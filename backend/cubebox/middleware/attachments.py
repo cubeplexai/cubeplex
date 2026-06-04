@@ -21,8 +21,13 @@ class AttachmentHintMiddleware(Middleware):
     """Inject [Attachments] hint into UserMessages before the LLM sees them."""
 
     async def transform_context(
-        self, messages: list[Message], *, signal: object = None
+        self,
+        messages: list[Message],
+        *,
+        ctx: object,
+        signal: object = None,
     ) -> list[Message]:
+        del ctx, signal
         out: list[Message] = []
         for msg in messages:
             if isinstance(msg, UserMessage):

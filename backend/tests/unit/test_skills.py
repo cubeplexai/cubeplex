@@ -219,7 +219,7 @@ async def test_transform_system_prompt_passthrough_when_empty() -> None:
     extra: dict[str, Any] = {}
     mw = _make_middleware(extra)
 
-    result = await mw.transform_system_prompt("Base prompt.")
+    result = await mw.transform_system_prompt("Base prompt.", ctx=object())
     assert result == "Base prompt."
 
 
@@ -228,7 +228,7 @@ async def test_transform_system_prompt_passthrough_empty_loaded_skills() -> None
     extra: dict[str, Any] = {"loaded_skills": {}}
     mw = _make_middleware(extra)
 
-    result = await mw.transform_system_prompt("Base prompt.")
+    result = await mw.transform_system_prompt("Base prompt.", ctx=object())
     assert result == "Base prompt."
 
 
@@ -242,7 +242,7 @@ async def test_transform_system_prompt_appends_single_skill() -> None:
     extra: dict[str, Any] = {"loaded_skills": {"deep-research": "# Deep Research content"}}
     mw = _make_middleware(extra)
 
-    result = await mw.transform_system_prompt("Base prompt.")
+    result = await mw.transform_system_prompt("Base prompt.", ctx=object())
 
     assert result.startswith("Base prompt.")
     assert "[Loaded skills]" in result
@@ -262,7 +262,7 @@ async def test_transform_system_prompt_sorts_skills_deterministically() -> None:
     }
     mw = _make_middleware(extra)
 
-    result = await mw.transform_system_prompt("Base.")
+    result = await mw.transform_system_prompt("Base.", ctx=object())
 
     aaa_pos = result.index("aaa-skill")
     mmm_pos = result.index("mmm-skill")
@@ -276,8 +276,8 @@ async def test_transform_system_prompt_deterministic_output() -> None:
     extra: dict[str, Any] = {"loaded_skills": {"beta": "Beta content", "alpha": "Alpha content"}}
     mw = _make_middleware(extra)
 
-    result1 = await mw.transform_system_prompt("Base.")
-    result2 = await mw.transform_system_prompt("Base.")
+    result1 = await mw.transform_system_prompt("Base.", ctx=object())
+    result2 = await mw.transform_system_prompt("Base.", ctx=object())
     assert result1 == result2
 
 
@@ -305,7 +305,7 @@ async def test_round_trip_via_shared_extra_dict() -> None:
     }
 
     # Step 2: system prompt is now augmented
-    augmented = await mw.transform_system_prompt("You are a helpful assistant.")
+    augmented = await mw.transform_system_prompt("You are a helpful assistant.", ctx=object())
 
     assert "[Loaded skills]" in augmented
     assert "## Skill: my-skill" in augmented
@@ -320,14 +320,14 @@ async def test_round_trip_skills_not_visible_before_load() -> None:
     mw = _make_middleware(shared_extra)
 
     # Before any load_skill call
-    prompt_before = await mw.transform_system_prompt("System.")
+    prompt_before = await mw.transform_system_prompt("System.", ctx=object())
     assert prompt_before == "System."
 
     # After a successful load_skill call
     ctx = _make_after_ctx(result=_skill_result("x-skill", "X content"), extra=shared_extra)
     await mw.after_tool_call(ctx)
 
-    prompt_after = await mw.transform_system_prompt("System.")
+    prompt_after = await mw.transform_system_prompt("System.", ctx=object())
     assert "X content" in prompt_after
 
 

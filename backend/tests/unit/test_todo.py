@@ -288,7 +288,7 @@ async def test_write_todos_tool_no_in_progress_with_pending() -> None:
 async def test_transform_system_prompt_appends() -> None:
     extra: dict[str, Any] = {}
     mw = _make_middleware(extra)
-    result = await mw.transform_system_prompt("Base prompt.")
+    result = await mw.transform_system_prompt("Base prompt.", ctx=object())
     assert result.startswith("Base prompt.")
     assert "write_todos" in result
 
@@ -297,8 +297,8 @@ async def test_transform_system_prompt_appends() -> None:
 async def test_transform_system_prompt_deterministic() -> None:
     extra: dict[str, Any] = {}
     mw = _make_middleware(extra)
-    r1 = await mw.transform_system_prompt("Base.")
-    r2 = await mw.transform_system_prompt("Base.")
+    r1 = await mw.transform_system_prompt("Base.", ctx=object())
+    r2 = await mw.transform_system_prompt("Base.", ctx=object())
     assert r1 == r2
 
 
@@ -312,7 +312,7 @@ async def test_transform_context_no_todos_passthrough() -> None:
     extra: dict[str, Any] = {}
     mw = _make_middleware(extra)
     messages: list[Any] = [UserMessage(content=[TextContent(text="hello")])]
-    result = await mw.transform_context(messages)
+    result = await mw.transform_context(messages, ctx=object())
     assert result == messages
 
 
@@ -321,7 +321,7 @@ async def test_transform_context_empty_todos_passthrough() -> None:
     extra: dict[str, Any] = {"todos": []}
     mw = _make_middleware(extra)
     messages: list[Any] = [UserMessage(content=[TextContent(text="hello")])]
-    result = await mw.transform_context(messages)
+    result = await mw.transform_context(messages, ctx=object())
     assert result == messages
 
 
@@ -331,7 +331,7 @@ async def test_transform_context_injects_todo_message() -> None:
     extra: dict[str, Any] = {"todos": todos}
     mw = _make_middleware(extra)
     messages: list[Any] = []
-    result = await mw.transform_context(messages)
+    result = await mw.transform_context(messages, ctx=object())
     assert len(result) == 1
     injected = result[0]
     assert isinstance(injected, UserMessage)
@@ -348,7 +348,7 @@ async def test_transform_context_all_completed_adds_reminder() -> None:
     ]
     extra: dict[str, Any] = {"todos": todos}
     mw = _make_middleware(extra)
-    result = await mw.transform_context([])
+    result = await mw.transform_context([], ctx=object())
     text = result[0].content[0].text  # type: ignore[union-attr]
     assert "reminder" in text
 
@@ -359,7 +359,7 @@ async def test_transform_context_does_not_mutate_original() -> None:
     extra: dict[str, Any] = {"todos": todos}
     mw = _make_middleware(extra)
     orig: list[Any] = [UserMessage(content=[TextContent(text="hi")])]
-    result = await mw.transform_context(orig)
+    result = await mw.transform_context(orig, ctx=object())
     assert len(result) == 2
     assert len(orig) == 1  # original list unchanged
 

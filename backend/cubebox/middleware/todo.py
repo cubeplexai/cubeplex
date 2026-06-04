@@ -483,10 +483,11 @@ class TodoListMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
+        ctx: Any,
         signal: Any = None,
     ) -> str:
         """Append the write_todos system instructions."""
-        del signal  # not used
+        del ctx, signal  # not used
         return system_prompt + "\n\n" + self._system_prompt
 
     # ------------------------------------------------------------------
@@ -497,6 +498,7 @@ class TodoListMiddleware(Middleware):
         self,
         messages: list[Any],
         *,
+        ctx: Any,
         signal: Any = None,
     ) -> list[Any]:
         """Inject current todo state as a UserMessage suffix when todos exist.
@@ -507,7 +509,7 @@ class TodoListMiddleware(Middleware):
 
         When no todos are set, messages are returned unchanged (no injection).
         """
-        del signal  # not used
+        del ctx, signal  # not used
         extra = self._extra_ref()
         todos: list[Todo] | None = extra.get("todos")
         if not todos:

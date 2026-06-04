@@ -126,6 +126,7 @@ class SkillsMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
+        ctx: Any,
         signal: Any = None,
     ) -> str:
         """Append loaded-skills section to the system prompt.
@@ -146,7 +147,7 @@ class SkillsMiddleware(Middleware):
             System prompt with the ``[Loaded skills]`` section appended, or
             the original string when ``loaded_skills`` is empty / absent.
         """
-        del signal  # not used
+        del ctx, signal  # not used
 
         extra = self._extra_ref()
         loaded: dict[str, str] = extra.get(_LOADED_SKILLS_KEY, {})

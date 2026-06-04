@@ -2,7 +2,7 @@
 
 Regression background: when the langgraph dispatch branch was removed in
 the cubepi cleanup (M6.6), the ``while True: event_q.get()`` consumer
-loop went with it. ``SubAgentMiddleware`` and ``CitationMiddleware`` kept
+loop went with it. subagent and citation middleware kept
 pushing tagged tuples onto ``event_q`` (set into both
 ``subagent_event_queue`` and ``citation_event_queue`` ContextVars by
 ``_execute_run``), but nothing drained them — so subagent live streaming

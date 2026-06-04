@@ -475,6 +475,7 @@ class SandboxMiddleware(Middleware):
         self,
         system_prompt: str,
         *,
+        ctx: object,
         signal: object = None,
     ) -> str:
         """Append sandbox capability section to the system prompt.
@@ -486,7 +487,7 @@ class SandboxMiddleware(Middleware):
         output — the capability section is appended unconditionally so
         the output is deterministic and cache-stable.
         """
-        del signal  # not used
+        del ctx, signal  # not used
 
         sandbox_section = SANDBOX_PROMPT_TEMPLATE.format(workdir=self.sandbox.workdir)
         separator = "\n\n" if system_prompt else ""

@@ -210,7 +210,7 @@ async def _drain_subagent_citation_queue(
     """Drain (kind, agent_id, payload) tuples and publish typed AgentEvents.
 
     Counterpart to :func:`_drain_cubepi_sse_queue` for the shared queue that
-    ``SubAgentMiddleware`` and ``CitationMiddleware`` push onto:
+    subagent and citation middleware push onto:
 
     - ``("subagent", agent_id, sse_dict)`` — already-translated cubepi SSE
       dict produced by ``convert_agent_event_to_sse``. We retranslate via
@@ -2391,14 +2391,13 @@ class RunManager:
         except Exception as _exc:
             logger.warning("MemoryMiddleware unavailable: {}", _exc)
 
-        # 5. CompactionMiddleware — needs extra_ref + summary_llm + config
+        # 5. CompactionMiddleware — cubepi built-in; state persists in ctx.extra.
         try:
             from cubepi import Model as _CompModel
+            from cubepi.middleware.compaction import CompactionMiddleware
 
             from cubebox.config import config as _comp_cfg
             from cubebox.llm.factory import LLMFactory as _CompLLMFactory
-            from cubebox.llm.oneshot import OneShotLLM as _CompOneShot
-            from cubebox.middleware.compaction import CompactionMiddleware
 
             if _comp_cfg.get("compaction.enabled", False):
                 _summary_provider = _comp_cfg.get("compaction.summary_provider")
@@ -2408,10 +2407,7 @@ class RunManager:
                 _summary_provider_inst = _comp_factory.build_cubepi_provider(
                     _summary_provider_config, cache_policy=None
                 )
-                _summary_llm = _CompOneShot(
-                    _summary_provider_inst,
-                    _CompModel(id=_summary_model_id, provider=_summary_provider),
-                )
+                _summary_model = _CompModel(id=_summary_model_id, provider=_summary_provider)
                 _fallback_window = int(_comp_cfg.get("compaction.fallback_context_window", 128000))
                 _model_window = int(_model_config.context_window or 0)
                 _model_max_out = int(_model_config.max_tokens or 0)
@@ -2423,8 +2419,8 @@ class RunManager:
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
                 cubepi_middleware.append(
                     CompactionMiddleware(
-                        extra_ref=_extra_ref,
-                        summary_llm=_summary_llm,
+                        summary_provider=_summary_provider_inst,
+                        summary_model=_summary_model,
                         max_tokens_before_compact=int(_ctx_window * _ratio),
                         keep_recent_messages=int(
                             _comp_cfg.get("compaction.keep_recent_messages", 8)
@@ -2521,12 +2517,18 @@ class RunManager:
         except Exception as _exc:
             logger.warning("SkillsMiddleware unavailable: {}", _exc)
 
-        # 8. SubAgentMiddleware — needs provider + model info + shared tools
+        # 8. SubagentMiddleware — cubepi built-in; cubebox only maps events to SSE.
         try:
-            from cubebox.middleware.subagents import SubAgentMiddleware
+            from cubepi import Model as _SubagentModel
+            from cubepi.middleware.subagents import SubagentMiddleware
 
-            # Cost middleware (if present) is passed as inherited_middleware for depth attribution.
-            # Build the cost instance separately so SubAgent can clone it.
+            from cubebox.streams.subagent_events import (
+                forward_subagent_event,
+                map_subagent_event,
+            )
+
+            # Cost middleware (if present) is passed as inherited_middleware
+            # for subagent attribution.
             _cost_mw_for_inherit: list[Any] = []
             try:
                 from cubebox.middleware.cost import CostMiddleware as _CostMwPi
@@ -2537,16 +2539,22 @@ class RunManager:
                         workspace_id=ctx.workspace_id,
                         user_id=ctx.user_id,
                         conversation_id=conversation_id,
+                        subagent_depth=1,
                     )
                 ]
             except Exception:
                 pass
 
-            subagent_mw = SubAgentMiddleware(
-                subagent_map={},
+            subagent_mw = SubagentMiddleware(
+                subagents={},
                 default_provider=provider,
-                default_model_id=model_id,
-                default_provider_name=provider_name,
+                default_model=_SubagentModel(
+                    id=model_id,
+                    provider=provider_name,
+                    reasoning=_model_config.reasoning,
+                    max_tokens=_model_max_tokens,
+                    temperature=_model_temperature,
+                ),
                 # Pass all tools (sandbox + artifact + builtin) collected so far
                 # as shared tools for subagent spawning, minus show_widget
                 # (top-level only in v1).
@@ -2554,12 +2562,15 @@ class RunManager:
                     _sandbox_tools + _artifact_tools + _builtin_tools
                 ),
                 inherited_middleware=_cost_mw_for_inherit,
+                excluded_tool_names={"subagent", "load_skill"},
+                event_mapper=map_subagent_event,
+                event_handler=forward_subagent_event,
                 tracer=getattr(self._app.state, "tracer", None),
             )
             cubepi_middleware.append(subagent_mw)
             _subagent_tools.extend(subagent_mw.tools)
         except Exception as _exc:
-            logger.warning("SubAgentMiddleware unavailable: {}", _exc)
+            logger.warning("SubagentMiddleware unavailable: {}", _exc)
 
         # 9. CostMiddleware — needs org/workspace/user/conversation IDs
         try:
@@ -2740,8 +2751,8 @@ class RunManager:
             citation_counter_var,
             citation_event_queue,
         )
-        from cubebox.middleware.subagents import subagent_event_queue
         from cubebox.schedules.completion_hook import record_scheduled_run_terminal_state
+        from cubebox.streams.subagent_events import subagent_event_queue
 
         sandbox = None
         sandbox_manager = None
@@ -2829,8 +2840,8 @@ class RunManager:
             await publish_event(sse_event)
 
         # Drainer for the shared subagent/citation queue (see
-        # _drain_subagent_citation_queue). Without this, SubAgentMiddleware
-        # and CitationMiddleware push events that never reach the SSE
+        # _drain_subagent_citation_queue). Without this, subagent and
+        # citation middleware push events that never reach the SSE
         # consumer, breaking live subagent rendering and live citations.
         # Typed `| None` so the success path can null it after the pre-Done
         # drain (see the DoneEvent block below) and the safety net in
@@ -3258,8 +3269,8 @@ class RunManager:
             citation_counter_var,
             citation_event_queue,
         )
-        from cubebox.middleware.subagents import subagent_event_queue
         from cubebox.schedules.completion_hook import record_scheduled_run_terminal_state
+        from cubebox.streams.subagent_events import subagent_event_queue
 
         sandbox = None
         sandbox_manager = None

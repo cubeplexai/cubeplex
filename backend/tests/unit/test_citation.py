@@ -502,7 +502,7 @@ async def test_transform_system_prompt_appends_when_configs_present() -> None:
     from cubebox.prompts.citations import CITATION_PROMPT
 
     mw = _make_middleware()  # default: web_search config
-    out = await mw.transform_system_prompt("BASE")
+    out = await mw.transform_system_prompt("BASE", ctx=object())
     assert out.startswith("BASE")
     assert CITATION_PROMPT in out
 
@@ -511,7 +511,7 @@ async def test_transform_system_prompt_appends_when_configs_present() -> None:
 async def test_transform_system_prompt_passthrough_when_no_configs() -> None:
     # Bypass _make_middleware's `configs or {...}` default for the empty case.
     mw = CitationMiddleware(citation_configs={})
-    out = await mw.transform_system_prompt("BASE")
+    out = await mw.transform_system_prompt("BASE", ctx=object())
     assert out == "BASE"
 
 

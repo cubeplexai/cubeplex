@@ -114,7 +114,7 @@ def test_all_tools_have_parameter_schemas() -> None:
 @pytest.mark.asyncio
 async def test_transform_system_prompt_appends_sandbox_section() -> None:
     mw = _make_middleware(sandbox=_make_sandbox(workdir="/work"))
-    result = await mw.transform_system_prompt("You are a helpful assistant.")
+    result = await mw.transform_system_prompt("You are a helpful assistant.", ctx=object())
     expected_section = SANDBOX_PROMPT_TEMPLATE.format(workdir="/work")
     assert expected_section in result
     assert result.startswith("You are a helpful assistant.")
@@ -124,7 +124,7 @@ async def test_transform_system_prompt_appends_sandbox_section() -> None:
 async def test_transform_system_prompt_includes_workdir() -> None:
     workdir = "/custom/sandbox/dir"
     mw = _make_middleware(sandbox=_make_sandbox(workdir=workdir))
-    result = await mw.transform_system_prompt("base prompt")
+    result = await mw.transform_system_prompt("base prompt", ctx=object())
     assert workdir in result
 
 
@@ -132,7 +132,7 @@ async def test_transform_system_prompt_includes_workdir() -> None:
 async def test_transform_system_prompt_with_empty_base() -> None:
     """Empty system prompt should not produce a leading double-newline."""
     mw = _make_middleware(sandbox=_make_sandbox(workdir="/work"))
-    result = await mw.transform_system_prompt("")
+    result = await mw.transform_system_prompt("", ctx=object())
     assert not result.startswith("\n\n")
     assert SANDBOX_PROMPT_TEMPLATE.format(workdir="/work") in result
 
@@ -142,15 +142,15 @@ async def test_transform_system_prompt_idempotent_same_input() -> None:
     """Same inputs always produce the same output (cache-stable)."""
     mw = _make_middleware(sandbox=_make_sandbox(workdir="/work"))
     base = "You are a helpful assistant."
-    result1 = await mw.transform_system_prompt(base)
-    result2 = await mw.transform_system_prompt(base)
+    result1 = await mw.transform_system_prompt(base, ctx=object())
+    result2 = await mw.transform_system_prompt(base, ctx=object())
     assert result1 == result2
 
 
 @pytest.mark.asyncio
 async def test_transform_system_prompt_separator_when_non_empty() -> None:
     mw = _make_middleware(sandbox=_make_sandbox(workdir="/work"))
-    result = await mw.transform_system_prompt("existing prompt")
+    result = await mw.transform_system_prompt("existing prompt", ctx=object())
     # Separator between existing prompt and new section
     assert "\n\nexisting prompt" not in result  # existing is first, section appended
     assert "existing prompt\n\n" in result

@@ -1,7 +1,7 @@
 """Per-conversation background memory consolidation (Layer 2).
 
 A cheap Redis gate (per-conversation run counter + last-consolidated timestamp +
-lock) decides when to run a single OneShotLLM pass that distills the
+lock) decides when to run a single provider.generate pass that distills the
 conversation's recent history into the user's personal memory.
 """
 
@@ -243,7 +243,6 @@ async def run_consolidation(
     from cubepi.providers.base import Message, TextContent, UserMessage
 
     from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.llm.oneshot import OneShotLLM
     from cubebox.repositories.memory import MemoryRepository
 
     token = await acquire_lock(redis, prefix, conversation_id, ttl_s=LOCK_TTL_S)
@@ -295,10 +294,16 @@ async def run_consolidation(
                     max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,
                 )
         else:
-            raw = await OneShotLLM(provider, model).generate_once(
-                system=CONSOLIDATION_SYSTEM,
+            response = await provider.generate(
+                model=model,
                 messages=messages,
+                system_prompt=CONSOLIDATION_SYSTEM,
                 max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,
+            )
+            if response.error_message is not None:
+                raise RuntimeError(response.error_message)
+            raw = "".join(
+                block.text for block in response.content if isinstance(block, TextContent)
             )
         ops = parse_ops(raw, max_ops=MAX_OPS)
         if ops is None:
