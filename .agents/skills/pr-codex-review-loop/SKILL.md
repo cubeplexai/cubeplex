@@ -44,10 +44,18 @@ loop per PR**.
 For each PR you're driving:
 
 1. **Push** (or confirm push happened). Capture the commit SHA pushed.
-2. **Wait ~5 minutes** for codex to comment. Use a real sleep or
+2. **Tag @codex — first push only is exempt.** Codex auto-reviews when
+   a PR is first opened (no tag needed). For every subsequent push you
+   must leave a top-level PR comment to trigger a re-review:
+   ```bash
+   gh pr comment <PR> --body "@codex please take another pass — pushed <short-sha>."
+   ```
+   Do **not** tag on the very first push of a PR; codex will run on its
+   own.
+3. **Wait ~5 minutes** for codex to comment. Use a real sleep or
    `ScheduleWakeup` — do not poll in a tight loop, you'll get rate-limited
    and the bot needs time anyway.
-3. **Poll** with per-kind cursors and self-author exclusion:
+4. **Poll** with per-kind cursors and self-author exclusion:
 
    ```bash
    ME="$(gh api user --jq .login)"   # resolve once at start of loop
@@ -80,18 +88,18 @@ For each PR you're driving:
    timestamp is compared as a string and the id as a number, so decimal
    id widths don't matter to callers.
 
-4. **Classify each new comment** (rules below). For each, take exactly one
+5. **Classify each new comment** (rules below). For each, take exactly one
    of: *fix*, *reply-declining*, *reply-already-fixed*, *reply-clarify*.
-5. **Make the fixes**, run the relevant tests (changed-module level —
+6. **Make the fixes**, run the relevant tests (changed-module level —
    reserve the full suite for the pre-merge sweep), commit & push.
-6. **Reply to every comment** on the PR (rules below). No silent fixes.
-7. **Re-tag** by leaving a top-level PR comment:
+7. **Reply to every comment** on the PR (rules below). No silent fixes.
+8. **Re-tag** by leaving a top-level PR comment:
 
    ```bash
    gh pr comment <PR> --body "@codex please take another pass — pushed <short-sha>."
    ```
 
-8. **Update cursors** by storing the poller's returned `cursor` object
+9. **Update cursors** by storing the poller's returned `cursor` object
    and feeding each kind back on the next pass:
 
    ```bash
@@ -105,11 +113,11 @@ For each PR you're driving:
    (input, latest entry of that kind). Kinds with no new comments echo
    the input cursor unchanged, so a no-op kind stays pinned. The
    primary self-loop defense is `--exclude-author "$ME"` on every
-   poll (see step 3) — the agent's own replies/re-tag are filtered
+   poll (see step 4) — the agent's own replies/re-tag are filtered
    regardless of cursor position.
 
    Anything codex (or a human reviewer) posts strictly after the
-   per-kind cursor will show up next pass. Loop back to step 2.
+   per-kind cursor will show up next pass. Loop back to step 3.
 
 **Exit when**: one full poll round returns `count: 0` *after* you've
 re-tagged @codex on the latest pushed SHA. (Empty before re-tag means
