@@ -338,8 +338,7 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 description=(
                     "Publish a skill artifact to the current workspace so it becomes "
                     "available via load_skill. Use after save_artifact produces an artifact "
-                    "with artifact_type='skill'. Available in both interactive and automated runs — "
-                    "a scheduled task can self-update its own skill based on observed feedback. "
+                    "with artifact_type='skill'. "
                     'Example: {"operation":"publish_artifact","artifact_id":"art-1abc..."}'
                 ),
                 input_model=PublishArtifactInput,
