@@ -205,7 +205,7 @@ async def test_transform_system_prompt_appends_pinned_memory() -> None:
         _mk_item(type_=MemoryType.PREFERENCE, content="Reply concisely."),
     ]
     mw = _make_middleware(items)
-    result = await mw.transform_system_prompt("You are a helpful assistant.")
+    result = await mw.transform_system_prompt("You are a helpful assistant.", ctx=object())
     assert "Reply concisely." in result
     # Header injected
     assert "Memory" in result
@@ -222,7 +222,7 @@ async def test_transform_system_prompt_appends_authoring_when_no_pinned_items() 
     ]
     mw = _make_middleware(items)
     original = "You are a helpful assistant."
-    result = await mw.transform_system_prompt(original)
+    result = await mw.transform_system_prompt(original, ctx=object())
     assert result.startswith(original)
     assert "memory_save" in result  # authoring block always injected
     assert "Backend runs on FastAPI." not in result  # not pinned
@@ -233,7 +233,7 @@ async def test_transform_system_prompt_appends_authoring_when_repo_empty() -> No
     """Empty repo → original prompt + authoring block (no pinned header)."""
     mw = _make_middleware([])
     original = "System prompt."
-    result = await mw.transform_system_prompt(original)
+    result = await mw.transform_system_prompt(original, ctx=object())
     assert result.startswith(original)
     assert "memory_save" in result
 
@@ -244,7 +244,7 @@ async def test_transform_system_prompt_authoring_only_with_empty_prompt() -> Non
     from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
 
     mw = _make_middleware([])
-    result = await mw.transform_system_prompt("")
+    result = await mw.transform_system_prompt("", ctx=object())
     assert result == MEMORY_AUTHORING_BLOCK
 
 
@@ -264,7 +264,7 @@ async def test_transform_system_prompt_correction_before_preference_within_scope
         ),
     ]
     mw = _make_middleware(items)
-    result = await mw.transform_system_prompt("")
+    result = await mw.transform_system_prompt("", ctx=object())
     corr_pos = result.index("CORR")
     pref_pos = result.index("PREF")
     assert corr_pos < pref_pos
@@ -285,7 +285,7 @@ async def test_transform_context_prepends_snapshot_to_user_msg() -> None:
     }
     mw = _make_middleware()
     msg = _user_msg("What should I do next?", snapshot=snap)
-    result = await mw.transform_context([msg])
+    result = await mw.transform_context([msg], ctx=object())
 
     assert len(result) == 1
     rendered = result[0]
@@ -303,7 +303,7 @@ async def test_transform_context_passthrough_when_no_snapshot() -> None:
     """UserMessage without snapshot metadata is returned as-is (identity)."""
     mw = _make_middleware()
     msg = _user_msg("No snapshot here.")
-    result = await mw.transform_context([msg])
+    result = await mw.transform_context([msg], ctx=object())
     assert len(result) == 1
     assert result[0] is msg
 
@@ -313,7 +313,7 @@ async def test_transform_context_passthrough_for_assistant_messages() -> None:
     """Non-UserMessage objects are always passed through unchanged."""
     mw = _make_middleware()
     asst = _assistant_msg("I'll help you.")
-    result = await mw.transform_context([asst])
+    result = await mw.transform_context([asst], ctx=object())
     assert len(result) == 1
     assert result[0] is asst
 
@@ -321,7 +321,7 @@ async def test_transform_context_passthrough_for_assistant_messages() -> None:
 @pytest.mark.asyncio
 async def test_transform_context_empty_list() -> None:
     mw = _make_middleware()
-    result = await mw.transform_context([])
+    result = await mw.transform_context([], ctx=object())
     assert result == []
 
 
@@ -344,7 +344,7 @@ async def test_transform_context_last_user_msg_flagged_current() -> None:
         _assistant_msg(),
         _user_msg("second turn", snapshot=snap_new),
     ]
-    result = await mw.transform_context(msgs)
+    result = await mw.transform_context(msgs, ctx=object())
 
     assert len(result) == 3
     # First user msg → historical tag
@@ -380,7 +380,7 @@ async def test_transform_context_multi_turn_independent_snapshots() -> None:
         _assistant_msg("reply A"),
         _user_msg("turn B", snapshot=snap_b),
     ]
-    result = await mw.transform_context(msgs)
+    result = await mw.transform_context(msgs, ctx=object())
 
     assert len(result) == 3
 
@@ -405,7 +405,7 @@ async def test_transform_context_mixed_snapshot_and_no_snapshot() -> None:
     msg_with = _user_msg("has snapshot", snapshot=snap)
     msg_without = _user_msg("no snapshot")
     msgs = [msg_with, _assistant_msg(), msg_without]
-    result = await mw.transform_context(msgs)
+    result = await mw.transform_context(msgs, ctx=object())
 
     assert len(result) == 3
     # msg_with was augmented

@@ -196,7 +196,13 @@ class ArtifactMiddleware(Middleware):
             )
         return "\n".join(lines) + "\n"
 
-    async def transform_system_prompt(self, system_prompt: str, *, signal: object = None) -> str:
+    async def transform_system_prompt(
+        self,
+        system_prompt: str,
+        *,
+        ctx: object,
+        signal: object = None,
+    ) -> str:
         """Append the artifact prompt + registry state to the system prompt.
 
         Mirrors ``ArtifactMiddleware.awrap_model_call`` which appends the
@@ -208,6 +214,7 @@ class ArtifactMiddleware(Middleware):
         (not turn-scoped). Appending to the user message breaks OpenAI
         auto-cache because the user message content changes every turn.
         """
+        del ctx, signal
         artifact_list = await self._build_artifact_list()
         injection = ARTIFACT_PROMPT + artifact_list
         return system_prompt + "\n\n" + injection

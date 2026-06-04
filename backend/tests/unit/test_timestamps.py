@@ -97,7 +97,7 @@ async def test_transform_context_returns_messages_unchanged() -> None:
     msgs = [_make_user_message("turn 1"), _make_user_message("turn 2")]
     original_content = [m.model_dump() for m in msgs]
 
-    result = await mw.transform_context(msgs)
+    result = await mw.transform_context(msgs, ctx=object())
 
     assert result is msgs  # same list object
     for orig, got in zip(original_content, result, strict=True):
@@ -109,7 +109,7 @@ async def test_transform_context_does_not_modify_content() -> None:
     """Strict check: content field of each message is untouched."""
     mw = TimestampMiddleware()
     msg = _make_user_message("do not touch me")
-    await mw.transform_context([msg])
+    await mw.transform_context([msg], ctx=object())
     assert msg.content[0].text == "do not touch me"
 
 
@@ -118,7 +118,7 @@ async def test_transform_context_no_timestamp_in_message_metadata() -> None:
     """transform_context must not inject timestamps into message.metadata."""
     mw = TimestampMiddleware()
     msg = _make_user_message("cache probe")
-    await mw.transform_context([msg])
+    await mw.transform_context([msg], ctx=object())
     # metadata should be empty — no timestamp injected
     assert msg.metadata == {}
 
@@ -134,7 +134,7 @@ async def test_transform_context_sets_turn_started_at_contextvar() -> None:
     mw = TimestampMiddleware()
     _turn_started_at.set(None)  # reset
 
-    await mw.transform_context([])
+    await mw.transform_context([], ctx=object())
 
     val = _turn_started_at.get()
     assert val is not None
@@ -341,7 +341,7 @@ async def test_timestamps_never_in_message_content() -> None:
     user_msg = _make_user_message("what time is it?")
 
     # transform_context
-    msgs = await mw.transform_context([user_msg])
+    msgs = await mw.transform_context([user_msg], ctx=object())
     for msg in msgs:
         for content_item in msg.content:
             assert not any(
@@ -384,7 +384,7 @@ async def test_full_turn_round_trip() -> None:
 
     # 1. Turn starts — transform_context sets turn-start
     user_msg = _make_user_message("run something")
-    await mw.transform_context([user_msg])
+    await mw.transform_context([user_msg], ctx=object())
     turn_start_captured = _turn_started_at.get()
     assert turn_start_captured is not None
 
