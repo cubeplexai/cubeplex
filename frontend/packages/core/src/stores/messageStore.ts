@@ -1194,22 +1194,40 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       // Hydrate per-conversation error from bootstrap if the last run ended
       // with a classified error (e.g. context_length_exceeded). This lets the
       // bubble reappear on page reload without waiting for an SSE event.
-      const seedError: { runId: string; data: ErrorEventData } | null = bootstrap.active_run
-        ?.error_code
-        ? {
-            runId: bootstrap.active_run.run_id,
-            data: {
-              error_code: bootstrap.active_run.error_code,
-              params: bootstrap.active_run.error_params ?? undefined,
-              message: bootstrap.active_run.error_message ?? bootstrap.active_run.error_code,
-            },
-          }
-        : null
-
+      //
+      // Priority: active_run.error_code > last_run_error > leave existing state.
+      // The active-run pointer is cleared when the run reaches a terminal status,
+      // so after a failed run completes the active slot is gone but last_run_error
+      // persists independently (separate Redis key, same TTL).
+      let seedError: { runId: string; data: ErrorEventData } | null | undefined
+      if (bootstrap.active_run?.error_code) {
+        seedError = {
+          runId: bootstrap.active_run.run_id,
+          data: {
+            error_code: bootstrap.active_run.error_code,
+            params: bootstrap.active_run.error_params ?? undefined,
+            message: bootstrap.active_run.error_message ?? bootstrap.active_run.error_code,
+          },
+        }
+      } else if (bootstrap.last_run_error) {
+        seedError = {
+          runId: bootstrap.last_run_error.run_id,
+          data: {
+            error_code: bootstrap.last_run_error.error_code,
+            params: (bootstrap.last_run_error.error_params ?? undefined) as
+              | Record<string, unknown>
+              | undefined,
+            message: bootstrap.last_run_error.error_message,
+          },
+        }
+      }
       set((s) => ({
         messages: { ...s.messages, [conversationId]: messages },
         todos: restoredTodos,
-        errors: { ...s.errors, [conversationId]: seedError },
+        // When seedError is undefined (no active_run error and no last_run_error),
+        // leave the existing errors[conversationId] state alone — don't overwrite
+        // with null on every reload.
+        errors: seedError !== undefined ? { ...s.errors, [conversationId]: seedError } : s.errors,
         lastRunStatus: bootstrap.last_run_status ?? null,
         streamAgents: nextStreamAgents,
         pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
