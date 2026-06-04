@@ -1,7 +1,7 @@
 'use client'
 
-import { memo, useCallback } from 'react'
-import { Download, Package, Eye } from 'lucide-react'
+import { memo, useCallback, useEffect } from 'react'
+import { Download, Package, Eye, PackagePlus, Loader2, Check, AlertCircle } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
 import { usePanelStore } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
@@ -9,9 +9,88 @@ import { useTranslations } from 'next-intl'
 import { getArtifactIcon, getArtifactLabel } from '@/components/panel/artifact/artifactIcons'
 import { buildDownloadUrl } from '@/components/panel/artifact/previewUtils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { usePublishSkill } from '@/hooks/usePublishSkill'
+import { cn } from '@/lib/utils'
 
 interface ArtifactCardProps {
   artifact: Artifact
+}
+
+function SkillInstallButton({
+  workspaceId,
+  artifactId,
+  label,
+}: {
+  workspaceId: string
+  artifactId: string
+  label: string
+}) {
+  const { publish, isPublishing, result, reset } = usePublishSkill(workspaceId, artifactId)
+
+  // Auto-reset success state after 1.5s
+  useEffect(() => {
+    if (result?.ok) {
+      const t = setTimeout(reset, 1500)
+      return () => clearTimeout(t)
+    }
+  }, [result, reset])
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation()
+      void publish()
+    },
+    [publish],
+  )
+
+  if (isPublishing) {
+    return (
+      <button
+        disabled
+        className="flex size-8 items-center justify-center rounded-md text-muted-foreground"
+      >
+        <Loader2 className="size-4 animate-spin" />
+      </button>
+    )
+  }
+
+  if (result?.ok) {
+    return (
+      <button
+        disabled
+        className="flex size-8 items-center justify-center rounded-md text-green-600 dark:text-green-400"
+      >
+        <Check className="size-4" />
+      </button>
+    )
+  }
+
+  if (result && !result.ok) {
+    const errMsg =
+      result.message === 'VERSION_EXISTS' ? label + ' (version exists)' : result.message
+    return (
+      <button
+        onClick={handleClick}
+        title={errMsg}
+        className="flex size-8 items-center justify-center rounded-md text-destructive transition-colors hover:bg-destructive/10"
+      >
+        <AlertCircle className="size-4" />
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      title={label}
+      className={cn(
+        'flex size-8 items-center justify-center rounded-md',
+        'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
+      )}
+    >
+      <PackagePlus className="size-4" />
+    </button>
+  )
 }
 
 export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCardProps) {
@@ -81,6 +160,13 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
           >
             <Download className="size-4" />
           </a>
+          {artifact.artifact_type === 'skill' && workspaceId && (
+            <SkillInstallButton
+              workspaceId={workspaceId}
+              artifactId={artifact.id}
+              label={t('addToWorkspace')}
+            />
+          )}
         </div>
       </div>
     </div>
