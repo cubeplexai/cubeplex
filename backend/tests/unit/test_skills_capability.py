@@ -283,11 +283,11 @@ def test_skills_capability_mutation_gate() -> None:
     deps = _make_deps()
     cap = build_skills_capability(deps)
     # Sanity: 4 operations declared
-    assert {op.name for op in cap.operations} == {"find", "preview", "install", "publish_artifact"}
+    assert {op.name for op in cap.operations} == {"find", "preview", "install", "publish_skill"}
     assert next(op for op in cap.operations if op.name == "install").mutates is True
     assert next(op for op in cap.operations if op.name == "find").mutates is False
     assert next(op for op in cap.operations if op.name == "preview").mutates is False
-    assert next(op for op in cap.operations if op.name == "publish_artifact").mutates is False
+    assert next(op for op in cap.operations if op.name == "publish_skill").mutates is False
 
     # With mutations allowed, the schema should mention all four ops.
     tool_full = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=True)
@@ -296,7 +296,7 @@ def test_skills_capability_mutation_gate() -> None:
     assert "Op_find" in schema_full
     assert "Op_preview" in schema_full
     assert "Op_install" in schema_full
-    assert "Op_publish_artifact" in schema_full
+    assert "Op_publish_skill" in schema_full
 
     # Without mutations, install is dropped but publish_artifact (non-mutating) remains.
     tool_ro = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=False)
@@ -305,20 +305,20 @@ def test_skills_capability_mutation_gate() -> None:
     assert "Op_install" not in schema_ro
     assert "Op_find" in schema_ro
     assert "Op_preview" in schema_ro
-    assert "Op_publish_artifact" in schema_ro
+    assert "Op_publish_skill" in schema_ro
 
 
 # --- publish_artifact tests ---
 
 from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
-    PublishArtifactInput,
-    _handle_publish_artifact_impl,
+    PublishSkillInput,
+    _handle_publish_skill_impl,
 )
 from cubebox.skills.service import SkillMdMissingError, VersionCollisionError  # noqa: E402
 
 
 @pytest.mark.asyncio
-async def test_publish_artifact_success(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_publish_skill_success(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_sv = MagicMock()
     fake_sv.skill_id = "skl-1"
     fake_sv.version = "1.0.0"
@@ -336,8 +336,8 @@ async def test_publish_artifact_success(monkeypatch: pytest.MonkeyPatch) -> None
     deps = _make_deps()
     fake_session = MagicMock()
 
-    result = await _handle_publish_artifact_impl(
-        deps, _ctx(), fake_session, PublishArtifactInput(artifact_id="art-abc")
+    result = await _handle_publish_skill_impl(
+        deps, _ctx(), fake_session, PublishSkillInput(artifact_id="art-abc")
     )
 
     assert result == {
@@ -355,7 +355,7 @@ async def test_publish_artifact_success(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_publish_artifact_skill_md_missing_raises_invalid_input(
+async def test_publish_skill_skill_md_missing_raises_invalid_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_publisher = MagicMock()
@@ -366,13 +366,13 @@ async def test_publish_artifact_skill_md_missing_raises_invalid_input(
 
     deps = _make_deps()
     with pytest.raises(ActionInvalidInput, match="SKILL.md"):
-        await _handle_publish_artifact_impl(
-            deps, _ctx(), MagicMock(), PublishArtifactInput(artifact_id="art-bad")
+        await _handle_publish_skill_impl(
+            deps, _ctx(), MagicMock(), PublishSkillInput(artifact_id="art-bad")
         )
 
 
 @pytest.mark.asyncio
-async def test_publish_artifact_version_exists_raises_invalid_input(
+async def test_publish_skill_version_exists_raises_invalid_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_publisher = MagicMock()
@@ -387,6 +387,6 @@ async def test_publish_artifact_version_exists_raises_invalid_input(
 
     deps = _make_deps()
     with pytest.raises(ActionInvalidInput, match="already exists"):
-        await _handle_publish_artifact_impl(
-            deps, _ctx(), MagicMock(), PublishArtifactInput(artifact_id="art-dup")
+        await _handle_publish_skill_impl(
+            deps, _ctx(), MagicMock(), PublishSkillInput(artifact_id="art-dup")
         )
