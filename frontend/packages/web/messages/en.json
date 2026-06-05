@@ -84,6 +84,7 @@
     "thinkingProcess": "Thinking",
     "sandboxPreparing": "Preparing sandbox environment...",
     "sandboxFailed": "Sandbox creation failed, continuing without sandbox",
+    "assistantReplyFailed": "Reply failed",
     "tasksDone": "{completed}/{total} tasks done",
     "tasksProgress": "Task progress {completed}/{total}",
     "artifacts": "Artifacts",
