@@ -226,7 +226,6 @@ async def run_consolidation(
     user_id: str,
     org_id: str | None,
     workspace_id: str | None,
-    provider: Any,
     model: Any,
     session_maker: Any,
     tracer: Any | None = None,
@@ -283,7 +282,6 @@ async def run_consolidation(
 
         if tracer is not None:
             async with tracer.oneshot(
-                provider=provider,
                 model=model,
                 operation="consolidate_memory",
                 metadata=meta,
@@ -294,8 +292,8 @@ async def run_consolidation(
                     max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,
                 )
         else:
-            response = await provider.generate(
-                model=model,
+            response = await model.provider.generate(
+                model=model.spec,
                 messages=messages,
                 system_prompt=CONSOLIDATION_SYSTEM,
                 max_output_tokens=EXTRACT_MODEL_MAX_TOKENS,

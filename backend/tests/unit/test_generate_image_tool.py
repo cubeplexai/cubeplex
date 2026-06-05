@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 from cubepi.providers.base import ImageContent
-from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
+from cubepi.providers.images import AssistantImages, ImagesContext, ImagesModel, ImagesOptions
 
 from cubebox.sandbox.base import ExecuteResult
 from cubebox.tools.builtin.generate_image import GenerateImageInput, make_generate_image_tool
@@ -24,7 +24,7 @@ from cubebox.tools.builtin.generate_image import GenerateImageInput, make_genera
 
 _FAKE_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 _FAKE_PNG_B64 = base64.b64encode(_FAKE_PNG_BYTES).decode("ascii")
-_FAKE_MODEL = ImagesModel(id="gpt-image-1", provider="openai", api="openai-images")
+_FAKE_MODEL = ImagesModel(id="gpt-image-1", provider_id="openai", api="openai-images")
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ def _make_faux_provider(png_b64: str = _FAKE_PNG_B64) -> Any:
     """Return a FauxImagesProvider instance (no global registry side-effects)."""
     from cubepi.providers.images.faux import FauxImagesProvider
 
-    return FauxImagesProvider(png_b64)
+    return FauxImagesProvider(provider_id="faux", png_b64=png_b64)
 
 
 # ---------------------------------------------------------------------------
@@ -167,23 +167,18 @@ async def test_generate_image_success_path(monkeypatch: pytest.MonkeyPatch) -> N
 async def test_generate_image_provider_error_no_artifact(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When the provider returns stop_reason='error', result is is_error=True, no artifact."""
+    """When the provider raises ProviderError, result is is_error=True, no artifact."""
+    from cubepi.errors import ProviderError
 
     class _ErrorProvider:
         async def generate_images(
             self,
             model: ImagesModel,
             context: ImagesContext,
-            options: dict[str, Any] | None = None,
+            *,
+            options: ImagesOptions | None = None,
         ) -> AssistantImages:
-            return AssistantImages(
-                api=model.api,
-                provider=model.provider,
-                model=model.id,
-                output=[],
-                stop_reason="error",
-                error_message="policy",
-            )
+            raise ProviderError("policy")
 
     sandbox = FakeSandbox()
     artifact_call_count = 0
@@ -324,20 +319,21 @@ async def test_generate_image_unreadable_edit_source_fails(
 async def test_generate_image_size_quality_passed_via_options(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """size and quality args must land in the options dict passed to generate_images."""
-    captured_options: list[dict[str, Any] | None] = []
+    """size and quality args must flow through ImagesContext to the provider."""
+    captured_contexts: list[ImagesContext] = []
 
     class _SpyProvider:
         async def generate_images(
             self,
             model: ImagesModel,
             context: ImagesContext,
-            options: dict[str, Any] | None = None,
+            *,
+            options: ImagesOptions | None = None,
         ) -> AssistantImages:
-            captured_options.append(options)
+            captured_contexts.append(context)
             return AssistantImages(
                 api=model.api,
-                provider=model.provider,
+                provider_id=model.provider_id,
                 model=model.id,
                 output=[ImageContent(source=_FAKE_PNG_B64, media_type="image/png")],
                 stop_reason="stop",
@@ -370,31 +366,31 @@ async def test_generate_image_size_quality_passed_via_options(
     result = await tool.execute("tc-5", args, signal=None, on_update=None)
 
     assert not result.is_error
-    assert len(captured_options) == 1
-    opts = captured_options[0]
-    assert opts is not None
-    assert opts.get("size") == "1536x864"
-    assert opts.get("quality") == "high"
+    assert len(captured_contexts) == 1
+    ctx = captured_contexts[0]
+    assert ctx.size == "1536x864"
+    assert ctx.quality == "high"
 
 
 @pytest.mark.asyncio
 async def test_generate_image_no_options_when_size_quality_omitted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When size/quality are omitted, options is None (not an empty dict)."""
-    captured_options: list[dict[str, Any] | None] = []
+    """When size/quality are omitted, ImagesContext carries None for those fields."""
+    captured_contexts: list[ImagesContext] = []
 
     class _SpyProvider2:
         async def generate_images(
             self,
             model: ImagesModel,
             context: ImagesContext,
-            options: dict[str, Any] | None = None,
+            *,
+            options: ImagesOptions | None = None,
         ) -> AssistantImages:
-            captured_options.append(options)
+            captured_contexts.append(context)
             return AssistantImages(
                 api=model.api,
-                provider=model.provider,
+                provider_id=model.provider_id,
                 model=model.id,
                 output=[ImageContent(source=_FAKE_PNG_B64, media_type="image/png")],
                 stop_reason="stop",
@@ -427,5 +423,7 @@ async def test_generate_image_no_options_when_size_quality_omitted(
     result = await tool.execute("tc-6", args, signal=None, on_update=None)
 
     assert not result.is_error
-    assert len(captured_options) == 1
-    assert captured_options[0] is None
+    assert len(captured_contexts) == 1
+    ctx = captured_contexts[0]
+    assert ctx.size is None
+    assert ctx.quality is None

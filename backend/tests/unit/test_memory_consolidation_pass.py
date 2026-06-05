@@ -119,7 +119,7 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
     captured: dict[str, object] = {}
 
     @contextlib.asynccontextmanager
-    async def _fake_oneshot(*, provider, model, operation, metadata, **_kw):
+    async def _fake_oneshot(*, model, operation, metadata, **_kw):
         captured["operation"] = operation
         captured["metadata"] = dict(metadata)
         session = MagicMock()
@@ -160,6 +160,8 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
     async def _fake_session_maker():
         yield MagicMock()
 
+    fake_bound_model = MagicMock()
+
     await mc.run_consolidation(
         redis=MagicMock(),
         prefix="test",
@@ -167,8 +169,7 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
         user_id="usr-abc",
         org_id="org-1",
         workspace_id="ws-2",
-        provider=MagicMock(),
-        model=MagicMock(),
+        model=fake_bound_model,
         tracer=fake_tracer,
         session_maker=_fake_session_maker,
     )
@@ -219,11 +220,14 @@ async def test_run_consolidation_fallback_uses_provider_generate(monkeypatch):
     async def _fake_session_maker():
         yield MagicMock()
 
-    provider = MagicMock()
-    provider.generate = AsyncMock(
+    fake_spec = MagicMock()
+    fake_provider = MagicMock()
+    fake_provider.generate = AsyncMock(
         return_value=AssistantMessage(content=[TextContent(text='{"ops": []}')])
     )
-    model = MagicMock()
+    bound_model = MagicMock()
+    bound_model.provider = fake_provider
+    bound_model.spec = fake_spec
 
     await mc.run_consolidation(
         redis=MagicMock(),
@@ -232,15 +236,14 @@ async def test_run_consolidation_fallback_uses_provider_generate(monkeypatch):
         user_id="usr-abc",
         org_id="org-1",
         workspace_id="ws-2",
-        provider=provider,
-        model=model,
+        model=bound_model,
         tracer=None,
         session_maker=_fake_session_maker,
     )
 
-    provider.generate.assert_awaited_once()
-    call = provider.generate.await_args.kwargs
-    assert call["model"] is model
+    fake_provider.generate.assert_awaited_once()
+    call = fake_provider.generate.await_args.kwargs
+    assert call["model"] is fake_spec
     assert call["system_prompt"] == mc.CONSOLIDATION_SYSTEM
     assert call["max_output_tokens"] == mc.EXTRACT_MODEL_MAX_TOKENS
 
@@ -286,10 +289,13 @@ async def test_run_consolidation_fallback_treats_provider_error_as_failed_pass(
     async def _fake_session_maker():
         yield MagicMock()
 
-    provider = MagicMock()
-    provider.generate = AsyncMock(
+    fake_provider = MagicMock()
+    fake_provider.generate = AsyncMock(
         return_value=AssistantMessage(content=[], error_message="provider failed")
     )
+    bound_model = MagicMock()
+    bound_model.provider = fake_provider
+    bound_model.spec = MagicMock()
 
     await mc.run_consolidation(
         redis=MagicMock(),
@@ -298,12 +304,11 @@ async def test_run_consolidation_fallback_treats_provider_error_as_failed_pass(
         user_id="usr-abc",
         org_id="org-1",
         workspace_id="ws-2",
-        provider=provider,
-        model=MagicMock(),
+        model=bound_model,
         tracer=None,
         session_maker=_fake_session_maker,
     )
 
-    provider.generate.assert_awaited_once()
+    fake_provider.generate.assert_awaited_once()
     mark_consolidated.assert_not_awaited()
     release_lock.assert_awaited_once()
