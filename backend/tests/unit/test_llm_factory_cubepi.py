@@ -27,7 +27,9 @@ def test_build_cubepi_provider_routes_anthropic() -> None:
             ),
         }
     )
-    provider = factory.build_cubepi_provider(factory.llm_config.providers["anthropic"])
+    provider = factory.build_cubepi_provider(
+        factory.llm_config.providers["anthropic"], provider_name="anthropic"
+    )
     assert isinstance(provider, AnthropicProvider)
 
 
@@ -43,7 +45,9 @@ def test_build_cubepi_provider_routes_openai_completions() -> None:
             ),
         }
     )
-    provider = factory.build_cubepi_provider(factory.llm_config.providers["deepseek"])
+    provider = factory.build_cubepi_provider(
+        factory.llm_config.providers["deepseek"], provider_name="deepseek"
+    )
     assert isinstance(provider, OpenAIProvider)
 
 
@@ -59,7 +63,9 @@ def test_build_cubepi_provider_routes_openai_responses() -> None:
             ),
         }
     )
-    provider = factory.build_cubepi_provider(factory.llm_config.providers["oai-responses"])
+    provider = factory.build_cubepi_provider(
+        factory.llm_config.providers["oai-responses"], provider_name="oai-responses"
+    )
     assert isinstance(provider, OpenAIResponsesProvider)
 
 
@@ -77,7 +83,7 @@ def test_build_cubepi_provider_unknown_api_raises() -> None:
     cfg = factory.llm_config.providers["weird"]
     object.__setattr__(cfg, "api", "some-unknown-api")
     with pytest.raises(ValueError, match="unsupported api"):
-        factory.build_cubepi_provider(cfg)
+        factory.build_cubepi_provider(cfg, provider_name="weird")
 
 
 def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
@@ -95,6 +101,7 @@ def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
     )
     provider = factory.build_cubepi_provider(
         factory.llm_config.providers["anthropic"],
+        provider_name="anthropic",
         cache_policy=None,
     )
     # When cache_policy=None, AnthropicProvider falls back to DefaultCacheMarkerPolicy

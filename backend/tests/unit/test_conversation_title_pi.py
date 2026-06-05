@@ -43,6 +43,7 @@ def _make_fake_factory(provider: FauxProvider) -> object:
             self,
             provider_config: object,
             *,
+            provider_name: str = "",
             cache_policy: object = None,
         ) -> FauxProvider:
             return provider

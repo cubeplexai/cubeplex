@@ -10,11 +10,17 @@ from __future__ import annotations
 import base64
 import re
 import shlex
-from typing import Any, Protocol
+from typing import Protocol
 
 from cubepi.agent.types import AgentTool, AgentToolResult
+from cubepi.errors import ProviderError
 from cubepi.providers.base import ImageContent, TextContent
-from cubepi.providers.images.types import AssistantImages, ImagesContext, ImagesModel
+from cubepi.providers.images import (
+    AssistantImages,
+    ImagesContext,
+    ImagesModel,
+    ImagesOptions,
+)
 from pydantic import BaseModel, Field
 
 from cubebox.sandbox.base import Sandbox
@@ -29,7 +35,8 @@ class _ImagesProvider(Protocol):
         self,
         model: ImagesModel,
         context: ImagesContext,
-        options: dict[str, Any] | None = None,
+        *,
+        options: ImagesOptions | None = None,
     ) -> AssistantImages: ...
 
 
@@ -117,26 +124,30 @@ def make_generate_image_tool(
                 )
             input_images.append(ImageContent(source=result.output.strip(), media_type="image/png"))
 
-        # Forward size/quality as provider options when explicitly set.
-        _options: dict[str, Any] = {}
-        if args.size is not None:
-            _options["size"] = args.size
-        if args.quality is not None:
-            _options["quality"] = args.quality
+        try:
+            gen_result = await images_provider.generate_images(
+                images_model,
+                ImagesContext(
+                    prompt=args.prompt,
+                    input_images=input_images,
+                    size=args.size,
+                    quality=args.quality,  # type: ignore[arg-type]
+                ),
+            )
+        except ProviderError as exc:
+            return AgentToolResult(
+                content=[TextContent(text=f"Image generation failed: {exc}")],
+                is_error=True,
+            )
 
-        gen_result = await images_provider.generate_images(
-            images_model,
-            ImagesContext(prompt=args.prompt, input_images=input_images),
-            options=_options or None,
-        )
-
-        if gen_result.stop_reason != "stop" or not gen_result.output:
+        if gen_result.stop_reason == "aborted" or not gen_result.output:
             return AgentToolResult(
                 content=[
                     TextContent(
                         text=(
-                            f"Image generation failed: "
-                            f"{gen_result.error_message or 'no image returned'}"
+                            "Image generation was aborted before completion."
+                            if gen_result.stop_reason == "aborted"
+                            else "Image generation returned no output."
                         )
                     )
                 ],

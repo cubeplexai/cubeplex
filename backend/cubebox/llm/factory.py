@@ -326,6 +326,7 @@ class LLMFactory:
         self,
         provider_config: ProviderConfig,
         *,
+        provider_name: str,
         cache_policy: "CacheMarkerPolicy | None" = None,
     ) -> Any:
         """Build a cubepi.Provider instance from a ProviderConfig.
@@ -335,6 +336,10 @@ class LLMFactory:
         - ``"anthropic-messages"`` → AnthropicProvider
         - ``"openai-completions"`` → cubepi OpenAIProvider
         - ``"openai-responses"``   → cubepi OpenAIResponsesProvider
+
+        ``provider_name`` is the logical key under ``llm_config.providers`` and is
+        stamped onto the returned provider as ``provider_id``, which then propagates to
+        ``BoundModel.spec.provider_id`` for cost tracking and tracing.
 
         Capability quirks stored as JSON on the provider (``capability`` +
         ``model_capability_overrides``) are converted to typed
@@ -363,6 +368,7 @@ class LLMFactory:
             from cubepi.providers.anthropic import AnthropicProvider
 
             return AnthropicProvider(
+                provider_id=provider_name,
                 api_key=provider_config.api_key,
                 base_url=provider_config.base_url or None,
                 cache_policy=cache_policy,
@@ -374,6 +380,7 @@ class LLMFactory:
             from cubepi.providers.openai import OpenAIProvider
 
             return OpenAIProvider(
+                provider_id=provider_name,
                 api_key=provider_config.api_key,
                 base_url=provider_config.base_url,
                 extra_body=provider_config.extra_body or None,
@@ -386,6 +393,7 @@ class LLMFactory:
             from cubepi.providers.openai_responses import OpenAIResponsesProvider
 
             return OpenAIResponsesProvider(
+                provider_id=provider_name,
                 api_key=provider_config.api_key,
                 base_url=provider_config.base_url,
                 capability=capability,

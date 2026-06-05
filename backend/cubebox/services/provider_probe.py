@@ -12,7 +12,6 @@ from collections.abc import Callable
 from typing import Any, Literal, cast
 
 from cubepi.providers.base import (
-    Model,
     StreamOptions,
     TextContent,
     ThinkingLevel,
@@ -113,7 +112,7 @@ async def _drain_stream(
     that a buffering gateway returns without emitting per-chunk tool-call events.
     """
     start = time.perf_counter()
-    model = Model(id=model_id, provider="probe", context_window=8192, max_tokens=max_output)
+    model = provider.model(model_id, context_window=8192, max_tokens=max_output).spec
     if temperature is not None:
         model.temperature = temperature
     stream = await asyncio.wait_for(
@@ -351,7 +350,7 @@ async def probe_usage(provider: Any, *, model_id: str) -> ProbeStep:
     try:
         stream = await asyncio.wait_for(
             provider.stream(
-                model=Model(id=model_id, provider="probe", context_window=8192, max_tokens=16),
+                model=provider.model(model_id, context_window=8192, max_tokens=16).spec,
                 messages=[UserMessage(content=[TextContent(text="hi")])],
                 options=StreamOptions(thinking="off"),
             ),
