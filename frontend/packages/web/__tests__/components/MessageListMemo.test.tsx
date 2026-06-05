@@ -42,4 +42,26 @@ describe('HistoryAssistantMessage', () => {
     )
     expect(screen.getByText('hello world')).toBeInTheDocument()
   })
+
+  it('renders an error alert when stop_reason is "error" and content is empty', () => {
+    const errored = {
+      id: 'msg-err',
+      role: 'assistant',
+      content: [],
+      stop_reason: 'error',
+      error_message: '400 Bad Request: messages.347: empty content',
+      timestamp: 1_700_000_001,
+    } as unknown as AssistantMessageType
+    render(
+      <HistoryAssistantMessage
+        message={errored}
+        subagentDataMap={{}}
+        toolResultMap={{}}
+        conversationId="conv-1"
+      />,
+      { wrapper },
+    )
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/messages\.347/)
+  })
 })

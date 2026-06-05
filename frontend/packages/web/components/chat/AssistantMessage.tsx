@@ -11,7 +11,7 @@ import type {
 } from '@cubebox/core'
 import type { AgentStream } from '@cubebox/core'
 import { useArtifactStore } from '@cubebox/core'
-import { Bot, ChevronDown, ChevronRight, Brain } from 'lucide-react'
+import { Bot, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
 import { ArtifactCard } from './ArtifactCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
@@ -520,6 +520,13 @@ export function AssistantMessage({
   const _hasContent = blocks.length > 0
   const grouped = groupBlocks(blocks)
 
+  // History assistants persisted from a failed turn have stop_reason="error"
+  // and an empty content list — without this branch the bubble renders nothing
+  // and the user sees a silent gap after their question. Surface the upstream
+  // error_message so the failure is at least visible (and addressable).
+  const errorMessage = (message?.error_message ?? '').trim()
+  const showErrorBubble = !isStreaming && message?.stop_reason === 'error' && errorMessage !== ''
+
   // Count subagent blocks for index assignment and cluster display
   let subagentCounter = 0
   const subagentIndexMap = new Map<number, number>()
@@ -573,7 +580,7 @@ export function AssistantMessage({
 
   return (
     <div data-role="assistant" className="space-y-2">
-      {(grouped.length > 0 || totalSubagents >= 2) && (
+      {(grouped.length > 0 || totalSubagents >= 2 || showErrorBubble) && (
         <div className="flex justify-start gap-2.5">
           <div
             className="shrink-0 w-6 h-6 rounded-md border border-border bg-card
@@ -589,6 +596,24 @@ export function AssistantMessage({
               />
             )}
             {grouped.map((item, i) => renderItem(item, i))}
+            {showErrorBubble && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 px-3 py-2.5 rounded-lg
+                  bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+              >
+                <AlertCircle className="size-4 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="font-medium">{t('assistantReplyFailed')}</div>
+                  <pre
+                    className="whitespace-pre-wrap break-words font-mono text-xs leading-snug
+                      opacity-90 max-h-48 overflow-auto"
+                  >
+                    {errorMessage}
+                  </pre>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
