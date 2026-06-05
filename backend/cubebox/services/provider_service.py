@@ -363,7 +363,9 @@ class ProviderService:
 
     # -- Two-phase test / liveness probe ----------------------------------------
 
-    def _provider_factory_from_config(self, cfg: ProviderConfig) -> Callable[[], Any]:
+    def _provider_factory_from_config(
+        self, cfg: ProviderConfig, *, provider_name: str
+    ) -> Callable[[], Any]:
         """Zero-arg callable that builds a fresh cubepi provider for the probe.
 
         The probe orchestrators call the factory each phase, so each invocation
@@ -371,18 +373,22 @@ class ProviderService:
         """
 
         def factory() -> Any:
-            return LLMFactory().build_cubepi_provider(cfg, cache_policy=None)
+            return LLMFactory().build_cubepi_provider(
+                cfg, provider_name=provider_name, cache_policy=None
+            )
 
         return factory
 
-    def _resolve_capability(self, cfg: ProviderConfig, model_id: str) -> Any:
+    def _resolve_capability(self, cfg: ProviderConfig, model_id: str, *, provider_name: str) -> Any:
         """Effective CapabilityDescriptor for ``model_id`` (override > base).
 
         Built off a throwaway cubepi provider so we reuse the exact same merge
         logic the runtime uses (``provider._resolve_capability``), avoiding a
         second copy of the override-precedence rule.
         """
-        provider = LLMFactory().build_cubepi_provider(cfg, cache_policy=None)
+        provider = LLMFactory().build_cubepi_provider(
+            cfg, provider_name=provider_name, cache_policy=None
+        )
         return provider._resolve_capability(model_id)
 
     @staticmethod
@@ -439,7 +445,7 @@ class ProviderService:
         """Pre-save liveness — transient provider, no DB write (spec §4.3)."""
         cfg = self._config_from_request(req)
         return await provider_probe.run_liveness(
-            provider_factory=self._provider_factory_from_config(cfg),
+            provider_factory=self._provider_factory_from_config(cfg, provider_name=req.api),
             model_id=req.model_id,
         )
 
@@ -448,7 +454,7 @@ class ProviderService:
         provider = await self.get_provider(provider_id)
         cfg = await self._config_from_provider(provider)
         step = await provider_probe.run_liveness(
-            provider_factory=self._provider_factory_from_config(cfg),
+            provider_factory=self._provider_factory_from_config(cfg, provider_name=provider.slug),
             model_id=model_id,
         )
         await self._persist_provider_liveness(provider, step)
@@ -457,13 +463,13 @@ class ProviderService:
     async def run_test_dryrun(self, req: ProviderTestRequest) -> ProbeResult:
         """Pre-save full probe — liveness then per-model capability. No DB write."""
         cfg = self._config_from_request(req)
-        factory = self._provider_factory_from_config(cfg)
+        factory = self._provider_factory_from_config(cfg, provider_name=req.api)
         liveness = await provider_probe.run_liveness(
             provider_factory=factory, model_id=req.model_id
         )
         if liveness.status != "pass":
             return ProbeResult(overall="fail", blocking_failed=True, steps=[liveness])
-        capability = self._resolve_capability(cfg, req.model_id)
+        capability = self._resolve_capability(cfg, req.model_id, provider_name=req.api)
         model_result = await provider_probe.run_model_probe(
             provider_factory=factory, model_id=req.model_id, capability=capability
         )
@@ -480,14 +486,14 @@ class ProviderService:
         if model is None or model.provider_id != provider_id:
             raise ModelNotFoundError(f"Model {model_db_id} not found")
         cfg = await self._config_from_provider(provider)
-        factory = self._provider_factory_from_config(cfg)
+        factory = self._provider_factory_from_config(cfg, provider_name=provider.slug)
         liveness = await provider_probe.run_liveness(
             provider_factory=factory, model_id=model.model_id
         )
         await self._persist_provider_liveness(provider, liveness)
         if liveness.status != "pass":
             return ProbeResult(overall="fail", blocking_failed=True, steps=[liveness])
-        capability = self._resolve_capability(cfg, model.model_id)
+        capability = self._resolve_capability(cfg, model.model_id, provider_name=provider.slug)
         model_result = await provider_probe.run_model_probe(
             provider_factory=factory, model_id=model.model_id, capability=capability
         )
@@ -513,7 +519,7 @@ class ProviderService:
         if not models:
             return []
         cfg = await self._config_from_provider(provider)
-        factory = self._provider_factory_from_config(cfg)
+        factory = self._provider_factory_from_config(cfg, provider_name=provider.slug)
         liveness = await provider_probe.run_liveness(
             provider_factory=factory, model_id=models[0].model_id
         )
@@ -525,7 +531,7 @@ class ProviderService:
         )
         results: list[ProbeResult] = []
         for model in models:
-            capability = self._resolve_capability(cfg, model.model_id)
+            capability = self._resolve_capability(cfg, model.model_id, provider_name=provider.slug)
             model_result = await provider_probe.run_model_probe(
                 provider_factory=factory, model_id=model.model_id, capability=capability
             )
@@ -545,7 +551,7 @@ class ProviderService:
         """Stream liveness (once) then a per-model probe event, persisting each verdict."""
         provider = await self.get_provider(provider_id)
         cfg = await self._config_from_provider(provider)
-        factory = self._provider_factory_from_config(cfg)
+        factory = self._provider_factory_from_config(cfg, provider_name=provider.slug)
         models = {m.id: m for m in await self._models.list_all_for_provider(provider_id)}
         liveness = await provider_probe.run_liveness(
             provider_factory=factory, model_id=models[model_db_ids[0]].model_id
@@ -560,7 +566,7 @@ class ProviderService:
         )
         for db_id in model_db_ids:
             model = models[db_id]
-            cap = self._resolve_capability(cfg, model.model_id)
+            cap = self._resolve_capability(cfg, model.model_id, provider_name=provider.slug)
             result = await provider_probe.run_model_probe(
                 provider_factory=factory, model_id=model.model_id, capability=cap
             )

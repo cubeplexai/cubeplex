@@ -40,13 +40,12 @@ def test_generate_image_tool_produced_when_sandbox_and_provider_present() -> Non
     """make_generate_image_tool returns an AgentTool when sandbox + provider instance given."""
     from cubepi.agent.types import AgentTool
     from cubepi.providers.images.faux import FauxImagesProvider
-    from cubepi.providers.images.types import ImagesModel
 
     from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
-    provider_instance = FauxImagesProvider(_FAKE_PNG)
+    provider_instance = FauxImagesProvider(provider_id="image-gen", png_b64=_FAKE_PNG)
+    images_model = provider_instance.model("gpt-image-2")
     fake_sandbox = MagicMock()
-    images_model = ImagesModel(id="gpt-image-2", provider="image-gen", api="openai-images")
 
     tool = make_generate_image_tool(
         org_id="org-1",
@@ -64,7 +63,6 @@ def test_generate_image_tool_produced_when_sandbox_and_provider_present() -> Non
 def test_generate_image_tool_not_added_when_sandbox_is_none() -> None:
     """The if-sandbox-is-not-None guard prevents adding generate_image to _builtin_tools."""
     from cubepi.providers.images.faux import FauxImagesProvider
-    from cubepi.providers.images.types import ImagesModel
 
     from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
@@ -72,14 +70,15 @@ def test_generate_image_tool_not_added_when_sandbox_is_none() -> None:
     collected: list[object] = []
 
     if sandbox is not None:
-        images_model = ImagesModel(id="gpt-image-2", provider="image-gen", api="openai-images")
+        _provider = FauxImagesProvider(provider_id="image-gen", png_b64=_FAKE_PNG)
+        images_model = _provider.model("gpt-image-2")
         collected.append(
             make_generate_image_tool(
                 org_id="org-1",
                 workspace_id="ws-1",
                 conversation_id="conv-1",
                 sandbox=sandbox,  # type: ignore[arg-type]
-                images_provider=FauxImagesProvider(_FAKE_PNG),
+                images_provider=_provider,
                 images_model=images_model,
             )
         )
@@ -107,18 +106,18 @@ def test_generate_image_tool_not_added_when_config_disabled(
     fake_sandbox = MagicMock()
     if cfg.enabled and cfg.api_key:
         from cubepi.providers.images.faux import FauxImagesProvider
-        from cubepi.providers.images.types import ImagesModel
 
         from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
-        images_model = ImagesModel(id=cfg.model, provider="image-gen", api=cfg.api)
+        _provider = FauxImagesProvider(provider_id="image-gen", png_b64=_FAKE_PNG)
+        images_model = _provider.model(cfg.model)
         collected.append(
             make_generate_image_tool(
                 org_id="org-1",
                 workspace_id="ws-1",
                 conversation_id="conv-1",
                 sandbox=fake_sandbox,
-                images_provider=FauxImagesProvider(_FAKE_PNG),
+                images_provider=_provider,
                 images_model=images_model,
             )
         )
@@ -145,18 +144,18 @@ def test_generate_image_tool_not_added_when_api_key_absent(
     fake_sandbox = MagicMock()
     if cfg.enabled and cfg.api_key:
         from cubepi.providers.images.faux import FauxImagesProvider
-        from cubepi.providers.images.types import ImagesModel
 
         from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
-        images_model = ImagesModel(id=cfg.model, provider="image-gen", api=cfg.api)
+        _provider = FauxImagesProvider(provider_id="image-gen", png_b64=_FAKE_PNG)
+        images_model = _provider.model(cfg.model)
         collected.append(
             make_generate_image_tool(
                 org_id="org-1",
                 workspace_id="ws-1",
                 conversation_id="conv-1",
                 sandbox=fake_sandbox,
-                images_provider=FauxImagesProvider(_FAKE_PNG),
+                images_provider=_provider,
                 images_model=images_model,
             )
         )
@@ -171,7 +170,6 @@ def test_generate_image_tool_added_when_config_enabled(
     """When image_generation.enabled=True + api_key set, tool is produced via config path."""
     from cubepi.agent.types import AgentTool
     from cubepi.providers.images.faux import FauxImagesProvider
-    from cubepi.providers.images.types import ImagesModel
 
     from cubebox.llm.config import ImageGenerationConfig
     from cubebox.tools.builtin.generate_image import make_generate_image_tool
@@ -185,16 +183,27 @@ def test_generate_image_tool_added_when_config_enabled(
     assert cfg.enabled
     assert cfg.api_key
 
-    # Monkeypatch create_images_provider in run_manager to return a FauxImagesProvider,
-    # mirroring the e2e test seam (FauxImagesProvider doesn't accept api_key).
-    faux_provider = FauxImagesProvider(_FAKE_PNG)
+    # Monkeypatch OpenAIImagesProvider at its source module so the lazy import
+    # inside _run_cubepi_path picks up the fake (run_manager imports it lazily).
+    faux_provider = FauxImagesProvider(provider_id="openai", png_b64=_FAKE_PNG)
+
+    def _fake_openai_images_provider(
+        *,
+        provider_id: str,
+        api_key: str,
+        base_url: object = None,
+        capability: object = None,
+        **kw: object,
+    ) -> FauxImagesProvider:
+        return faux_provider
+
     monkeypatch.setattr(
-        "cubebox.streams.run_manager.create_images_provider",
-        lambda api, **kwargs: faux_provider,
+        "cubepi.providers.images.OpenAIImagesProvider",
+        _fake_openai_images_provider,
     )
 
     fake_sandbox = MagicMock()
-    images_model = ImagesModel(id=cfg.model, provider="image-gen", api=cfg.api)
+    images_model = faux_provider.model(cfg.model)
 
     tool = make_generate_image_tool(
         org_id="org-1",

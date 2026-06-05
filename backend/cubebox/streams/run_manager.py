@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from cubepi.providers.images import create_images_provider
 from fastapi import FastAPI
 from loguru import logger
 from redis.asyncio import Redis
@@ -1558,7 +1557,7 @@ class RunManager:
                     elif _bus is not None:
 
                         def _make_reflection_agent(_inp: ReflectionInput) -> Any:
-                            from cubepi import Agent, Model
+                            from cubepi import Agent
 
                             from cubebox.llm.config import ModelCost
                             from cubebox.middleware.cost import (
@@ -1598,8 +1597,7 @@ class RunManager:
                             ]
 
                             return Agent(
-                                provider=_provider_ref,
-                                model=Model(id=model_id, provider=provider_name),
+                                model=_provider_ref.model(model_id),
                                 system_prompt=REFLECTION_SYSTEM_PROMPT,
                                 tools=_mem_tools,
                                 middleware=_refl_mw,
@@ -1993,7 +1991,7 @@ class RunManager:
         # upstream supports fallback chains or we wrap the provider on
         # cubebox's side.
         provider = factory.build_cubepi_provider(
-            provider_config, cache_policy=CubeboxCacheMarkerPolicy()
+            provider_config, provider_name=provider_name, cache_policy=CubeboxCacheMarkerPolicy()
         )
 
         # --- Compose tool list ---
@@ -2105,12 +2103,12 @@ class RunManager:
             logger.warning("show_widget unavailable for cubepi run: {}", _exc)
 
         # generate_image — sandbox-gated; enabled only when image_generation config is active.
-        # Builds a per-run provider instance via create_images_provider — never the global registry.
         if sandbox is not None:
             try:
-                from cubepi.providers.images.types import ImagesModel as _ImagesModel
+                from cubepi.providers.images import OpenAIImagesProvider
 
                 from cubebox.llm.config import get_image_generation_config
+                from cubebox.llm.images import build_image_capability
                 from cubebox.tools.builtin.generate_image import make_generate_image_tool
 
                 _img_cfg = get_image_generation_config()
@@ -2119,16 +2117,17 @@ class RunManager:
                         "generate_image unavailable: image_generation not enabled or api_key absent"
                     )
                 else:
-                    _images_provider = create_images_provider(
-                        _img_cfg.api,
+                    _capability, _default_base = build_image_capability(_img_cfg.api)
+                    # _img_cfg.base_url wins when set, so per-env overrides
+                    # keep working. The capability map's _default_base is
+                    # only used when the user did not set base_url.
+                    _images_provider = OpenAIImagesProvider(
+                        provider_id=_img_cfg.api.removesuffix("-images"),
                         api_key=_img_cfg.api_key,
-                        base_url=_img_cfg.base_url or None,
+                        base_url=_img_cfg.base_url or _default_base,
+                        capability=_capability,
                     )
-                    _images_model = _ImagesModel(
-                        id=_img_cfg.model,
-                        provider="image-gen",
-                        api=_img_cfg.api,
-                    )
+                    _images_model = _images_provider.model(_img_cfg.model)
                     _builtin_tools.append(
                         make_generate_image_tool(
                             org_id=ctx.org_id,
@@ -2393,7 +2392,6 @@ class RunManager:
 
         # 5. CompactionMiddleware — cubepi built-in; state persists in ctx.extra.
         try:
-            from cubepi import Model as _CompModel
             from cubepi.middleware.compaction import CompactionMiddleware
 
             from cubebox.config import config as _comp_cfg
@@ -2406,9 +2404,9 @@ class RunManager:
                 # config.yaml — providers configured via the admin UI would miss.
                 _summary_provider_config = factory.llm_config.providers[_summary_provider]
                 _summary_provider_inst = factory.build_cubepi_provider(
-                    _summary_provider_config, cache_policy=None
+                    _summary_provider_config, provider_name=_summary_provider, cache_policy=None
                 )
-                _summary_model = _CompModel(id=_summary_model_id, provider=_summary_provider)
+                _summary_bound_model = _summary_provider_inst.model(_summary_model_id)
                 _fallback_window = int(_comp_cfg.get("compaction.fallback_context_window", 128000))
                 _model_window = int(_model_config.context_window or 0)
                 _model_max_out = int(_model_config.max_tokens or 0)
@@ -2420,8 +2418,7 @@ class RunManager:
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
                 cubepi_middleware.append(
                     CompactionMiddleware(
-                        summary_provider=_summary_provider_inst,
-                        summary_model=_summary_model,
+                        summary_model=_summary_bound_model,
                         max_tokens_before_compact=int(_ctx_window * _ratio),
                         keep_recent_messages=int(
                             _comp_cfg.get("compaction.keep_recent_messages", 8)
@@ -2520,7 +2517,6 @@ class RunManager:
 
         # 8. SubagentMiddleware — cubepi built-in; cubebox only maps events to SSE.
         try:
-            from cubepi import Model as _SubagentModel
             from cubepi.middleware.subagents import SubagentMiddleware
 
             from cubebox.streams.subagent_events import (
@@ -2548,10 +2544,8 @@ class RunManager:
 
             subagent_mw = SubagentMiddleware(
                 subagents={},
-                default_provider=provider,
-                default_model=_SubagentModel(
-                    id=model_id,
-                    provider=provider_name,
+                default_model=provider.model(
+                    model_id,
                     reasoning=_model_config.reasoning,
                     max_tokens=_model_max_tokens,
                     temperature=_model_temperature,
@@ -2710,8 +2704,6 @@ class RunManager:
             ):
                 return
 
-            from cubepi import Model
-
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.factory import LLMFactory
 
@@ -2727,8 +2719,10 @@ class RunManager:
                     provider_config,
                 ) = await factory.resolve_default_provider_and_config()
                 await _llm_session.commit()
-            provider = factory.build_cubepi_provider(provider_config, cache_policy=None)
-            model = Model(id=model_id, provider=provider_name)
+            provider = factory.build_cubepi_provider(
+                provider_config, provider_name=provider_name, cache_policy=None
+            )
+            bound_model = provider.model(model_id)
             # Tracer is optional — pass None to run_consolidation when tracing
             # is disabled, otherwise the background LLM call is wrapped in
             # tracer.oneshot() so it shows up in `cubepi trace ls` filterable
@@ -2743,8 +2737,7 @@ class RunManager:
                     user_id=ctx.user_id,
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
-                    provider=provider,
-                    model=model,
+                    model=bound_model,
                     tracer=tracer,
                     session_maker=async_session_maker,
                     min_hours=min_hours,

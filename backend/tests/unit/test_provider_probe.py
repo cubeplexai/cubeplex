@@ -54,6 +54,11 @@ class _StubProvider:
         self._result_content = result_content or []
         self.calls: list[dict] = []
 
+    def model(self, id: str, **kwargs):  # type: ignore[override]
+        from cubepi.providers.base import BoundModel, Model
+
+        return BoundModel(provider=self, spec=Model(id=id, **kwargs))  # type: ignore[arg-type]
+
     async def stream(self, model, messages, *, options=None, system_prompt="", tools=None):
         self.calls.append({"thinking": getattr(options, "thinking", "off")})
         if self._raise_error is not None:

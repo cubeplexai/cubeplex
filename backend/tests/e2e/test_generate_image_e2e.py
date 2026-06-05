@@ -162,7 +162,7 @@ async def generate_image_client(
     Injection strategy (config-driven path):
     1. Monkeypatch get_image_generation_config() to return enabled=True + a dummy
        api_key so run_manager decides to include the generate_image tool.
-    2. Monkeypatch cubebox.streams.run_manager.create_images_provider to return a
+    2. Monkeypatch cubepi.providers.images.OpenAIImagesProvider to return a
        FauxImagesProvider instance — no network hit, real tool/sandbox/artifact path.
     """
     await _ensure_default_user_and_membership()
@@ -172,7 +172,7 @@ async def generate_image_client(
 
     from cubebox.llm.config import ImageGenerationConfig
 
-    _faux_images_instance = FauxImagesProvider(_PNG_1x1_B64)
+    _faux_images_instance = FauxImagesProvider(provider_id="faux", png_b64=_PNG_1x1_B64)
 
     monkeypatch.setattr(
         "cubebox.llm.config.get_image_generation_config",
@@ -184,12 +184,22 @@ async def generate_image_client(
         ),
     )
 
-    # --- 2. Monkeypatch create_images_provider in run_manager's namespace ---
+    # --- 2. Monkeypatch OpenAIImagesProvider in run_manager's namespace ---
     # This intercepts the lazy import inside _run_cubepi_path so the faux
     # provider is used without any network call.
+    def _fake_openai_images_provider(
+        *,
+        provider_id: str,
+        api_key: str,
+        base_url: object = None,
+        capability: object = None,
+        **kw: object,
+    ) -> object:
+        return _faux_images_instance
+
     monkeypatch.setattr(
-        "cubebox.streams.run_manager.create_images_provider",
-        lambda api, **kwargs: _faux_images_instance,
+        "cubepi.providers.images.OpenAIImagesProvider",
+        _fake_openai_images_provider,
     )
 
     # --- 4. Set up FauxProvider scripted responses ---
