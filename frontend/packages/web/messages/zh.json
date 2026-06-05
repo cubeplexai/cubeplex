@@ -84,6 +84,7 @@
     "thinkingProcess": "思考过程",
     "sandboxPreparing": "正在准备沙箱环境...",
     "sandboxFailed": "沙箱环境创建失败，将在无沙箱模式下继续",
+    "assistantReplyFailed": "回复失败",
     "tasksDone": "{completed}/{total} 个任务已完成",
     "tasksProgress": "任务进度 {completed}/{total}",
     "artifacts": "产出物",
