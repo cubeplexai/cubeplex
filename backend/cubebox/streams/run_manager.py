@@ -2633,6 +2633,26 @@ class RunManager:
             len(cubepi_middleware),
             len(all_tools),
         )
+        # cubepi.Agent.__init__ auto-appends each middleware's own `.tools`
+        # to the caller-provided list (cubepi/agent/agent.py:165-169). cubebox
+        # also extracts middleware-contributed tools into the matching
+        # `_sandbox_tools` / `_artifact_tools` / `_todo_tools` /
+        # `_subagent_tools` lists so they sit at a specific position relative
+        # to the builtins for cache-prefix stability. Without this strip,
+        # those tools land on the wire twice and shape-compatible providers
+        # reject the request with "Tool names must be unique."
+        # (deepseek-anthropic-shape). Drop them from the caller list so the
+        # only copy reaching the wire is the one cubepi appends from the
+        # middleware itself — order becomes "all_tools (sans middleware
+        # contributions) then middleware tools in middleware order".
+        _mw_tool_names: set[str] = set()
+        for _mw in cubepi_middleware:
+            for _t in getattr(_mw, "tools", []) or []:
+                _mw_tool_names.add(getattr(_t, "name", repr(_t)))
+        if _mw_tool_names:
+            all_tools = [
+                _t for _t in all_tools if getattr(_t, "name", repr(_t)) not in _mw_tool_names
+            ]
 
         agent = create_cubebox_agent(
             provider=provider,
