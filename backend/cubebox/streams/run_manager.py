@@ -2397,14 +2397,15 @@ class RunManager:
             from cubepi.middleware.compaction import CompactionMiddleware
 
             from cubebox.config import config as _comp_cfg
-            from cubebox.llm.factory import LLMFactory as _CompLLMFactory
 
             if _comp_cfg.get("compaction.enabled", False):
                 _summary_provider = _comp_cfg.get("compaction.summary_provider")
                 _summary_model_id = _comp_cfg.get("compaction.summary_model")
-                _comp_factory = _CompLLMFactory()
-                _summary_provider_config = _comp_factory.llm_config.providers[_summary_provider]
-                _summary_provider_inst = _comp_factory.build_cubepi_provider(
+                # Reuse the DB-aware factory built above so admin-managed providers
+                # in the model registry are visible. A bare LLMFactory() only sees
+                # config.yaml — providers configured via the admin UI would miss.
+                _summary_provider_config = factory.llm_config.providers[_summary_provider]
+                _summary_provider_inst = factory.build_cubepi_provider(
                     _summary_provider_config, cache_policy=None
                 )
                 _summary_model = _CompModel(id=_summary_model_id, provider=_summary_provider)
