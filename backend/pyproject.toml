@@ -172,13 +172,17 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-# 1363163 is cubepi PR #142: anthropic-shape providers (deepseek etc.) stop
-# 400ing on a replayed history that ends in an empty error AssistantMessage.
-# stream() now strips trailing empty-content error assistants before both the
-# API conversion and the cache-policy query, and synthesises a placeholder
-# for any mid-history empty assistant so user→assistant→user alternation
-# stays intact.
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "1363163" }
+# bfd6b84 includes:
+#   * PR #142 — anthropic-shape providers (deepseek etc.) stop 400ing on a
+#     replayed history that ends in an empty error AssistantMessage. stream()
+#     strips trailing empty-content error assistants before both the API
+#     conversion and the cache-policy query; mid-history empties get a
+#     placeholder so user→assistant→user alternation stays intact.
+#   * PR #143 — Middleware.extra_llm_calls() so CompactionMiddleware's
+#     summarizer chat span lands in the agent run's trace, with model-based
+#     gating that keeps the root invoke_agent attribution on the agent's
+#     own (provider, model).
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "bfd6b84" }
 
 [dependency-groups]
 dev = [
