@@ -332,8 +332,8 @@ default:
   # Conversation context compaction (default on; threshold = model.context_window * ratio)
   compaction:
     enabled: true
-    summary_provider: "cubebox"
-    summary_model: "doubao-seed-1.8"
+    summary_provider: "deepseek"
+    summary_model: "deepseek-v4-flash"
     threshold_ratio: 0.7
     keep_recent_messages: 8
     max_summary_tokens: 1024
