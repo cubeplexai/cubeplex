@@ -66,6 +66,7 @@ _CHECKPOINT_TABLES = {
     "checkpoint_blobs",
     "checkpoint_writes",
     "cubepi_messages",
+    "cubepi_runs",
     "cubepi_schema_version",
 }
 
@@ -82,6 +83,8 @@ def include_object(
         if name in _CHECKPOINT_TABLES:
             return False
         if name.startswith("cubepi_messages_p"):
+            return False
+        if name.startswith("cubepi_runs_p"):
             return False
     return True
 

@@ -1474,7 +1474,11 @@ class RunManager:
             try:
                 with tracing_context(metadata=_trace_meta):
                     async with trace(tracer, agent):
-                        await agent.prompt(_user_msg)
+                        # Pass cubebox's run_id so cubepi stamps it onto
+                        # cubepi_messages.run_id (instead of generating its own).
+                        # Aligns the cubepi message ledger with cubebox's redis
+                        # run-meta, SSE streams, and billing_llm_events.
+                        await agent.prompt(_user_msg, run_id=run_id)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
                 # "fail"; a model_not_found flips this model to "unavailable".
