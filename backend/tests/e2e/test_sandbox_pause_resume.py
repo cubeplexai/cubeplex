@@ -171,6 +171,13 @@ async def manager(
     # pause/resume orchestration and must run against the pause-enabled branch
     # — mirrors tests/unit/test_sandbox_manager_pause.py:71.
     mgr._pause_on_idle = True
+    # Default _idle_ttl_seconds is 1800 (30 min) but _insert_record only
+    # backdates last_activity_at by 60s, so list_idle_to_pause_system would
+    # never select these freshly inserted rows and pause_idle would silently
+    # no-op — letting the test fall into the G11 skip path for the wrong
+    # reason (provider never asked to pause). Drop the threshold to 0 so the
+    # 60s-stale records are immediately idle. (codex P2 on PR #213)
+    mgr._idle_ttl_seconds = 0
     return mgr
 
 
