@@ -166,6 +166,11 @@ async def manager(
     mgr = SandboxManager(session_factory, FernetBackend([Fernet.generate_key()]))
     # No egress in these tests — keep the focus on pause/resume orchestration.
     mgr._exchange_host = ""
+    # The deployed config disables pause_on_idle (OpenSandbox v1.0.12 "pause"
+    # silently deletes the pod). These tests are specifically exercising the
+    # pause/resume orchestration and must run against the pause-enabled branch
+    # — mirrors tests/unit/test_sandbox_manager_pause.py:71.
+    mgr._pause_on_idle = True
     return mgr
 
 
