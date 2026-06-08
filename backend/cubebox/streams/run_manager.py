@@ -2610,7 +2610,7 @@ class RunManager:
 
         # 11. TodoListMiddleware — needs extra_ref
         try:
-            from cubebox.middleware.todo import TodoListMiddleware
+            from cubepi.middleware.todo import TodoListMiddleware
 
             todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
             cubepi_middleware.append(todo_mw)

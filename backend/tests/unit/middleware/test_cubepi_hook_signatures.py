@@ -6,6 +6,8 @@ import inspect
 from collections.abc import Callable
 from typing import Any
 
+from cubepi.middleware.todo import TodoListMiddleware
+
 from cubebox.middleware.artifacts import ArtifactMiddleware
 from cubebox.middleware.attachments import AttachmentHintMiddleware
 from cubebox.middleware.citation import CitationMiddleware
@@ -13,7 +15,6 @@ from cubebox.middleware.memory import MemoryMiddleware
 from cubebox.middleware.sandbox import SandboxMiddleware
 from cubebox.middleware.skills import SkillsMiddleware
 from cubebox.middleware.timestamps import TimestampMiddleware
-from cubebox.middleware.todo import TodoListMiddleware
 
 
 def _assert_requires_keyword_ctx(method: Callable[..., Any]) -> None:
