@@ -330,13 +330,17 @@ default:
     stale_run_threshold_seconds: 120
 
   # Conversation context compaction (default on; threshold = model.context_window * ratio)
+  # cubepi 0.x+: ``keep_tail_tokens`` (token budget) replaces the older
+  # ``keep_recent_messages`` (message count). ``max_summary_tokens: null``
+  # uses cubepi's dynamic budget — clamp(content*0.15, 1024, 4096); set
+  # an int to pin the budget instead.
   compaction:
     enabled: true
     summary_provider: "deepseek"
     summary_model: "deepseek-v4-flash"
     threshold_ratio: 0.7
-    keep_recent_messages: 8
-    max_summary_tokens: 1024
+    keep_tail_tokens: 8000
+    max_summary_tokens: null
     min_compact_messages: 4
     fallback_context_window: 128000
 
