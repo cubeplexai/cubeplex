@@ -172,7 +172,7 @@ exclude_lines = [
 ]
 
 [tool.uv.sources]
-cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "747d03055f5bc2a9feac32117f597b99528d4930" }
+cubepi = { git = "https://github.com/cubeplexai/cubepi.git", rev = "65640f2c9dc01c2e995593dd00236a473fe6e6ba" }
 
 [dependency-groups]
 dev = [
