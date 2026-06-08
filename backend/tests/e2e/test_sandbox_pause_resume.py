@@ -171,13 +171,6 @@ async def manager(
     # pause/resume orchestration and must run against the pause-enabled branch
     # — mirrors tests/unit/test_sandbox_manager_pause.py:71.
     mgr._pause_on_idle = True
-    # Default _idle_ttl_seconds is 1800 (30 min) but _insert_record only
-    # backdates last_activity_at by 60s, so list_idle_to_pause_system would
-    # never select these freshly inserted rows and pause_idle would silently
-    # no-op — letting the test fall into the G11 skip path for the wrong
-    # reason (provider never asked to pause). Drop the threshold to 0 so the
-    # 60s-stale records are immediately idle. (codex P2 on PR #213)
-    mgr._idle_ttl_seconds = 0
     return mgr
 
 
@@ -190,7 +183,7 @@ async def _insert_record(
     paused_at: datetime | None = None,
     in_use_until: datetime | None = None,
     paused_ttl_seconds: int = 24 * 60,
-    idle_secs: int = 60,
+    idle_secs: int = 3600,
 ) -> str:
     """Insert a UserSandbox row directly and return its id.
 
@@ -198,6 +191,12 @@ async def _insert_record(
     stale against ``list_idle_to_pause_system`` queries with positive
     ``idle_ttl_seconds`` — the default match for the test SQL
     ``last_activity_at + idle_ttl * INTERVAL '1 second' <= NOW()``.
+
+    Default 3600s is safely past the default ``SandboxManager._idle_ttl_seconds``
+    (1800s / 30 min) so the test row is selected by ``list_idle_to_pause_system``
+    *without* lowering the manager's threshold — lowering it to 0 in the
+    fixture would make the system-scope reaper match every concurrent
+    unleased row in the shared test DB (codex P2 on PR #213).
     """
     async with session_maker() as session:
         repo = UserSandboxRepository(session, org_id=_ORG_ID, workspace_id=_WS_ID)
