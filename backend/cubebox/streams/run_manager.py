@@ -2420,16 +2420,24 @@ class RunManager:
                 _usable_window = max(0, _model_window - _model_max_out) if _model_window else 0
                 _ctx_window: int = _usable_window or _fallback_window
                 _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
+                # cubepi 0.x+ replaced ``keep_recent_messages`` (a message
+                # count) with ``keep_tail_tokens`` (a token budget). The new
+                # default 8 000 tokens ≈ the old 8 messages for short text,
+                # but adapts when recent turns contain large tool outputs.
+                # ``max_summary_tokens`` now accepts None → cubepi computes
+                # a dynamic budget (clamp(content*0.15, 1024, 4096)). We
+                # pass through the configured value if set, otherwise None
+                # so long conversations get more headroom than the old 1024.
+                _max_summary_cfg = _comp_cfg.get("compaction.max_summary_tokens")
+                _max_summary_tokens = (
+                    int(_max_summary_cfg) if _max_summary_cfg is not None else None
+                )
                 cubepi_middleware.append(
                     CompactionMiddleware(
                         summary_model=_summary_bound_model,
                         max_tokens_before_compact=int(_ctx_window * _ratio),
-                        keep_recent_messages=int(
-                            _comp_cfg.get("compaction.keep_recent_messages", 8)
-                        ),
-                        max_summary_tokens=int(
-                            _comp_cfg.get("compaction.max_summary_tokens", 1024)
-                        ),
+                        keep_tail_tokens=int(_comp_cfg.get("compaction.keep_tail_tokens", 8_000)),
+                        max_summary_tokens=_max_summary_tokens,
                         min_compact_messages=int(
                             _comp_cfg.get("compaction.min_compact_messages", 4)
                         ),
