@@ -12,9 +12,11 @@ import type {
   AssistantMessage as AssistantMessageType,
   ContentBlock,
   ErrorEventData,
+  FailoverEvent,
   Message,
   ReasoningEvent,
   TextDeltaEvent,
+  ThinkingLevel,
   TodoItem,
   ToolCallDeltaEvent,
   ToolCallEvent,
@@ -104,6 +106,13 @@ export interface MessageStore {
   contextTokens: Record<string, number | null>
   pendingConfirmMap: Record<string, PendingConfirm>
   pendingAsk: PendingAsk | null
+  /**
+   * Per-conversation list of ``model_failover`` SSE events. Appended as
+   * the events arrive so ``MessageList`` can render an inline banner at
+   * the point in the stream where the failover happened. Not persisted —
+   * cleared with the rest of the in-flight stream state on send / cancel.
+   */
+  failoverEvents: Record<string, FailoverEvent[]>
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
   send(
@@ -112,7 +121,14 @@ export interface MessageStore {
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
+    options?: { preset_label?: string | null; thinking?: ThinkingLevel },
   ): Promise<void>
+  /**
+   * Append a ``model_failover`` event to the conversation's banner list.
+   * Exposed as a public action so the SSE consumer in this store and any
+   * future replay path (bootstrap, history) can share one entry point.
+   */
+  appendFailoverEvent(conversationId: string, event: FailoverEvent): void
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<void>
   cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
@@ -949,6 +965,14 @@ async function consumeRunStream(
       } else if (event.type === 'citation') {
         const citationData = event.data as unknown as import('../types').CitationData
         useCitationStore.getState().addCitation(conversationId, citationData)
+      } else if (event.type === 'model_failover') {
+        // Append to the per-conversation banner list. Keep advancing the
+        // applied-event cursor here so the next reattach doesn't replay it.
+        get().appendFailoverEvent(conversationId, event as FailoverEvent)
+        set((s) => ({
+          lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+        }))
+        continue
       } else if (event.type === 'error') {
         const errData = event.data as ErrorEventData
         set((s) => ({
@@ -1059,10 +1083,20 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   toolResultMap: {},
   pendingConfirmMap: {},
   pendingAsk: null,
+  failoverEvents: {},
   turnUsage: {},
   sessionUsage: {},
   contextWindow: {},
   contextTokens: {},
+
+  appendFailoverEvent(conversationId, event) {
+    set((s) => ({
+      failoverEvents: {
+        ...s.failoverEvents,
+        [conversationId]: [...(s.failoverEvents[conversationId] ?? []), event],
+      },
+    }))
+  },
 
   async loadMessages(client: ApiClient, conversationId: string) {
     const state = get()
@@ -1293,6 +1327,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
+    options?: { preset_label?: string | null; thinking?: ThinkingLevel },
   ) {
     const isFirstTurn = (get().messages[conversationId] ?? []).length === 0
     if (isFirstTurn && content.trim()) {
@@ -1325,6 +1360,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       toolResultMap: {},
       pendingConfirmMap: {},
       pendingAsk: null,
+      failoverEvents: { ...state.failoverEvents, [conversationId]: [] },
       turnUsage: { ...state.turnUsage, [conversationId]: null },
     }))
 
@@ -1344,6 +1380,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       content,
       attachmentIds,
       controller.signal,
+      options,
     )
 
     let processed = 0
@@ -1363,6 +1400,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           } else if (event.type === 'citation') {
             const citationData = event.data as unknown as import('../types').CitationData
             useCitationStore.getState().addCitation(conversationId, citationData)
+          } else if (event.type === 'model_failover') {
+            get().appendFailoverEvent(conversationId, event as FailoverEvent)
+            set((s) => ({
+              lastAppliedEventId: nextEventId(s.lastAppliedEventId, event.event_id),
+            }))
+            continue
           } else if (event.type === 'error') {
             const errData = event.data as ErrorEventData
             if (!retried && !sawDone && errData.message.includes('409')) {
@@ -1374,6 +1417,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 content,
                 attachmentIds,
                 controller.signal,
+                options,
               )
               continue outer
             }

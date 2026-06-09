@@ -200,16 +200,15 @@ export function MessageList({ conversationId }: MessageListProps) {
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
-  // `failoverEvents` is an SSE side-channel slice the message store will
-  // populate once `model_failover` events are wired in (separate task).
-  // Until that lands, the selector returns [] and the banner-render block
-  // below is a no-op rather than a dangling import. Cast keeps F4 scoped
-  // to component + type + render-site without modifying MessageStore.
-  const failoverEvents = useMessageStore((s) => {
-    const slice = (s as unknown as { failoverEvents?: Record<string, FailoverEvent[]> })
-      .failoverEvents
-    return slice?.[conversationId] ?? EMPTY_FAILOVER_EVENTS
-  })
+  // `failoverEvents` is populated by the message store's SSE consumer
+  // whenever a `model_failover` event arrives. The core slice's per-event
+  // shape is structurally identical to the web `FailoverEvent` type, so
+  // the renderer below works against either; the cast bridges only the
+  // local-type vs core-type identity gap, not a missing slice.
+  const failoverEvents = useMessageStore(
+    (s) =>
+      (s.failoverEvents[conversationId] as FailoverEvent[] | undefined) ?? EMPTY_FAILOVER_EVENTS,
+  )
   const { workspaceId } = useWorkspaceContext()
   // Hoisted: also drives status-row visibility below so an empty chip doesn't
   // leave a stray gutter-only line.
