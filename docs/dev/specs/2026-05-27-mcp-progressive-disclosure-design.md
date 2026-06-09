@@ -48,9 +48,12 @@ given server's full tool set only when the model asks.
 - No change to how a tool actually executes once exposed (transport, namespacing, citations).
 - No semantic / embedding-based tool retrieval in v1 (noted as a later option below).
 - No "code mode" (exposing tools as a callable API the model writes code against) in v1.
-- No frontend redesign of MCP management surfaces. A small read-only indicator of which servers
+- No frontend redesign of MCP management surfaces. A small read-only indicator of which groups
   expanded during a run is acceptable but not required for v1.
-- No per-tool (sub-server) disclosure in v1 — the unit of expansion is a whole server.
+- No per-tool (sub-group) disclosure in v1 — the unit of expansion is a whole group (= MCP server
+  in v1).
+- No non-MCP group types in v1 — the cubepi primitive is generic, but cubebox v1 only maps MCP
+  servers to groups.
 
 ## Current state in cubebox (how MCP tools reach the prompt today)
 
@@ -105,7 +108,8 @@ grows by appending — never reorders — so earlier cache segments stay valid.
 ## Industry research (with citations)
 
 The "load a compact index, expand on demand" pattern is now the mainstream answer to tool/context
-bloat. What's transferable to cubebox:
+bloat. Three families of prior art, from provider-side features to self-hosted agent runtimes.
+What's transferable to cubebox:
 
 - **Anthropic Tool Search Tool / deferred tools (GA Feb 2026).** You register all tools but mark
   most with `defer_loading: true`; only a search tool plus a few always-on tools are in context.
@@ -136,79 +140,145 @@ bloat. What's transferable to cubebox:
   list. *Transferable as a later option:* semantic retrieval is the natural upgrade if a
   name+description catalog proves too coarse at high server counts.
 
+- **hermes-agent Tool Search (production, `~/hermes-agent/tools/tool_search.py`).** A full
+  progressive-disclosure layer for an agent runtime with MCP + plugin tools. Three bridge tools
+  (`tool_search`, `tool_describe`, `tool_call`) replace deferred tool schemas. Core tools
+  (`_HERMES_CORE_TOOLS`) never defer. Key design points:
+  - **Granularity = single tool** (vs. our server/group-level).
+  - **Threshold = context-window percentage** (default 10%): activates when deferrable tool schemas
+    would consume ≥ N% of context, not when a server-count threshold is crossed. This is more
+    direct — 3 tiny servers don't need deferral, 1 giant server does.
+  - **Stateless catalog**: rebuilt from the current tool-defs list every assembly, never cached
+    across turns. Lesson from OpenClaw #84141: a session-keyed catalog that drifts from the live
+    registry silently drops tools. cubebox avoids the same drift differently (live loader on expand,
+    not cached-schema synthesis), but the failure mode is worth defending against.
+  - **BM25 retrieval** over tokenized tool name + description + parameter names, with substring
+    fallback. Needed because their catalog is hundreds of individual tools with no readable index.
+  - **Toolset scoping**: bridge tools only see/invoke tools the session was granted. Defense in depth
+    via `scoped_deferrable_names()` gate before dispatch.
+  - **Transparent unwrap**: `tool_call` recurses into the real dispatcher; hooks/guardrails/activity
+    feed see the underlying tool, not the bridge.
+  *Transferable:* context-window-percentage threshold (adopted below), catalog-drift defense,
+  transparent unwrap principle. *Not transferable:* per-tool granularity (too many round trips at
+  our scale), stateless rebuild (conflicts with prompt-cache append-only invariant), BM25 (our
+  catalog is small enough for the model to read directly).
+
+- **LangChain / LangGraph dynamic tool management (2025–2026).** Three mechanisms:
+  (1) LangGraph **dynamic tool calling** (Aug 2025) — graph-state-driven per-node tool-set
+  switching; (2) LangChain 1.0 **`LLMToolSelectorMiddleware`** — secondary LLM call selects
+  relevant tools per turn; (3) DIY **vector-store tool retrieval** — embed tool descriptions,
+  top-k by similarity. All are per-turn automatic selection, not model-initiated expansion.
+  *Transferable:* validates the "filter before the model sees" principle. *Not transferable:*
+  per-turn LLM or vector retrieval adds latency/cost we avoid with a readable catalog.
+
 Recommendation drawn from the research: build a **host-side, provider-agnostic** index-then-expand
-mechanism modeled on cubebox's own skills system (a catalog in the prompt + an `expand_mcp_server`
-tool), rather than binding to any single provider's deferred-tools feature. Keep semantic retrieval
-and code-mode as documented later-stage options.
+mechanism in **cubepi** (the agent runtime) as a `DeferredToolGroup` primitive, with cubebox
+providing the MCP-specific mapping. Use context-window-percentage thresholds (hermes-agent's
+approach). Keep semantic retrieval and code-mode as documented later-stage options.
 
 ## Proposed design
 
-### Shape: mirror the skills pattern, at the *server* granularity
+### Shape: deferred tool groups, with MCP servers as the v1 group type
 
-Default behavior becomes: the prompt carries a **compact MCP catalog**; the model calls a builtin
-tool to **expand** a named server; expanded servers' full tools + schemas become available for the
-rest of the run. The unit of disclosure is a **server**, not an individual tool — this matches how
-users think about MCP ("I connected Linear"), keeps the catalog short, and reuses the existing
-per-server namespacing/citation plumbing wholesale.
+Default behavior becomes: the prompt carries a **compact catalog** of collapsed tool groups; the
+model calls a builtin tool to **expand** a named group; expanded groups' full tools + schemas
+become available for the rest of the run.
+
+The disclosure unit is a **tool group**, not an individual tool. MCP servers are the first (and v1
+only) group type, but the underlying mechanism is group-agnostic so future group types (plugins,
+large builtin suites) require no runtime changes — only a new mapping from source → group. This
+matches how users think about MCP ("I connected Linear"), keeps the catalog short, and reuses the
+existing per-server namespacing/citation plumbing wholesale.
+
+### 0. Layering: cubepi primitive + cubebox mapping
+
+The core mechanism lives in **cubepi** (the agent runtime) as a `DeferredToolGroup` abstraction.
+cubebox provides the application-specific wiring.
+
+**cubepi provides (generic, tool-source-agnostic):**
+- `DeferredToolGroup` data structure: `group_id`, `display_name`, `description`, `tool_names`
+  (for catalog display), `loader` callback (returns `list[AgentTool]` on expand).
+- `agent.register_deferred_group(group)` registration API.
+- Catalog text rendering from registered groups (deterministic, sorted by `group_id`).
+- `expand_tools(group_id)` builtin tool: validates group_id, invokes loader, injects tools into
+  the active set, updates prompt suffix.
+- `DeferredToolsMiddleware`: `after_tool_call` records expansion order in `extra`;
+  `transform_system_prompt` appends expanded schema text in expansion order (append-only).
+
+**cubebox provides (MCP-specific):**
+- Mapping `MCPRuntimeConnectorSpec` → `DeferredToolGroup` (group_id = `mcp:{slug}`, tool_names
+  from `tools_cache`, loader = filtered `load_workspace_mcp_tools_for_cubepi`).
+- Threshold decision: which servers to defer (context-window-percentage gate, see §config below).
+- Catalog description derivation from `discovery_metadata`.
+- Expansion state persistence across turns (via `agent._extra` → checkpointer).
 
 ### 1. Catalog index (what's in the prompt by default)
 
 Built from data **already in Postgres** (`tools_cache`, `discovery_metadata`, template/install
 `name`/`description`) — no live discovery needed to render it. Rendered as a stable suffix of the
-system prompt, sorted by server slug, e.g.:
+system prompt, sorted by group_id (= server slug for MCP), e.g.:
 
 ```
 # Connected tool servers (collapsed)
 
 These servers are connected but their tools are not loaded yet. Call
-`expand_mcp_server(server)` with a name below to load that server's tools for the
+`expand_tools(group_id)` with a group_id below to load that group's tools for the
 rest of this conversation.
 
-- `linear` — Issue tracking: create/update/search issues, projects, cycles. (8 tools)
-  Use when: tracking work, filing bugs, querying project status.
-- `gdrive` — Google Drive: search and read documents, list folders. (5 tools)
-  Use when: finding or reading shared docs/spreadsheets.
+- `mcp:linear` — Issue tracking (8 tools)
+  create_issue, update_issue, search_issues, get_issue, create_project,
+  list_projects, create_cycle, list_cycles
+- `mcp:gdrive` — Google Drive (5 tools)
+  search_files, read_file, list_folders, get_file_metadata, create_file
 ```
 
-Per-server line content:
-- **Name** = the namespacing slug (so `expand_mcp_server("linear")` is unambiguous).
-- **One-line description** = install/template `description`, trimmed.
-- **Trigger hints** = a short "Use when:" phrase. Source options (open question below): derive from
-  description, or add an optional authored `trigger_hints` field on the install/template.
-- **Tool count** so the model can gauge cost/coverage.
+Per-group content:
+- **group_id** = `mcp:{slug}` (so `expand_tools("mcp:linear")` is unambiguous).
+- **One-line description** = from `discovery_metadata`, trimmed.
+- **Tool names** = the namespaced tool names from `tools_cache`, listed without descriptions or
+  JSON schemas. Tool names are the highest signal-to-noise ratio element: `search_issues` is more
+  precise than "Issue tracking" and far more compact than a full schema. A typical 12-tool server
+  adds ~40 tokens of tool names — 10 servers total ~400 tokens, vs 5000+ for full schemas.
+- **Tool count** in parentheses.
 
-The catalog never contains per-tool JSON schemas — that's the whole point. It is fully derived
-from DB state that's identical turn-to-turn, so it's cache-safe as a suffix.
+The catalog never contains per-tool JSON schemas or per-tool descriptions — only tool names.
+This is the right trade-off: tool names are self-descriptive (MCP tools follow `verb_noun`
+convention), and the model can decide which group to expand just by scanning the name list.
+No BM25 or semantic retrieval needed at this catalog size.
 
-### 2. Expansion tool: `expand_mcp_server`
+The catalog is fully derived from DB state that's identical turn-to-turn, so it's cache-safe as a
+suffix.
+
+### 2. Expansion tool: `expand_tools`
 
 A new builtin tool (sibling of `load_skill`), placed in the fixed tool order **where the MCP tools
 used to go** (after `load_skill`), so the cache-prefix tool ordering rule is respected. Input:
-`{ server: str }` (the catalog slug). Behavior:
+`{ group_id: str }` (the catalog group_id, e.g. `"mcp:linear"`). Behavior:
 
-- Validate the slug against the workspace's usable installs.
-- Return a JSON result (analogous to `LoadSkillOutput`) listing the server's tools — at minimum
-  the namespaced tool names + descriptions, and optionally the schemas (open question: does the
-  tool *return* schemas, or just acknowledge, letting middleware do the injection?). The design
-  keeps schemas out of the tool *result* and lets the middleware add them to the prefix, matching
-  how `SkillsMiddleware` injects skill bodies rather than re-emitting them per tool result.
-- Record the expanded server in `agent._extra["expanded_mcp_servers"]` via an `extra_ref` closure.
+- Validate the group_id against registered deferred groups.
+- Invoke the group's `loader` callback to obtain callable `AgentTool`s.
+- Return a JSON result (analogous to `LoadSkillOutput`) listing the group's tools — the namespaced
+  tool names + descriptions, **no schemas in the result** — middleware injects schema text into the
+  system-prompt suffix, matching how `SkillsMiddleware` injects skill bodies.
+- Record the expanded group_id in `agent._extra["expanded_groups"]` via an `extra_ref` closure.
 
 The model learns about this tool the same way it learns about `load_skill`: the catalog text tells
-it to call `expand_mcp_server(server)`.
+it to call `expand_tools(group_id)`.
 
-### 3. `MCPDisclosureMiddleware` (the cache-safe injector)
+**cubepi owns the tool definition and dispatch.** cubebox only registers the deferred groups
+(with their loaders); the expand tool itself is generic and knows nothing about MCP.
 
-A new middleware modeled almost exactly on `SkillsMiddleware`:
+### 3. `DeferredToolsMiddleware` (the cache-safe injector, in cubepi)
 
-- **`after_tool_call`**: when the tool is `expand_mcp_server` and it succeeded, append the server
-  slug to `extra["expanded_mcp_servers"]` **in expansion order** (an ordered list, de-duplicated,
-  preserving first-expanded-first). Do **not** sort it — expansion order *is* the cache order.
-- **`transform_system_prompt`**: for each expanded server **in expansion order**, append a stable
-  section listing that server's full tool definitions (namespaced name + description + input
-  schema), rendered from the **cached** `tools_cache` for that install. Appending in expansion
-  order keeps the prefix monotonic and cache-stable: a newly expanded server's block always lands
-  *after* every already-rendered block, so earlier cache segments stay byte-identical.
+A new middleware in **cubepi**, modeled almost exactly on `SkillsMiddleware`:
+
+- **`after_tool_call`**: when the tool is `expand_tools` and it succeeded, append the group_id to
+  `extra["expanded_groups"]` **in expansion order** (an ordered list, de-duplicated, preserving
+  first-expanded-first). Do **not** sort it — expansion order *is* the cache order.
+- **`transform_system_prompt`**: for each expanded group **in expansion order**, append a stable
+  section listing that group's full tool definitions (name + description + input schema). Appending
+  in expansion order keeps the prefix monotonic and cache-stable: a newly expanded group's block
+  always lands *after* every already-rendered block, so earlier cache segments stay byte-identical.
 
 Why schemas go in the **system-prompt suffix**, not the tool list: the tool *list* (`tools=...`) is
 fixed before the agent loop starts and is the most cache-sensitive region; mutating it mid-run is
@@ -216,72 +286,74 @@ exactly the "toggling MCP tools mid-conversation" the cache doc warns against. A
 text to the system-prompt suffix is the same trick skills already use and is proven cache-safe.
 
 **The catch — actually calling an expanded tool.** Putting a tool's *schema text* in the prompt
-does not register a callable `AgentTool`. The naive shortcut — register *all* usable servers'
-tools as real `AgentTool`s up front and merely **omit collapsed servers from the catalog text** —
-does **not** save anything. Those tools still flow through `tools=all_tools` into
-`create_cubebox_agent`, so the model still receives every collapsed server's full schema in the
+does not register a callable `AgentTool`. The naive shortcut — register *all* groups' tools as
+real `AgentTool`s up front and merely **omit collapsed groups from the catalog text** — does
+**not** save anything. Those tools still flow through `tools=all_tools` into
+`create_cubebox_agent`, so the model still receives every collapsed group's full schema in the
 tool block and pays the identical cache-write/cache-read and attention cost as today. Hiding a
 tool in the prose while still shipping its schema in `tools=` is not disclosure at all. So
 pre-register-all is **rejected**: it is the status quo with a shorter catalog, not a cost win.
 
-To realize the token/cache/attention savings the schemas of collapsed servers must be **absent
+To realize the token/cache/attention savings the schemas of collapsed groups must be **absent
 from the tool set itself**, not just from the prompt text. v1 therefore commits to **true
 deferral (register-on-first-expand)**:
 
 - The `tools=` block at agent-creation time contains **only**: the always-on builtins,
-  `expand_mcp_server`, and the tools of any servers already expanded earlier in this conversation
-  (replayed from `extra["expanded_mcp_servers"]`). Collapsed servers contribute **zero** tool
+  `expand_tools`, and the tools of any groups already expanded earlier in this conversation
+  (replayed from `extra["expanded_groups"]`). Collapsed groups contribute **zero** tool
   definitions and zero schema text.
-- When the model calls `expand_mcp_server(server)`, that server's **callable** `AgentTool`s are
-  obtained through the real runtime loader — `load_workspace_mcp_tools_for_cubepi`-style path,
-  which live-discovers via `load_mcp_tools_http(...)` with resolved auth — **filtered to the
-  expanded server(s)**, for the remainder of the conversation. `tools_cache` is *not* a tool
-  source: cached JSON schemas are not executable. The cache feeds only the lightweight catalog
-  index and the expansion preview/schema text appended to the system-prompt suffix per the
-  middleware above. So the runtime tool-load path that today loads all servers is **filtered to
-  expanded servers**, not replaced by synthesizing `AgentTool`s from `tools_cache`.
+- When the model calls `expand_tools(group_id)`, the group's `loader` callback is invoked. For
+  MCP groups, this calls the real runtime loader —
+  `load_workspace_mcp_tools_for_cubepi`-style path, which live-discovers via
+  `load_mcp_tools_http(...)` with resolved auth — **filtered to the expanded server(s)**, for the
+  remainder of the conversation. `tools_cache` is *not* a tool source: cached JSON schemas are not
+  executable. The cache feeds only the lightweight catalog index and the expansion schema text
+  appended to the system-prompt suffix per the middleware above.
 - Because the cache discipline treats the tool block as fixed per conversation, *adding* tools
   mid-conversation changes that block. We model each expansion as a **cache re-establishment
   point** — the same treatment the discipline doc gives the "new conversation" case — not as a
-  silent mid-prefix mutation. This is a bounded, one-time cost per expanded server, far cheaper
-  than carrying every collapsed server's schema on every turn from turn one.
+  silent mid-prefix mutation. This is a bounded, one-time cost per expanded group, far cheaper
+  than carrying every collapsed group's schema on every turn from turn one.
 
-**Load-bearing cubepi dependency.** True deferral requires cubepi to support changing a live
-agent's callable tool set mid-run (add the newly expanded server's `AgentTool`s) and to re-mark
-the cache boundary at that point. If cubepi cannot do this today, that is an **upstream cubepi
-change** (cubepi is self-authored, upstream-first) and must land before this feature ships.
-The **fallback that needs no cubepi change** is to keep the tool set fixed for the lifetime of a
-single agent run: expansions requested during a run take effect on the **next** run (next user
-turn), where the tool set is rebuilt to include all servers expanded so far. This still delivers
-the savings (collapsed servers are never in `tools=`) at the cost of a one-turn delay before a
-just-expanded server is callable. Validate cubepi's mid-run capability before building; if absent,
-ship the next-turn fallback for v1 and pursue the cubepi change as a follow-up. Either way,
-pre-register-all is not on the table — it saves nothing.
+**Load-bearing cubepi dependency.** True deferral requires cubepi to support `DeferredToolGroup`
+as a first-class concept: registration, catalog rendering, `expand_tools` builtin, mid-run tool
+injection + cache re-establishment. This is a **new cubepi feature** (tracked as a separate cubepi
+issue), not just a single API call. The scope:
+- `DeferredToolGroup` dataclass + `agent.register_deferred_group()` API
+- `expand_tools` builtin with loader invocation
+- `DeferredToolsMiddleware` (expansion-order tracking + system-prompt suffix injection)
+- Mid-run tool-set mutation (add `AgentTool`s to a live agent's context)
 
-### 4. Where it plugs into assembly
+If cubepi cannot ship all of this before cubebox v1, the **fallback** is to keep the tool set
+fixed for the lifetime of a single agent run: expansions requested during a run take effect on the
+**next** run (next user turn), where the tool set is rebuilt to include all groups expanded so far.
+This still delivers the savings (collapsed groups are never in `tools=`) at the cost of a one-turn
+delay before a just-expanded group is callable. Either way, pre-register-all is not on the table —
+it saves nothing.
 
-- `run_manager.py` system-prompt section (~line 1799, beside the skills index): add the MCP
-  catalog suffix when the feature is enabled and the workspace has ≥ N usable servers.
+### 4. Where it plugs into assembly (cubebox side)
+
+- `run_manager.py` system-prompt section (~line 1799, beside the skills index): add the catalog
+  suffix when disclosure is active.
 - `run_manager.py` tool assembly (~line 1034): replace the unconditional "load all MCP tools" call
   to `load_workspace_mcp_tools_for_cubepi` with a **filtered** invocation of that same live loader —
-  it still live-discovers callable tools via `load_mcp_tools_http`, but restricted to the servers
-  expanded so far this conversation (from `extra["expanded_mcp_servers"]`), never the collapsed
-  ones. Filtering the live loader (not building tools from `tools_cache`) is what makes expanded
-  tools callable while keeping collapsed servers' schemas out of `tools=all_tools`.
-- Register `expand_mcp_server` builtin in the fixed order slot.
-- Append `MCPDisclosureMiddleware` to `cubepi_middleware` with an `extra_ref` closure, mirroring
-  `SkillsMiddleware` (~line 1263).
+  restricted to the groups expanded so far this conversation (from `extra["expanded_groups"]`),
+  never the collapsed ones. For each non-expanded MCP server, register a `DeferredToolGroup` with
+  cubepi via `agent.register_deferred_group(...)`.
+- cubepi auto-registers the `expand_tools` builtin when deferred groups exist (no manual slot
+  management in cubebox).
+- cubepi auto-appends `DeferredToolsMiddleware` when deferred groups are registered.
 - Citations: keep `mcp_citation_configs` populated for expanded servers exactly as today; the
   `CitationMiddleware` (~line 1163) is unchanged.
 
 ### 5. How the prompt-cache prefix stays intact
 
-- The **catalog** is derived purely from DB state, sorted by slug → byte-identical every turn.
-- **Expanded-server schema text** is appended to the system-prompt **suffix** in **expansion
+- The **catalog** is derived purely from DB state, sorted by group_id → byte-identical every turn.
+- **Expanded-group schema text** is appended to the system-prompt **suffix** in **expansion
   order** (never re-sorted), and only ever grows (append-only) within a conversation → matches the
   skills cache pattern, which the cache E2E test already protects. (Skills can sort by name because
-  the enabled set is fixed up front and identical every turn; MCP servers expand incrementally
-  mid-conversation, so slug-sorting could insert a later expansion *before* an already-cached block
+  the enabled set is fixed up front and identical every turn; tool groups expand incrementally
+  mid-conversation, so id-sorting could insert a later expansion *before* an already-cached block
   and invalidate that prefix — expansion order avoids this.)
 - With true deferral, expansion is explicitly modeled as a **cache re-establishment point**
   (treated like the documented "new conversation" case), never as a silent mid-prefix mutation.
@@ -298,10 +370,14 @@ Mostly reuses existing columns; minimal additions.
   template) to author the "Use when:" line, instead of deriving it. If added, follow the migration
   rule: `alembic revision --autogenerate`.
 - **Config flags (likely in `mcp` config block):**
-  - `mcp.progressive_disclosure.enabled` (bool).
-  - `mcp.progressive_disclosure.min_servers` — only collapse when a workspace has at least this
-    many usable servers (small workspaces keep today's behavior).
-  - Optionally `min_tools` as an alternative threshold.
+  - `mcp.progressive_disclosure.enabled` (`"auto"` | `"on"` | `"off"`, default `"auto"`).
+  - `mcp.progressive_disclosure.threshold_pct` (float, default 10.0) — only collapse when
+    deferrable tool schemas would consume ≥ this percentage of the active model's context window.
+    Borrowed from hermes-agent: this is more direct than a server-count threshold because 3 tiny
+    servers don't need deferral while 1 server with 50 large schemas does.
+  - `mcp.progressive_disclosure.min_servers` (int, default 2) — secondary guard: never collapse
+    when fewer than N servers are connected, even if the token percentage is above threshold.
+    Prevents single-server workspaces from getting indirection overhead.
 - **No new public-ID table** (no new business entity in v1).
 - **Run telemetry (nice-to-have):** record which servers were expanded during a run (in run
   metadata / trace spans) for cost analysis. No schema change if stored in existing extra/trace.
@@ -309,23 +385,31 @@ Mostly reuses existing columns; minimal additions.
 ## v1 scope vs later
 
 **v1:**
-- Server-granularity catalog index in the system prompt (DB-derived, sorted, cache-safe).
-- `expand_mcp_server` builtin + `MCPDisclosureMiddleware` (skills-pattern port).
-- Config-gated by `enabled` + `min_servers`; off-by-default behavior identical to today below the
-  threshold.
-- **True deferral / register-on-first-expand**: collapsed servers' tools are never in `tools=`;
-  expanding a server registers its tools as callable for the rest of the conversation. If cubepi
-  cannot change a live agent's tool set mid-run, ship the next-turn fallback (expansions take
-  effect on the following user turn) and land the cubepi change as a follow-up. Pre-register-all
-  is explicitly **not** a v1 option — it saves no cache/attention cost.
+- **cubepi: `DeferredToolGroup` primitive** — registration API, `expand_tools` builtin, catalog
+  rendering, `DeferredToolsMiddleware`, mid-run tool injection. Generic, tool-source-agnostic.
+- **cubebox: MCP → DeferredToolGroup mapping** — MCP servers as groups, catalog descriptions from
+  `discovery_metadata`, tool names from `tools_cache`, loader via filtered live MCP discovery.
+- Catalog includes per-group tool name lists (not schemas, not descriptions).
+- Config-gated: `enabled` (`auto`/`on`/`off`) + `threshold_pct` (context-window percentage) +
+  `min_servers` secondary guard. `auto` mode identical to today below threshold.
+- **True deferral / register-on-first-expand**: collapsed groups' tools are never in `tools=`;
+  expanding a group registers its tools as callable for the rest of the conversation. If cubepi
+  cannot ship the full `DeferredToolGroup` feature in time, ship the next-turn fallback (expansions
+  take effect on the following user turn) with cubebox-side middleware, and land the cubepi feature
+  as a follow-up. Pre-register-all is explicitly **not** a v1 option — it saves no cache/attention
+  cost.
 
 **Later:**
-- Per-tool (sub-server) disclosure for very large single servers.
+- Non-MCP group types (plugins, large builtin suites) — only a new mapping needed, cubepi
+  mechanism is reused.
+- Per-tool (sub-group) disclosure for very large single servers.
 - Semantic / embedding retrieval over tools (RAG-over-tools) instead of a flat catalog.
 - Provider-native deferred tools (Anthropic Tool Search) as an optimization when the active
   provider supports it, sitting behind the same host-level abstraction.
 - "Code mode" style search+execute for extreme connector counts.
 - Authored `trigger_hints` editing UI in MCP management.
+- Unify skills and tool-group disclosure under a single cubepi primitive (both are "catalog →
+  expand → inject" patterns; let API stabilize first).
 
 ## Testing strategy (E2E-first per CLAUDE.md)
 
@@ -349,40 +433,42 @@ fall back to fake-server-only unit coverage.
 
 ## Open Questions
 
-- **Does cubepi support adding tools to a running agent** and re-establishing the cache boundary
-  mid-conversation? This is now the load-bearing residual (the callability approach is decided:
-  true deferral, not pre-register-all). If cubepi *can* change a live agent's tool set mid-run, a
-  just-expanded server is callable within the same turn. If it *cannot*, v1 ships the next-turn
-  fallback (expansion takes effect on the following user turn) and the cubepi change lands as a
-  follow-up (cubepi is self-authored, upstream-first). Validate this capability before building.
-- **What does `expand_mcp_server` return?** Just an acknowledgement (middleware injects schemas) vs
-  the schema list in the tool result itself. Affects token placement and replay/cache behavior.
+### Resolved
+
+- **Disclosure granularity** → tool group (MCP server as v1 group type), not per-tool. Per-tool
+  adds too many round trips for our server-sized groups (5-15 tools).
+- **Threshold type** → context-window token percentage (default 10%) + min_servers secondary guard,
+  not server-count-only. Adopted from hermes-agent.
+- **Catalog content** → group_id + one-line description + all tool names (no tool descriptions, no
+  schemas). Tool names are the highest signal-to-noise element.
+- **cubepi layering** → core mechanism (`DeferredToolGroup`, `expand_tools`, middleware) lives in
+  cubepi; cubebox provides MCP → group mapping + threshold logic + loader callbacks.
+- **What does `expand_tools` return?** → Tool names + descriptions only; middleware injects schema
+  text into the system-prompt suffix (matching skills pattern).
+
+### Still open
+
+- **cubepi `DeferredToolGroup` API design.** The full scope — registration, catalog rendering,
+  expand builtin, middleware, mid-run tool injection — needs a cubepi design pass. Tracked as a
+  separate cubepi issue.
 - **Trigger hints source.** Derive from description automatically, or add an authored
-  `trigger_hints` field (migration + a small editing surface later)? Auto-derivation is cheaper but
-  lower quality.
-- **Granularity.** Is whole-server expansion enough, or do single large servers (50+ tools) need
-  per-tool disclosure in v1? Likely v1 = server-only, but confirm against real connector sizes.
-- **Threshold default.** What `min_servers` (and/or `min_tools`) value flips collapsing on? Needs a
-  token-cost measurement on representative workspaces.
-- **Expanded state persistence across turns.** `extra["expanded_mcp_servers"]` lives in agent
-  extra and is persisted like `loaded_skills` — confirm it replays correctly so a server expanded
-  on turn 1 stays expanded on turn 5 without re-triggering a cache reset each turn. Because the
-  cache invariant now depends on **expansion order** (not slug sort), persistence must preserve that
-  order too: serialize as an ordered list and replay it unchanged. If a future store reloads it as
-  an unordered set, the rendered prefix could reorder across turns and silently break the cache —
-  call this out as a constraint on however `extra` is persisted.
-- **Stale `tools_cache`.** Callable tools always come from live discovery on expand (the filtered
-  runtime loader), so a stale cache cannot make the model call a non-existent tool — the live tool
-  set is authoritative. The residual staleness risk is only the **catalog index + expansion
-  preview text** rendered from the cache: drift there can make the model expand the wrong server or
-  see a description that no longer matches. Open: re-render the preview from the live discovery
-  result on expand (perfectly consistent, but couples preview text to per-run discovery and could
-  perturb the suffix), or accept cache-rendered preview and refresh `tools_cache` out of band.
+  `trigger_hints` field (migration + a small editing surface later)? v1 = auto-derivation.
+- **Stale `tools_cache`.** Callable tools always come from live discovery on expand, so a stale
+  cache cannot make the model call a non-existent tool. The residual staleness risk is only the
+  **catalog index** (tool names + description) rendered from the cache: drift there can make the
+  model expand the wrong group. Accepted for v1; refresh `tools_cache` out of band.
+- **Expanded state persistence across turns.** `extra["expanded_groups"]` must persist as an
+  **ordered list** and replay unchanged. If a future store reloads it as an unordered set, the
+  rendered prefix could reorder across turns and silently break the cache.
 - **Interaction with subagents.** Subagents get their own tool/middleware assembly — should they
   inherit the parent's expanded set, start collapsed, or be configured independently?
-- **Disabling mid-conversation / re-collapse.** Is there ever a need to collapse an expanded server
-  again within a conversation? Probably no for v1 (monotonic growth is what keeps cache safe), but
-  state explicitly.
+- **Disabling mid-conversation / re-collapse.** Not in v1 (monotonic growth is what keeps cache
+  safe).
+- **Catalog drift defense.** hermes-agent's OpenClaw #84141 lesson: any catalog that can drift from
+  the live tool registry silently drops tools. Our defense: callable tools always come from live
+  discovery (loader callback), never from catalog data. But catalog text can still mislead the
+  model — add an expansion-time validation that warns if the live tool set differs significantly
+  from the catalog's tool_names list.
 
 ## References
 
