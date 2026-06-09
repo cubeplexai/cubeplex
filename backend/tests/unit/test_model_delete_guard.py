@@ -1,9 +1,11 @@
 """Guard against deleting a model that is referenced by caller-org presets.
 
-Per D6:
-- Scan only the caller's org row of OrgSettings.model_presets.
-- Skip the system row (chicken-and-egg trap).
-- Do not scan other orgs (cross-tenant info leak).
+Per D6 (updated):
+- Scan the caller's org row of OrgSettings.model_presets first.
+- If no org row exists, fall back to the system row — those are the
+  caller's effective presets, so a delete that ignored them would break
+  the next agent run.
+- Never scan another org's row (cross-tenant info leak).
 """
 
 from __future__ import annotations
@@ -118,7 +120,9 @@ async def test_delete_blocked_when_caller_org_preset_references_model(
     with pytest.raises(ModelInUseByPresetError) as exc:
         await svc.delete_model(pid, mid)
     assert exc.value.status_code == 409
-    assert exc.value.refs == [{"org_id": CALLER_ORG, "preset_label": "ultra"}]
+    assert exc.value.refs == [
+        {"org_id": CALLER_ORG, "preset_label": "ultra", "source": "org"},
+    ]
 
 
 async def test_delete_allowed_when_only_other_org_references_model(
@@ -148,14 +152,14 @@ async def test_delete_allowed_when_only_other_org_references_model(
     assert await ModelRepository(db_session).get(mid) is None
 
 
-async def test_delete_allowed_when_only_system_row_references_model(
+async def test_delete_blocked_when_only_system_row_references_model(
     db_session: AsyncSession,
 ) -> None:
-    """System row references the model, no caller-org row exists → delete proceeds.
+    """System row references the model, no caller-org row → delete blocked.
 
-    Per D6: system row is intentionally skipped (chicken-and-egg — admin must be
-    able to delete a model that the seed presets reference, before they have
-    saved their first org-level override).
+    When the org has no own row, the system row is the caller's effective
+    presets — deleting a referenced model would surface as broken_preset
+    on the next agent run. Surface that as a 409 at delete time instead.
     """
     pid, mid = await _seed_provider_with_model(db_session, org_id=CALLER_ORG)
     db_session.add(
@@ -168,6 +172,48 @@ async def test_delete_allowed_when_only_system_row_references_model(
                 ],
                 "task_presets": {},
             },
+        )
+    )
+    await db_session.commit()
+
+    svc = _make_svc(db_session)
+    with pytest.raises(ModelInUseByPresetError) as exc:
+        await svc.delete_model(pid, mid)
+    assert exc.value.status_code == 409
+    assert exc.value.refs == [
+        {"org_id": CALLER_ORG, "preset_label": "sys-default", "source": "system"},
+    ]
+    # Model row survives — guard fired before delete.
+    assert await ModelRepository(db_session).get(mid) is not None
+
+
+async def test_delete_allowed_when_system_row_references_but_org_row_exists(
+    db_session: AsyncSession,
+) -> None:
+    """Org row exists (even if empty) → the system row is no longer effective.
+
+    Once the org has saved its own model_presets, the system row is shadowed.
+    Whatever references it carries are irrelevant for the org's runs, so the
+    delete proceeds.
+    """
+    pid, mid = await _seed_provider_with_model(db_session, org_id=CALLER_ORG)
+    db_session.add(
+        OrgSettings(
+            org_id=None,
+            key=MODEL_PRESETS_KEY,
+            value={
+                "presets": [
+                    {"label": "sys-default", "chain": ["acme/m1"], "is_default": True},
+                ],
+                "task_presets": {},
+            },
+        )
+    )
+    db_session.add(
+        OrgSettings(
+            org_id=CALLER_ORG,
+            key=MODEL_PRESETS_KEY,
+            value={"presets": [], "task_presets": {}},
         )
     )
     await db_session.commit()
