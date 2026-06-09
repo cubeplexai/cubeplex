@@ -353,7 +353,7 @@ class AttachmentTooManyError(APIException):
 class ModelInUseByPresetError(APIException):
     """409 — model cannot be deleted because caller-org presets reference it."""
 
-    def __init__(self, slug: str, model_id: str, refs: list[dict[str, str]]) -> None:
+    def __init__(self, slug: str, model_id: str, refs: list[dict[str, str | None]]) -> None:
         super().__init__(
             error_code="model_in_use_by_preset",
             message=f"model {slug}/{model_id} is referenced by presets and cannot be deleted",
