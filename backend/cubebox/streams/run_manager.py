@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -44,6 +45,35 @@ def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     if not ns:
         return None
     return ":".join(str(part) for part in ns)
+
+
+def _make_failover_publisher(
+    run_id: str,
+    publish: Callable[[str, dict[str, Any]], Awaitable[None]],
+) -> Callable[[Any, Any, BaseException | str], Awaitable[None]]:
+    """Build an on_failover callback that publishes a model_failover SSE event.
+
+    `failed` and `next_bound` are cubepi BoundModel instances (or None for
+    next_bound when the chain is exhausted). `error` is either a triggered
+    exception or a string sentinel from cubepi.
+    """
+
+    async def _on_failover(failed: Any, next_bound: Any, error: BaseException | str) -> None:
+        await publish(
+            run_id,
+            {
+                "type": "model_failover",
+                "failed_ref": f"{failed.spec.provider_id}/{failed.spec.id}",
+                "next_ref": (
+                    f"{next_bound.spec.provider_id}/{next_bound.spec.id}"
+                    if next_bound is not None
+                    else None
+                ),
+                "reason": str(error)[:256],
+            },
+        )
+
+    return _on_failover
 
 
 def _subagent_shared_tools(tools: list[Any]) -> list[Any]:
