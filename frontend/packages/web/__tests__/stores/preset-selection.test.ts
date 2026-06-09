@@ -87,4 +87,26 @@ describe('preset-selection store', () => {
     expect(aAfter).not.toBe(a)
     expect(aAfter.getState().presetLabel).toBeNull()
   })
+
+  it('clearAllPresetSelectionStores() wipes prefix-matched entries written outside this tab', () => {
+    // Simulate persisted entries from another tab / earlier session whose
+    // stores were never instantiated in this tab — the in-memory `stores`
+    // map is empty for these keys, but the localStorage records exist.
+    localStorage.setItem(
+      'preset-selection-v1:ws_other_tab',
+      JSON.stringify({ state: { presetLabel: 'leaked', thinking: 'high' }, version: 0 }),
+    )
+    localStorage.setItem(
+      'preset-selection-v1:ws_another',
+      JSON.stringify({ state: { presetLabel: 'also-leaked', thinking: 'off' }, version: 0 }),
+    )
+    // An unrelated key must survive.
+    localStorage.setItem('not-our-key', 'keep-me')
+
+    clearAllPresetSelectionStores()
+
+    expect(localStorage.getItem('preset-selection-v1:ws_other_tab')).toBeNull()
+    expect(localStorage.getItem('preset-selection-v1:ws_another')).toBeNull()
+    expect(localStorage.getItem('not-our-key')).toBe('keep-me')
+  })
 })

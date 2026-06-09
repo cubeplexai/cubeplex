@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import { createApiClient, logoutUser, useAuthStore } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { LogOut } from 'lucide-react'
+import { clearAllPresetSelectionStores } from '@/lib/stores/preset-selection'
 
 export function AdminAvatarMenu() {
   const t = useTranslations('adminSkills')
@@ -21,6 +22,7 @@ export function AdminAvatarMenu() {
       /* ignore */
     }
     useAuthStore.getState().reset()
+    clearAllPresetSelectionStores()
     router.replace('/login')
   }
 
