@@ -21,9 +21,10 @@ from cubebox.api.schemas.provider import (
     ProviderUpdate,
 )
 from cubebox.credentials.exceptions import CredentialNotFound
+from cubebox.llm.builder import build_provider
 from cubebox.llm.config import ProviderConfig
-from cubebox.llm.factory import LLMFactory
 from cubebox.llm.readiness import capability_fingerprint
+from cubebox.llm.snapshot import LLMSnapshot
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.provider import Model, Provider
 from cubebox.repositories.model import ModelRepository
@@ -373,9 +374,8 @@ class ProviderService:
         """
 
         def factory() -> Any:
-            return LLMFactory().build_cubepi_provider(
-                cfg, provider_name=provider_name, cache_policy=None
-            )
+            snap = LLMSnapshot(providers={provider_name: cfg}, presets=(), task_presets={})
+            return build_provider(snap, provider_name, cache_policy=None)
 
         return factory
 
@@ -386,9 +386,8 @@ class ProviderService:
         logic the runtime uses (``provider._resolve_capability``), avoiding a
         second copy of the override-precedence rule.
         """
-        provider = LLMFactory().build_cubepi_provider(
-            cfg, provider_name=provider_name, cache_policy=None
-        )
+        snap = LLMSnapshot(providers={provider_name: cfg}, presets=(), task_presets={})
+        provider = build_provider(snap, provider_name, cache_policy=None)
         return provider._resolve_capability(model_id)
 
     @staticmethod

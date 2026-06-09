@@ -10,6 +10,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 
 
@@ -118,6 +119,7 @@ async def build_usage_summary(
     conversation_id: str,
     *,
     org_id: str,
+    encryption_backend: EncryptionBackend,
     last_user_message_ts: str | None = None,
 ) -> UsageSummary:
     """Build a complete usage summary for the usage panel.
@@ -137,10 +139,14 @@ async def build_usage_summary(
             summary["turn"] = turn
             summary["context_tokens"] = context_tokens
 
-        from cubebox.llm.factory import LLMFactory
+        from cubebox.llm.resolver import parse_model_ref, resolve_preset
+        from cubebox.llm.snapshot import load_llm_snapshot
 
-        factory = LLMFactory(session=session, org_id=org_id)
-        model_cfg = await factory.get_default_model_config()
+        snap = await load_llm_snapshot(session, org_id, encryption_backend)
+        preset = resolve_preset(snap, None)
+        slug, model_id = parse_model_ref(preset.chain[0])
+        provider_cfg = snap.providers[slug]
+        model_cfg = next(m for m in provider_cfg.models if m.id == model_id)
         summary["context_window"] = model_cfg.context_window
     except Exception:
         logger.warning(

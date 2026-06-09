@@ -955,6 +955,7 @@ async def get_conversation_bootstrap(
         session,
         conversation_id,
         org_id=ctx.org_id,
+        encryption_backend=raw_request.app.state.encryption_backend,
         last_user_message_ts=last_user_ts,
     )
 
