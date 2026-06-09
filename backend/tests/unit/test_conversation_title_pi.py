@@ -1,54 +1,80 @@
 """Unit tests for _generate_title.
 
 Exercises ``conversation_title._generate_title`` by monkeypatching
-``LLMFactory`` to return a ``FauxProvider``, verifying the cubepi
-one-shot title-generation path (prompt shape, message ordering, output
-trimming, and error handling).
+``load_llm_snapshot`` + ``build_chain_model`` to return a ``BoundModel``
+wrapping a ``FauxProvider``, verifying the cubepi one-shot
+title-generation path (prompt shape, message ordering, output trimming,
+and error handling).
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
+from cubepi.providers.base import BoundModel, Model
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
+
+from cubebox.llm.config import ModelConfig, ProviderConfig
+from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_fake_factory(provider: FauxProvider) -> object:
-    """Return a minimal LLMFactory stand-in for _generate_title."""
+def _snap() -> LLMSnapshot:
+    return LLMSnapshot(
+        providers={
+            "acme": ProviderConfig(
+                api="openai-completions",
+                base_url="https://x",
+                api_key="k",
+                models=[
+                    ModelConfig(
+                        id="title-m",
+                        name="title-m",
+                        contextWindow=128000,
+                        maxTokens=32000,
+                    )
+                ],
+            )
+        },
+        presets=(LLMPreset(label="default", chain=("acme/title-m",), is_default=True),),
+        task_presets={"title": "default"},
+    )
 
-    class _FakeProviderConfig:
-        name = "faux"
 
-    class _FakeLLMConfig:
-        # No ``title_model`` attribute → resolve_task_model falls through to
-        # the default provider/model below.
-        title_model = None
+def _install_fakes(monkeypatch: pytest.MonkeyPatch, provider: FauxProvider) -> None:
+    """Patch snapshot loader + chain builder in the service module.
 
-    class _FakeFactory:
-        # resolve_task_model only consults OrgSettings when both are truthy;
-        # leaving them None keeps these unit tests on the default path.
-        _session = None
-        _org_id = None
-        llm_config = _FakeLLMConfig()
+    The service calls ``load_llm_snapshot`` then ``build_chain_model``;
+    we short-circuit both to return a known snapshot and a BoundModel
+    wrapping ``provider``.
+    """
 
-        async def resolve_default_provider_and_config(
-            self,
-        ) -> tuple[str, str, _FakeProviderConfig]:
-            return ("faux", "test-model", _FakeProviderConfig())
+    async def _fake_load(session: Any, org_id: str, backend: Any) -> LLMSnapshot:
+        return _snap()
 
-        def build_cubepi_provider(
-            self,
-            provider_config: object,
-            *,
-            provider_name: str = "",
-            cache_policy: object = None,
-        ) -> FauxProvider:
-            return provider
+    def _fake_build_chain_model(
+        snap: LLMSnapshot, preset: LLMPreset, *, thinking: str = "off", **_: Any
+    ) -> BoundModel:
+        spec = Model(
+            id="title-m",
+            provider_id="acme",
+            context_window=128000,
+            max_tokens=32000,
+        )
+        return BoundModel(provider=provider, spec=spec)
 
-    return _FakeFactory()
+    monkeypatch.setattr(
+        "cubebox.services.conversation_title.load_llm_snapshot",
+        _fake_load,
+    )
+    monkeypatch.setattr(
+        "cubebox.services.conversation_title.build_chain_model",
+        _fake_build_chain_model,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -57,58 +83,64 @@ def _make_fake_factory(provider: FauxProvider) -> object:
 
 
 @pytest.mark.asyncio
-async def test_generate_title_returns_streamed_text() -> None:
+async def test_generate_title_returns_streamed_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """FauxProvider text chunks are concatenated and returned."""
     from cubebox.services.conversation_title import _generate_title
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="acme")
     provider.set_responses([faux_assistant_message("Quick chat about Tokyo")])
+    _install_fakes(monkeypatch, provider)
 
-    factory = _make_fake_factory(provider)
-    text = await _generate_title(factory, "title prompt", org_id="org-x")  # type: ignore[arg-type]
+    text = await _generate_title(None, "org-x", object(), "title prompt")  # type: ignore[arg-type]
 
     assert "Tokyo" in text
 
 
 @pytest.mark.asyncio
-async def test_generate_title_raises_on_error_event() -> None:
+async def test_generate_title_raises_on_error_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A provider error event surfaces as RuntimeError."""
     from cubebox.services.conversation_title import _generate_title
 
     # FauxProvider with no queued responses emits an error event automatically.
-    provider = FauxProvider()  # no responses queued
+    provider = FauxProvider(provider_id="acme")  # no responses queued
+    _install_fakes(monkeypatch, provider)
 
-    factory = _make_fake_factory(provider)
     with pytest.raises(RuntimeError, match="No more faux responses queued"):
-        await _generate_title(factory, "prompt", org_id="org-x")  # type: ignore[arg-type]
+        await _generate_title(None, "org-x", object(), "prompt")  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
-async def test_generate_title_empty_response_returns_empty() -> None:
+async def test_generate_title_empty_response_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """An assistant message with no text content returns an empty string."""
-    from cubepi.providers.faux import faux_assistant_message
-
     from cubebox.services.conversation_title import _generate_title
 
     # faux_assistant_message with an empty string still yields text_delta events
     # but with no content — result should be empty string (not crash).
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="acme")
     provider.set_responses([faux_assistant_message("")])
+    _install_fakes(monkeypatch, provider)
 
-    factory = _make_fake_factory(provider)
-    text = await _generate_title(factory, "prompt", org_id="org-x")  # type: ignore[arg-type]
+    text = await _generate_title(None, "org-x", object(), "prompt")  # type: ignore[arg-type]
     assert text == ""
 
 
 @pytest.mark.asyncio
-async def test_generate_title_provider_called_once() -> None:
+async def test_generate_title_provider_called_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Provider.stream is called exactly once per invocation."""
     from cubebox.services.conversation_title import _generate_title
 
-    provider = FauxProvider()
+    provider = FauxProvider(provider_id="acme")
     provider.set_responses([faux_assistant_message("A title")])
+    _install_fakes(monkeypatch, provider)
 
-    factory = _make_fake_factory(provider)
-    await _generate_title(factory, "some prompt", org_id="org-x")  # type: ignore[arg-type]
+    await _generate_title(None, "org-x", object(), "some prompt")  # type: ignore[arg-type]
 
     assert provider.call_count == 1

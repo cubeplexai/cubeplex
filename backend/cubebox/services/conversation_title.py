@@ -26,7 +26,9 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.llm.factory import LLMFactory
+from cubebox.llm.builder import build_chain_model
+from cubebox.llm.resolver import resolve_task_preset
+from cubebox.llm.snapshot import load_llm_snapshot
 from cubebox.models import Conversation
 from cubebox.prompts.title import TITLE_GENERATION_PROMPT, TITLE_PROMPT_PLACEHOLDER
 from cubebox.repositories import ConversationRepository
@@ -127,7 +129,12 @@ def _build_prompt(snippet: str) -> str:
     return TITLE_GENERATION_PROMPT.replace(TITLE_PROMPT_PLACEHOLDER, snippet)
 
 
-async def _generate_title(factory: LLMFactory, full_prompt: str, *, org_id: str) -> str:
+async def _generate_title(
+    session: AsyncSession,
+    org_id: str,
+    encryption_backend: EncryptionBackend,
+    full_prompt: str,
+) -> str:
     """One-shot title generation via cubepi.Provider direct call.
 
     No agent loop needed — title generation is a single-turn request.
@@ -137,19 +144,18 @@ async def _generate_title(factory: LLMFactory, full_prompt: str, *, org_id: str)
     from cubebox.llm.runtime_writeback import (
         schedule_runtime_status_writeback as _schedule_writeback,
     )
-    from cubebox.services.task_model_resolver import resolve_task_model
 
-    provider_slug, model_id, provider_config = await resolve_task_model(factory, "title")
-    # cache_policy=None → cubepi's DefaultCacheMarkerPolicy. Title generation
-    # is a one-shot call with no prior conversation context, so no cache
-    # breakpoints will be inserted regardless of the policy used.
-    provider = factory.build_cubepi_provider(
-        provider_config, provider_name=provider_slug, cache_policy=None
-    )
-    bound = provider.model(model_id)
+    snap = await load_llm_snapshot(session, org_id, encryption_backend)
+    preset = resolve_task_preset(snap, "title")
+    # cache_policy_factory=None → cubepi's DefaultCacheMarkerPolicy. Title
+    # generation is a one-shot call with no prior conversation context, so
+    # no cache breakpoints will be inserted regardless of the policy used.
+    bound = build_chain_model(snap, preset, thinking="off")
+    provider_slug = bound.spec.provider_id
+    model_id = bound.spec.id
 
     try:
-        stream = await provider.stream(
+        stream = await bound.provider.stream(
             model=bound.spec,
             messages=[UserMessage(content=[TextContent(text=full_prompt)])],
             system_prompt="",  # title-gen prompt is fully in the user message
@@ -204,16 +210,14 @@ async def generate_and_apply_title(
     if not snippet:
         return conversation
 
-    factory = LLMFactory(
-        session=session,
-        org_id=org_id,
-        encryption_backend=encryption_backend,
-    )
+    if encryption_backend is None:
+        logger.warning("Auto-title skipped: no encryption backend on app state")
+        return conversation
 
     full_prompt = _build_prompt(snippet)
 
     try:
-        raw_title = await _generate_title(factory, full_prompt, org_id=org_id)
+        raw_title = await _generate_title(session, org_id, encryption_backend, full_prompt)
     except Exception:
         logger.warning("Auto-title skipped: LLM call failed", exc_info=True)
         return conversation
