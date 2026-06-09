@@ -15,12 +15,12 @@ def test_accepts_minimal_valid_payload():
 
 
 def test_rejects_zero_presets():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="presets"):
         ModelPresetsValue.model_validate({"presets": [], "task_presets": {}})
 
 
 def test_rejects_zero_chain_entries():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="chain"):
         ModelPresetsValue.model_validate({"presets": [_make(chain=())], "task_presets": {}})
 
 
@@ -64,7 +64,7 @@ def test_rejects_task_value_not_in_labels():
 
 
 def test_rejects_label_with_bad_chars():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="label"):
         ModelPresetsValue.model_validate(
             {"presets": [_make(label="bad space")], "task_presets": {}}
         )

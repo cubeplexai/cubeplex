@@ -1,8 +1,9 @@
 """Pydantic schema for OrgSettings.model_presets row value.
 
 Validates the JSON shape that admin endpoints write and that the snapshot
-loader reads. Model-ref well-formedness is validated; ref-exists-in-providers
-is enforced later by the loader (after providers are joined).
+loader reads. Chain-entry format (provider/model-id) is not validated
+here; the resolver and loader enforce ref well-formedness and
+ref-exists-in-providers at request time.
 """
 
 from typing import Self
