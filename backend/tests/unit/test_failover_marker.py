@@ -29,7 +29,6 @@ async def test_publisher_emits_correct_shape():
         (
             "run_abc",
             {
-                "type": "model_failover",
                 "failed_ref": "p1/m1",
                 "next_ref": "p2/m2",
                 "reason": "boom",
