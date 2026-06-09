@@ -56,3 +56,62 @@ async def test_snapshot_loads_system_provider_and_preset(async_session, encrypti
     )
     assert "acme" in snap.providers
     assert snap.presets == (LLMPreset(label="default", chain=("acme/m1",), is_default=True),)
+
+
+@pytest.mark.asyncio
+async def test_org_row_replaces_system_row(async_session, encryption_backend):
+    async_session.add(
+        OrgSettings(
+            org_id=None,
+            key=MODEL_PRESETS_KEY,
+            value={
+                "presets": [{"label": "sys", "chain": ["acme/m1"], "is_default": True}],
+                "task_presets": {},
+            },
+        )
+    )
+    async_session.add(
+        OrgSettings(
+            org_id="org_test",
+            key=MODEL_PRESETS_KEY,
+            value={
+                "presets": [{"label": "org", "chain": ["acme/m1"], "is_default": True}],
+                "task_presets": {},
+            },
+        )
+    )
+    # Seed provider/model so refs validate.
+    p = Provider(
+        org_id=None,
+        name="acme",
+        slug="acme",
+        provider_type="openai-completions",
+        base_url="https://x",
+        auth_type="api_key",
+        enabled=True,
+    )
+    async_session.add(p)
+    await async_session.flush()
+    async_session.add(
+        Model(
+            org_id=None,
+            provider_id=p.id,
+            model_id="m1",
+            display_name="m1",
+            reasoning=False,
+            input_modalities=["text"],
+            cost_input=0,
+            cost_output=0,
+            cost_cache_read=0,
+            cost_cache_write=0,
+            context_window=128000,
+            max_tokens=32000,
+            enabled=True,
+        )
+    )
+    await async_session.commit()
+
+    snap = await load_llm_snapshot(
+        async_session, org_id="org_test", encryption_backend=encryption_backend
+    )
+    assert [p.label for p in snap.presets] == ["org"]

@@ -16,7 +16,7 @@ This mirrors the system-row pattern used by ``credentials``
 
 from typing import Any
 
-from sqlalchemy import Column, Index
+from sqlalchemy import Column, Index, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 
@@ -50,12 +50,14 @@ class OrgSettings(SQLModel, TimestampMixin, table=True):
             "key",
             unique=True,
             postgresql_where="org_id IS NOT NULL",
+            sqlite_where=text("org_id IS NOT NULL"),
         ),
         Index(
             "uq_org_settings_system_key",
             "key",
             unique=True,
             postgresql_where="org_id IS NULL",
+            sqlite_where=text("org_id IS NULL"),
         ),
     )
 
