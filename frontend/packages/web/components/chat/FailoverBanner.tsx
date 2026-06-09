@@ -42,7 +42,7 @@ export function FailoverBanner({ event }: FailoverBannerProps) {
             />
             <span className="font-medium">{summary}</span>
           </summary>
-          <p className="mt-1.5 ml-5.5 whitespace-pre-wrap break-words text-zinc-500 dark:text-zinc-500">
+          <p className="mt-1.5 ml-5 whitespace-pre-wrap break-words text-zinc-500 dark:text-zinc-500">
             {reason}
           </p>
         </details>
