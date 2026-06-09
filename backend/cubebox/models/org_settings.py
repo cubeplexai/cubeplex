@@ -13,6 +13,10 @@ from cubebox.models.mixins import TimestampMixin
 # All keys optional; a missing key falls back to default_model.
 TASK_MODELS_KEY = "task_models"
 
+# Replacement for the legacy default_model / fallback_models / task_models keys.
+# Schema lives in cubebox.llm.snapshot_schema.ModelPresetsValue.
+MODEL_PRESETS_KEY = "model_presets"
+
 
 class OrgSettings(SQLModel, TimestampMixin, table=True):
     """Per-org key-value settings store; composite PK (org_id, key)."""
