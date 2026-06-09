@@ -72,23 +72,34 @@ async def _load_providers(
         .where(func.coalesce(DBO.enabled, DBP.enabled, True))
     )
     rows = (await session.execute(stmt)).scalars().all()
+
+    # Batch-load enabled models for all providers in one query (was: one
+    # SELECT per provider — N+1).
+    provider_ids = [p.id for p in rows]
+    models_by_provider: dict[str, list[DBM]] = {pid: [] for pid in provider_ids}
+    if provider_ids:
+        models_stmt = select(DBM).where(
+            DBM.provider_id.in_(provider_ids),  # type: ignore[attr-defined]
+            DBM.enabled,  # type: ignore[arg-type]
+        )
+        for m in (await session.execute(models_stmt)).scalars().all():
+            models_by_provider.setdefault(m.provider_id, []).append(m)
+
+    # Batch-load credentials in one query (was: session.get per provider).
+    cred_ids = [p.credential_id for p in rows if p.credential_id is not None]
+    cred_map: dict[str, Credential] = {}
+    if cred_ids:
+        cred_stmt = select(Credential).where(
+            Credential.id.in_(cred_ids)  # type: ignore[attr-defined]
+        )
+        cred_map = {c.id: c for c in (await session.execute(cred_stmt)).scalars().all()}
+
     out: dict[str, ProviderConfig] = {}
     for p in rows:
-        models = (
-            (
-                await session.execute(
-                    select(DBM).where(
-                        DBM.provider_id == p.id,  # type: ignore[arg-type]
-                        DBM.enabled,  # type: ignore[arg-type]
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
+        models = models_by_provider.get(p.id, [])
         api_key: str | None = None
         if p.credential_id is not None:
-            cred = await session.get(Credential, p.credential_id)
+            cred = cred_map.get(p.credential_id)
             if cred is not None and cred.kind == "provider_api_key":
                 try:
                     api_key = (await backend.decrypt(cred.value_encrypted)).decode("utf-8")
