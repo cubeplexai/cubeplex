@@ -86,7 +86,15 @@ export function clearAllPresetSelectionStores(): void {
   for (const wsId of stores.keys()) {
     const store = stores.get(wsId)
     try {
-      store?.persist?.clearStorage()
+      // Zustand's persist middleware is attached to the store as a `persist`
+      // namespace; the type isn't exposed on the public UseBoundStore generic
+      // so we read it with an unknown-cast guard.
+      const persisted = (
+        store as unknown as {
+          persist?: { clearStorage?: () => void }
+        }
+      )?.persist
+      persisted?.clearStorage?.()
     } catch {
       // best-effort — fall through to the direct localStorage sweep below.
     }
