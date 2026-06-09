@@ -1548,11 +1548,11 @@ class RunManager:
                     _bus = getattr(self._app.state, "user_event_bus", None)
                     _memory_service_factory = extra_ref_holder.get("memory_service_factory")
                     _provider_ref = extra_ref_holder.get("provider")
-                    _factory_ref = extra_ref_holder.get("llm_factory")
+                    _snap_ref = extra_ref_holder.get("llm_snapshot")
                     if (
                         _memory_service_factory is None
                         or _provider_ref is None
-                        or _factory_ref is None
+                        or _snap_ref is None
                     ):
                         logger.debug(
                             "skipping reflection for run_id={}: memory tools not available",
@@ -1580,8 +1580,8 @@ class RunManager:
                             def _refl_price_lookup(
                                 provider_name_: str, model_id_: str
                             ) -> ModelCost | None:
-                                assert _factory_ref is not None  # narrowed above
-                                pcfg = _factory_ref.llm_config.providers.get(provider_name_)
+                                assert _snap_ref is not None  # narrowed above
+                                pcfg = _snap_ref.providers.get(provider_name_)
                                 if pcfg is None:
                                     return None
                                 for m in pcfg.models:
@@ -1954,49 +1954,42 @@ class RunManager:
 
         from cubebox.agents.graph import create_cubebox_agent
         from cubebox.db.engine import async_session_maker
+        from cubebox.llm.builder import build_chain_model
         from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
-        from cubebox.llm.factory import LLMFactory
+        from cubebox.llm.resolver import resolve_preset
+        from cubebox.llm.snapshot import LLMSnapshot, load_llm_snapshot
 
-        try:
-            async with async_session_maker() as llm_session:
-                factory = LLMFactory(
-                    session=llm_session,
-                    org_id=ctx.org_id,
-                    encryption_backend=self._app.state.encryption_backend,
-                )
-                (
-                    provider_name,
-                    model_id,
-                    provider_config,
-                ) = await factory.resolve_default_provider_and_config()
-                await llm_session.commit()
-        except Exception:
-            logger.warning("LLMFactory DB load failed for cubepi path, falling back to config-only")
-            factory = LLMFactory()
-            (
-                provider_name,
-                model_id,
-                provider_config,
-            ) = await factory.resolve_default_provider_and_config()
+        async with async_session_maker() as llm_session:
+            snap: LLMSnapshot = await load_llm_snapshot(
+                llm_session, ctx.org_id, self._app.state.encryption_backend
+            )
+            await llm_session.commit()
 
-        # Resolve model config to extract max_tokens forwarded to the provider.
-        try:
-            _model_config = factory.get_model_config(provider_name, model_id)
-            _model_max_tokens: int = _model_config.max_tokens or 32000
-            _model_temperature: float = 0.7  # ModelConfig has no temperature field
-        except Exception:
-            _model_max_tokens = 32000
-            _model_temperature = 0.7
-
-        # TODO(PR #84 review - fallback chains TBD): no fallback chain
-        # implementation yet. cubepi v0.3.0 has no equivalent of
-        # with_fallbacks(), so resolved ModelConfig.fallback_models are
-        # currently ignored. Tracked as a follow-up once either cubepi
-        # upstream supports fallback chains or we wrap the provider on
-        # cubebox's side.
-        provider = factory.build_cubepi_provider(
-            provider_config, provider_name=provider_name, cache_policy=CubeboxCacheMarkerPolicy()
+        # Preset selection: PR 1 uses default (None label). Task C2 will plumb
+        # body.preset_label.
+        preset = resolve_preset(snap, None)
+        # chain_model is a BoundModel in PR 1 (chain length 1 enforced by builder).
+        # Task B1 will allow FallbackBoundModel for chain >1.
+        this_run_model = build_chain_model(
+            snap,
+            preset,
+            thinking="off",  # Task C2 will plumb body.thinking
+            cache_policy_factory=lambda slug: (
+                CubeboxCacheMarkerPolicy()
+                if snap.providers[slug].api == "anthropic-messages"
+                else None
+            ),
         )
+
+        # Extract downstream-required vars from the bound model so middleware,
+        # subagent setup, and cost attribution continue working unchanged.
+        provider_name = this_run_model.spec.provider_id
+        model_id = this_run_model.spec.id
+        provider = this_run_model.provider
+        provider_config = snap.providers[provider_name]
+        _model_config = next(m for m in provider_config.models if m.id == model_id)
+        _model_max_tokens: int = _model_config.max_tokens or 32000
+        _model_temperature: float = 0.7
 
         # --- Compose tool list ---
         # Tool registration order is deliberately stable — changes invalidate
@@ -2083,15 +2076,26 @@ class RunManager:
         # cache-prefix tool order.
         try:
             from cubebox.llm.capabilities import LLMCapabilities
+            from cubebox.llm.config import LLMConfig
             from cubebox.objectstore import get_objectstore_client
             from cubebox.tools.builtin.view_images import make_view_images_tool
 
+            # LLMCapabilities reads providers + default/fallback refs off LLMConfig.
+            # Build a thin adapter from the snapshot so view_images sees the same
+            # input modalities the resolved primary model supports.
+            _caps_cfg = LLMConfig.model_validate(
+                {
+                    "default_model": f"{provider_name}/{model_id}",
+                    "fallback_models": [],
+                    "providers": {slug: cfg.model_dump() for slug, cfg in snap.providers.items()},
+                }
+            )
             _builtin_tools.append(
                 make_view_images_tool(
                     org_id=ctx.org_id,
                     workspace_id=ctx.workspace_id,
                     objectstore=get_objectstore_client(),
-                    capabilities=LLMCapabilities(factory.llm_config),
+                    capabilities=LLMCapabilities(_caps_cfg),
                 )
             )
         except Exception as _exc:
@@ -2403,13 +2407,11 @@ class RunManager:
             if _comp_cfg.get("compaction.enabled", False):
                 _summary_provider = _comp_cfg.get("compaction.summary_provider")
                 _summary_model_id = _comp_cfg.get("compaction.summary_model")
-                # Reuse the DB-aware factory built above so admin-managed providers
-                # in the model registry are visible. A bare LLMFactory() only sees
-                # config.yaml — providers configured via the admin UI would miss.
-                _summary_provider_config = factory.llm_config.providers[_summary_provider]
-                _summary_provider_inst = factory.build_cubepi_provider(
-                    _summary_provider_config, provider_name=_summary_provider, cache_policy=None
-                )
+                # Reuse the snapshot loaded above so admin-managed providers
+                # in the model registry are visible without a second DB read.
+                from cubebox.llm.builder import build_provider as _build_provider
+
+                _summary_provider_inst = _build_provider(snap, _summary_provider, cache_policy=None)
                 _summary_bound_model = _summary_provider_inst.model(_summary_model_id)
                 _fallback_window = int(_comp_cfg.get("compaction.fallback_context_window", 128000))
                 _model_window = int(_model_config.context_window or 0)
@@ -2585,10 +2587,10 @@ class RunManager:
             from cubebox.middleware.cost import CostMiddleware
 
             # Resolve ModelCost for any (provider, model_id) the agent reports.
-            # The factory's llm_config holds the merged YAML + DB provider config
-            # so this lookup honors per-org overrides.
+            # The snapshot holds the merged system + per-org provider config so
+            # this lookup honors per-org overrides.
             def _price_lookup(provider: str, model_id: str) -> ModelCost | None:
-                pcfg = factory.llm_config.providers.get(provider)
+                pcfg = snap.providers.get(provider)
                 if pcfg is None:
                     return None
                 for m in pcfg.models:
@@ -2690,7 +2692,7 @@ class RunManager:
         # own short-lived agent for end-of-turn memory self-review.
         extra_ref_holder["memory_service_factory"] = _memory_service_factory
         extra_ref_holder["provider"] = provider
-        extra_ref_holder["llm_factory"] = factory
+        extra_ref_holder["llm_snapshot"] = snap
         extra_ref_holder["model_context_window"] = int(_model_config.context_window or 0)
 
         return agent, all_tools, sandbox_hitl_channel

@@ -21,6 +21,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from cubepi.hitl import CheckpointedChannel
 
+from cubebox.llm.config import ProviderConfig
+from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
 from cubebox.streams.run_manager import RunContext, RunManager
 
 pytestmark = pytest.mark.asyncio
@@ -63,24 +65,49 @@ async def _build(
         MagicMock(return_value=mock_agent),
     )
 
-    # LLMFactory.resolve_default_provider_and_config: return a sentinel
-    # tuple so the path through the try/commit branch succeeds without a
-    # DB. build_cubepi_provider returns a MagicMock; the agent factory is
-    # stubbed so it never inspects it.
-    mock_factory_inst = MagicMock()
-    mock_factory_inst.resolve_default_provider_and_config = AsyncMock(
-        return_value=("anthropic", "claude-stub", MagicMock()),
+    # load_llm_snapshot returns a deterministic snapshot whose default preset
+    # resolves to anthropic/claude-stub. build_chain_model is patched so we
+    # don't need a real cubepi provider — the agent factory is stubbed and
+    # never inspects the bound model.
+    snap = LLMSnapshot(
+        providers={
+            "anthropic": ProviderConfig.model_validate(
+                {
+                    "base_url": "https://example.invalid",
+                    "api_key": "k",
+                    "api": "openai-completions",
+                    "models": [
+                        {
+                            "id": "claude-stub",
+                            "name": "claude-stub",
+                            "contextWindow": 128000,
+                            "maxTokens": 32000,
+                        }
+                    ],
+                }
+            ),
+        },
+        presets=(LLMPreset(label="default", chain=("anthropic/claude-stub",), is_default=True),),
+        task_presets={},
     )
-    mock_model_config = MagicMock()
-    mock_model_config.max_tokens = 32000
-    mock_model_config.reasoning = False
-    mock_factory_inst.get_model_config = MagicMock(return_value=mock_model_config)
-    mock_factory_inst.build_cubepi_provider = MagicMock(return_value=MagicMock())
-    mock_factory_inst.llm_config = MagicMock()
-    mock_factory_inst.llm_config.providers = {}
+
+    async def _fake_load(*_a: Any, **_kw: Any) -> LLMSnapshot:
+        return snap
+
+    # _build_agent_for_conversation imports load_llm_snapshot / build_chain_model
+    # locally inside the method, so we patch the source modules.
     monkeypatch.setattr(
-        "cubebox.llm.factory.LLMFactory",
-        MagicMock(return_value=mock_factory_inst),
+        "cubebox.llm.snapshot.load_llm_snapshot",
+        _fake_load,
+    )
+
+    mock_bound_model = MagicMock()
+    mock_bound_model.spec.provider_id = "anthropic"
+    mock_bound_model.spec.id = "claude-stub"
+    mock_bound_model.provider = MagicMock()
+    monkeypatch.setattr(
+        "cubebox.llm.builder.build_chain_model",
+        MagicMock(return_value=mock_bound_model),
     )
 
     rm = RunManager(
