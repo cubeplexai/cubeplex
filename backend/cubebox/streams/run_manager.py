@@ -1999,11 +1999,21 @@ class RunManager:
         from cubebox.llm.resolver import resolve_preset
         from cubebox.llm.snapshot import LLMSnapshot, load_llm_snapshot
 
-        async with async_session_maker() as llm_session:
-            snap: LLMSnapshot = await load_llm_snapshot(
-                llm_session, ctx.org_id, self._app.state.encryption_backend
-            )
-            await llm_session.commit()
+        # Reuse the snapshot the caller (e.g. _execute_run pre-resolving
+        # context_window for the DoneEvent) already loaded into
+        # extra_ref_holder, instead of issuing another _load_providers
+        # cascade per send_message. Falls back to a fresh load when the
+        # caller didn't seed it (e.g. cancel-paused-run path).
+        _cached_snap = extra_ref_holder.get("llm_snapshot")
+        snap: LLMSnapshot
+        if isinstance(_cached_snap, LLMSnapshot):
+            snap = _cached_snap
+        else:
+            async with async_session_maker() as llm_session:
+                snap = await load_llm_snapshot(
+                    llm_session, ctx.org_id, self._app.state.encryption_backend
+                )
+                await llm_session.commit()
 
         preset = resolve_preset(snap, preset_label)
 
@@ -2737,9 +2747,20 @@ class RunManager:
 
         return agent, all_tools, sandbox_hitl_channel
 
-    async def _maybe_consolidate_memory(self, *, conversation_id: str, ctx: RunContext) -> None:
+    async def _maybe_consolidate_memory(
+        self,
+        *,
+        conversation_id: str,
+        ctx: RunContext,
+        cached_snapshot: Any | None = None,
+    ) -> None:
         """Cheap per-run gate; spawn a tracked background consolidation task when
-        due. Never raises into the run path."""
+        due. Never raises into the run path.
+
+        ``cached_snapshot`` lets the caller pass the LLMSnapshot it already
+        loaded for the same run (Fix-8) so we avoid reissuing
+        _load_providers + credential lookups just to pick the compaction model.
+        """
         try:
             from cubebox.config import config as _cfg
             from cubebox.services import memory_consolidation as mc
@@ -2761,13 +2782,16 @@ class RunManager:
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.builder import build_chain_model
             from cubebox.llm.resolver import resolve_task_preset
-            from cubebox.llm.snapshot import load_llm_snapshot
+            from cubebox.llm.snapshot import LLMSnapshot, load_llm_snapshot
 
-            async with async_session_maker() as _llm_session:
-                snap = await load_llm_snapshot(
-                    _llm_session, ctx.org_id, self._app.state.encryption_backend
-                )
-                await _llm_session.commit()
+            if isinstance(cached_snapshot, LLMSnapshot):
+                snap = cached_snapshot
+            else:
+                async with async_session_maker() as _llm_session:
+                    snap = await load_llm_snapshot(
+                        _llm_session, ctx.org_id, self._app.state.encryption_backend
+                    )
+                    await _llm_session.commit()
 
             preset = resolve_task_preset(snap, "compaction")
             bound_model = build_chain_model(snap, preset, thinking="off")
@@ -2977,6 +3001,9 @@ class RunManager:
 
             # Resolve effective model + context_window for the DoneEvent. The
             # actual cubepi.Provider construction happens inside _run_cubepi_path.
+            # Stash the snapshot in extra_ref_holder so the subsequent
+            # _build_agent_for_conversation call reuses it instead of loading
+            # the same providers/credentials again (Fix-8).
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.resolver import parse_model_ref, resolve_preset
             from cubebox.llm.snapshot import load_llm_snapshot
@@ -2988,6 +3015,7 @@ class RunManager:
                         ctx_session, ctx.org_id, self._app.state.encryption_backend
                     )
                     await ctx_session.commit()
+                extra_ref_holder["llm_snapshot"] = ctx_snap
                 _ctx_preset = resolve_preset(ctx_snap, None)
                 _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
                 _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
@@ -3151,7 +3179,11 @@ class RunManager:
                 status=final_status,
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
-            await self._maybe_consolidate_memory(conversation_id=conversation_id, ctx=ctx)
+            await self._maybe_consolidate_memory(
+                conversation_id=conversation_id,
+                ctx=ctx,
+                cached_snapshot=extra_ref_holder.get("llm_snapshot"),
+            )
         except asyncio.CancelledError:
             await update_run_meta(
                 self._redis,
@@ -3474,6 +3506,8 @@ class RunManager:
                         logger.warning("Sandbox unavailable, continuing without: {}", exc)
                         await emit_status("sandbox_failed", detail=str(exc))
 
+            # Stash snapshot in extra_ref_holder so _build_agent_for_conversation
+            # reuses it via _run_cubepi_respond_path (Fix-8).
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.resolver import parse_model_ref, resolve_preset
             from cubebox.llm.snapshot import load_llm_snapshot
@@ -3485,6 +3519,7 @@ class RunManager:
                         ctx_session, ctx.org_id, self._app.state.encryption_backend
                     )
                     await ctx_session.commit()
+                extra_ref_holder["llm_snapshot"] = ctx_snap
                 _ctx_preset = resolve_preset(ctx_snap, None)
                 _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
                 _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
@@ -3637,7 +3672,11 @@ class RunManager:
             # update_run_meta would race with whatever flow stole the slot
             # while we were running.
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
-            await self._maybe_consolidate_memory(conversation_id=conversation_id, ctx=ctx)
+            await self._maybe_consolidate_memory(
+                conversation_id=conversation_id,
+                ctx=ctx,
+                cached_snapshot=extra_ref_holder.get("llm_snapshot"),
+            )
         except asyncio.CancelledError:
             # Mirror prompt-path cancel handling. We bypass the CAS guard
             # on cancel because cancel is itself the takeover signal — the
