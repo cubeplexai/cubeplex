@@ -71,7 +71,8 @@ class AmbiguousOrgError(LLMConfigError):
                 "an explicit org selection"
             ),
             status_code=400,
-            details=f"org_ids={org_ids}",
+            details=f"org_ids={list(org_ids)}",
+            data={"org_ids": list(org_ids)},
         )
         self.org_ids = list(org_ids)
 
