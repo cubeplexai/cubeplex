@@ -1,7 +1,7 @@
 """E2E tests for Provider <-> Credential vault integration.
 
 Covers what unit-level mocking can't: real DB, real Fernet encryption,
-real LLMFactory wiring, and the seeder running against the live engine.
+real snapshot-loader wiring, and the seeder running against the live engine.
 """
 
 from __future__ import annotations
@@ -13,8 +13,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.encryption import FernetBackend
-from cubebox.llm.config import LLMConfig
-from cubebox.llm.factory import LLMFactory
+from cubebox.llm.snapshot import load_llm_snapshot
 from cubebox.models import Credential
 from cubebox.models.provider import Provider
 from cubebox.seeders.provider_seeder import seed_system_providers_from_config
@@ -139,7 +138,7 @@ async def test_factory_decrypts_provider_api_key(
     admin_client: tuple[AsyncClient, str],
     db_session: AsyncSession,
 ) -> None:
-    """LLMFactory loads ProviderConfig.api_key by decrypting the credential."""
+    """load_llm_snapshot loads ProviderConfig.api_key by decrypting the credential."""
     client, _ = admin_client
 
     res = await client.post(
@@ -159,14 +158,8 @@ async def test_factory_decrypts_provider_api_key(
     backend = transport.app.state.encryption_backend
     provider = await _get_provider_by_id(db_session, pid)
 
-    factory = LLMFactory(
-        llm_config=LLMConfig(default_model="x/y", providers={}),
-        session=db_session,
-        org_id=provider.org_id,
-        encryption_backend=backend,
-    )
-    db_cfgs, _ = await factory._load_db_provider_configs()
-    assert db_cfgs["vault-factory"]["api_key"] == "sk-factory-XYZ"
+    snap = await load_llm_snapshot(db_session, provider.org_id or "", backend)
+    assert snap.providers["vault-factory"].api_key == "sk-factory-XYZ"
 
     await client.delete(f"/api/v1/admin/providers/{pid}")
 
@@ -224,14 +217,8 @@ async def test_factory_decrypts_with_rotated_keys(
     await db_session.commit()
 
     try:
-        factory = LLMFactory(
-            llm_config=LLMConfig(default_model="x/y", providers={}),
-            session=db_session,
-            org_id=org_id,
-            encryption_backend=backend_rotated,
-        )
-        db_cfgs, _ = await factory._load_db_provider_configs()
-        assert db_cfgs["rotation-target"]["api_key"] == secret
+        snap = await load_llm_snapshot(db_session, org_id, backend_rotated)
+        assert snap.providers["rotation-target"].api_key == secret
     finally:
         await db_session.execute(
             text("DELETE FROM providers WHERE id = :pid"), {"pid": provider.id}

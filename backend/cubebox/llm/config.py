@@ -117,7 +117,7 @@ class LLMConfig(BaseModel):
     title_model: str | None = Field(
         default=None,
         description="Model for title generation in 'provider/model-id' format; "
-        "yaml fallback for resolve_task_model('title')",
+        "legacy yaml fallback (OrgSettings.model_presets task_presets['title'] supersedes)",
         alias="title_model",
     )
     providers: dict[str, ProviderConfig] = Field(

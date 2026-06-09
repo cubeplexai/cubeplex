@@ -2677,9 +2677,9 @@ class RunManager:
 
         # Stash provider_name / model_id / memory-repo factory on the bridge
         # dict so the caller doesn't have to re-resolve them (a second
-        # ``factory.resolve_default_provider_and_config()`` would double the
-        # DB load). The caller's runtime-status writeback and per-turn
-        # relevance-snapshot pass both read from here.
+        # snapshot load + preset resolve would double the DB load). The
+        # caller's runtime-status writeback and per-turn relevance-snapshot
+        # pass both read from here.
         extra_ref_holder["provider_name"] = provider_name
         extra_ref_holder["model_id"] = model_id
         extra_ref_holder["mem_repo_factory"] = _mem_repo_factory
