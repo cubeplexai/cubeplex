@@ -228,3 +228,14 @@ class AskUserResolvedEvent(AgentEvent):
             "emitted by the respond-path dangling-pending cleanup."
         )
     )
+
+
+class FailoverEvent(AgentEvent):
+    """Model failover event — primary chain leg failed, switched to next.
+
+    Emitted by the on_failover callback wired into FallbackBoundModel.
+    data: {failed_ref, next_ref|None, reason}
+    """
+
+    type: Literal["model_failover"] = "model_failover"
+    data: dict[str, Any] = Field(description="Event data with failed_ref, next_ref, reason")
