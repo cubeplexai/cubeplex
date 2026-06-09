@@ -2713,9 +2713,10 @@ class RunManager:
             checkpointer=cp,
             thread_id=conversation_id,
             middleware=cubepi_middleware,
-            # Reasoning-capable models think by default ("medium"); a
-            # per-conversation toggle (UI) can override this later.
-            thinking="medium" if _model_config.reasoning else "off",
+            # Honor the user-selected level threaded through from
+            # SendMessageRequest. Providers (e.g. AnthropicProvider) clamp
+            # this to what the active model actually supports.
+            thinking=thinking,
             channel=sandbox_hitl_channel,
         )
 
