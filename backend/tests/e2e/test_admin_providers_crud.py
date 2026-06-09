@@ -121,6 +121,92 @@ async def test_model_crud(admin_client: tuple[AsyncClient, str]) -> None:
     await client.delete(f"/api/v1/admin/providers/{pid}")
 
 
+async def test_delete_model_blocked_by_preset_reference(
+    admin_client: tuple[AsyncClient, str],
+) -> None:
+    """Admin attempting to delete a model referenced by their org's preset row gets 409.
+
+    Per D6: only the caller's org row is scanned (system row + other orgs are
+    intentionally skipped).
+    """
+    client, _ws_id = admin_client
+
+    res = await client.post(
+        "/api/v1/admin/providers",
+        json={
+            "name": "guard-test-provider-e2e",
+            "base_url": "https://example.com/api",
+            "auth_type": "api_key",
+            "api_key": "sk-test",
+        },
+    )
+    assert res.status_code == 201
+    provider = res.json()
+    pid = provider["id"]
+    slug = provider["slug"]
+
+    res = await client.post(
+        f"/api/v1/admin/providers/{pid}/models",
+        json={
+            "model_id": "guard-m1",
+            "display_name": "Guard Test",
+            "context_window": 128000,
+            "max_tokens": 4096,
+        },
+    )
+    assert res.status_code == 201
+    mid = res.json()["id"]
+    ref = f"{slug}/guard-m1"
+
+    # Org admin writes a preset that references this model.
+    res = await client.put(
+        "/api/v1/admin/model-presets",
+        json={
+            "presets": [{"label": "in-use", "chain": [ref], "is_default": True}],
+            "task_presets": {},
+        },
+    )
+    assert res.status_code == 200, res.text
+
+    # Now deleting the referenced model must fail with 409 + label list.
+    res = await client.delete(f"/api/v1/admin/providers/{pid}/models/{mid}")
+    assert res.status_code == 409, res.text
+    body = res.json()
+    assert body.get("error_code") == "model_in_use_by_preset", body
+    assert "in-use" in body.get("details", "")
+
+    # Repoint the preset chain at a different (auto-seeded system) ref so the
+    # caller-org row no longer references our model; delete should now succeed.
+    # We pick an unrelated dummy ref by first creating a second model on the
+    # same provider, repointing presets at it, then deleting our model.
+    res = await client.post(
+        f"/api/v1/admin/providers/{pid}/models",
+        json={
+            "model_id": "guard-m2",
+            "display_name": "Guard Test 2",
+            "context_window": 128000,
+            "max_tokens": 4096,
+        },
+    )
+    assert res.status_code == 201
+    mid2 = res.json()["id"]
+    other_ref = f"{slug}/guard-m2"
+    res = await client.put(
+        "/api/v1/admin/model-presets",
+        json={
+            "presets": [{"label": "moved", "chain": [other_ref], "is_default": True}],
+            "task_presets": {},
+        },
+    )
+    assert res.status_code == 200, res.text
+    res = await client.delete(f"/api/v1/admin/providers/{pid}/models/{mid}")
+    assert res.status_code == 204, res.text
+
+    # Cleanup
+    await client.delete(f"/api/v1/admin/providers/{pid}/models/{mid2}")
+    await client.delete(f"/api/v1/admin/providers/{pid}")
+
+
 async def test_org_settings(admin_client: tuple[AsyncClient, str]) -> None:
     """Admin can set and read org LLM settings."""
     client, _ws_id = admin_client
