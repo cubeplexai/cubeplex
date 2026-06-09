@@ -53,6 +53,28 @@ class InvalidModelRefError(LLMConfigError):
         )
 
 
+class AmbiguousOrgError(LLMConfigError):
+    """Admin route called by a user with admin/owner role in >1 org.
+
+    Admin routes are not workspace-scoped, so there is no path segment
+    that names the target org. Rather than silently pick one (today's
+    behaviour of ``resolve_current_org_id``), refuse the call so the
+    frontend can prompt the admin to choose.
+    """
+
+    def __init__(self, *, org_ids: list[str]) -> None:
+        super().__init__(
+            error_code="ambiguous_org",
+            message=(
+                "you are an admin of multiple orgs; this admin route requires "
+                "an explicit org selection"
+            ),
+            status_code=400,
+            details=f"org_ids={org_ids}",
+        )
+        self.org_ids = list(org_ids)
+
+
 class CorruptPresetsRowError(LLMConfigError):
     """OrgSettings.model_presets row failed schema validation at load time.
 
