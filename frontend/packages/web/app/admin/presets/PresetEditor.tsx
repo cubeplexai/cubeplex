@@ -62,6 +62,26 @@ function emptyBody(): AdminModelPresetsBody {
   return { presets: [], task_presets: {} }
 }
 
+/**
+ * Move an array entry from index `from` to index `to`. `to` is the index the
+ * moved item should occupy in the final array. Used by both arrow buttons
+ * (`reorder(arr, idx, idx ± 1)`) and HTML5 drag-drop
+ * (`reorder(arr, draggingIdx, dropTargetIdx)`) — the splice-after-removal
+ * shape gives "moved item lands at target's original slot" for both
+ * directions without any off-by-one adjustment.
+ *
+ * Exported for unit tests.
+ */
+export function reorder<T>(arr: readonly T[], from: number, to: number): T[] {
+  if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) {
+    return [...arr]
+  }
+  const next = [...arr]
+  const [item] = next.splice(from, 1)
+  next.splice(to, 0, item)
+  return next
+}
+
 export function PresetEditor({ initial, availableModels }: PresetEditorProps): React.ReactElement {
   const t = useTranslations('adminPresets')
   const [body, setBody] = useState<AdminModelPresetsBody>(() => initial.value ?? emptyBody())
@@ -100,12 +120,7 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
 
   const movePreset = (from: number, to: number): void => {
     if (to < 0 || to >= body.presets.length) return
-    setBody((b) => {
-      const next = [...b.presets]
-      const [item] = next.splice(from, 1)
-      next.splice(to, 0, item)
-      return { ...b, presets: next }
-    })
+    setBody((b) => ({ ...b, presets: reorder(b.presets, from, to) }))
   }
 
   const addPreset = (): void => {
@@ -143,10 +158,7 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
   const moveChainEntry = (presetIdx: number, from: number, to: number): void => {
     const preset = body.presets[presetIdx]
     if (!preset || to < 0 || to >= preset.chain.length) return
-    const next = [...preset.chain]
-    const [item] = next.splice(from, 1)
-    next.splice(to, 0, item)
-    updatePreset(presetIdx, { chain: next })
+    updatePreset(presetIdx, { chain: reorder(preset.chain, from, to) })
   }
 
   const removeChainEntry = (presetIdx: number, chainIdx: number): void => {
