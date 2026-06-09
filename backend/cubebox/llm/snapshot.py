@@ -13,11 +13,13 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.llm.config import ProviderConfig
+from cubebox.llm.errors import CorruptPresetsRowError
 from cubebox.llm.snapshot_schema import ModelPresetsValue
 
 logger = logging.getLogger(__name__)
@@ -45,7 +47,6 @@ async def load_llm_snapshot(
     """Read DB providers + OrgSettings → frozen snapshot. No YAML."""
     providers = await _load_providers(session, org_id, encryption_backend)
     presets, task_presets = await _load_presets(session, org_id)
-    _check_broken_refs(presets, providers)
     return LLMSnapshot(providers=providers, presets=presets, task_presets=task_presets)
 
 
@@ -146,37 +147,15 @@ async def _load_presets(
         org_row = (await session.execute(sys_stmt)).scalar_one_or_none()
     if org_row is None:
         return (), {}
-    parsed = ModelPresetsValue.model_validate(org_row.value)
+    try:
+        parsed = ModelPresetsValue.model_validate(org_row.value)
+    except ValidationError as exc:
+        raise CorruptPresetsRowError(
+            org_id=org_row.org_id,
+            errors=exc.errors(),
+        ) from exc
     presets = tuple(
         LLMPreset(label=p.label, chain=tuple(p.chain), is_default=p.is_default)
         for p in parsed.presets
     )
     return presets, dict(parsed.task_presets)
-
-
-def _check_broken_refs(
-    presets: tuple[LLMPreset, ...],
-    providers: Mapping[str, ProviderConfig],
-) -> None:
-    """Log warnings for chain refs whose provider+model don't exist in snapshot.providers.
-
-    Does NOT remove broken presets — the resolver surfaces broken_preset at
-    request time so the API can return a 400 with the missing refs.
-    """
-    for preset in presets:
-        missing: list[str] = []
-        for ref in preset.chain:
-            try:
-                slug, model_id = ref.split("/", 1)
-            except ValueError:
-                missing.append(ref)
-                continue
-            cfg = providers.get(slug)
-            if cfg is None or all(m.id != model_id for m in cfg.models):
-                missing.append(ref)
-        if missing:
-            logger.warning(
-                "preset %r has broken refs: %s",
-                preset.label,
-                missing,
-            )

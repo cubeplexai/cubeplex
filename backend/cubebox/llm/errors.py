@@ -4,6 +4,9 @@ Inherit from APIException so the existing FastAPI handler maps them to
 HTTP status + error_code automatically.
 """
 
+from collections.abc import Sequence
+from typing import Any
+
 from cubebox.api.exceptions import APIException
 
 
@@ -48,3 +51,21 @@ class InvalidModelRefError(LLMConfigError):
             message=f"model ref {ref!r} must be 'provider/model'",
             status_code=400,
         )
+
+
+class CorruptPresetsRowError(LLMConfigError):
+    """OrgSettings.model_presets row failed schema validation at load time.
+
+    Indicates DB-level corruption (admin SQL edit, migration bug, etc.)
+    since the admin write path validates via Pydantic.
+    """
+
+    def __init__(self, org_id: str | None, errors: Sequence[Any]) -> None:
+        super().__init__(
+            error_code="corrupt_presets_row",
+            message=f"OrgSettings.model_presets row for org_id={org_id!r} failed validation",
+            status_code=500,
+            details=f"validation_errors={list(errors)}",
+        )
+        self.org_id = org_id
+        self.errors = list(errors)
