@@ -789,6 +789,38 @@ async def send_message(
                 if row is None or row.status not in {"pending", "attached"}:
                     raise AttachmentReferenceInvalidError(fid)
 
+    # Validate preset early so unknown_preset / broken_preset surface as HTTP
+    # errors rather than mid-stream SSE error events. The actual run picks up
+    # its own snapshot inside _build_agent_for_conversation.
+    #
+    # NOTE: this runs BEFORE the attachment mark_attached_bulk and conversation
+    # timestamp bump below. resolve_preset can raise (UnknownPresetError /
+    # BrokenPresetError / NoDefaultPresetError) and those need to surface as
+    # 4xx without leaving orphaned attachment state or a bumped has_messages /
+    # updated_at on a turn that never ran.
+    from cubebox.llm.resolver import resolve_preset
+    from cubebox.llm.snapshot import load_llm_snapshot
+
+    async with async_session_maker() as _validate_session:
+        _snap = await load_llm_snapshot(
+            _validate_session,
+            ctx.org_id,
+            raw_request.app.state.encryption_backend,
+        )
+    # resolve_preset raises one of UnknownPresetError / BrokenPresetError /
+    # NoDefaultPresetError, all of which are APIException subclasses with the
+    # right status_code; the registered handler maps them to HTTP responses.
+    resolve_preset(_snap, request_obj.preset_label)
+
+    if request_obj.attachments:
+        from cubebox.repositories import AttachmentRepository
+
+        async with async_session_maker() as att_session:
+            att_repo = AttachmentRepository(
+                att_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
             # Flip pending → attached synchronously, before the run starts.
             # The background _execute_run path also calls this (idempotent),
             # but doing it here closes a race where the client navigates to
@@ -809,23 +841,6 @@ async def send_message(
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
     )
-
-    # Validate preset early so unknown_preset / broken_preset surface as HTTP
-    # errors rather than mid-stream SSE error events. The actual run picks up
-    # its own snapshot inside _build_agent_for_conversation.
-    from cubebox.llm.resolver import resolve_preset
-    from cubebox.llm.snapshot import load_llm_snapshot
-
-    async with async_session_maker() as _validate_session:
-        _snap = await load_llm_snapshot(
-            _validate_session,
-            ctx.org_id,
-            raw_request.app.state.encryption_backend,
-        )
-    # resolve_preset raises one of UnknownPresetError / BrokenPresetError /
-    # NoDefaultPresetError, all of which are APIException subclasses with the
-    # right status_code; the registered handler maps them to HTTP responses.
-    resolve_preset(_snap, request_obj.preset_label)
 
     run_manager = raw_request.app.state.run_manager
     run_ctx = RunContext(

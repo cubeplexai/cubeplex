@@ -30,6 +30,7 @@ import cubebox.db as _cubebox_db
 from cubebox.api.app import create_app
 from cubebox.db.engine import _build_database_url, engine
 from cubebox.db.session import get_session
+from cubebox.models.conversation import Conversation
 from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 from cubebox.models.provider import Model as DBModel
 from cubebox.models.provider import Provider as DBProvider
@@ -181,12 +182,15 @@ async def _seed_broken_default_preset() -> None:
 async def preset_error_client() -> AsyncIterator[httpx.AsyncClient]:
     """Authenticated client; each test seeds its own preset / provider state."""
     await _ensure_default_user_and_membership()
-    await _wipe_preset_seed_rows()
 
     app = _make_test_app()
     app.state.deployment_mode = "multi_tenant"
 
     async with _lifespan_context(app):
+        # Wipe AFTER lifespan startup so the seeder's freshly-committed
+        # model_presets / system-provider rows are cleared. Each test then
+        # seeds its own state (or, for no_default_preset, seeds nothing).
+        await _wipe_preset_seed_rows()
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD)
@@ -205,6 +209,26 @@ async def _create_conversation(client: httpx.AsyncClient, ws_id: str, title: str
     return conv_id
 
 
+async def _read_conversation_state(conv_id: str) -> tuple[bool, Any]:
+    """Return (has_messages, updated_at) straight from the DB.
+
+    Used to assert that a preset-validation failure leaves the conversation
+    row untouched — no orphan ``has_messages=True`` / bumped ``updated_at``
+    for a turn that never ran. ``updated_at`` is returned as the raw
+    SQLAlchemy datetime so callers can compare equality without ISO-format
+    rounding surprises.
+    """
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            row = await session.get(Conversation, conv_id)
+            assert row is not None, f"conversation {conv_id} missing from DB"
+            return bool(row.has_messages), row.updated_at
+    finally:
+        await test_engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_unknown_preset_label_400(preset_error_client: httpx.AsyncClient) -> None:
     """preset_label not in OrgSettings.model_presets → 400 unknown_preset."""
@@ -213,6 +237,7 @@ async def test_unknown_preset_label_400(preset_error_client: httpx.AsyncClient) 
     client = preset_error_client
     ws_id = DEFAULT_WS_ID
     conv_id = await _create_conversation(client, ws_id, "unknown-preset")
+    before_has_messages, before_updated_at = await _read_conversation_state(conv_id)
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
@@ -223,6 +248,14 @@ async def test_unknown_preset_label_400(preset_error_client: httpx.AsyncClient) 
     assert body.get("error_code") == "unknown_preset", body
     assert "ghost" in body.get("message", ""), body
 
+    # Locks the ordering invariant: preset validation must run BEFORE any
+    # mutation (attachment mark or has_messages / updated_at bump). If this
+    # assertion fires, the validation block has drifted back below the
+    # mutations and a 4xx will leave orphan state on the row.
+    after_has_messages, after_updated_at = await _read_conversation_state(conv_id)
+    assert after_has_messages == before_has_messages, (before_has_messages, after_has_messages)
+    assert after_updated_at == before_updated_at, (before_updated_at, after_updated_at)
+
 
 @pytest.mark.asyncio
 async def test_broken_preset_400_lists_refs(preset_error_client: httpx.AsyncClient) -> None:
@@ -232,6 +265,7 @@ async def test_broken_preset_400_lists_refs(preset_error_client: httpx.AsyncClie
     client = preset_error_client
     ws_id = DEFAULT_WS_ID
     conv_id = await _create_conversation(client, ws_id, "broken-preset")
+    before_has_messages, before_updated_at = await _read_conversation_state(conv_id)
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
@@ -245,6 +279,10 @@ async def test_broken_preset_400_lists_refs(preset_error_client: httpx.AsyncClie
     haystack = f"{body.get('message', '')} {body.get('details', '')}"
     assert "ghost/x" in haystack, body
 
+    after_has_messages, after_updated_at = await _read_conversation_state(conv_id)
+    assert after_has_messages == before_has_messages, (before_has_messages, after_has_messages)
+    assert after_updated_at == before_updated_at, (before_updated_at, after_updated_at)
+
 
 @pytest.mark.asyncio
 async def test_no_default_preset_500(preset_error_client: httpx.AsyncClient) -> None:
@@ -254,6 +292,7 @@ async def test_no_default_preset_500(preset_error_client: httpx.AsyncClient) -> 
     client = preset_error_client
     ws_id = DEFAULT_WS_ID
     conv_id = await _create_conversation(client, ws_id, "no-default-preset")
+    before_has_messages, before_updated_at = await _read_conversation_state(conv_id)
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
@@ -262,3 +301,7 @@ async def test_no_default_preset_500(preset_error_client: httpx.AsyncClient) -> 
     assert resp.status_code == 500, resp.text
     body = resp.json()
     assert body.get("error_code") == "no_default_preset", body
+
+    after_has_messages, after_updated_at = await _read_conversation_state(conv_id)
+    assert after_has_messages == before_has_messages, (before_has_messages, after_has_messages)
+    assert after_updated_at == before_updated_at, (before_updated_at, after_updated_at)
