@@ -415,4 +415,5 @@ async def seed_default_presets_from_config(session: AsyncSession) -> None:
     )
     session.add(row)
     await session.flush()
+    await session.commit()
     logger.info("Seeded OrgSettings.model_presets (default chain: %s)", default_chain)
