@@ -4,15 +4,19 @@ No DB. No cubebox.config. The chain wrapper in build_chain_model() is
 added in Task A7 (chain length 1 only for PR 1) and Task B1 (length >1).
 """
 
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 from cubepi.providers.base import ThinkingLevel
 
 from cubebox.llm.resolver import parse_model_ref
-from cubebox.llm.snapshot import LLMSnapshot
+from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
 
 if TYPE_CHECKING:
     from cubepi.providers.anthropic import CacheMarkerPolicy
+
+
+OnFailoverCb = Callable[[Any, Any, BaseException | str], Awaitable[None] | None]
 
 
 def build_provider(
@@ -101,3 +105,24 @@ def build_bound_model(
         max_tokens=model_cfg.max_tokens or 32000,
         temperature=0.7,
     )
+
+
+def build_chain_model(
+    snap: LLMSnapshot,
+    preset: LLMPreset,
+    *,
+    thinking: ThinkingLevel = "off",
+    cache_policy_factory: Callable[[str], "CacheMarkerPolicy | None"] | None = None,
+    on_failover: OnFailoverCb | None = None,
+) -> Any:
+    """chain length 1 → BoundModel; >1 → FallbackBoundModel (added in Task B1)."""
+    if len(preset.chain) == 0:
+        raise ValueError(f"preset {preset.label!r} has empty chain")
+    if len(preset.chain) > 1:
+        raise NotImplementedError(
+            "chain length >1 lands in PR 2 (Task B1); enforce length 1 for PR 1"
+        )
+    ref = preset.chain[0]
+    slug, _ = parse_model_ref(ref)
+    policy = cache_policy_factory(slug) if cache_policy_factory else None
+    return build_bound_model(snap, ref, thinking=thinking, cache_policy=policy)
