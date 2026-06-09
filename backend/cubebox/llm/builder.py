@@ -115,14 +115,22 @@ def build_chain_model(
     cache_policy_factory: Callable[[str], "CacheMarkerPolicy | None"] | None = None,
     on_failover: OnFailoverCb | None = None,
 ) -> Any:
-    """chain length 1 → BoundModel; >1 → FallbackBoundModel (added in Task B1)."""
+    """chain length 1 → BoundModel; >1 → FallbackBoundModel."""
     if len(preset.chain) == 0:
         raise ValueError(f"preset {preset.label!r} has empty chain")
-    if len(preset.chain) > 1:
-        raise NotImplementedError(
-            "chain length >1 lands in PR 2 (Task B1); enforce length 1 for PR 1"
-        )
-    ref = preset.chain[0]
-    slug, _ = parse_model_ref(ref)
-    policy = cache_policy_factory(slug) if cache_policy_factory else None
-    return build_bound_model(snap, ref, thinking=thinking, cache_policy=policy)
+
+    if len(preset.chain) == 1:
+        ref = preset.chain[0]
+        slug, _ = parse_model_ref(ref)
+        policy = cache_policy_factory(slug) if cache_policy_factory else None
+        return build_bound_model(snap, ref, thinking=thinking, cache_policy=policy)
+
+    from cubepi.providers.fallback import FallbackBoundModel
+
+    bounds = []
+    for ref in preset.chain:
+        slug, _ = parse_model_ref(ref)
+        policy = cache_policy_factory(slug) if cache_policy_factory else None
+        bounds.append(build_bound_model(snap, ref, thinking=thinking, cache_policy=policy))
+
+    return FallbackBoundModel(chain=tuple(bounds), on_failover=on_failover)
