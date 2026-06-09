@@ -478,6 +478,7 @@ def create_app(
         admin_llm,
         admin_mcp,
         admin_members,
+        admin_model_presets,
         admin_providers,
         admin_router,
         admin_sandbox_env,
@@ -532,6 +533,7 @@ def create_app(
     app.include_router(ws_settings.router, prefix="/api/v1")
     app.include_router(admin_providers.router, prefix="/api/v1")
     app.include_router(admin_llm.router, prefix="/api/v1")
+    app.include_router(admin_model_presets.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
     app.include_router(ws_triggers.router, prefix="/api/v1")
     app.include_router(trigger_ingest.router, prefix="/api/v1")
