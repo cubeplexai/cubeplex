@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from cubepi.providers.base import ThinkingLevel
 from fastapi import FastAPI
 from loguru import logger
 from redis.asyncio import Redis
@@ -776,6 +777,8 @@ class RunManager:
         attachments: list[str] | None = None,
         ctx: RunContext,
         run_id: str | None = None,
+        preset_label: str | None = None,
+        thinking: ThinkingLevel = "off",
     ) -> str:
         """Create and start a new background run.
 
@@ -842,6 +845,8 @@ class RunManager:
                 content=content,
                 attachments=list(attachments or []),
                 ctx=ctx,
+                preset_label=preset_label,
+                thinking=thinking,
             ),
             name=f"run:{run_id}",
         )
@@ -1323,6 +1328,8 @@ class RunManager:
         catalog_session: Any | None = None,
         trigger: str = "interactive",
         extra_ref_holder: dict[str, Any] | None = None,
+        preset_label: str | None = None,
+        thinking: ThinkingLevel = "off",
     ) -> str:
         """Execute a single user turn through the cubepi runtime.
 
@@ -1392,6 +1399,8 @@ class RunManager:
                 sse_queue=sse_queue,
                 publish_stream_event=publish_stream_event,
                 trigger=trigger,
+                preset_label=preset_label,
+                thinking=thinking,
             )
             # Late-bind extra_ref to the live agent._extra dict so compaction /
             # skills / todo middleware can read and write persistent state.
@@ -1954,6 +1963,8 @@ class RunManager:
         sse_queue: asyncio.Queue[dict[str, Any] | None],
         publish_stream_event: Any,
         trigger: str = "interactive",
+        preset_label: str | None = None,
+        thinking: ThinkingLevel = "off",
     ) -> tuple[Any, list[Any], Any]:
         """Build provider + middleware + tools + channel + agent for a conversation.
 
@@ -1994,9 +2005,7 @@ class RunManager:
             )
             await llm_session.commit()
 
-        # Preset selection: PR 1 uses default (None label). Task C2 will plumb
-        # body.preset_label.
-        preset = resolve_preset(snap, None)
+        preset = resolve_preset(snap, preset_label)
 
         async def _publish_failover_dict(rid: str, data_payload: dict[str, Any]) -> None:
             event = FailoverEvent(
@@ -2011,7 +2020,7 @@ class RunManager:
         this_run_model = build_chain_model(
             snap,
             preset,
-            thinking="off",  # Task C2 will plumb body.thinking
+            thinking=thinking,
             cache_policy_factory=lambda slug: (
                 CubeboxCacheMarkerPolicy()
                 if snap.providers[slug].api == "anthropic-messages"
@@ -2804,6 +2813,8 @@ class RunManager:
         content: str,
         attachments: list[str],
         ctx: RunContext,
+        preset_label: str | None = None,
+        thinking: ThinkingLevel = "off",
     ) -> None:
         from cubebox.api.routes.v1.conversations import _update_conversation_timestamp
         from cubebox.middleware.citations.counter import (
@@ -3065,6 +3076,8 @@ class RunManager:
                 catalog_session=catalog_session,
                 trigger=ctx.trigger,
                 extra_ref_holder=extra_ref_holder,
+                preset_label=preset_label,
+                thinking=thinking,
             )
             await _update_conversation_timestamp(
                 conversation_id,

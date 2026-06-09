@@ -823,6 +823,8 @@ async def send_message(
             content=request_obj.content,
             attachments=list(request_obj.attachments),
             ctx=run_ctx,
+            preset_label=request_obj.preset_label,
+            thinking=request_obj.thinking,
         )
     except RuntimeError as exc:
         raise HTTPException(
