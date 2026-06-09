@@ -317,6 +317,11 @@
     "addModel": "Add model",
     "deleteModel": "Delete",
     "deleteModelConfirm": "Delete model {name}?",
+    "modelInUseByPreset": {
+      "title": "Model is in use by presets",
+      "body": "Edit or remove the referencing presets first, then try again.",
+      "linkLabel": "Open Presets"
+    },
     "test": "Test",
     "testing": "Testing…",
     "testOk": "{latency}ms",

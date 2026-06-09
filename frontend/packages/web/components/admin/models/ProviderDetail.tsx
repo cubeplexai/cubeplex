@@ -1,9 +1,11 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { Box, Check, Loader2, Pencil, Plus, RotateCw, Trash2, Zap, X } from 'lucide-react'
 import {
+  ApiError,
   checkLiveness,
   parseTestStream,
   startTestStream,
@@ -22,6 +24,28 @@ import { ProviderLogo } from './ProviderLogo'
 import { ProviderFormDialog } from './ProviderFormDialog'
 import { ModelFormDialog } from './ModelFormDialog'
 import { ModelRow } from './ModelRow'
+
+/**
+ * Backend's ModelInUseByPresetError serialises refs as a Python-repr string
+ * ("refs=[{'org_id': '…', 'preset_label': '…'}, …]") via APIException.details.
+ * We extract the label/org pairs with a regex — the labels are validated
+ * elsewhere as URL-safe slugs (no quotes), so this is robust enough.
+ */
+export interface PresetRef {
+  org_id: string
+  preset_label: string
+}
+
+export function parsePresetRefs(details: string | null | undefined): PresetRef[] {
+  if (!details) return []
+  const refs: PresetRef[] = []
+  const re = /'org_id'\s*:\s*'([^']+)'\s*,\s*'preset_label'\s*:\s*'([^']+)'/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(details)) !== null) {
+    refs.push({ org_id: m[1], preset_label: m[2] })
+  }
+  return refs
+}
 
 interface ProviderDetailProps {
   provider: Provider
@@ -88,6 +112,7 @@ export function ProviderDetail({
   const [modelFormOpen, setModelFormOpen] = useState(false)
   const [editingModel, setEditingModel] = useState<Model | null>(null)
   const [modelError, setModelError] = useState<string | null>(null)
+  const [modelInUseRefs, setModelInUseRefs] = useState<PresetRef[] | null>(null)
   const [testingAll, setTestingAll] = useState(false)
   const [testingConn, setTestingConn] = useState(false)
 
@@ -174,9 +199,17 @@ export function ProviderDetail({
 
   async function handleDeleteModel(model: Model): Promise<void> {
     setModelError(null)
+    setModelInUseRefs(null)
     try {
       await onDeleteModel(client, provider.id, model.id)
     } catch (e) {
+      if (e instanceof ApiError && e.code === 'model_in_use_by_preset') {
+        const detailStr = typeof e.detail === 'string' ? e.detail : null
+        const refs = parsePresetRefs(detailStr)
+        setModelInUseRefs(refs)
+        setModelError(null)
+        return
+      }
       setModelError((e as Error).message)
     }
   }
@@ -343,6 +376,34 @@ export function ProviderDetail({
         {modelError && (
           <div className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {modelError}
+          </div>
+        )}
+
+        {modelInUseRefs && (
+          <div
+            className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+            data-testid="model-in-use-by-preset-error"
+            role="alert"
+          >
+            <div className="font-medium">{t('modelInUseByPreset.title')}</div>
+            <p className="mt-1 text-destructive/90">
+              {t('modelInUseByPreset.body')}{' '}
+              <Link
+                href="/admin/presets"
+                className="underline underline-offset-2 hover:text-destructive"
+              >
+                {t('modelInUseByPreset.linkLabel')}
+              </Link>
+            </p>
+            {modelInUseRefs.length > 0 && (
+              <ul className="mt-1.5 list-disc space-y-0.5 pl-5">
+                {modelInUseRefs.map((r) => (
+                  <li key={`${r.org_id}:${r.preset_label}`}>
+                    <code className="font-mono text-[11px]">{r.preset_label}</code>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 
