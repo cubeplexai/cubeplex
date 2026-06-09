@@ -2558,12 +2558,7 @@ class RunManager:
 
             subagent_mw = SubagentMiddleware(
                 subagents={},
-                default_model=provider.model(
-                    model_id,
-                    reasoning=_model_config.reasoning,
-                    max_tokens=_model_max_tokens,
-                    temperature=_model_temperature,
-                ),
+                default_model=this_run_model,
                 # Pass all tools (sandbox + artifact + builtin) collected so far
                 # as shared tools for subagent spawning, minus show_widget
                 # (top-level only in v1).
@@ -2719,24 +2714,18 @@ class RunManager:
                 return
 
             from cubebox.db.engine import async_session_maker
-            from cubebox.llm.factory import LLMFactory
+            from cubebox.llm.builder import build_chain_model
+            from cubebox.llm.resolver import resolve_task_preset
+            from cubebox.llm.snapshot import load_llm_snapshot
 
             async with async_session_maker() as _llm_session:
-                factory = LLMFactory(
-                    session=_llm_session,
-                    org_id=ctx.org_id,
-                    encryption_backend=self._app.state.encryption_backend,
+                snap = await load_llm_snapshot(
+                    _llm_session, ctx.org_id, self._app.state.encryption_backend
                 )
-                (
-                    provider_name,
-                    model_id,
-                    provider_config,
-                ) = await factory.resolve_default_provider_and_config()
                 await _llm_session.commit()
-            provider = factory.build_cubepi_provider(
-                provider_config, provider_name=provider_name, cache_policy=None
-            )
-            bound_model = provider.model(model_id)
+
+            preset = resolve_task_preset(snap, "compaction")
+            bound_model = build_chain_model(snap, preset, thinking="off")
             # Tracer is optional — pass None to run_consolidation when tracing
             # is disabled, otherwise the background LLM call is wrapped in
             # tracer.oneshot() so it shows up in `cubepi trace ls` filterable
@@ -2942,23 +2931,19 @@ class RunManager:
             # Resolve effective model + context_window for the DoneEvent. The
             # actual cubepi.Provider construction happens inside _run_cubepi_path.
             from cubebox.db.engine import async_session_maker
-            from cubebox.llm.factory import LLMFactory
+            from cubebox.llm.resolver import parse_model_ref, resolve_preset
+            from cubebox.llm.snapshot import load_llm_snapshot
 
             context_window: int = 0
             try:
                 async with async_session_maker() as ctx_session:
-                    ctx_factory = LLMFactory(
-                        session=ctx_session,
-                        org_id=ctx.org_id,
-                        encryption_backend=self._app.state.encryption_backend,
+                    ctx_snap = await load_llm_snapshot(
+                        ctx_session, ctx.org_id, self._app.state.encryption_backend
                     )
-                    (
-                        _ctx_provider,
-                        _ctx_model_id,
-                        _ctx_provider_config,
-                    ) = await ctx_factory.resolve_default_provider_and_config()
                     await ctx_session.commit()
-                _model_cfg = ctx_factory.get_model_config(_ctx_provider, _ctx_model_id)
+                _ctx_preset = resolve_preset(ctx_snap, None)
+                _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
+                _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
                 context_window = int(_model_cfg.context_window or 0)
             except Exception as exc:
                 logger.debug("Could not resolve context_window for DoneEvent: {}", exc)
@@ -3441,23 +3426,19 @@ class RunManager:
                         await emit_status("sandbox_failed", detail=str(exc))
 
             from cubebox.db.engine import async_session_maker
-            from cubebox.llm.factory import LLMFactory
+            from cubebox.llm.resolver import parse_model_ref, resolve_preset
+            from cubebox.llm.snapshot import load_llm_snapshot
 
             context_window: int = 0
             try:
                 async with async_session_maker() as ctx_session:
-                    ctx_factory = LLMFactory(
-                        session=ctx_session,
-                        org_id=ctx.org_id,
-                        encryption_backend=self._app.state.encryption_backend,
+                    ctx_snap = await load_llm_snapshot(
+                        ctx_session, ctx.org_id, self._app.state.encryption_backend
                     )
-                    (
-                        _ctx_provider,
-                        _ctx_model_id,
-                        _ctx_provider_config,
-                    ) = await ctx_factory.resolve_default_provider_and_config()
                     await ctx_session.commit()
-                _model_cfg = ctx_factory.get_model_config(_ctx_provider, _ctx_model_id)
+                _ctx_preset = resolve_preset(ctx_snap, None)
+                _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
+                _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
                 context_window = int(_model_cfg.context_window or 0)
             except Exception as exc:
                 logger.debug("Could not resolve context_window for respond DoneEvent: {}", exc)
