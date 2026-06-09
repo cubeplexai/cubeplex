@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
+from cubepi.providers.base import ThinkingLevel
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -391,6 +392,8 @@ class SendMessageRequest(BaseModel):
 
     content: str = ""
     attachments: list[str] = []
+    preset_label: str | None = None
+    thinking: ThinkingLevel = "off"
 
 
 class SendMessageResponse(BaseModel):
