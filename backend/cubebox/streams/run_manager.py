@@ -6,11 +6,12 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
 from cubepi.providers.base import ThinkingLevel
+from cubepi.providers.fallback import FallbackBoundModel
 from fastapi import FastAPI
 from loguru import logger
 from redis.asyncio import Redis
@@ -74,6 +75,20 @@ def _make_failover_publisher(
         )
 
     return _on_failover
+
+
+def _subagent_model_for(this_run_model: Any) -> Any:
+    """Strip ``on_failover`` so subagent failovers don't emit ``model_failover``
+    SSE events misattributed to the main agent (Fix-6).
+
+    Subagent failovers still occur transparently at the chain level — only the
+    SSE notification is suppressed. ``FallbackBoundModel`` is a frozen
+    dataclass; use :func:`dataclasses.replace`. Plain ``BoundModel`` has no
+    ``on_failover`` field, so pass through unchanged.
+    """
+    if isinstance(this_run_model, FallbackBoundModel):
+        return replace(this_run_model, on_failover=None)
+    return this_run_model
 
 
 def _subagent_shared_tools(tools: list[Any]) -> list[Any]:
@@ -2612,9 +2627,11 @@ class RunManager:
             except Exception:
                 pass
 
+            subagent_model = _subagent_model_for(this_run_model)
+
             subagent_mw = SubagentMiddleware(
                 subagents={},
-                default_model=this_run_model,
+                default_model=subagent_model,
                 # Pass all tools (sandbox + artifact + builtin) collected so far
                 # as shared tools for subagent spawning, minus show_widget
                 # (top-level only in v1).
