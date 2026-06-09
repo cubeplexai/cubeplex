@@ -19,9 +19,11 @@ import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
+import { FailoverBanner } from './FailoverBanner'
 import { MessageAttachments } from './MessageAttachments'
 import { TokenUsageBar } from './TokenUsageBar'
 import { MemoryUpdateChip } from './MemoryUpdateChip'
+import type { FailoverEvent } from '@/lib/types/events'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useMemoryCount } from '@/hooks/useMemoryCount'
 import { useMessages } from '@/hooks/useMessages'
@@ -32,6 +34,10 @@ import { rafThrottleScrollToBottom } from '@/lib/scrollToBottom'
 interface MessageListProps {
   conversationId: string
 }
+
+// Module-level stable empty array — avoids breaking Zustand's `===` selector
+// equality when the failover slice is missing/empty.
+const EMPTY_FAILOVER_EVENTS: FailoverEvent[] = []
 
 function msgTimestampMs(msg: Message): number {
   return msg.timestamp != null ? msg.timestamp * 1000 : 0
@@ -194,6 +200,16 @@ export function MessageList({ conversationId }: MessageListProps) {
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
+  // `failoverEvents` is an SSE side-channel slice the message store will
+  // populate once `model_failover` events are wired in (separate task).
+  // Until that lands, the selector returns [] and the banner-render block
+  // below is a no-op rather than a dangling import. Cast keeps F4 scoped
+  // to component + type + render-site without modifying MessageStore.
+  const failoverEvents = useMessageStore((s) => {
+    const slice = (s as unknown as { failoverEvents?: Record<string, FailoverEvent[]> })
+      .failoverEvents
+    return slice?.[conversationId] ?? EMPTY_FAILOVER_EVENTS
+  })
   const { workspaceId } = useWorkspaceContext()
   // Hoisted: also drives status-row visibility below so an empty chip doesn't
   // leave a stray gutter-only line.
@@ -405,6 +421,10 @@ export function MessageList({ conversationId }: MessageListProps) {
               />
             )}
           </div>
+        ))}
+
+        {failoverEvents.map((event, idx) => (
+          <FailoverBanner key={`${event.timestamp}-${idx}`} event={event} />
         ))}
 
         {mainStream && (
