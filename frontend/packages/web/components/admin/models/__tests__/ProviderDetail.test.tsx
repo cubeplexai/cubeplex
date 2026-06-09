@@ -3,7 +3,7 @@ import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError, type ApiClient, type Model, type Provider } from '@cubebox/core'
 import en from '../../../../messages/en.json'
-import { ProviderDetail, parsePresetRefs } from '../ProviderDetail'
+import { ProviderDetail, extractPresetRefs, parsePresetRefs } from '../ProviderDetail'
 
 // ProviderLogo pulls @lobehub/icons, whose transitive @lobehub/ui has an ESM
 // resolution bug under vitest. Stub it — these tests care about the delete flow.
@@ -104,6 +104,30 @@ describe('parsePresetRefs', () => {
   })
 })
 
+describe('extractPresetRefs', () => {
+  it('reads refs from a structured data payload', () => {
+    expect(
+      extractPresetRefs({
+        refs: [
+          { org_id: 'org_a', preset_label: 'in-use', source: 'org' },
+          { org_id: 'org_a', preset_label: 'sys-default', source: 'system' },
+        ],
+      }),
+    ).toEqual([
+      { org_id: 'org_a', preset_label: 'in-use', source: 'org' },
+      { org_id: 'org_a', preset_label: 'sys-default', source: 'system' },
+    ])
+  })
+
+  it('returns [] for non-object / missing refs / bad shape', () => {
+    expect(extractPresetRefs(null)).toEqual([])
+    expect(extractPresetRefs(undefined)).toEqual([])
+    expect(extractPresetRefs({})).toEqual([])
+    expect(extractPresetRefs({ refs: 'nope' })).toEqual([])
+    expect(extractPresetRefs({ refs: [{ org_id: 1 }] })).toEqual([])
+  })
+})
+
 describe('ProviderDetail — delete-model 409', () => {
   it('renders inline preset list with /admin/presets link on model_in_use_by_preset', async () => {
     const onDeleteModel = vi
@@ -128,6 +152,28 @@ describe('ProviderDetail — delete-model 409', () => {
     expect(alert).toHaveTextContent('in-use')
     const link = screen.getByRole('link', { name: /open presets/i })
     expect(link).toHaveAttribute('href', '/admin/presets')
+  })
+
+  it('prefers structured data.refs over the details regex when present', async () => {
+    const onDeleteModel = vi.fn().mockRejectedValue(
+      new ApiError(
+        'model custom/gpt-test is referenced by presets and cannot be deleted',
+        409,
+        'model_in_use_by_preset',
+        // Stale / unrelated details string — must be ignored when `data` is set.
+        'unparseable',
+        {
+          refs: [{ org_id: 'org_abc', preset_label: 'from-structured-data', source: 'org' }],
+        },
+      ),
+    )
+    renderDetail(onDeleteModel)
+
+    fireEvent.click(screen.getByLabelText('Delete gpt-test'))
+    fireEvent.click(screen.getByTestId('model-row-gpt-test-confirm-delete'))
+
+    const alert = await waitFor(() => screen.getByTestId('model-in-use-by-preset-error'))
+    expect(alert).toHaveTextContent('from-structured-data')
   })
 
   it('falls back to generic error for non-409 failures', async () => {

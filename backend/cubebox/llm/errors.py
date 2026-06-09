@@ -31,6 +31,7 @@ class BrokenPresetError(LLMConfigError):
             message=f"preset {label!r} has missing refs: {refs}",
             status_code=400,
             details=f"missing_refs={missing_refs}",
+            data={"missing_refs": list(missing_refs)},
         )
         self.missing_refs = missing_refs
 

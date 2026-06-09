@@ -142,4 +142,33 @@ describe('toApiError', () => {
     expect(err.message).toBe('model x/y is referenced')
     expect(err.detail).toBe("refs=[{'org_id': 'org_a', 'preset_label': 'in-use'}]")
   })
+
+  it('captures the structured `data` field from the flat envelope', async () => {
+    const res = new Response(
+      JSON.stringify({
+        status: 'error',
+        error_code: 'model_in_use_by_preset',
+        message: 'model x/y is referenced',
+        details: "refs=[{'org_id': 'org_a', 'preset_label': 'in-use', 'source': 'org'}]",
+        data: {
+          refs: [{ org_id: 'org_a', preset_label: 'in-use', source: 'org' }],
+        },
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    )
+    const err = await toApiError(res)
+    expect(err.code).toBe('model_in_use_by_preset')
+    expect(err.data).toEqual({
+      refs: [{ org_id: 'org_a', preset_label: 'in-use', source: 'org' }],
+    })
+  })
+
+  it('defaults data to null when the envelope has no data field', async () => {
+    const res = new Response(JSON.stringify({ status: 'error', error_code: 'x', message: 'm' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    })
+    const err = await toApiError(res)
+    expect(err.data).toBeNull()
+  })
 })

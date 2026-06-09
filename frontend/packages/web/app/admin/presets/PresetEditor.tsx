@@ -42,11 +42,21 @@ interface ApiError {
   error_code?: string
   message?: string
   details?: string
+  data?: unknown
 }
 
-// Backend BrokenPresetError serializes missing_refs as `details="missing_refs=['a/b', 'c/d']"`.
-// Parse it back into a string[]. Returns [] when the shape doesn't match.
-function parseMissingRefs(details: string | undefined): string[] {
+export function extractMissingRefs(data: unknown): string[] {
+  if (typeof data !== 'object' || data === null) return []
+  const refs = (data as { missing_refs?: unknown }).missing_refs
+  if (!Array.isArray(refs)) return []
+  return refs.filter((r): r is string => typeof r === 'string')
+}
+
+// Fallback: backend BrokenPresetError pre-data-field serialized missing_refs
+// as `details="missing_refs=['a/b', 'c/d']"`. Parse it back into a string[].
+// Returns [] when the shape doesn't match. Kept for back-compat with older
+// servers whose responses do not include the structured `data` field.
+export function parseMissingRefs(details: string | undefined): string[] {
   if (!details) return []
   const match = details.match(/missing_refs=\[(.*)\]/)
   if (!match) return []
@@ -215,7 +225,12 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
       if (!res.ok) {
         const data: ApiError = await res.json().catch(() => ({ status: 'error' }))
         if (data.error_code === 'broken_preset') {
-          const refs = parseMissingRefs(data.details)
+          // Prefer the structured `data.missing_refs` payload; fall back to
+          // parsing the Python-repr `details` string for older servers.
+          let refs = extractMissingRefs(data.data)
+          if (refs.length === 0) {
+            refs = parseMissingRefs(data.details)
+          }
           setMissingRefs(new Set(refs))
           setBanner(t('errorBrokenPreset'))
         } else {
