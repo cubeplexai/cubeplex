@@ -26,14 +26,30 @@ import { ModelFormDialog } from './ModelFormDialog'
 import { ModelRow } from './ModelRow'
 
 /**
- * Backend's ModelInUseByPresetError serialises refs as a Python-repr string
- * ("refs=[{'org_id': '…', 'preset_label': '…'}, …]") via APIException.details.
- * We extract the label/org pairs with a regex — the labels are validated
- * elsewhere as URL-safe slugs (no quotes), so this is robust enough.
+ * Backend's ModelInUseByPresetError carries refs in two places:
+ *   - `error.data.refs` — structured payload (preferred).
+ *   - `details` — Python-repr fallback like
+ *     "refs=[{'org_id': '…', 'preset_label': '…', 'source': '…'}, …]".
+ * Prefer the structured form; fall back to the regex parser for old
+ * responses (e.g. an admin's cached browser tab hitting an older server).
  */
 export interface PresetRef {
   org_id: string
   preset_label: string
+  source?: 'org' | 'system'
+}
+
+function isPresetRef(v: unknown): v is PresetRef {
+  if (typeof v !== 'object' || v === null) return false
+  const o = v as Record<string, unknown>
+  return typeof o.org_id === 'string' && typeof o.preset_label === 'string'
+}
+
+export function extractPresetRefs(data: unknown): PresetRef[] {
+  if (typeof data !== 'object' || data === null) return []
+  const refs = (data as { refs?: unknown }).refs
+  if (!Array.isArray(refs)) return []
+  return refs.filter(isPresetRef)
 }
 
 export function parsePresetRefs(details: string | null | undefined): PresetRef[] {
@@ -204,8 +220,13 @@ export function ProviderDetail({
       await onDeleteModel(client, provider.id, model.id)
     } catch (e) {
       if (e instanceof ApiError && e.code === 'model_in_use_by_preset') {
-        const detailStr = typeof e.detail === 'string' ? e.detail : null
-        const refs = parsePresetRefs(detailStr)
+        // Structured `data.refs` is the source of truth; fall back to the
+        // Python-repr regex parser for responses from older servers.
+        let refs = extractPresetRefs(e.data)
+        if (refs.length === 0) {
+          const detailStr = typeof e.detail === 'string' ? e.detail : null
+          refs = parsePresetRefs(detailStr)
+        }
         setModelInUseRefs(refs)
         setModelError(null)
         return

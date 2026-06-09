@@ -178,54 +178,70 @@ export class ApiError extends Error {
   status: number
   code: string | null
   detail: unknown
+  /**
+   * Structured payload from the backend's `data` field on APIException
+   * responses. Callers should prefer this over parsing the human-readable
+   * `detail` / `details` Python-repr fallback. Shape is per-error_code.
+   */
+  data: unknown
 
-  constructor(message: string, status: number, code: string | null, detail: unknown) {
+  constructor(
+    message: string,
+    status: number,
+    code: string | null,
+    detail: unknown,
+    data: unknown = null,
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.detail = detail
+    this.data = data
   }
 }
 
 export async function toApiError(res: Response): Promise<ApiError> {
   const contentType = res.headers.get('content-type')
   if (contentType?.includes('application/json')) {
-    let data: {
+    let body: {
       message?: string
       error_code?: string
       details?: string
       detail?: string | { code?: string; message?: string; reason?: string }
+      data?: unknown
     }
     try {
-      data = (await res.json()) as typeof data
+      body = (await res.json()) as typeof body
     } catch {
       return new ApiError(`HTTP ${res.status}: ${res.statusText}`, res.status, null, null)
     }
     let code: string | null = null
     let message: string | null = null
     let detailFallback: string | undefined
-    if (typeof data.detail === 'string') {
-      detailFallback = data.detail
-    } else if (data.detail && typeof data.detail === 'object') {
-      code = data.detail.code ?? null
-      message = data.detail.message ?? null
-      detailFallback = data.detail.reason
+    if (typeof body.detail === 'string') {
+      detailFallback = body.detail
+    } else if (body.detail && typeof body.detail === 'object') {
+      code = body.detail.code ?? null
+      message = body.detail.message ?? null
+      detailFallback = body.detail.reason
     }
     // Backend's custom APIException handler returns a flat envelope
-    // ({status, error_code, message, details}) instead of FastAPI's nested
-    // `detail.code` shape. Surface both so callers can branch on `code` and
-    // read the `details` string uniformly via `detail`.
-    if (!code && typeof data.error_code === 'string') {
-      code = data.error_code
+    // ({status, error_code, message, details, data?}) instead of FastAPI's
+    // nested `detail.code` shape. Surface both so callers can branch on
+    // `code`, read the `details` string uniformly via `detail`, and read
+    // structured payloads via `data` when available.
+    if (!code && typeof body.error_code === 'string') {
+      code = body.error_code
     }
-    const flatDetails = typeof data.details === 'string' ? data.details : undefined
+    const flatDetails = typeof body.details === 'string' ? body.details : undefined
     if (!detailFallback && flatDetails) {
       detailFallback = flatDetails
     }
-    const finalMessage = data.message || message || detailFallback || `HTTP ${res.status}`
-    const detailField = data.detail ?? flatDetails ?? null
-    return new ApiError(finalMessage, res.status, code, detailField)
+    const finalMessage = body.message || message || detailFallback || `HTTP ${res.status}`
+    const detailField = body.detail ?? flatDetails ?? null
+    const dataField = body.data ?? null
+    return new ApiError(finalMessage, res.status, code, detailField, dataField)
   }
   return new ApiError(`HTTP ${res.status}: ${res.statusText}`, res.status, null, null)
 }

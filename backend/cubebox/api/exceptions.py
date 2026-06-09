@@ -22,6 +22,7 @@ class APIException(Exception):
         message: str,
         status_code: int,
         details: str | None = None,
+        data: dict[str, Any] | None = None,
     ) -> None:
         """Initialize API exception
 
@@ -30,11 +31,16 @@ class APIException(Exception):
             message: Human-readable error message
             status_code: HTTP status code
             details: Optional detailed error information
+            data: Optional structured payload. Surfaced as the top-level
+                ``data`` field on the JSON response so frontend callers
+                can branch on typed values instead of parsing ``details``
+                (which carries a Python-repr fallback only).
         """
         self.error_code = error_code
         self.message = message
         self.status_code = status_code
         self.details = details
+        self.data = data
         super().__init__(self.message)
 
     def to_error_event(self) -> ErrorEvent:
@@ -66,6 +72,8 @@ class APIException(Exception):
         }
         if self.details:
             response["details"] = self.details
+        if self.data is not None:
+            response["data"] = self.data
         return response
 
 
@@ -351,5 +359,6 @@ class ModelInUseByPresetError(APIException):
             message=f"model {slug}/{model_id} is referenced by presets and cannot be deleted",
             status_code=status.HTTP_409_CONFLICT,
             details=f"refs={refs}",
+            data={"refs": refs},
         )
         self.refs = refs
