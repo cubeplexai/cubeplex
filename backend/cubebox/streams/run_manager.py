@@ -2712,6 +2712,10 @@ class RunManager:
             reasoning=_model_config.reasoning,
             thinking="medium" if _model_config.reasoning else "off",
             channel=sandbox_hitl_channel,
+            # Pass the pre-built chain model so a FallbackBoundModel
+            # (chain len > 1) drives the agent instead of being silently
+            # collapsed to chain[0] by a fresh provider.model() call.
+            bound_model=this_run_model,
         )
 
         # Stash provider_name / model_id / memory-repo factory on the bridge

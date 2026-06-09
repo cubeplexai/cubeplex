@@ -34,6 +34,7 @@ def create_cubebox_agent(
     reasoning: bool = False,
     thinking: ThinkingLevel = "off",
     channel: HitlChannel | None = None,
+    bound_model: Any = None,
 ) -> Agent[Any]:
     """Build a cubepi.Agent for cubebox's cubepi runtime path.
 
@@ -41,13 +42,23 @@ def create_cubebox_agent(
     sites, but the cubepi 0.7 API now reads ``provider_id`` off the
     provider instance — set it via
     ``cubebox.llm.builder.build_provider(snap, slug)``.
+
+    ``bound_model`` is the pre-built ``BoundModel`` or ``FallbackBoundModel``
+    that should drive the agent. When provided (the M3.h+ path) it is passed
+    through unchanged so chain-aware fallback survives all the way to
+    cubepi's agent loop. When ``None`` (legacy callers) a fresh ``BoundModel``
+    is built from ``provider`` + ``model_id`` — single-leg only, no failover.
     """
     mw_list = middleware or []
-    model = provider.model(
-        model_id,
-        reasoning=reasoning,
-        max_tokens=max_tokens,
-        temperature=temperature,
+    model = (
+        bound_model
+        if bound_model is not None
+        else provider.model(
+            model_id,
+            reasoning=reasoning,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
     )
     return Agent(
         model=model,
