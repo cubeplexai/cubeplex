@@ -1,0 +1,48 @@
+"""builder.build_provider — Provider construction from snapshot.providers[slug]."""
+
+import pytest
+
+from cubebox.llm.builder import build_provider
+from cubebox.llm.config import ProviderConfig
+from cubebox.llm.snapshot import LLMSnapshot
+
+
+def _snap(**provider_kwargs: object) -> LLMSnapshot:
+    return LLMSnapshot(
+        providers={"acme": ProviderConfig(api="openai-completions", **provider_kwargs)},
+        presets=(),
+        task_presets={},
+    )
+
+
+def test_build_provider_openai_completions() -> None:
+    from cubepi.providers.openai import OpenAIProvider
+
+    p = build_provider(_snap(base_url="https://x", api_key="k"), "acme")
+    assert isinstance(p, OpenAIProvider)
+    assert p.provider_id == "acme"
+
+
+def test_build_provider_anthropic_messages_with_cache_policy() -> None:
+    from cubepi.providers.anthropic import AnthropicProvider
+
+    from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
+
+    snap = LLMSnapshot(
+        providers={
+            "anthr": ProviderConfig(
+                api="anthropic-messages",
+                base_url="https://api.anthropic.com",
+                api_key="k",
+            ),
+        },
+        presets=(),
+        task_presets={},
+    )
+    p = build_provider(snap, "anthr", cache_policy=CubeboxCacheMarkerPolicy())
+    assert isinstance(p, AnthropicProvider)
+
+
+def test_build_provider_unknown_slug_raises() -> None:
+    with pytest.raises(ValueError, match="acme"):
+        build_provider(LLMSnapshot(providers={}, presets=(), task_presets={}), "acme")
