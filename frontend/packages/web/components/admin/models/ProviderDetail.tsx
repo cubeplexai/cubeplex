@@ -421,9 +421,19 @@ export function ProviderDetail({
                 {modelInUseRefs.map((r) => (
                   <li key={`${r.org_id}:${r.preset_label}`}>
                     <code className="font-mono text-[11px]">{r.preset_label}</code>
+                    {r.source && (
+                      <span className="ml-1 text-xs text-muted-foreground">
+                        {r.source === 'system'
+                          ? t('modelInUseByPreset.systemSourceLabel')
+                          : t('modelInUseByPreset.orgSourceLabel')}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
+            )}
+            {modelInUseRefs.some((r) => r.source === 'system') && (
+              <p className="mt-2 text-destructive/90">{t('modelInUseByPreset.systemHint')}</p>
             )}
           </div>
         )}

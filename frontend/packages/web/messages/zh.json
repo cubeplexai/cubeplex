@@ -321,7 +321,10 @@
     "modelInUseByPreset": {
       "title": "该模型正在被预设引用",
       "body": "请先编辑或删除引用它的预设，再重试。",
-      "linkLabel": "打开预设管理"
+      "linkLabel": "打开预设管理",
+      "systemSourceLabel": "（系统）",
+      "orgSourceLabel": "（组织）",
+      "systemHint": "部分引用来自你所在组织的默认（系统）预设。要删除该模型，请先打开 /admin/presets，点击“保存”生成一份组织级副本，再移除其中的引用。"
     },
     "test": "测试",
     "testing": "测试中…",
