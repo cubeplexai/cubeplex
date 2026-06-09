@@ -6,6 +6,9 @@ added in Task A7 (chain length 1 only for PR 1) and Task B1 (length >1).
 
 from typing import TYPE_CHECKING, Any
 
+from cubepi.providers.base import ThinkingLevel
+
+from cubebox.llm.resolver import parse_model_ref
 from cubebox.llm.snapshot import LLMSnapshot
 
 if TYPE_CHECKING:
@@ -69,3 +72,27 @@ def build_provider(
         )
 
     raise ValueError(f"unsupported api for cubepi provider: {api!r}")
+
+
+def build_bound_model(
+    snap: LLMSnapshot,
+    ref: str,
+    *,
+    thinking: ThinkingLevel = "off",
+    cache_policy: "CacheMarkerPolicy | None" = None,
+) -> Any:
+    """Build a cubepi BoundModel for `ref`, binding max_tokens / reasoning."""
+    slug, model_id = parse_model_ref(ref)
+    cfg = snap.providers.get(slug)
+    if cfg is None:
+        raise ValueError(f"provider slug {slug!r} not in snapshot")
+    model_cfg = next((m for m in cfg.models if m.id == model_id), None)
+    if model_cfg is None:
+        raise ValueError(f"model {model_id!r} not in provider {slug!r}")
+    provider = build_provider(snap, slug, cache_policy=cache_policy)
+    return provider.model(
+        model_id,
+        reasoning=model_cfg.reasoning,
+        max_tokens=model_cfg.max_tokens or 32000,
+        temperature=0.7,
+    )
