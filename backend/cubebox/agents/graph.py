@@ -40,7 +40,7 @@ def create_cubebox_agent(
     ``provider_name`` is accepted for telemetry parity with older call
     sites, but the cubepi 0.7 API now reads ``provider_id`` off the
     provider instance — set it via
-    ``LLMFactory.build_cubepi_provider(provider_config, provider_name=...)``.
+    ``cubebox.llm.builder.build_provider(snap, slug)``.
     """
     mw_list = middleware or []
     model = provider.model(

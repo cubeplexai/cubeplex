@@ -23,12 +23,7 @@ from sqlmodel import Field, SQLModel
 from cubebox.models.mixins import TimestampMixin
 from cubebox.models.public_id import PREFIX_ORG_SETTING, generate_public_id
 
-# Per-task model routing. value shape:
-#   {"chat": "<provider/model>", "title": "...", "summarize": "..."}
-# All keys optional; a missing key falls back to default_model.
-TASK_MODELS_KEY = "task_models"
-
-# Replacement for the legacy default_model / fallback_models / task_models keys.
+# Per-org model presets + per-task preset routing.
 # Schema lives in cubebox.llm.snapshot_schema.ModelPresetsValue.
 MODEL_PRESETS_KEY = "model_presets"
 

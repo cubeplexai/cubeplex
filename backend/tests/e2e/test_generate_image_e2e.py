@@ -210,8 +210,6 @@ async def generate_image_client(
         faux_tool_call,
     )
 
-    from cubebox.llm.factory import LLMFactory
-
     faux_provider = FauxProvider()
     faux_provider.set_responses(
         [
@@ -228,11 +226,11 @@ async def generate_image_client(
         ]
     )
 
-    # Monkeypatch LLMFactory.build_cubepi_provider to return our FauxProvider.
+    # Monkeypatch cubebox.llm.builder.build_provider to return our FauxProvider
+    # regardless of the snapshot's resolved provider slug.
     monkeypatch.setattr(
-        LLMFactory,
-        "build_cubepi_provider",
-        lambda self, provider_config, **kw: faux_provider,
+        "cubebox.llm.builder.build_provider",
+        lambda snap, slug, **kw: faux_provider,
     )
 
     # --- 5. Create temp sandbox directory ---

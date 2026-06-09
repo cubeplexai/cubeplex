@@ -32,7 +32,7 @@ _CONV_ID = "conv_t7_smoke"
 
 
 def _stub_app() -> MagicMock:
-    """A FastAPI app whose state exposes the bits LLMFactory + MCP loader touch."""
+    """A FastAPI app whose state exposes the bits snapshot loader + MCP loader touch."""
     app = MagicMock()
     app.state.encryption_backend = MagicMock()
     app.state.mcp_user_token_signer = MagicMock()
