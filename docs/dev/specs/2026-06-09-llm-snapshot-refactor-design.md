@@ -146,6 +146,24 @@ cubebox/llm/
 `services/task_model_resolver.py` is deleted; its logic moves into
 `resolver.resolve_task_preset`.
 
+### `OrgSettings` schema refactor (added mid-implementation)
+
+The original spec assumed `OrgSettings(org_id=NULL, key='model_presets')` would
+just work for the system-level fallback row. It did not: the existing
+table had `(org_id, key)` as a composite PK with both columns non-null and
+`org_id` FK-referencing `organizations.id`.
+
+The fix matches the established Credential / Provider system-row pattern:
+
+- Add a surrogate `id: str` primary key with `oset-` prefix.
+- Make `org_id: str | None` nullable.
+- Replace the composite PK with two partial unique indexes:
+  - `uq_org_settings_org_key` on `(org_id, key)` where `org_id IS NOT NULL`.
+  - `uq_org_settings_system_key` on `(key,)` where `org_id IS NULL`.
+
+This refactor lives in a dedicated alembic migration; it is a prerequisite
+for `load_llm_snapshot` to read the system row.
+
 ### Data structures
 
 ```python
