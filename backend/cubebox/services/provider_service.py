@@ -362,16 +362,25 @@ class ProviderService:
         m = await self._models.get(model_db_id)
         if m is None or m.provider_id != provider_id:
             raise ModelNotFoundError(f"Model {model_db_id} not found")
-        # Per D6: scan caller-org row only (no system row, no other orgs).
-        # System row is the chicken-and-egg trap; cross-org scan would leak labels.
-        labels = await find_preset_refs_to_model(
+        # Per D6: scan caller-org row first. If absent, fall back to the
+        # system row — its presets are the org's effective presets, so a
+        # delete that ignores them would break the next run. Other orgs'
+        # rows are never scanned (cross-tenant info leak).
+        refs = await find_preset_refs_to_model(
             self._session, self.org_id, provider.slug, m.model_id
         )
-        if labels:
+        if refs:
             raise ModelInUseByPresetError(
                 slug=provider.slug,
                 model_id=m.model_id,
-                refs=[{"org_id": self.org_id, "preset_label": label} for label in labels],
+                refs=[
+                    {
+                        "org_id": self.org_id,
+                        "preset_label": r["preset_label"],
+                        "source": r["source"],
+                    }
+                    for r in refs
+                ],
             )
         await self._models.delete(m)
 

@@ -112,7 +112,7 @@ async def test_write_rejects_unknown_ref(session):
 
 
 @pytest.mark.asyncio
-async def test_find_preset_refs_to_model(session):
+async def test_find_preset_refs_to_model_scans_org_row(session):
     session.add(
         OrgSettings(
             org_id="org_x",
@@ -128,8 +128,58 @@ async def test_find_preset_refs_to_model(session):
     )
     await session.commit()
     refs = await find_preset_refs_to_model(session, "org_x", "acme", "m1")
-    assert set(refs) == {"ultra", "mini"}
+    assert {r["preset_label"] for r in refs} == {"ultra", "mini"}
+    assert all(r["source"] == "org" for r in refs)
     refs2 = await find_preset_refs_to_model(session, "org_x", "acme", "m2")
-    assert refs2 == ["ultra"]
+    assert refs2 == [{"preset_label": "ultra", "source": "org"}]
     refs3 = await find_preset_refs_to_model(session, "org_x", "ghost", "x")
     assert refs3 == []
+
+
+@pytest.mark.asyncio
+async def test_find_preset_refs_falls_back_to_system_when_no_org_row(session):
+    # No org row exists; the system row references the model. Deleting that
+    # model would break the org's next run, so the guard must catch it.
+    session.add(
+        OrgSettings(
+            org_id=None,
+            key=MODEL_PRESETS_KEY,
+            value={
+                "presets": [
+                    {"label": "sys-default", "chain": ["acme/m1"], "is_default": True},
+                ],
+                "task_presets": {},
+            },
+        )
+    )
+    await session.commit()
+    refs = await find_preset_refs_to_model(session, "org_x", "acme", "m1")
+    assert refs == [{"preset_label": "sys-default", "source": "system"}]
+
+
+@pytest.mark.asyncio
+async def test_find_preset_refs_org_row_supersedes_system(session):
+    # When the org has its own row, the system row is invisible — that row
+    # is no longer the org's effective config.
+    session.add(
+        OrgSettings(
+            org_id=None,
+            key=MODEL_PRESETS_KEY,
+            value={
+                "presets": [
+                    {"label": "sys-default", "chain": ["acme/m1"], "is_default": True},
+                ],
+                "task_presets": {},
+            },
+        )
+    )
+    session.add(
+        OrgSettings(
+            org_id="org_x",
+            key=MODEL_PRESETS_KEY,
+            value={"presets": [], "task_presets": {}},
+        )
+    )
+    await session.commit()
+    refs = await find_preset_refs_to_model(session, "org_x", "acme", "m1")
+    assert refs == []

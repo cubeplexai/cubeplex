@@ -70,18 +70,37 @@ async def find_preset_refs_to_model(
     org_id: str,
     slug: str,
     model_id: str,
-) -> list[str]:
-    """Return labels of org presets whose chain references the given model ref."""
+) -> list[dict[str, str]]:
+    """Return ``{preset_label, source}`` entries for presets that reference this ref.
+
+    Scans the caller's own org row first. If the org has no row, falls back
+    to the system row — the org's effective presets come from there, so
+    deleting a model referenced by a system preset would break the org's
+    next run (broken_preset at load time).
+
+    Other orgs' rows are NEVER scanned (cross-tenant info leak per D6).
+    """
     ref = f"{slug}/{model_id}"
     org_stmt = select(OrgSettings).where(
         OrgSettings.org_id == org_id,  # type: ignore[arg-type]
         OrgSettings.key == MODEL_PRESETS_KEY,  # type: ignore[arg-type]
     )
-    row = (await session.execute(org_stmt)).scalar_one_or_none()
-    if row is None:
+    org_row = (await session.execute(org_stmt)).scalar_one_or_none()
+    if org_row is not None:
+        return [
+            {"preset_label": preset["label"], "source": "org"}
+            for preset in org_row.value.get("presets", [])
+            if ref in preset.get("chain", [])
+        ]
+    sys_stmt = select(OrgSettings).where(
+        OrgSettings.org_id.is_(None),  # type: ignore[union-attr]
+        OrgSettings.key == MODEL_PRESETS_KEY,  # type: ignore[arg-type]
+    )
+    sys_row = (await session.execute(sys_stmt)).scalar_one_or_none()
+    if sys_row is None:
         return []
-    out: list[str] = []
-    for preset in row.value.get("presets", []):
-        if ref in preset.get("chain", []):
-            out.append(preset["label"])
-    return out
+    return [
+        {"preset_label": preset["label"], "source": "system"}
+        for preset in sys_row.value.get("presets", [])
+        if ref in preset.get("chain", [])
+    ]
