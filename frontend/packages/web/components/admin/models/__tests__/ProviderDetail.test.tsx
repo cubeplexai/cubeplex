@@ -176,6 +176,56 @@ describe('ProviderDetail — delete-model 409', () => {
     expect(alert).toHaveTextContent('from-structured-data')
   })
 
+  it('shows source badges and a system-hint paragraph when a ref is system-sourced', async () => {
+    const onDeleteModel = vi.fn().mockRejectedValue(
+      new ApiError(
+        'model custom/gpt-test is referenced by presets and cannot be deleted',
+        409,
+        'model_in_use_by_preset',
+        null,
+        {
+          refs: [
+            { org_id: 'org_abc', preset_label: 'org-preset', source: 'org' },
+            { org_id: 'org_abc', preset_label: 'system-default', source: 'system' },
+          ],
+        },
+      ),
+    )
+    renderDetail(onDeleteModel)
+
+    fireEvent.click(screen.getByLabelText('Delete gpt-test'))
+    fireEvent.click(screen.getByTestId('model-row-gpt-test-confirm-delete'))
+
+    const alert = await waitFor(() => screen.getByTestId('model-in-use-by-preset-error'))
+    expect(alert).toHaveTextContent('org-preset')
+    expect(alert).toHaveTextContent('(org)')
+    expect(alert).toHaveTextContent('system-default')
+    expect(alert).toHaveTextContent('(system)')
+    expect(alert).toHaveTextContent(/system.*presets/i)
+  })
+
+  it('omits the system-hint paragraph when no ref is system-sourced', async () => {
+    const onDeleteModel = vi.fn().mockRejectedValue(
+      new ApiError(
+        'model custom/gpt-test is referenced by presets and cannot be deleted',
+        409,
+        'model_in_use_by_preset',
+        null,
+        {
+          refs: [{ org_id: 'org_abc', preset_label: 'org-preset', source: 'org' }],
+        },
+      ),
+    )
+    renderDetail(onDeleteModel)
+
+    fireEvent.click(screen.getByLabelText('Delete gpt-test'))
+    fireEvent.click(screen.getByTestId('model-row-gpt-test-confirm-delete'))
+
+    const alert = await waitFor(() => screen.getByTestId('model-in-use-by-preset-error'))
+    expect(alert).toHaveTextContent('(org)')
+    expect(alert).not.toHaveTextContent(en.adminModels.modelInUseByPreset.systemHint)
+  })
+
   it('falls back to generic error for non-409 failures', async () => {
     const onDeleteModel = vi.fn().mockRejectedValue(new Error('network down'))
     renderDetail(onDeleteModel)
