@@ -9,6 +9,10 @@ import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
 import { PendingSteers } from '@/components/layout/PendingSteers'
+import { PresetPicker } from '@/components/chat/PresetPicker'
+import { ThinkingControl } from '@/components/chat/ThinkingControl'
+import { ThinkingBadge } from '@/components/chat/ThinkingBadge'
+import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
 
 interface InputBarProps {
   conversationId?: string
@@ -123,7 +127,16 @@ export function InputBar({
       setContent('')
       resetTextareaHeight()
       clearStaging(conversationId!)
-      await send(client, conversationId!, text, ids, optimisticAttachments)
+      // Pull the per-workspace preset + thinking choice at send time so the
+      // user's most recent toolbar change is always reflected (no stale
+      // closure). Falls back to `undefined` when no workspace is available
+      // (e.g. tests that render <InputBar onSubmit={...} /> without context),
+      // which lets the backend use the workspace default.
+      const selection = workspaceId ? getPresetSelectionStore(workspaceId).getState() : null
+      const sendOptions = selection
+        ? { preset_label: selection.presetLabel, thinking: selection.thinking }
+        : undefined
+      await send(client, conversationId!, text, ids, optimisticAttachments, sendOptions)
     } catch (err) {
       console.error('Failed to send message:', err)
     } finally {
@@ -245,6 +258,13 @@ export function InputBar({
               </button>
             </div>
           ))}
+        </div>
+      )}
+      {workspaceId && (
+        <div className="flex items-center gap-2 pb-1.5">
+          <PresetPicker wsId={workspaceId} />
+          <ThinkingControl wsId={workspaceId} />
+          <ThinkingBadge wsId={workspaceId} />
         </div>
       )}
       <div

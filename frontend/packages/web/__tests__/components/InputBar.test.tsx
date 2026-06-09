@@ -3,6 +3,7 @@ import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import en from '../../messages/en.json'
 import { InputBar } from '../../components/layout/InputBar'
+import { getPresetSelectionStore } from '../../lib/stores/preset-selection'
 
 const storeMocks = vi.hoisted(() => ({
   send: vi.fn(),
@@ -66,6 +67,13 @@ vi.mock('@/hooks/useWorkspaceContext', () => ({
   useWorkspaceContext: () => ({ workspaceId: 'ws-1' }),
 }))
 
+vi.mock('@/lib/api/presets', () => ({
+  fetchWorkspaceModelPresets: vi.fn().mockResolvedValue([
+    { label: 'default', is_default: true },
+    { label: 'reasoning', is_default: false },
+  ]),
+}))
+
 function renderWithIntl(ui: React.ReactElement): ReturnType<typeof render> {
   return render(
     <NextIntlClientProvider locale="en" messages={en}>
@@ -79,6 +87,10 @@ describe('InputBar', () => {
     vi.clearAllMocks()
     storeMocks.state.isStreaming = false
     storeMocks.state.streamingConversationId = null
+    // Reset the per-`wsId` preset selection so each test starts from "no
+    // explicit choice / thinking off". The store factory caches a single
+    // hook instance per wsId; clearing state on the cached store is safe.
+    getPresetSelectionStore('ws-1').setState({ presetLabel: null, thinking: 'off' })
   })
 
   it('keeps the textarea editable once a streamed run is in flight (for steering)', async () => {
@@ -149,6 +161,53 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(onSubmit).toHaveBeenCalledWith('', [file])
     })
+  })
+
+  it('renders the preset picker + thinking control toolbar when a workspace is present', () => {
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    expect(screen.getByLabelText('Model preset')).toBeInTheDocument()
+    expect(screen.getByLabelText('Thinking level')).toBeInTheDocument()
+    // The badge is hidden when thinking is "off" (default) so the toolbar
+    // doesn't show a chip for the standard case.
+    expect(screen.queryByRole('status', { name: /^Thinking level/ })).not.toBeInTheDocument()
+  })
+
+  it('shows the ThinkingBadge inline whenever the thinking level is non-off', () => {
+    getPresetSelectionStore('ws-1').setState({ thinking: 'high' })
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    const badge = screen.getByRole('status', { name: 'Thinking level high' })
+    expect(badge).toBeInTheDocument()
+    expect(badge).toHaveTextContent('thinking: high')
+  })
+
+  it('forwards the current preset_label and thinking selection on send', async () => {
+    getPresetSelectionStore('ws-1').setState({ presetLabel: 'reasoning', thinking: 'medium' })
+    storeMocks.send.mockResolvedValue(undefined)
+
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'hello' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => {
+      expect(storeMocks.send).toHaveBeenCalled()
+    })
+    const callArgs = storeMocks.send.mock.calls[0]
+    // send(client, conversationId, text, ids, optimisticAttachments, options)
+    expect(callArgs[1]).toBe('conv-1')
+    expect(callArgs[2]).toBe('hello')
+    expect(callArgs[5]).toEqual({ preset_label: 'reasoning', thinking: 'medium' })
+  })
+
+  it('sends preset_label: null when the user has not picked a preset', async () => {
+    storeMocks.send.mockResolvedValue(undefined)
+    renderWithIntl(<InputBar conversationId="conv-1" />)
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'hi' } })
+    fireEvent.click(screen.getByTestId('send-button'))
+
+    await waitFor(() => {
+      expect(storeMocks.send).toHaveBeenCalled()
+    })
+    expect(storeMocks.send.mock.calls[0][5]).toEqual({ preset_label: null, thinking: 'off' })
   })
 
   it('creates a draft conversation on first file pick when onCreateConversation is provided', async () => {

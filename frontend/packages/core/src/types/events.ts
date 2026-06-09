@@ -65,6 +65,33 @@ export type AgentEventType =
   | 'sandbox_confirm_resolved'
   | 'ask_user_request'
   | 'ask_user_resolved'
+  | 'model_failover'
+
+/**
+ * Thinking depth level requested per-message by the composer. Mirrors the
+ * backend ``ThinkingLevel`` enum (see ``backend/cubebox/llm/snapshot_schema``).
+ * Defined here (alongside ``AgentEventType``) so message-store send signatures
+ * and the SSE event types share one source of truth — the web package
+ * (`@/lib/types/presets`) re-uses this directly.
+ */
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+
+/**
+ * Emitted by the backend ``FallbackBoundModel`` chain when a leg fails and
+ * the next leg takes over. ``next_ref === null`` signals chain exhaustion
+ * (no further leg to try) — UI must render a chain-exhausted summary rather
+ * than the literal string ``"null"``. Sibling type in
+ * ``frontend/packages/web/lib/types/events.ts`` is kept for the web-package
+ * banner component; the message store re-uses this definition.
+ */
+export interface FailoverEvent extends AgentEvent {
+  type: 'model_failover'
+  data: {
+    failed_ref: string
+    next_ref: string | null
+    reason: string
+  }
+}
 
 export interface AgentEvent {
   type: AgentEventType
