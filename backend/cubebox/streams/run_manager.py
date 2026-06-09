@@ -15,7 +15,7 @@ from loguru import logger
 from redis.asyncio import Redis
 from uuid_utils import uuid7
 
-from cubebox.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, StatusEvent
+from cubebox.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, FailoverEvent, StatusEvent
 from cubebox.errors import ErrorCode, classify_exception, english_fallback
 from cubebox.streams.run_events import (
     append_run_event,
@@ -53,16 +53,15 @@ def _make_failover_publisher(
 ) -> Callable[[Any, Any, BaseException | str], Awaitable[None]]:
     """Build an on_failover callback that publishes a model_failover SSE event.
 
-    `failed` and `next_bound` are cubepi BoundModel instances (or None for
-    next_bound when the chain is exhausted). `error` is either a triggered
-    exception or a string sentinel from cubepi.
+    The publish callable receives (run_id, data_payload) — the data dict
+    that will populate FailoverEvent.data. FailoverEvent.type itself is
+    fixed; the caller wraps `data` into the event.
     """
 
     async def _on_failover(failed: Any, next_bound: Any, error: BaseException | str) -> None:
         await publish(
             run_id,
             {
-                "type": "model_failover",
                 "failed_ref": f"{failed.spec.provider_id}/{failed.spec.id}",
                 "next_ref": (
                     f"{next_bound.spec.provider_id}/{next_bound.spec.id}"
@@ -1998,8 +1997,17 @@ class RunManager:
         # Preset selection: PR 1 uses default (None label). Task C2 will plumb
         # body.preset_label.
         preset = resolve_preset(snap, None)
-        # chain_model is a BoundModel in PR 1 (chain length 1 enforced by builder).
-        # Task B1 will allow FallbackBoundModel for chain >1.
+
+        async def _publish_failover_dict(rid: str, data_payload: dict[str, Any]) -> None:
+            event = FailoverEvent(
+                timestamp=datetime.now(UTC).isoformat(),
+                data=data_payload,
+            )
+            await publish_stream_event(event, None)  # None agent_key = main agent
+
+        on_failover_cb = _make_failover_publisher(run_id, _publish_failover_dict)
+
+        # chain_model is a BoundModel (single leg) or FallbackBoundModel (chain >1).
         this_run_model = build_chain_model(
             snap,
             preset,
@@ -2009,6 +2017,7 @@ class RunManager:
                 if snap.providers[slug].api == "anthropic-messages"
                 else None
             ),
+            on_failover=on_failover_cb,
         )
 
         # Extract downstream-required vars from the bound model so middleware,
