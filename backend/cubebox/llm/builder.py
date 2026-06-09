@@ -81,7 +81,12 @@ def build_bound_model(
     thinking: ThinkingLevel = "off",
     cache_policy: "CacheMarkerPolicy | None" = None,
 ) -> Any:
-    """Build a cubepi BoundModel for `ref`, binding max_tokens / reasoning."""
+    """Build a cubepi BoundModel for `ref`, binding max_tokens / reasoning.
+
+    `thinking` is reserved for chain wrapping (Task B1) and Agent.prompt()
+    binding (Task C2); cubepi applies it at runtime, not at BoundModel build
+    time. Kept on the signature so callers stay stable across A7/B1/C2.
+    """
     slug, model_id = parse_model_ref(ref)
     cfg = snap.providers.get(slug)
     if cfg is None:
