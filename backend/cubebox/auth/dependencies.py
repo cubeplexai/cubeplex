@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
 from cubebox.db import get_session
+from cubebox.llm.errors import AmbiguousOrgError
 from cubebox.models import Membership, OrganizationMembership, OrgRole, Role, User, Workspace
 from cubebox.plugins import PermissionChecker, PermissionResource, get_registry
 from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
@@ -118,8 +119,6 @@ async def resolve_unambiguous_admin_org_id(user: User, session: AsyncSession) ->
     Single-org admins are the common case (single_tenant deployments and
     most multi_tenant accounts) and continue to work transparently.
     """
-    from cubebox.llm.errors import AmbiguousOrgError
-
     admin_roles = (OrgRole.OWNER.value, OrgRole.ADMIN.value)
     role_col = cast(Any, OrganizationMembership.role)
     stmt = (
