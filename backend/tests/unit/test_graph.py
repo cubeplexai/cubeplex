@@ -7,11 +7,14 @@ from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubebox.agents.graph import create_cubebox_agent
 
 
+def _faux_bound_model() -> object:
+    """Build a single-leg FauxProvider-backed BoundModel for unit tests."""
+    return FauxProvider().model("test-model")
+
+
 def test_returns_cubepi_agent_instance() -> None:
     agent = create_cubebox_agent(
-        provider=FauxProvider(),
-        model_id="test-model",
-        provider_name="faux",
+        bound_model=_faux_bound_model(),
         system_prompt="You are helpful.",
     )
     assert isinstance(agent, Agent)
@@ -19,9 +22,7 @@ def test_returns_cubepi_agent_instance() -> None:
 
 def test_agent_carries_system_prompt() -> None:
     agent = create_cubebox_agent(
-        provider=FauxProvider(),
-        model_id="test-model",
-        provider_name="faux",
+        bound_model=_faux_bound_model(),
         system_prompt="You are helpful.",
     )
     assert agent._state.system_prompt == "You are helpful."
@@ -32,9 +33,7 @@ def test_agent_accepts_checkpointer_and_thread_id() -> None:
 
     cp = MemoryCheckpointer()
     agent = create_cubebox_agent(
-        provider=FauxProvider(),
-        model_id="test-model",
-        provider_name="faux",
+        bound_model=_faux_bound_model(),
         system_prompt="",
         checkpointer=cp,
         thread_id="conv-123",
@@ -45,9 +44,7 @@ def test_agent_accepts_checkpointer_and_thread_id() -> None:
 
 def test_agent_accepts_empty_tools() -> None:
     agent = create_cubebox_agent(
-        provider=FauxProvider(),
-        model_id="test-model",
-        provider_name="faux",
+        bound_model=_faux_bound_model(),
         system_prompt="",
     )
     # No tools provided → empty list
@@ -60,9 +57,7 @@ async def test_bare_agent_runs_a_turn() -> None:
     provider = FauxProvider()
     provider.set_responses([faux_assistant_message("hello back")])
     agent = create_cubebox_agent(
-        provider=provider,
-        model_id="test-model",
-        provider_name="faux",
+        bound_model=provider.model("test-model"),
         system_prompt="You are helpful.",
     )
     await agent.prompt("hi")

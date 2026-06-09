@@ -2036,8 +2036,6 @@ class RunManager:
         provider = this_run_model.provider
         provider_config = snap.providers[provider_name]
         _model_config = next(m for m in provider_config.models if m.id == model_id)
-        _model_max_tokens: int = _model_config.max_tokens or 32000
-        _model_temperature: float = 0.7
 
         # --- Compose tool list ---
         # Tool registration order is deliberately stable — changes invalidate
@@ -2706,25 +2704,19 @@ class RunManager:
             ]
 
         agent = create_cubebox_agent(
-            provider=provider,
-            model_id=model_id,
-            provider_name=provider_name,
+            # Pre-built chain model so a FallbackBoundModel (chain len > 1)
+            # drives the agent end-to-end — the factory no longer has a
+            # legacy fallback that would collapse the chain to chain[0].
+            bound_model=this_run_model,
             system_prompt=effective_system_prompt,
             tools=all_tools,
             checkpointer=cp,
             thread_id=conversation_id,
             middleware=cubepi_middleware,
-            max_tokens=_model_max_tokens,
-            temperature=_model_temperature,
             # Reasoning-capable models think by default ("medium"); a
             # per-conversation toggle (UI) can override this later.
-            reasoning=_model_config.reasoning,
             thinking="medium" if _model_config.reasoning else "off",
             channel=sandbox_hitl_channel,
-            # Pass the pre-built chain model so a FallbackBoundModel
-            # (chain len > 1) drives the agent instead of being silently
-            # collapsed to chain[0] by a fresh provider.model() call.
-            bound_model=this_run_model,
         )
 
         # Stash provider_name / model_id / memory-repo factory on the bridge

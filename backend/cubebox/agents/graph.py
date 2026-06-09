@@ -14,54 +14,34 @@ from cubepi import Agent
 from cubepi.agent.types import AgentTool
 from cubepi.hitl import HitlChannel
 from cubepi.middleware.base import Middleware
-from cubepi.providers.base import BaseProvider, ThinkingLevel
+from cubepi.providers.base import ThinkingLevel
 
 from cubebox.middleware._compose import compose_after_tool_call
 
 
 def create_cubebox_agent(
     *,
-    provider: BaseProvider,
-    model_id: str,
-    provider_name: str,
+    bound_model: Any,
     system_prompt: str = "",
     tools: list[AgentTool[Any]] | None = None,
     checkpointer: Any = None,
     thread_id: str | None = None,
     middleware: list[Middleware] | None = None,
-    max_tokens: int = 8192,
-    temperature: float = 0.7,
-    reasoning: bool = False,
     thinking: ThinkingLevel = "off",
     channel: HitlChannel | None = None,
-    bound_model: Any = None,
 ) -> Agent[Any]:
     """Build a cubepi.Agent for cubebox's cubepi runtime path.
 
-    ``provider_name`` is accepted for telemetry parity with older call
-    sites, but the cubepi 0.7 API now reads ``provider_id`` off the
-    provider instance — set it via
-    ``cubebox.llm.builder.build_provider(snap, slug)``.
-
     ``bound_model`` is the pre-built ``BoundModel`` or ``FallbackBoundModel``
-    that should drive the agent. When provided (the M3.h+ path) it is passed
-    through unchanged so chain-aware fallback survives all the way to
-    cubepi's agent loop. When ``None`` (legacy callers) a fresh ``BoundModel``
-    is built from ``provider`` + ``model_id`` — single-leg only, no failover.
+    that drives the agent. It is passed through unchanged so chain-aware
+    fallback survives all the way to cubepi's agent loop. Callers must
+    build it via ``cubebox.llm.builder.build_chain_model(snap, preset)``
+    (or ``provider.model(...)`` for single-leg tests) — there is no
+    in-factory fallback that would silently collapse a multi-leg chain.
     """
     mw_list = middleware or []
-    model = (
-        bound_model
-        if bound_model is not None
-        else provider.model(
-            model_id,
-            reasoning=reasoning,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-    )
     return Agent(
-        model=model,
+        model=bound_model,
         thinking=thinking,
         system_prompt=system_prompt,
         tools=tools or [],
