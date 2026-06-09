@@ -1,5 +1,17 @@
 # MCP Progressive Disclosure Implementation Plan
 
+> **⚠ PENDING REVISION (2026-06-09):** The spec has been updated with three
+> significant design changes from the hermes-agent research pass:
+> 1. **cubepi/cubebox layering** — core mechanism (`DeferredToolGroup`, `expand_tools`,
+>    middleware) moves into cubepi as a generic primitive; cubebox provides MCP → group mapping.
+> 2. **Catalog includes tool names** — not just server slug + description.
+> 3. **Threshold = context-window token %** (default 10%) + `min_servers` secondary guard.
+>
+> The tasks below still reference the old names (`expand_mcp_server`,
+> `MCPDisclosureMiddleware`, `min_servers`-only threshold). A plan revision is needed
+> before implementation begins. The cubepi-side work is tracked as a separate cubepi
+> issue and should land first.
+
 > For agentic workers: execute tasks top to bottom. Each task is TDD — write the
 > test first, watch it fail, implement, watch it pass. Stay on branch
 > `feat/mcp-progressive-disclosure`; never switch to main or merge mid-execution.
@@ -9,7 +21,7 @@
 > **Task 0 (the spike) gates the whole plan** — its answer selects the deferral
 > mode for Task 6. Do not skip or reorder it.
 
-Date: 2026-05-27
+Date: 2026-05-27 (spec revised 2026-06-09)
 Spec: `docs/dev/specs/2026-05-27-mcp-progressive-disclosure-design.md`
 Issue: #143
 
