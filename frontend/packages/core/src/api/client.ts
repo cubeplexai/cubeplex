@@ -193,6 +193,8 @@ export async function toApiError(res: Response): Promise<ApiError> {
   if (contentType?.includes('application/json')) {
     let data: {
       message?: string
+      error_code?: string
+      details?: string
       detail?: string | { code?: string; message?: string; reason?: string }
     }
     try {
@@ -210,8 +212,20 @@ export async function toApiError(res: Response): Promise<ApiError> {
       message = data.detail.message ?? null
       detailFallback = data.detail.reason
     }
+    // Backend's custom APIException handler returns a flat envelope
+    // ({status, error_code, message, details}) instead of FastAPI's nested
+    // `detail.code` shape. Surface both so callers can branch on `code` and
+    // read the `details` string uniformly via `detail`.
+    if (!code && typeof data.error_code === 'string') {
+      code = data.error_code
+    }
+    const flatDetails = typeof data.details === 'string' ? data.details : undefined
+    if (!detailFallback && flatDetails) {
+      detailFallback = flatDetails
+    }
     const finalMessage = data.message || message || detailFallback || `HTTP ${res.status}`
-    return new ApiError(finalMessage, res.status, code, data.detail ?? null)
+    const detailField = data.detail ?? flatDetails ?? null
+    return new ApiError(finalMessage, res.status, code, detailField)
   }
   return new ApiError(`HTTP ${res.status}: ${res.statusText}`, res.status, null, null)
 }

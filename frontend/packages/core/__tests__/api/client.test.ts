@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
-import { createApiClient } from '../../src/api/client'
+import { createApiClient, toApiError } from '../../src/api/client'
 
 describe('ApiClient', () => {
   let fetchMock: ReturnType<typeof vi.fn>
@@ -113,5 +113,33 @@ describe('ApiClient', () => {
     client.onUnauthorized(handler)
     await client.postForm('/api/v1/auth/login', { username: 'x', password: 'y' })
     expect(handler).not.toHaveBeenCalled()
+  })
+})
+
+describe('toApiError', () => {
+  it('parses the FastAPI nested detail.code shape', async () => {
+    const res = new Response(
+      JSON.stringify({ detail: { code: 'provider_slug_conflict', message: 'taken' } }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    )
+    const err = await toApiError(res)
+    expect(err.code).toBe('provider_slug_conflict')
+    expect(err.message).toBe('taken')
+  })
+
+  it('parses the cubebox APIException flat envelope (error_code + details)', async () => {
+    const res = new Response(
+      JSON.stringify({
+        status: 'error',
+        error_code: 'model_in_use_by_preset',
+        message: 'model x/y is referenced',
+        details: "refs=[{'org_id': 'org_a', 'preset_label': 'in-use'}]",
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    )
+    const err = await toApiError(res)
+    expect(err.code).toBe('model_in_use_by_preset')
+    expect(err.message).toBe('model x/y is referenced')
+    expect(err.detail).toBe("refs=[{'org_id': 'org_a', 'preset_label': 'in-use'}]")
   })
 })
