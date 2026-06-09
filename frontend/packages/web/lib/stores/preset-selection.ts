@@ -75,16 +75,37 @@ export function getPresetSelectionStore(
 /**
  * Logout flow helper: clear every per-`wsId` persisted selection and drop
  * the in-memory store registry so the next login starts fresh.
+ *
+ * Scans ALL localStorage keys matching our prefix — not just the
+ * in-memory `stores.keys()` — so we also wipe entries written by other
+ * tabs / earlier sessions whose stores were never instantiated in this
+ * tab. Without that sweep, logging in as a different user would see the
+ * previous user's persisted preset selections.
  */
 export function clearAllPresetSelectionStores(): void {
   for (const wsId of stores.keys()) {
+    const store = stores.get(wsId)
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(storageKey(wsId))
-      }
+      store?.persist?.clearStorage()
     } catch {
-      // SSR / privacy mode — best effort.
+      // best-effort — fall through to the direct localStorage sweep below.
     }
   }
   stores.clear()
+
+  if (typeof window === 'undefined') return
+  try {
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key?.startsWith(STORAGE_PREFIX)) {
+        keysToRemove.push(key)
+      }
+    }
+    for (const k of keysToRemove) {
+      localStorage.removeItem(k)
+    }
+  } catch {
+    // SSR / privacy mode — best effort.
+  }
 }

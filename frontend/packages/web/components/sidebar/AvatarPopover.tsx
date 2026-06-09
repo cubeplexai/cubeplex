@@ -15,6 +15,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
 import { Languages, LogOut, Moon, Shield, Sun } from 'lucide-react'
+import { clearAllPresetSelectionStores } from '@/lib/stores/preset-selection'
 
 export function AvatarPopover() {
   const t = useTranslations('avatar')
@@ -42,6 +43,7 @@ export function AvatarPopover() {
     useAuthStore.getState().reset()
     useConversationStore.setState({ conversations: [], activeId: null })
     useWorkspaceStore.getState().reset()
+    clearAllPresetSelectionStores()
     router.replace('/login')
   }
 
