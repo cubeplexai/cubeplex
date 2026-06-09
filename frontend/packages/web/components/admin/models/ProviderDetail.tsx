@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
+
+const PRESETS_ADMIN_PATH = '/admin/presets'
 import { Box, Check, Loader2, Pencil, Plus, RotateCw, Trash2, Zap, X } from 'lucide-react'
 import {
   ApiError,
@@ -410,7 +412,7 @@ export function ProviderDetail({
             <p className="mt-1 text-destructive/90">
               {t('modelInUseByPreset.body')}{' '}
               <Link
-                href="/admin/presets"
+                href={PRESETS_ADMIN_PATH}
                 className="underline underline-offset-2 hover:text-destructive"
               >
                 {t('modelInUseByPreset.linkLabel')}
@@ -433,7 +435,9 @@ export function ProviderDetail({
               </ul>
             )}
             {modelInUseRefs.some((r) => r.source === 'system') && (
-              <p className="mt-2 text-destructive/90">{t('modelInUseByPreset.systemHint')}</p>
+              <p className="mt-2 text-destructive/90">
+                {t('modelInUseByPreset.systemHint', { path: PRESETS_ADMIN_PATH })}
+              </p>
             )}
           </div>
         )}

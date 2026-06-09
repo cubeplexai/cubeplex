@@ -324,7 +324,7 @@
       "linkLabel": "Open Presets",
       "systemSourceLabel": "(system)",
       "orgSourceLabel": "(org)",
-      "systemHint": "Some references are in your organization's default (system) presets. To delete this model, first open /admin/presets, click 'Save' to create an org-level copy, then remove the references."
+      "systemHint": "Some references are in your organization's default (system) presets. To delete this model, first open {path}, click 'Save' to create an org-level copy, then remove the references."
     },
     "test": "Test",
     "testing": "Testing…",

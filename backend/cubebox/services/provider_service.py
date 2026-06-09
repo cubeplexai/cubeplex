@@ -375,7 +375,11 @@ class ProviderService:
                 model_id=m.model_id,
                 refs=[
                     {
-                        "org_id": self.org_id,
+                        # System-row refs are conceptually owned by no org;
+                        # surface that truthfully so consumers branching on
+                        # org_id don't get misled. The `source` field is the
+                        # canonical disambiguator either way.
+                        "org_id": None if r["source"] == "system" else self.org_id,
                         "preset_label": r["preset_label"],
                         "source": r["source"],
                     }

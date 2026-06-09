@@ -181,7 +181,8 @@ async def test_delete_blocked_when_only_system_row_references_model(
         await svc.delete_model(pid, mid)
     assert exc.value.status_code == 409
     assert exc.value.refs == [
-        {"org_id": CALLER_ORG, "preset_label": "sys-default", "source": "system"},
+        # System-row refs surface as org_id=None (no org owns the system row).
+        {"org_id": None, "preset_label": "sys-default", "source": "system"},
     ]
     # Model row survives — guard fired before delete.
     assert await ModelRepository(db_session).get(mid) is not None
