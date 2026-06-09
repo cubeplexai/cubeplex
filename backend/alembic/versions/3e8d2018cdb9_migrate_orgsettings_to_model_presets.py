@@ -7,6 +7,14 @@ Create Date: 2026-06-09 21:12:09.835213
 Translates OrgSettings rows with keys in
 {'default_model', 'fallback_models', 'task_models'} into a single
 'model_presets' row per (org_id) tuple. No table schema changes.
+
+Note: ``ALLOWED_TASKS`` is inlined (not imported from
+``cubebox.llm.snapshot_schema``) so this migration stays frozen against
+future schema drift. Legacy ``task_models`` keys outside this set (e.g.
+the historical ``"chat"`` key) are dropped on purpose — they previously
+fell through to the default model, and should continue doing so under
+the new ``ModelPresetsValue`` schema, which would otherwise reject them
+during Pydantic validation and 500 every request.
 """
 
 import json
@@ -25,6 +33,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 LEGACY_KEYS = ("default_model", "fallback_models", "task_models")
 NEW_KEY = "model_presets"
+ALLOWED_TASKS = frozenset({"title", "compaction", "summarize"})
 
 
 def upgrade() -> None:
@@ -56,6 +65,10 @@ def upgrade() -> None:
         ]
         task_presets: dict[str, str] = {}
         for task_key, ref in task_models.items():
+            if task_key not in ALLOWED_TASKS:
+                # Drop legacy keys like 'chat' — they used to fall through
+                # to default and should continue doing so under the new schema.
+                continue
             if not ref or ref == default_ref:
                 continue
             label = f"task-{task_key}"
