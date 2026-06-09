@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.exceptions import ModelInUseByPresetError
 from cubebox.api.schemas.provider import (
     ModelCreate,
     ModelUpdate,
@@ -33,6 +34,7 @@ from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
 from cubebox.services import provider_probe
 from cubebox.services.credential import CredentialService
+from cubebox.services.model_presets import find_preset_refs_to_model
 from cubebox.services.provider_probe import ProbeResult, ProbeStep
 from cubebox.utils.slug import slugify
 
@@ -360,6 +362,17 @@ class ProviderService:
         m = await self._models.get(model_db_id)
         if m is None or m.provider_id != provider_id:
             raise ModelNotFoundError(f"Model {model_db_id} not found")
+        # Per D6: scan caller-org row only (no system row, no other orgs).
+        # System row is the chicken-and-egg trap; cross-org scan would leak labels.
+        labels = await find_preset_refs_to_model(
+            self._session, self.org_id, provider.slug, m.model_id
+        )
+        if labels:
+            raise ModelInUseByPresetError(
+                slug=provider.slug,
+                model_id=m.model_id,
+                refs=[{"org_id": self.org_id, "preset_label": label} for label in labels],
+            )
         await self._models.delete(m)
 
     # -- Two-phase test / liveness probe ----------------------------------------
