@@ -1,7 +1,7 @@
 """FastAPI dependencies for auth + scoping."""
 
 from collections.abc import Awaitable, Callable
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 from fastapi import Depends, HTTPException, Path, Request, status
 from sqlalchemy import case, select
@@ -102,6 +102,35 @@ def require_role(
 
 require_admin = require_role(Role.ADMIN)
 require_member = require_role(Role.ADMIN, Role.MEMBER)
+
+
+async def resolve_unambiguous_admin_org_id(user: User, session: AsyncSession) -> str:
+    """Like ``resolve_current_org_id``, but raises when the user is admin of
+    more than one org and no explicit org_id was selected.
+
+    Admin routes don't carry a workspace path segment, so there is no other
+    structural source of truth for which org the call targets. Silently
+    picking the highest-role / oldest membership (as ``resolve_current_org_id``
+    does) can route a write to the wrong org. This helper opts into a hard
+    400 — surfaced via :class:`AmbiguousOrgError` — so the frontend can ask
+    the admin to disambiguate.
+
+    Single-org admins are the common case (single_tenant deployments and
+    most multi_tenant accounts) and continue to work transparently.
+    """
+    from cubebox.llm.errors import AmbiguousOrgError
+
+    admin_roles = (OrgRole.OWNER.value, OrgRole.ADMIN.value)
+    role_col = cast(Any, OrganizationMembership.role)
+    stmt = (
+        select(OrganizationMembership)
+        .where(OrganizationMembership.user_id == user.id)  # type: ignore[arg-type]
+        .where(role_col.in_(admin_roles))
+    )
+    admin_oms = list((await session.execute(stmt)).scalars().all())
+    if len(admin_oms) > 1:
+        raise AmbiguousOrgError(org_ids=[om.org_id for om in admin_oms])
+    return await resolve_current_org_id(user, session)
 
 
 async def resolve_current_org_id(user: User, session: AsyncSession) -> str:

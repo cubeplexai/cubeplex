@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.model_presets import AdminModelPresetsBody
-from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubebox.auth.dependencies import require_org_admin, resolve_unambiguous_admin_org_id
 from cubebox.db import get_session
 from cubebox.llm.snapshot import load_llm_snapshot
 from cubebox.models import User
@@ -29,7 +29,7 @@ async def get_admin_model_presets(
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminModelPresetsResponse:
-    org_id = await resolve_current_org_id(user, session)
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
     value, origin = await read_org_presets(session, org_id)
     return AdminModelPresetsResponse(value=value, origin=origin)
 
@@ -42,7 +42,7 @@ async def put_admin_model_presets(
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminModelPresetsResponse:
-    org_id = await resolve_current_org_id(user, session)
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
     snap = await load_llm_snapshot(
         session,
         org_id,
