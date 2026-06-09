@@ -20,12 +20,12 @@
 |---|----------|-------------|
 | D1 | Admin PUT replaces the entire `OrgSettings.model_presets` row (not granular field-PATCH) | per-preset CRUD endpoints |
 | D2 | Admin sees the system row when no org row exists; first save creates org row | only show org row, blank by default |
-| D3 | Workspace endpoint returns just labels + `is_default` (no chain refs) — chains are admin-only | expose chains so frontend can show "fall back to X" badges |
-| D4 | Per-message preset persistence (already in Spec 1 API). Composer remembers last choice in localStorage, not server-side. | per-conversation persistence in DB |
-| D5 | Thinking control: dropdown next to preset picker. Same value re-used until user changes it. | inline slider in message draft, separate per-message |
-| D6 | Delete-model guard: model delete endpoint scans org rows for refs; on conflict returns `409` with list of preset labels referencing the model. Admin must edit presets first. | cascade-clear refs; or RESTRICT at DB level |
-| D7 | `model_failover` rendering: inline gray banner in the message stream where the event arrived, expandable to show failed_ref/next_ref/reason. | toast/notification only |
-| D8 | Subagent failover attribution (resolves Fix-6): subagent middleware receives a copy of the chain model with `on_failover=None`. Subagent failovers still occur transparently but emit no SSE event. Main-agent failovers remain visible. | per-subagent agent_id baked into the closure |
+| D3 | Workspace endpoint returns just labels + `is_default` (no chain refs) — chains are admin-only. **Minimum viable** — if frontend later needs more context (chain length badge, fallback hint) extend the response then. | expose chains so frontend can show "fall back to X" badges |
+| D4 | Per-message preset persistence (already in Spec 1 API). Composer remembers last choice in localStorage, **keyed by `wsId`** (`preset-selection-v1:${wsId}`); only `presetLabel` + `thinking` persist (the workspace `presets` list is always refetched on mount). On mount, validate `presetLabel` against the fresh `presets`; reset to `null` if missing. Store is cleared in the logout flow. | per-conversation persistence in DB |
+| D5 | Thinking control: dropdown next to preset picker. Same value re-used until user changes it (**sticky across messages**). To prevent silent bill shock from a forgotten "high" setting, the composer renders an inline always-visible badge showing the current level (e.g. `thinking: high`) whenever it is non-`off`. | inline slider in message draft, separate per-message; or reset to `off` after each send |
+| D6 | Delete-model guard: scans only `(org_id IS NULL OR org_id == caller.org_id)` rows so no cross-tenant info leaks in multi-tenant mode. The **system row is excluded from the blocking set** — system presets are superseded on the first admin PUT anyway, so blocking on system-row references would be a chicken-and-egg trap. On conflict returns `409` with the list of `{org_id, preset_label}` from the caller's own org. | scan all orgs (leaks); or cascade-clear refs; or RESTRICT at DB level |
+| D7 | `model_failover` rendering: inline gray banner in the message stream where the event arrived, expandable to show failed_ref/next_ref/reason. When `next_ref === null` (chain exhausted) the banner reads "Failover exhausted on `failed_ref`" rather than "Switched from X to null". | toast/notification only |
+| D8 | Subagent failover attribution (resolves Fix-6): subagent middleware receives a copy of the chain model with `on_failover=None`. Subagent failovers still occur transparently but emit no SSE event. Main-agent failovers remain visible. **Cost/observability:** subagent failovers still hop to `chain[1]`, so cost middleware (agent-event driven) correctly attributes spend; only the SSE event is suppressed. Tracer/Meter chain-coverage gap is tracked separately in cubepi#167 follow-up. | per-subagent agent_id baked into the closure |
 | D9 | Admin frontend uses existing `/admin/models` patterns (table-based, shadcn) | freeform editor |
 | D10 | `thinking` default in composer: `off`. UI shows it as "Standard" with a tooltip; advanced users open the dropdown. | always show explicit value |
 
@@ -44,31 +44,32 @@
 - `backend/tests/e2e/test_admin_model_presets_e2e.py`
 - `backend/tests/e2e/test_workspace_model_presets_e2e.py`
 
-**Frontend:**
-- `frontend/packages/web/src/app/admin/presets/page.tsx` — server component shell
-- `frontend/packages/web/src/app/admin/presets/PresetEditor.tsx` — client component
-- `frontend/packages/web/src/app/admin/presets/__tests__/page.test.tsx`
-- `frontend/packages/web/src/components/chat/PresetPicker.tsx`
-- `frontend/packages/web/src/components/chat/ThinkingControl.tsx`
-- `frontend/packages/web/src/components/chat/FailoverBanner.tsx`
-- `frontend/packages/web/src/lib/api/presets.ts` — fetch helpers
-- `frontend/packages/web/src/lib/stores/preset-selection.ts` — Zustand store for chosen preset+thinking
+**Frontend:** (Note: `frontend/packages/web/` has no `src/` directory. Files live directly under `app/`, `components/`, `lib/`, `hooks/`. The `@/` alias maps to the package root per `tsconfig.json` — `@/lib/...` resolves to `lib/...`.)
+- `frontend/packages/web/app/admin/presets/page.tsx` — server component shell
+- `frontend/packages/web/app/admin/presets/PresetEditor.tsx` — client component
+- `frontend/packages/web/app/admin/presets/__tests__/page.test.tsx`
+- `frontend/packages/web/components/chat/PresetPicker.tsx`
+- `frontend/packages/web/components/chat/ThinkingControl.tsx`
+- `frontend/packages/web/components/chat/FailoverBanner.tsx`
+- `frontend/packages/web/lib/api/presets.ts` — fetch helpers
+- `frontend/packages/web/lib/types/presets.ts` — TS types
+- `frontend/packages/web/lib/stores/preset-selection.ts` — Zustand store for chosen preset+thinking
 - `frontend/packages/web/playwright/tests/admin-presets.spec.ts`
 - `frontend/packages/web/playwright/tests/chat-preset-picker.spec.ts`
 
 ### Modified files
 
 **Backend:**
-- `backend/cubebox/api/routes/v1/admin.py` — register `admin_model_presets.router`
-- `backend/cubebox/api/routes/v1/__init__.py` — register `model_presets.router` under workspace scope
+- `backend/cubebox/api/app.py` — register `admin_model_presets.router` and `model_presets.router` alongside other `admin_*` / `ws_*` routers (see lines ~508-537)
 - `backend/cubebox/services/provider_service.py` — delete-model guard checks preset refs
 - `backend/cubebox/streams/run_manager.py` — Fix-6: subagent gets `replace(this_run_model, on_failover=None)`
 
 **Frontend:**
-- `frontend/packages/web/src/app/admin/layout.tsx` — add "Model Presets" to sidebar
-- `frontend/packages/web/src/components/chat/MessageComposer.tsx` — embed `PresetPicker` + `ThinkingControl`, send `preset_label` + `thinking` in body
-- `frontend/packages/web/src/components/chat/MessageStream.tsx` — render `model_failover` events via `FailoverBanner`
-- `frontend/packages/web/src/lib/api/conversations.ts` — extend message-send request type
+- `frontend/packages/web/app/admin/layout.tsx` — add "Model Presets" to sidebar
+- `frontend/packages/web/components/layout/InputBar.tsx` — embed `PresetPicker` + `ThinkingControl`, send `preset_label` + `thinking` in body (this is the actual composer; `MessageComposer.tsx` does not exist)
+- `frontend/packages/web/components/chat/MessageList.tsx` — render `model_failover` events via `FailoverBanner` (this is the actual message renderer; `MessageStream.tsx` does not exist)
+- `frontend/packages/web/lib/api/conversations.ts` — extend message-send request type
+- `frontend/packages/web/app/admin/models/...` — surface 409 `model_in_use_by_preset` from delete (see Task F7)
 
 ---
 
@@ -439,7 +440,7 @@ Endpoints:
 - `GET /api/v1/admin/model-presets` → `{value: AdminModelPresetsBody, origin: "org"|"system"|"none"}`
 - `PUT /api/v1/admin/model-presets` → accepts `AdminModelPresetsBody`; returns the same; 400 on broken refs
 
-- [ ] **Step 1: Write router**
+- [ ] **Step 1: Write router** — follow the `admin_llm.py` pattern: `require_org_admin` returns a `User` (not a `RequestContext`); fetch `org_id` via `resolve_current_org_id(user, session)`; inject `session` via `Depends(get_session)` (do NOT open a fresh `async with async_session_maker()` in the handler).
 
 ```python
 """Admin endpoints for managing OrgSettings.model_presets."""
@@ -450,10 +451,11 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.model_presets import AdminModelPresetsBody
-from cubebox.auth.dependencies import require_org_admin
-from cubebox.db.engine import async_session_maker
+from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubebox.db import get_session
 from cubebox.llm.snapshot import load_llm_snapshot
 from cubebox.models import User
 from cubebox.services.model_presets import read_org_presets, write_org_presets
@@ -470,9 +472,10 @@ class AdminModelPresetsResponse(BaseModel):
 async def get_admin_model_presets(
     *,
     user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminModelPresetsResponse:
-    async with async_session_maker() as session:
-        value, origin = await read_org_presets(session, user.org_id)
+    org_id = await resolve_current_org_id(user, session)
+    value, origin = await read_org_presets(session, org_id)
     return AdminModelPresetsResponse(value=value, origin=origin)
 
 
@@ -482,32 +485,31 @@ async def put_admin_model_presets(
     body: AdminModelPresetsBody,
     *,
     user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AdminModelPresetsResponse:
-    async with async_session_maker() as session:
-        snap = await load_llm_snapshot(
-            session,
-            user.org_id,
-            raw_request.app.state.encryption_backend,
-        )
-        available_models: set[str] = {
-            f"{slug}/{m.id}" for slug, cfg in snap.providers.items() for m in cfg.models
-        }
-        await write_org_presets(session, user.org_id, body, available_models=available_models)
-        await session.commit()
-        value, origin = await read_org_presets(session, user.org_id)
+    org_id = await resolve_current_org_id(user, session)
+    snap = await load_llm_snapshot(
+        session,
+        org_id,
+        raw_request.app.state.encryption_backend,
+    )
+    available_models: set[str] = {
+        f"{slug}/{m.id}" for slug, cfg in snap.providers.items() for m in cfg.models
+    }
+    await write_org_presets(session, org_id, body, available_models=available_models)
+    await session.commit()
+    value, origin = await read_org_presets(session, org_id)
     return AdminModelPresetsResponse(value=value, origin=origin)
 ```
 
-- [ ] **Step 2: Register in `admin.py`**
+- [ ] **Step 2: Register router in `backend/cubebox/api/app.py`**
+
+The convention (see `app.py` ~lines 508-537) is to register each `admin_*` / `ws_*` router individually on the FastAPI app — **do NOT** nest into `admin.py`. Add an import alongside the existing `admin_llm`, `admin_providers`, etc. imports, then:
 
 ```python
-# In backend/cubebox/api/routes/v1/admin.py, add:
-from cubebox.api.routes.v1.admin_model_presets import router as admin_model_presets_router
-# In whatever pattern admin.py uses to compose routers (likely include_router):
-admin_router.include_router(admin_model_presets_router)
+# in app.py near line 534, alongside admin_llm.router etc:
+app.include_router(admin_model_presets.router, prefix="/api/v1")
 ```
-
-(Inspect admin.py to confirm pattern.)
 
 - [ ] **Step 3: Write E2E tests**
 
@@ -523,7 +525,7 @@ Reuse `tests/e2e/test_admin_providers_crud.py` as template. Cover:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_model_presets.py backend/cubebox/api/routes/v1/admin.py backend/tests/e2e/test_admin_model_presets_e2e.py
+git add backend/cubebox/api/routes/v1/admin_model_presets.py backend/cubebox/api/app.py backend/tests/e2e/test_admin_model_presets_e2e.py
 git commit -m "feat(api): admin GET/PUT /model-presets endpoints"
 ```
 
@@ -536,11 +538,11 @@ git commit -m "feat(api): admin GET/PUT /model-presets endpoints"
 - E2E: `backend/tests/e2e/test_workspace_model_presets_e2e.py`
 
 Endpoint:
-- `GET /api/v1/ws/{ws_id}/model-presets` → `WorkspacePresetsResponse{presets: [{label, is_default}]}`
+- `GET /api/v1/ws/{workspace_id}/model-presets` → `WorkspacePresetsResponse{presets: [{label, is_default}]}`
 
-Returns the effective preset list (org row if present, else system) — chain refs stripped (D3).
+Returns the effective preset list (org row if present, else system) — chain refs stripped (D3). Path param is **`workspace_id`** to match every other `/ws/{workspace_id}/...` route (verified by grepping `backend/cubebox/api/routes/v1/`).
 
-- [ ] **Step 1: Write router**
+- [ ] **Step 1: Write router** — use `require_member` (defined in `auth/dependencies.py`), which returns a `RequestContext` carrying `org_id`, `workspace_id`, `role`. No need to fetch org_id separately. Inject `session` via `Depends(get_session)`.
 
 ```python
 """Workspace endpoint exposing available model presets to chat composer."""
@@ -550,32 +552,35 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.model_presets import (
     WorkspacePresetSummary,
     WorkspacePresetsResponse,
 )
-from cubebox.auth.dependencies import require_workspace_member
-from cubebox.db.engine import async_session_maker
+from cubebox.auth.context import RequestContext
+from cubebox.auth.dependencies import require_member
+from cubebox.db import get_session
 from cubebox.llm.snapshot import load_llm_snapshot
-from cubebox.models import User
 
-router = APIRouter(prefix="/ws/{ws_id}/model-presets", tags=["workspace-model-presets"])
+router = APIRouter(
+    prefix="/ws/{workspace_id}/model-presets",
+    tags=["workspace-model-presets"],
+)
 
 
 @router.get("")
 async def get_workspace_model_presets(
     raw_request: Request,
-    ws_id: str,
     *,
-    user: Annotated[User, Depends(require_workspace_member)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> WorkspacePresetsResponse:
-    async with async_session_maker() as session:
-        snap = await load_llm_snapshot(
-            session,
-            user.org_id,
-            raw_request.app.state.encryption_backend,
-        )
+    snap = await load_llm_snapshot(
+        session,
+        ctx.org_id,
+        raw_request.app.state.encryption_backend,
+    )
     return WorkspacePresetsResponse(
         presets=[
             WorkspacePresetSummary(label=p.label, is_default=p.is_default)
@@ -584,9 +589,13 @@ async def get_workspace_model_presets(
     )
 ```
 
-- [ ] **Step 2: Register router under workspace prefix**
+- [ ] **Step 2: Register router in `backend/cubebox/api/app.py`**
 
-In `backend/cubebox/api/routes/v1/__init__.py` (or wherever workspace routes are composed), include this router.
+Add the import alongside other `ws_*` imports and register on the app at the `/api/v1` prefix (matches lines ~527-536):
+
+```python
+app.include_router(model_presets.router, prefix="/api/v1")
+```
 
 - [ ] **Step 3: E2E tests**
 
@@ -597,8 +606,8 @@ In `backend/cubebox/api/routes/v1/__init__.py` (or wherever workspace routes are
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/model_presets.py backend/cubebox/api/routes/v1/__init__.py backend/tests/e2e/test_workspace_model_presets_e2e.py
-git commit -m "feat(api): GET /ws/{ws}/model-presets workspace endpoint"
+git add backend/cubebox/api/routes/v1/model_presets.py backend/cubebox/api/app.py backend/tests/e2e/test_workspace_model_presets_e2e.py
+git commit -m "feat(api): GET /ws/{workspace_id}/model-presets workspace endpoint"
 ```
 
 ---
@@ -610,7 +619,7 @@ git commit -m "feat(api): GET /ws/{ws}/model-presets workspace endpoint"
 - Modify: `backend/cubebox/api/exceptions.py` (add `ModelInUseByPresetError`)
 - Test: `backend/tests/unit/test_model_delete_guard.py`
 
-Before deleting a model, scan all `OrgSettings.model_presets` rows in any org and refuse if any preset references the ref. Return a 409 with the list of `{org_id, preset_label}` pairs.
+Before deleting a model, scan **only the caller's org row** of `OrgSettings.model_presets` and refuse if any preset references the ref. Return a 409 with the list of `{org_id, preset_label}` pairs from that org. Per D6: scan `org_id == caller.org_id` only; **do not block on the system row** (system presets are superseded on the first admin PUT — blocking on them is a chicken-and-egg trap). And **do not scan other orgs** — leaking other tenants' preset labels via a 409 body is a cross-tenant info leak in multi-tenant mode.
 
 - [ ] **Step 1: Add `ModelInUseByPresetError` to `cubebox/api/exceptions.py`**
 
@@ -636,35 +645,32 @@ Likely in `cubebox/api/routes/v1/admin_models.py` or `admin_providers.py`. Read 
 
 - [ ] **Step 3: Add the guard**
 
-Before performing the actual delete:
+Before performing the actual delete — reuse the existing `find_preset_refs_to_model(session, org_id, slug, model_id)` service (scoped to the caller's org by construction). The system row is intentionally excluded.
 
 ```python
 from cubebox.services.model_presets import find_preset_refs_to_model
 from cubebox.api.exceptions import ModelInUseByPresetError
-from sqlalchemy import select
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
-# Find all orgs that have a model_presets row
-preset_rows = (await session.execute(
-    select(OrgSettings).where(OrgSettings.key == MODEL_PRESETS_KEY)
-)).scalars().all()
-refs: list[dict[str, str]] = []
-ref = f"{slug}/{model_id}"
-for row in preset_rows:
-    for preset in row.value.get("presets", []):
-        if ref in preset.get("chain", []):
-            refs.append({
-                "org_id": row.org_id or "system",
-                "preset_label": preset["label"],
-            })
-if refs:
-    raise ModelInUseByPresetError(slug=slug, model_id=model_id, refs=refs)
+# caller_org_id is resolved via resolve_current_org_id(user, session) earlier
+# in the handler; do NOT scan other orgs (info leak) and do NOT include the
+# system row (chicken-and-egg per D6).
+labels = await find_preset_refs_to_model(session, caller_org_id, slug, model_id)
+if labels:
+    raise ModelInUseByPresetError(
+        slug=slug,
+        model_id=model_id,
+        refs=[{"org_id": caller_org_id, "preset_label": label} for label in labels],
+    )
 # Proceed with delete...
 ```
 
 - [ ] **Step 4: Tests**
 
-Unit test: seed two orgs' OrgSettings rows referencing a model; assert the delete raises `ModelInUseByPresetError` with both refs.
+Unit tests must cover the new scope rules:
+- caller's org has a referencing preset → 409 with that label only
+- another org has a referencing preset → 200/204 (no leak; other org not scanned)
+- the system row references the model but no org row does → 200/204 (system row intentionally skipped)
+- nothing references the model → 200/204
 
 E2E test (optional but valuable): admin tries to delete a referenced model via the actual route, gets 409.
 
@@ -750,9 +756,18 @@ def test_replace_strips_on_failover():
     assert stripped.chain == fb.chain
 ```
 
-- [ ] **Step 4: E2E test (extend existing fallback E2E)**
+- [ ] **Step 4: Wiring verification test (mandatory — not deferrable)**
 
-In `tests/e2e/test_fallback_e2e.py`, add a test that triggers a subagent failover and asserts NO `model_failover` SSE event is emitted (only the cubepi warning log fires internally). This requires a multi-turn flow where the agent invokes a subagent — may be substantial. If too complex, defer to a follow-up and mark with a TODO.
+The wiring lock is non-negotiable: without a test that pins the subagent middleware to a model with `on_failover is None`, future refactors of `run_manager` can silently regress attribution. Two acceptable shapes:
+
+1. **Full SSE E2E** in `tests/e2e/test_fallback_e2e.py` — trigger a multi-turn flow where the agent invokes a subagent whose chain[0] errors, assert no `model_failover` SSE event is emitted (only main-agent failovers should be visible).
+2. **Focused integration test** if (1) is impractical — call the function in `run_manager.py` that builds the subagent middleware directly, then assert:
+   ```python
+   assert subagent_middleware.default_model.on_failover is None
+   ```
+   That single assertion is the verification; it locks the wiring without requiring a full subagent run.
+
+Pick (1) when feasible, fall back to (2). Do not defer.
 
 - [ ] **Step 5: Commit**
 
@@ -768,20 +783,23 @@ git commit -m "fix(run_manager): subagent gets chain model without on_failover (
 ### Task F1: API client + types
 
 **Files:**
-- Create: `frontend/packages/web/src/lib/api/presets.ts`
-- Create: `frontend/packages/web/src/lib/types/presets.ts`
-- Test: `frontend/packages/web/src/lib/api/__tests__/presets.test.ts`
+- Create: `frontend/packages/web/lib/api/presets.ts`
+- Create: `frontend/packages/web/lib/types/presets.ts`
+- Test: `frontend/packages/web/lib/api/__tests__/presets.test.ts`
+
+The PUT call **must** use the repo's CSRF helper from `frontend/packages/web/lib/csrf.ts`. The middleware rejects admin mutations that lack `X-CSRF-Token`. Use `jsonHeaders()` (returns Content-Type + X-CSRF-Token) for JSON-bodied requests; `csrfHeaders()` for DELETE/multipart. Verified exports: `jsonHeaders()`, `csrfHeaders()`, `readCsrfToken()`, `readApiError(res)`.
 
 ```typescript
 // presets.ts
-import type { AdminModelPresetsBody, WorkspacePresetSummary } from "../types/presets";
+import { jsonHeaders, readApiError } from "@/lib/csrf";
+import type { AdminModelPresetsBody, WorkspacePresetSummary } from "@/lib/types/presets";
 
 export async function fetchAdminModelPresets(): Promise<{
   value: AdminModelPresetsBody | null;
   origin: "org" | "system" | "none";
 }> {
   const res = await fetch("/api/v1/admin/model-presets", { credentials: "include" });
-  if (!res.ok) throw new Error(`Failed to fetch admin model presets: ${res.status}`);
+  if (!res.ok) throw new Error(await readApiError(res));
   return res.json();
 }
 
@@ -789,18 +807,15 @@ export async function putAdminModelPresets(body: AdminModelPresetsBody): Promise
   const res = await fetch("/api/v1/admin/model-presets", {
     method: "PUT",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers: jsonHeaders(), // Content-Type + X-CSRF-Token
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => null);
-    throw new Error(errBody?.error?.message ?? `Failed: ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await readApiError(res));
 }
 
 export async function fetchWorkspaceModelPresets(wsId: string): Promise<WorkspacePresetSummary[]> {
   const res = await fetch(`/api/v1/ws/${wsId}/model-presets`, { credentials: "include" });
-  if (!res.ok) throw new Error(`Failed to fetch workspace model presets: ${res.status}`);
+  if (!res.ok) throw new Error(await readApiError(res));
   const data = await res.json();
   return data.presets;
 }
@@ -811,6 +826,7 @@ export async function fetchWorkspaceModelPresets(wsId: string): Promise<Workspac
 ```typescript
 // types/presets.ts
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type TaskPresetKey = "title" | "compaction" | "summarize";
 
 export interface AdminPresetEntry {
   label: string;
@@ -820,7 +836,10 @@ export interface AdminPresetEntry {
 
 export interface AdminModelPresetsBody {
   presets: AdminPresetEntry[];
-  task_presets: Record<"title" | "compaction" | "summarize", string>;
+  // Partial — backend accepts any subset of {title, compaction, summarize}.
+  // Each value must be a label present in `presets[].label`; backend rejects
+  // unknown keys and unknown label refs (see B1 schema tests).
+  task_presets: Partial<Record<TaskPresetKey, string>>;
 }
 
 export interface WorkspacePresetSummary {
@@ -829,12 +848,16 @@ export interface WorkspacePresetSummary {
 }
 ```
 
-- [ ] **Step 2-4: Implement + test + commit**
+Form-handling note for F5: treat the three `task_presets` dropdowns as independently optional (each can be empty/unset). When building the PUT body, omit any key whose dropdown is "—" rather than sending an empty string. `Partial<Record<...>>` makes the union explicit so TS doesn't force placeholders.
+
+- [ ] **Step 2: Logout cleanup** — wherever the logout flow lives (likely the auth hook / context), add a call to `usePresetSelectionStore.persist.clearStorage()` (or equivalent) so the per-`wsId` keys don't leak across users on a shared device.
+
+- [ ] **Step 3-5: Implement + test + commit**
 
 ```bash
-git add frontend/packages/web/src/lib/api/presets.ts \
-        frontend/packages/web/src/lib/types/presets.ts \
-        frontend/packages/web/src/lib/api/__tests__/presets.test.ts
+git add frontend/packages/web/lib/api/presets.ts \
+        frontend/packages/web/lib/types/presets.ts \
+        frontend/packages/web/lib/api/__tests__/presets.test.ts
 git commit -m "feat(web): API client + types for model presets"
 ```
 
@@ -843,26 +866,100 @@ git commit -m "feat(web): API client + types for model presets"
 ### Task F2: PresetPicker + ThinkingControl components
 
 **Files:**
-- Create: `frontend/packages/web/src/components/chat/PresetPicker.tsx`
-- Create: `frontend/packages/web/src/components/chat/ThinkingControl.tsx`
-- Create: `frontend/packages/web/src/lib/stores/preset-selection.ts`
+- Create: `frontend/packages/web/components/chat/PresetPicker.tsx`
+- Create: `frontend/packages/web/components/chat/ThinkingControl.tsx`
+- Create: `frontend/packages/web/components/chat/ThinkingBadge.tsx` (inline visibility chip — see D5)
+- Create: `frontend/packages/web/lib/stores/preset-selection.ts`
 - Test: vitest unit tests + Playwright
+
+Store is **factory-built per `wsId`** so each workspace gets its own localStorage key (`preset-selection-v1:${wsId}`). Only `presetLabel` and `thinking` persist; `presets` is always refetched on mount and validated against `presetLabel`.
+
+```typescript
+// stores/preset-selection.ts
+import { create, type UseBoundStore, type StoreApi } from "zustand";
+import { persist } from "zustand/middleware";
+import type { ThinkingLevel, WorkspacePresetSummary } from "@/lib/types/presets";
+
+interface State {
+  presets: WorkspacePresetSummary[];
+  presetLabel: string | null; // null = use workspace default
+  thinking: ThinkingLevel;
+  setPresets: (p: WorkspacePresetSummary[]) => void;
+  setPresetLabel: (l: string | null) => void;
+  setThinking: (t: ThinkingLevel) => void;
+  reset: () => void;
+}
+
+// One store per wsId. The composer calls this in a memo keyed by wsId.
+const stores = new Map<string, UseBoundStore<StoreApi<State>>>();
+
+export function getPresetSelectionStore(wsId: string): UseBoundStore<StoreApi<State>> {
+  let s = stores.get(wsId);
+  if (s) return s;
+  s = create<State>()(
+    persist(
+      (set) => ({
+        presets: [],
+        presetLabel: null,
+        thinking: "off",
+        setPresets: (presets) => set({ presets }),
+        setPresetLabel: (presetLabel) => set({ presetLabel }),
+        setThinking: (thinking) => set({ thinking }),
+        reset: () => set({ presetLabel: null, thinking: "off" }),
+      }),
+      {
+        name: `preset-selection-v1:${wsId}`,
+        // Only the user's choices persist — the presets list is refetched.
+        partialize: (st) => ({ presetLabel: st.presetLabel, thinking: st.thinking }),
+      },
+    ),
+  );
+  stores.set(wsId, s);
+  return s;
+}
+
+// For tests + logout cleanup
+export function clearAllPresetSelectionStores(): void {
+  for (const [key, _store] of stores.entries()) {
+    try {
+      localStorage.removeItem(`preset-selection-v1:${key}`);
+    } catch {
+      /* SSR / privacy mode */
+    }
+  }
+  stores.clear();
+}
+```
 
 ```typescript
 // PresetPicker.tsx
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { fetchWorkspaceModelPresets } from "@/lib/api/presets";
-import { usePresetSelectionStore } from "@/lib/stores/preset-selection";
+import { getPresetSelectionStore } from "@/lib/stores/preset-selection";
 
 export function PresetPicker({ wsId }: { wsId: string }) {
-  const { presetLabel, setPresetLabel, presets, setPresets } = usePresetSelectionStore();
+  const useStore = useMemo(() => getPresetSelectionStore(wsId), [wsId]);
+  const { presetLabel, setPresetLabel, presets, setPresets } = useStore();
 
   useEffect(() => {
-    fetchWorkspaceModelPresets(wsId).then(setPresets);
-  }, [wsId, setPresets]);
+    let cancelled = false;
+    fetchWorkspaceModelPresets(wsId).then((fresh) => {
+      if (cancelled) return;
+      setPresets(fresh);
+      // Validate persisted choice against the fresh list (D4).
+      const validLabels = new Set(fresh.map((p) => p.label));
+      const current = useStore.getState().presetLabel;
+      if (current !== null && !validLabels.has(current)) {
+        setPresetLabel(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [wsId, setPresets, setPresetLabel, useStore]);
 
   return (
     <Select value={presetLabel ?? ""} onValueChange={setPresetLabel}>
@@ -885,8 +982,9 @@ export function PresetPicker({ wsId }: { wsId: string }) {
 // ThinkingControl.tsx
 "use client";
 
+import { useMemo } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { usePresetSelectionStore } from "@/lib/stores/preset-selection";
+import { getPresetSelectionStore } from "@/lib/stores/preset-selection";
 import type { ThinkingLevel } from "@/lib/types/presets";
 
 const LEVELS: { value: ThinkingLevel; label: string }[] = [
@@ -898,8 +996,9 @@ const LEVELS: { value: ThinkingLevel; label: string }[] = [
   { value: "xhigh", label: "Extra High" },
 ];
 
-export function ThinkingControl() {
-  const { thinking, setThinking } = usePresetSelectionStore();
+export function ThinkingControl({ wsId }: { wsId: string }) {
+  const useStore = useMemo(() => getPresetSelectionStore(wsId), [wsId]);
+  const { thinking, setThinking } = useStore();
   return (
     <Select value={thinking} onValueChange={(v) => setThinking(v as ThinkingLevel)}>
       <SelectTrigger className="w-32">
@@ -916,58 +1015,57 @@ export function ThinkingControl() {
 ```
 
 ```typescript
-// stores/preset-selection.ts
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
-import type { ThinkingLevel, WorkspacePresetSummary } from "@/lib/types/presets";
+// ThinkingBadge.tsx — always-visible inline chip when thinking !== "off" (D5)
+"use client";
 
-interface State {
-  presets: WorkspacePresetSummary[];
-  presetLabel: string | null; // null = use default
-  thinking: ThinkingLevel;
-  setPresets: (p: WorkspacePresetSummary[]) => void;
-  setPresetLabel: (l: string | null) => void;
-  setThinking: (t: ThinkingLevel) => void;
+import { useMemo } from "react";
+import { getPresetSelectionStore } from "@/lib/stores/preset-selection";
+
+export function ThinkingBadge({ wsId }: { wsId: string }) {
+  const useStore = useMemo(() => getPresetSelectionStore(wsId), [wsId]);
+  const thinking = useStore((s) => s.thinking);
+  if (thinking === "off") return null;
+  return (
+    <span
+      role="status"
+      aria-label={`Thinking level ${thinking}`}
+      className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900"
+    >
+      thinking: {thinking}
+    </span>
+  );
 }
-
-export const usePresetSelectionStore = create<State>()(
-  persist(
-    (set) => ({
-      presets: [],
-      presetLabel: null,
-      thinking: "off",
-      setPresets: (presets) => set({ presets }),
-      setPresetLabel: (presetLabel) => set({ presetLabel }),
-      setThinking: (thinking) => set({ thinking }),
-    }),
-    { name: "preset-selection-v1" },
-  ),
-);
 ```
 
-- [ ] **Steps**: unit tests via vitest, then commit.
+- [ ] **Steps**: unit tests (cover: per-wsId isolation, partialize whitelist, mount-time validation resets a stale label, badge renders only for non-`off`), then commit.
 
 ```bash
-git add frontend/packages/web/src/components/chat/PresetPicker.tsx \
-        frontend/packages/web/src/components/chat/ThinkingControl.tsx \
-        frontend/packages/web/src/lib/stores/preset-selection.ts \
-        frontend/packages/web/src/components/chat/__tests__/PresetPicker.test.tsx \
-        frontend/packages/web/src/components/chat/__tests__/ThinkingControl.test.tsx
-git commit -m "feat(web): PresetPicker + ThinkingControl + selection store"
+git add frontend/packages/web/components/chat/PresetPicker.tsx \
+        frontend/packages/web/components/chat/ThinkingControl.tsx \
+        frontend/packages/web/components/chat/ThinkingBadge.tsx \
+        frontend/packages/web/lib/stores/preset-selection.ts \
+        frontend/packages/web/components/chat/__tests__/PresetPicker.test.tsx \
+        frontend/packages/web/components/chat/__tests__/ThinkingControl.test.tsx \
+        frontend/packages/web/components/chat/__tests__/ThinkingBadge.test.tsx
+git commit -m "feat(web): PresetPicker + ThinkingControl + ThinkingBadge + per-ws selection store"
 ```
 
 ---
 
-### Task F3: Wire into MessageComposer
+### Task F3: Wire into InputBar
 
 **Files:**
-- Modify: `frontend/packages/web/src/components/chat/MessageComposer.tsx`
-- Modify: `frontend/packages/web/src/lib/api/conversations.ts`
+- Modify: `frontend/packages/web/components/layout/InputBar.tsx` (this is the actual composer — `MessageComposer.tsx` does not exist; confirmed via grep for `sendMessage` / message-send call sites)
+- Modify: `frontend/packages/web/lib/api/conversations.ts`
 
-Locate `MessageComposer.tsx` — embed `<PresetPicker wsId={wsId} />` and `<ThinkingControl />` next to the send button. When sending a message, read `presetLabel` and `thinking` from the store and include them in the request body.
+Embed `<PresetPicker wsId={wsId} />`, `<ThinkingControl wsId={wsId} />`, and `<ThinkingBadge wsId={wsId} />` in the composer toolbar near the send button. The badge sits inline with the input chrome so an elevated thinking level is always visible — preventing silent bill shock from a forgotten "high" setting (D5).
+
+When sending, read from the per-`wsId` store and include `preset_label` + `thinking` in the request body:
 
 ```typescript
 // conversations.ts — extend the send-message body type:
+import type { ThinkingLevel } from "@/lib/types/presets";
+
 export interface SendMessageRequest {
   content: string;
   attachments?: string[];
@@ -979,9 +1077,9 @@ export interface SendMessageRequest {
 In the send handler:
 
 ```typescript
-import { usePresetSelectionStore } from "@/lib/stores/preset-selection";
+import { getPresetSelectionStore } from "@/lib/stores/preset-selection";
 
-const { presetLabel, thinking } = usePresetSelectionStore.getState();
+const { presetLabel, thinking } = getPresetSelectionStore(wsId).getState();
 
 await sendMessage(wsId, conversationId, {
   content,
@@ -991,31 +1089,56 @@ await sendMessage(wsId, conversationId, {
 });
 ```
 
-- [ ] **Steps**: tests + commit.
+- [ ] **Steps**: tests + commit. (Note: tests must assert badge is present in the composer DOM whenever `thinking !== "off"`.)
 
 ```bash
-git add frontend/packages/web/src/components/chat/MessageComposer.tsx \
-        frontend/packages/web/src/lib/api/conversations.ts
-git commit -m "feat(web): embed preset picker + thinking control in MessageComposer"
+git add frontend/packages/web/components/layout/InputBar.tsx \
+        frontend/packages/web/lib/api/conversations.ts
+git commit -m "feat(web): embed preset picker + thinking control + badge in InputBar"
 ```
 
 ---
 
-### Task F4: FailoverBanner in MessageStream
+### Task F4: FailoverBanner in MessageList
 
 **Files:**
-- Create: `frontend/packages/web/src/components/chat/FailoverBanner.tsx`
-- Modify: `frontend/packages/web/src/components/chat/MessageStream.tsx`
+- Create: `frontend/packages/web/components/chat/FailoverBanner.tsx`
+- Modify: `frontend/packages/web/components/chat/MessageList.tsx` (the actual message renderer — `MessageStream.tsx` does not exist)
+- Modify: `frontend/packages/web/lib/types/events.ts` (extend the existing SSE event union with `FailoverEvent`)
 
-`FailoverBanner` renders a `model_failover` SSE event inline as a small gray banner between messages: "Switched from `failed_ref` to `next_ref` — reason: …". Collapsible.
+- [ ] **Step 1: Add the event TS type**
 
-Locate the SSE event-rendering switch in `MessageStream.tsx`. Add a case for `type === "model_failover"` that renders `<FailoverBanner event={event} />`.
+```typescript
+// lib/types/events.ts — extend the existing event union
+export interface FailoverEvent {
+  type: "model_failover";
+  timestamp: string;
+  data: {
+    failed_ref: string;
+    next_ref: string | null; // null = chain exhausted
+    reason: string;
+  };
+  agent_id: string | null;
+}
+```
 
-- [ ] **Steps**: tests + commit.
+- [ ] **Step 2: Banner rendering rules**
+
+`FailoverBanner` renders a `model_failover` event inline as a small gray banner between messages. Collapsible. Two display cases:
+
+- `next_ref` non-null: `"Switched from <failed_ref> to <next_ref>"` (expand reveals `reason`).
+- `next_ref === null` (chain exhausted): `"Failover exhausted on <failed_ref>"` — never render the literal string "null". Expand reveals `reason`.
+
+- [ ] **Step 3: Wire into MessageList**
+
+Locate the SSE event-rendering switch in `MessageList.tsx`. Add a case for `type === "model_failover"` that renders `<FailoverBanner event={event} />`.
+
+- [ ] **Steps**: tests (cover both `next_ref` cases) + commit.
 
 ```bash
-git add frontend/packages/web/src/components/chat/FailoverBanner.tsx \
-        frontend/packages/web/src/components/chat/MessageStream.tsx
+git add frontend/packages/web/components/chat/FailoverBanner.tsx \
+        frontend/packages/web/components/chat/MessageList.tsx \
+        frontend/packages/web/lib/types/events.ts
 git commit -m "feat(web): render model_failover SSE events as inline banner"
 ```
 
@@ -1024,9 +1147,26 @@ git commit -m "feat(web): render model_failover SSE events as inline banner"
 ### Task F5: Admin Preset Editor page
 
 **Files:**
-- Create: `frontend/packages/web/src/app/admin/presets/page.tsx`
-- Create: `frontend/packages/web/src/app/admin/presets/PresetEditor.tsx`
-- Modify: `frontend/packages/web/src/app/admin/layout.tsx`
+- Create: `frontend/packages/web/app/admin/presets/page.tsx`
+- Create: `frontend/packages/web/app/admin/presets/PresetEditor.tsx`
+- Modify: `frontend/packages/web/app/admin/layout.tsx`
+
+- [ ] **Step 0: UI design**
+
+Layout (top → bottom):
+
+- **Top-right toolbar**: a single Save button. Calls `putAdminModelPresets(body)`.
+- **Preset list (left or full-width section)**: one row per preset, with a drag handle on the far left. The order in the list is the surfaced order; only one row can have the `is_default` toggle on (toggling another flips the previous off).
+- **Per preset (editable inline)**:
+  - Editable `label` text field (validated: non-empty, unique within list).
+  - Ordered list of `slug/model_id` chain entries. Each entry has up / down / remove buttons. A `+ Add model` button at the bottom of the chain opens an autocomplete dropdown fed by `GET /api/v1/admin/models` (this is the existing admin-models catalog endpoint).
+  - `is_default` radio.
+- **Bottom: task_presets section** — three independently-optional dropdowns labeled "Title", "Compaction", "Summarize". Each lists the preset labels currently defined above, plus a "— (not set)" option that maps to the key being **omitted** from the PUT body (per the `Partial<Record<...>>` type — F1).
+- **Error states**:
+  - On 400 `broken_preset`: parse the response's `missing_refs` (or equivalent) and highlight each offending chain entry inline (red border + tooltip showing the missing `slug/model_id`).
+  - On 400 with other field errors (duplicate label, no default, etc.): show a banner at the top of the form summarizing the issue and focus the offending field.
+
+Form state: keep an editable working copy in component state; only commit to the backend on Save. Use the `AdminModelPresetsBody` type from F1 as the shape of the working copy.
 
 Server component shell loads initial data; client component handles editing.
 
@@ -1044,21 +1184,40 @@ export default async function AdminPresetsPage() {
 ```typescript
 // PresetEditor.tsx
 "use client";
-// - Form to add/edit presets (label, chain, is_default)
-// - Chain editor: ordered list with add/remove/reorder
-// - Task overrides: dropdowns for title/compaction/summarize
-// - Save button → PUT /admin/model-presets
-// - On 400 broken_preset, surface the failed refs inline
+// Implements the UI from Step 0:
+// - Top Save button
+// - Drag-reorderable preset list with inline label edit + is_default radio
+// - Per-preset chain editor (up/down/remove + autocomplete-add from admin/models)
+// - Bottom task_presets dropdowns (title/compaction/summarize) with "— (not set)"
+// - On 400 broken_preset: highlight bad refs inline; other 400s → top banner
 ```
 
 - [ ] **Steps**: tests + Playwright + commit.
 
 ```bash
-git add frontend/packages/web/src/app/admin/presets/page.tsx \
-        frontend/packages/web/src/app/admin/presets/PresetEditor.tsx \
-        frontend/packages/web/src/app/admin/presets/__tests__/page.test.tsx \
-        frontend/packages/web/src/app/admin/layout.tsx
+git add frontend/packages/web/app/admin/presets/page.tsx \
+        frontend/packages/web/app/admin/presets/PresetEditor.tsx \
+        frontend/packages/web/app/admin/presets/__tests__/page.test.tsx \
+        frontend/packages/web/app/admin/layout.tsx
 git commit -m "feat(web): admin preset editor page"
+```
+
+---
+
+### Task F7: Admin /models page — surface 409 model_in_use_by_preset
+
+**Files:**
+- Modify: existing admin-models delete UI under `frontend/packages/web/app/admin/models/` (locate with `grep -rn "DELETE\|deleteModel\|/admin/models" frontend/packages/web/app/admin/models/`)
+
+When deleting a model, catch a `409` response with `error.code === "model_in_use_by_preset"`, parse `refs` (list of `{org_id, preset_label}`), and render an inline error message listing them with a link to `/admin/presets` so the admin can edit the preset first. The backend response shape comes from B5's `ModelInUseByPresetError`.
+
+- [ ] **Step 1**: Find the delete handler.
+- [ ] **Step 2**: Add the 409 branch with a list rendering `preset_label` (and optionally `org_id` for multi-tenant admin contexts).
+- [ ] **Step 3**: Smoke test via Playwright (referenced model → delete → 409 → list displayed).
+
+```bash
+git add frontend/packages/web/app/admin/models/
+git commit -m "feat(web): surface model-in-use-by-preset 409 in admin models page"
 ```
 
 ---
@@ -1120,7 +1279,7 @@ Mocking discipline: backend E2E uses cubepi's `FauxProvider` (already establishe
 | Spec section | Tasks |
 |---|---|
 | Admin CRUD endpoints | B1, B2, B3 |
-| Admin "delete model blocked by referencing presets" UX | B5, F5 |
+| Admin "delete model blocked by referencing presets" UX | B5, F5, F7 |
 | Workspace API listing | B1, B2, B4 |
 | Workspace chat picker | F1, F2, F3 |
 | Thinking depth control | F2, F3 |
@@ -1128,6 +1287,7 @@ Mocking discipline: backend E2E uses cubepi's `FauxProvider` (already establishe
 | Subagent failover attribution (Fix-6) | B6 |
 | Admin frontend management page | F5 |
 | Playwright E2E for admin + chat | F6 |
+| Admin /models 409 model_in_use_by_preset UX | F7 |
 
 ---
 
