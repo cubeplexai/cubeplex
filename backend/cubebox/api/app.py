@@ -490,6 +490,7 @@ def create_app(
         conversations_router,
         mcp_oauth,
         memory_router,
+        model_presets,
         public_artifacts,
         system,
         trigger_ingest,
@@ -536,6 +537,7 @@ def create_app(
     app.include_router(admin_model_presets.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
     app.include_router(ws_triggers.router, prefix="/api/v1")
+    app.include_router(model_presets.router, prefix="/api/v1")
     app.include_router(trigger_ingest.router, prefix="/api/v1")
     # Browser live-view/keepalive handlers require the SandboxManager, which is
     # only initialized when sandbox support is enabled (see the lifespan above).
