@@ -1,0 +1,264 @@
+"""HTTP error matrix for preset / thinking on the chat endpoint.
+
+These tests verify that LLMConfigError subclasses surface as HTTP errors
+(not as mid-stream SSE error events) when ``send_message`` validates the
+preset synchronously before scheduling the background run.
+
+Three error paths:
+
+* ``unknown_preset`` (400) — caller passes ``preset_label`` that doesn't
+  match any seeded preset.
+* ``broken_preset`` (400) — default preset's chain references a
+  non-existent provider/model.
+* ``no_default_preset`` (500) — no ``model_presets`` row at all
+  (neither org-level nor system-level).
+"""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any
+
+import httpx
+import pytest
+import pytest_asyncio
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+import cubebox.db as _cubebox_db
+from cubebox.api.app import create_app
+from cubebox.db.engine import _build_database_url, engine
+from cubebox.db.session import get_session
+from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubebox.models.provider import Model as DBModel
+from cubebox.models.provider import Provider as DBProvider
+from tests.e2e.conftest import (
+    DEFAULT_ORG_ID,
+    DEFAULT_TEST_EMAIL,
+    DEFAULT_TEST_PASSWORD,
+    DEFAULT_WS_ID,
+    _ensure_default_user_and_membership,
+    _lifespan_context,
+    _login_and_attach,
+)
+
+
+def _make_test_app() -> Any:
+    """Create a test app wired with NullPool DB + sandbox_factory=None."""
+    url = _build_database_url()
+    test_engine = create_async_engine(url, poolclass=NullPool)
+    test_session_maker = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    _cubebox_db.async_session_maker = test_session_maker
+
+    async def override_get_session() -> AsyncIterator[AsyncSession]:
+        async with test_session_maker() as session:
+            yield session
+
+    app = create_app(sandbox_factory=None)
+    app.dependency_overrides[get_session] = override_get_session
+    return app
+
+
+async def _wipe_preset_seed_rows() -> None:
+    """Remove any provider+preset rows seeded by prior tests / bootstrap."""
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            from sqlalchemy import select
+
+            await session.execute(
+                delete(DBModel).where(
+                    DBModel.provider_id.in_(  # type: ignore[attr-defined]
+                        select(DBProvider.id).where(
+                            DBProvider.slug.in_(("alpha", "ghost"))  # type: ignore[attr-defined]
+                        )
+                    )
+                )
+            )
+            await session.execute(
+                delete(DBProvider).where(
+                    DBProvider.slug.in_(("alpha", "ghost"))  # type: ignore[attr-defined]
+                )
+            )
+            # Delete BOTH org-level and system-level model_presets rows.
+            await session.execute(
+                delete(OrgSettings).where(
+                    OrgSettings.key == MODEL_PRESETS_KEY,  # type: ignore[arg-type]
+                )
+            )
+            await session.commit()
+    finally:
+        await test_engine.dispose()
+
+
+async def _seed_alpha_provider_and_default_preset() -> None:
+    """One system provider 'alpha' with model 'm1' + default preset alpha/m1."""
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            provider = DBProvider(
+                org_id=None,
+                name="alpha",
+                slug="alpha",
+                provider_type="openai-completions",
+                base_url="https://alpha.test/v1",
+                auth_type="api_key",
+                enabled=True,
+            )
+            session.add(provider)
+            await session.flush()
+            session.add(
+                DBModel(
+                    org_id=None,
+                    provider_id=provider.id,
+                    model_id="m1",
+                    display_name="alpha-m1",
+                    reasoning=False,
+                    input_modalities=["text"],
+                    cost_input=0.0,
+                    cost_output=0.0,
+                    cost_cache_read=0.0,
+                    cost_cache_write=0.0,
+                    context_window=128_000,
+                    max_tokens=4096,
+                    enabled=True,
+                )
+            )
+            session.add(
+                OrgSettings(
+                    org_id=DEFAULT_ORG_ID,
+                    key=MODEL_PRESETS_KEY,
+                    value={
+                        "presets": [
+                            {
+                                "label": "default",
+                                "chain": ["alpha/m1"],
+                                "is_default": True,
+                            }
+                        ],
+                        "task_presets": {},
+                    },
+                )
+            )
+            await session.commit()
+    finally:
+        await test_engine.dispose()
+
+
+async def _seed_broken_default_preset() -> None:
+    """Default preset whose chain references a non-existent provider/model."""
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as session:
+            session.add(
+                OrgSettings(
+                    org_id=DEFAULT_ORG_ID,
+                    key=MODEL_PRESETS_KEY,
+                    value={
+                        "presets": [
+                            {
+                                "label": "default",
+                                "chain": ["ghost/x"],
+                                "is_default": True,
+                            }
+                        ],
+                        "task_presets": {},
+                    },
+                )
+            )
+            await session.commit()
+    finally:
+        await test_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def preset_error_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Authenticated client; each test seeds its own preset / provider state."""
+    await _ensure_default_user_and_membership()
+    await _wipe_preset_seed_rows()
+
+    app = _make_test_app()
+    app.state.deployment_mode = "multi_tenant"
+
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, DEFAULT_TEST_EMAIL, DEFAULT_TEST_PASSWORD)
+            yield c
+
+    await engine.dispose()
+
+
+async def _create_conversation(client: httpx.AsyncClient, ws_id: str, title: str) -> str:
+    resp = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations",
+        params={"title": title},
+    )
+    assert resp.status_code == 201, f"conversation creation failed: {resp.text}"
+    conv_id: str = resp.json()["id"]
+    return conv_id
+
+
+@pytest.mark.asyncio
+async def test_unknown_preset_label_400(preset_error_client: httpx.AsyncClient) -> None:
+    """preset_label not in OrgSettings.model_presets → 400 unknown_preset."""
+    await _seed_alpha_provider_and_default_preset()
+
+    client = preset_error_client
+    ws_id = DEFAULT_WS_ID
+    conv_id = await _create_conversation(client, ws_id, "unknown-preset")
+
+    resp = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
+        json={"content": "hello", "preset_label": "ghost"},
+    )
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    assert body.get("error_code") == "unknown_preset", body
+    assert "ghost" in body.get("message", ""), body
+
+
+@pytest.mark.asyncio
+async def test_broken_preset_400_lists_refs(preset_error_client: httpx.AsyncClient) -> None:
+    """Default preset references a missing provider/model → 400 broken_preset."""
+    await _seed_broken_default_preset()
+
+    client = preset_error_client
+    ws_id = DEFAULT_WS_ID
+    conv_id = await _create_conversation(client, ws_id, "broken-preset")
+
+    resp = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
+        json={"content": "hello"},
+    )
+    assert resp.status_code == 400, resp.text
+    body = resp.json()
+    assert body.get("error_code") == "broken_preset", body
+    # The missing ref "ghost/x" should appear somewhere in the response
+    # (either the message or the details field).
+    haystack = f"{body.get('message', '')} {body.get('details', '')}"
+    assert "ghost/x" in haystack, body
+
+
+@pytest.mark.asyncio
+async def test_no_default_preset_500(preset_error_client: httpx.AsyncClient) -> None:
+    """No model_presets row at all → 500 no_default_preset."""
+    # Fixture already wiped all model_presets rows; no seeding here.
+
+    client = preset_error_client
+    ws_id = DEFAULT_WS_ID
+    conv_id = await _create_conversation(client, ws_id, "no-default-preset")
+
+    resp = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
+        json={"content": "hello"},
+    )
+    assert resp.status_code == 500, resp.text
+    body = resp.json()
+    assert body.get("error_code") == "no_default_preset", body
