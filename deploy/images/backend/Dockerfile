@@ -45,13 +45,8 @@ RUN git config --global url."https://githubfast.com/".insteadOf "https://github.
 RUN python -m venv /app/.venv
 ENV PATH=/app/.venv/bin:$PATH
 
-COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv export \
-        --format requirements-txt \
-        --no-hashes --no-dev --no-editable --no-emit-project \
-    > /tmp/requirements.txt \
-    && sed -i 's|https://github.com/|https://githubfast.com/|g' /tmp/requirements.txt \
-    && uv pip install -r /tmp/requirements.txt
+COPY backend/pyproject.toml backend/uv.lock backend/requirements-frozen.txt ./
+RUN uv pip install -r requirements-frozen.txt
 
 COPY backend/cubebox ./cubebox
 COPY backend/alembic ./alembic
