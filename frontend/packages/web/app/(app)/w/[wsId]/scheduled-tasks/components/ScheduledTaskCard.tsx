@@ -142,7 +142,7 @@ export function ScheduledTaskCard({
               className={cn(
                 'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium shrink-0',
                 task.status === 'active'
-                  ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+                  ? 'bg-success-surface text-success-fg'
                   : 'bg-muted text-muted-foreground',
               )}
               data-testid={`status-badge-${task.id}`}

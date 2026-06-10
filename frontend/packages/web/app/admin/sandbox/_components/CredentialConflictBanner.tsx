@@ -18,14 +18,14 @@ export function CredentialConflictBanner({ warnings }: Props) {
     <div
       role="status"
       data-testid="sandbox-policy-conflict-banner"
-      className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 shadow-sm dark:border-amber-400/40 dark:bg-amber-950/40 dark:text-amber-100"
+      className="flex items-start gap-3 rounded-lg border border-warning-border bg-warning-surface px-4 py-3 text-warning-fg shadow-sm"
     >
-      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-300" />
+      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning-fg" />
       <div className="flex flex-col gap-1 text-xs leading-relaxed">
-        <p className="font-medium text-amber-900 dark:text-amber-100">
+        <p className="font-medium text-warning-fg">
           Network policy conflicts with installed credentials
         </p>
-        <ul className="list-disc space-y-0.5 pl-4 text-amber-800/90 dark:text-amber-200/90">
+        <ul className="list-disc space-y-0.5 pl-4 text-warning-fg/90">
           {warnings.map((w, i) => (
             <li key={i}>{w}</li>
           ))}

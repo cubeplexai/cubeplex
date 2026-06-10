@@ -183,7 +183,7 @@ function VersionsTab({
                 {isInstalled && (
                   <Badge
                     variant="outline"
-                    className="border-emerald-500/40 text-[10px] text-emerald-600"
+                    className="border-success-border text-[10px] text-success-fg"
                   >
                     {t('versionInstalled')}
                   </Badge>
@@ -230,9 +230,9 @@ interface FileDiffEntry {
 }
 
 const STATUS_STYLES: Record<FileStatus, { label: string; cls: string }> = {
-  added: { label: 'added', cls: 'text-emerald-600 bg-emerald-500/10' },
-  removed: { label: 'removed', cls: 'text-red-600 bg-red-500/10' },
-  changed: { label: 'changed', cls: 'text-amber-600 bg-amber-500/10' },
+  added: { label: 'added', cls: 'text-success-fg bg-success-surface' },
+  removed: { label: 'removed', cls: 'text-danger-fg bg-danger-surface' },
+  changed: { label: 'changed', cls: 'text-warning-fg bg-warning-surface' },
   same: { label: 'same', cls: 'text-muted-foreground bg-muted/40' },
 }
 
@@ -478,12 +478,12 @@ export function SkillDetailPanel({ skillId, onActionDone }: SkillDetailPanelProp
             {skill.source === 'preinstalled' ? t('preinstalled') : t('orgUploaded')}
           </Badge>
           {skill.install_state === 'installed' && (
-            <Badge variant="outline" className="border-emerald-500/40 text-emerald-600">
+            <Badge variant="outline" className="border-success-border text-success-fg">
               {t('installed')}
             </Badge>
           )}
           {skill.install_state === 'update_available' && (
-            <Badge variant="outline" className="border-amber-500/40 text-amber-600">
+            <Badge variant="outline" className="border-warning-border text-warning-fg">
               {t('upgradable')}
             </Badge>
           )}

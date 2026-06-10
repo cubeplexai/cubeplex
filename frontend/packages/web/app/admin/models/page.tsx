@@ -7,6 +7,7 @@ import { createApiClient, useModelsStore, useProvidersStore } from '@cubebox/cor
 import { ModelsToolbar, type ProviderKind } from '@/components/admin/models/ModelsToolbar'
 import { ProviderList } from '@/components/admin/models/ProviderList'
 import { ProviderDetail } from '@/components/admin/models/ProviderDetail'
+import { PageHeader } from '@/components/management/PageHeader'
 
 export default function ModelsPage() {
   const t = useTranslations('adminModels')
@@ -62,10 +63,7 @@ export default function ModelsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
-      </header>
+      <PageHeader title={t('title')} description={t('subtitle')} />
 
       <ModelsToolbar
         query={query}

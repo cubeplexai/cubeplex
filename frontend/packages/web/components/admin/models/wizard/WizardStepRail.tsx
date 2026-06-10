@@ -31,7 +31,7 @@ export function WizardStepRail({ current }: WizardStepRailProps) {
                 className={cn(
                   'flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-semibold transition-colors',
                   done && 'border-primary bg-primary text-primary-foreground',
-                  active && 'border-primary bg-primary/10 text-primary',
+                  active && 'border-primary bg-accent text-foreground',
                   !done && !active && 'border-border bg-card text-muted-foreground',
                 )}
                 data-state={active ? 'active' : done ? 'done' : 'idle'}

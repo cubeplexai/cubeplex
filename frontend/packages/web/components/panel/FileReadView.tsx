@@ -164,7 +164,7 @@ function Chip({
       className={cn(
         'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]',
         tone === 'warn'
-          ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400'
+          ? 'border-warning-border bg-warning-solid/10 text-warning-fg'
           : 'border-border bg-muted text-muted-foreground',
       )}
     >
@@ -248,7 +248,7 @@ function Body({
           <h3 className="text-base font-medium">{t('unsupported')}</h3>
           <p className="text-sm text-muted-foreground">{u.reason}</p>
           {u.hint && (
-            <div className="flex items-start gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-left text-xs text-blue-700 dark:text-blue-400">
+            <div className="flex items-start gap-2 rounded-md border border-info-border bg-info-solid/10 px-3 py-2 text-left text-xs text-info-fg">
               <Info className="size-3.5 shrink-0 mt-0.5" />
               <span>{u.hint}</span>
             </div>

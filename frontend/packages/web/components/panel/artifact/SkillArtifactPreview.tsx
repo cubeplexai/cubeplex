@@ -65,8 +65,8 @@ export function SkillArtifactPreview({
 
         {result?.ok && (
           <div
-            className="flex items-start gap-2 rounded-md border-l-4 border-green-500 bg-green-50
-              px-3 py-2.5 text-sm font-medium text-green-700 dark:bg-green-950 dark:text-green-300"
+            className="flex items-start gap-2 rounded-md border-l-4 border-success-border bg-success-surface
+              px-3 py-2.5 text-sm font-medium text-success-fg"
           >
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{resultMessage}</span>

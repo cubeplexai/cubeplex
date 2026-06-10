@@ -85,7 +85,7 @@ export function ModelRow({
         <div className="flex items-center gap-2">
           <span className="truncate font-mono font-medium text-foreground">{model.model_id}</span>
           {model.reasoning && (
-            <Brain className="size-3.5 shrink-0 text-purple-500" aria-label="reasoning" />
+            <Brain className="size-3.5 shrink-0 text-info-fg" aria-label="reasoning" />
           )}
           {model.is_system && (
             <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
@@ -105,14 +105,9 @@ export function ModelRow({
                   {isFail ? (
                     <X className="mt-px size-3 shrink-0 text-destructive" />
                   ) : (
-                    <TriangleAlert className="mt-px size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <TriangleAlert className="mt-px size-3 shrink-0 text-warning-fg" />
                   )}
-                  <span
-                    className={cn(
-                      'min-w-0',
-                      isFail ? 'text-destructive' : 'text-amber-700 dark:text-amber-300',
-                    )}
-                  >
+                  <span className={cn('min-w-0', isFail ? 'text-destructive' : 'text-warning-fg')}>
                     <span className="font-medium">{i.name}</span>
                     {i.detail ? ` — ${i.detail}` : ''}
                   </span>

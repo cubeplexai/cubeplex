@@ -33,18 +33,16 @@ function NavItem({ href, label, icon: Icon, active }: NavDef & { active: boolean
     <Link
       href={href}
       className={cn(
-        'relative flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors',
+        'relative flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors duration-fast',
         active
-          ? 'bg-primary/10 text-foreground font-medium'
-          : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
+          ? 'bg-accent text-foreground font-medium'
+          : 'text-muted-foreground hover:text-foreground hover:bg-accent',
       )}
     >
       {active && (
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full" />
+        <span className="absolute left-0 top-[22%] bottom-[22%] w-0.5 bg-primary rounded-r" />
       )}
-      <Icon
-        className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-muted-foreground/70')}
-      />
+      <Icon className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-faint')} />
       <span className="truncate">{label}</span>
     </Link>
   )
@@ -81,7 +79,7 @@ export function AdminSubNav() {
   return (
     <nav
       aria-label={tLayout('subNavAria')}
-      className="w-56 border-r border-border/70 bg-card/40 flex flex-col p-2 overflow-y-auto"
+      className="w-56 border-r border-border bg-card flex flex-col p-2 overflow-y-auto"
     >
       <ul className="space-y-0.5">
         {NATIVE_ITEMS.map((item) => {
@@ -99,7 +97,7 @@ export function AdminSubNav() {
               <Separator />
             </li>
             <li>
-              <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
+              <p className="px-2 py-1 text-2xs font-medium uppercase tracking-wider text-faint">
                 {t('extensions')}
               </p>
             </li>

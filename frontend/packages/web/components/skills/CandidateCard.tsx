@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 function TrustBadge({ trust }: { trust: SkillCandidateOut['trust'] }) {
   if (trust === 'official') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-success-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-success-fg">
         <ShieldCheck className="size-3" />
         Official
       </span>
@@ -16,14 +16,14 @@ function TrustBadge({ trust }: { trust: SkillCandidateOut['trust'] }) {
   }
   if (trust === 'community') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-info-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-info-fg">
         <ShieldAlert className="size-3" />
         Community
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+    <span className="inline-flex items-center gap-1 rounded-full bg-warning-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-fg">
       <ShieldOff className="size-3" />
       Unvetted
     </span>
@@ -65,7 +65,7 @@ export function CandidateCard({ candidate, active, onClick }: CandidateCardProps
         <p className="line-clamp-2 text-xs text-muted-foreground">{candidate.description}</p>
       )}
       <div className="flex flex-wrap items-center gap-2 pt-0.5">
-        <span className="rounded-md bg-gradient-to-r from-slate-500/15 to-slate-500/5 border border-slate-500/20 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:text-slate-300">
+        <span className="rounded-md bg-gradient-to-r from-muted to-muted/30 border border-border px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
           {candidate.source_name}
         </span>
         {candidate.version && (
@@ -79,7 +79,7 @@ export function CandidateCard({ candidate, active, onClick }: CandidateCardProps
           </span>
         )}
         {candidate.trust === 'official' && getOfficialSource(candidate.repo) && (
-          <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+          <span className="text-[10px] font-medium text-success-fg">
             {getOfficialSource(candidate.repo)}
           </span>
         )}

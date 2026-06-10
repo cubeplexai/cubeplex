@@ -58,7 +58,7 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
           onChange={(e) => setPassword(e.target.value)}
         />
       </label>
-      {error && <div className="text-sm text-red-500">{error}</div>}
+      {error && <div className="text-sm text-destructive">{error}</div>}
       <button
         type="submit"
         disabled={submitting}

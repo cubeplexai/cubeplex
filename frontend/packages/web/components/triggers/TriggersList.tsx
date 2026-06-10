@@ -119,7 +119,7 @@ function TriggerRow({ trigger, wsId, onToggleEnabled, onDelete, t }: TriggerRowP
         {trigger.enabled ? (
           <Badge
             variant="default"
-            className="text-xs bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20 hover:bg-green-500/15"
+            className="text-xs bg-success-solid/15 text-success-fg border-success-border hover:bg-success-solid/15"
           >
             {t('statusEnabled')}
           </Badge>

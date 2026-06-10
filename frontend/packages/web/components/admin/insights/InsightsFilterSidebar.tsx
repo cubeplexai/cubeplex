@@ -66,8 +66,8 @@ export function InsightsFilterSidebar({
                     onChange({ ...filters, workspaceIds: toggle(filters.workspaceIds, w.id) })
                   }
                   className={cn(
-                    'w-full rounded-md px-2 py-1 text-left text-xs',
-                    on ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
+                    'w-full rounded px-2 py-1 text-left text-xs',
+                    on ? 'bg-accent text-foreground' : 'hover:bg-muted',
                   )}
                 >
                   {w.name}
@@ -91,8 +91,8 @@ export function InsightsFilterSidebar({
                   key={m}
                   onClick={() => onChange({ ...filters, models: toggle(filters.models, m) })}
                   className={cn(
-                    'w-full rounded-md px-2 py-1 text-left text-[11px] font-mono',
-                    on ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
+                    'w-full rounded px-2 py-1 text-left text-[11px] font-mono',
+                    on ? 'bg-accent text-foreground' : 'hover:bg-muted',
                   )}
                 >
                   {m}

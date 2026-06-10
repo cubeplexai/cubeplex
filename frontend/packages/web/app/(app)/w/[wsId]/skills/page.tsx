@@ -11,6 +11,7 @@ import { WorkspaceSkillsToolbar } from '@/components/workspace-settings/skills/W
 import { UploadWorkspaceSkillModal } from '@/components/workspace-settings/skills/UploadWorkspaceSkillModal'
 import { CandidateCard } from '@/components/skills/CandidateCard'
 import { CandidateDetailPanel } from '@/components/skills/CandidateDetailPanel'
+import { PageHeader } from '@/components/management/PageHeader'
 
 type Selection = { kind: 'skill'; id: string } | { kind: 'candidate'; candidateId: string }
 
@@ -47,10 +48,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
 
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
-      </header>
+      <PageHeader title={t('title')} description={t('subtitle')} />
 
       <WorkspaceSkillsToolbar
         filters={filters}
@@ -63,7 +61,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
         <aside
           aria-label={t('listAria')}
           data-testid="skills-list"
-          className="w-[360px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
+          className="w-[360px] shrink-0 overflow-y-auto border-r border-border bg-card/20"
         >
           {filters.externalOnly ? (
             searching ? (
@@ -71,7 +69,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                 {[1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className="h-[76px] animate-pulse rounded-lg border border-border/50 bg-muted/30"
+                    className="h-[76px] animate-pulse rounded-lg border border-border bg-accent"
                   />
                 ))}
               </div>
@@ -112,7 +110,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                 <span className="text-xs font-semibold text-muted-foreground">
                   {t('systemCatalog')}
                 </span>
-                <div className="flex-1 border-t border-border/50" />
+                <div className="flex-1 border-t border-border" />
               </div>
 
               {skills.length === 0 ? (
@@ -149,7 +147,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                         </div>
                       </div>
                     )}
-                    <div className="flex-1 border-t border-border/50" />
+                    <div className="flex-1 border-t border-border" />
                   </div>
                   {searching &&
                   candidates.filter((c) => c.source_kind === 'remote').length === 0 ? (
@@ -157,7 +155,7 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
                       {[1, 2, 3].map((i) => (
                         <div
                           key={i}
-                          className="h-[76px] animate-pulse rounded-lg border border-border/50 bg-muted/30"
+                          className="h-[76px] animate-pulse rounded-lg border border-border bg-accent"
                         />
                       ))}
                     </div>

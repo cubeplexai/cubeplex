@@ -276,7 +276,7 @@ export function ProviderConfigForm({
       </div>
 
       {!supported && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+        <div className="flex items-start gap-2 rounded-lg border border-warning-border bg-warning-surface px-3 py-2.5 text-xs text-warning-fg">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           <span>{tc('unsupportedAuth')}</span>
         </div>

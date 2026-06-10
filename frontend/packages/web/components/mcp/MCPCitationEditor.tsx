@@ -59,7 +59,7 @@ export function MCPCitationEditor({
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-base font-semibold">{t('editorTitle', { tool: toolName })}</h3>
         {value ? (
-          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+          <span className="rounded bg-success-surface px-1.5 py-0.5 text-[10px] font-medium text-success-fg">
             {t('statusMapped')}
           </span>
         ) : (

@@ -19,7 +19,7 @@ import { cn, proseClasses } from '@/lib/utils'
 function TrustInfo({ trust }: { trust: SkillCandidateOut['trust'] }) {
   if (trust === 'official') {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-success-surface px-2 py-1 text-xs font-medium text-success-fg">
         <ShieldCheck className="size-3.5" />
         Official
       </span>
@@ -27,14 +27,14 @@ function TrustInfo({ trust }: { trust: SkillCandidateOut['trust'] }) {
   }
   if (trust === 'community') {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-info-surface px-2 py-1 text-xs font-medium text-info-fg">
         <ShieldAlert className="size-3.5" />
         Community
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-warning-surface px-2 py-1 text-xs font-medium text-warning-fg">
       <ShieldOff className="size-3.5" />
       Unvetted
     </span>

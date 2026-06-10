@@ -57,7 +57,7 @@ function StatusPill({ status }: { status: RowStatus }) {
   const t = useTranslations('mcpAdmin')
   if (status === 'ready') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-success-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-success-fg">
         <CheckCircle2 className="size-3" />
         {t('ready')}
       </span>
@@ -65,7 +65,7 @@ function StatusPill({ status }: { status: RowStatus }) {
   }
   if (status === 'needsCredential') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-warning-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-fg">
         <AlertTriangle className="size-3" />
         {t('needsCredential')}
       </span>
@@ -73,7 +73,7 @@ function StatusPill({ status }: { status: RowStatus }) {
   }
   if (status === 'pendingOAuth') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-warning-solid/10 px-1.5 py-0.5 text-[10px] font-medium text-warning-fg">
         <AlertTriangle className="size-3" />
         {t('statusPendingOAuth')}
       </span>

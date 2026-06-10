@@ -20,12 +20,12 @@ const TYPE_LABELS: Record<MemoryType, string> = {
 }
 
 const TYPE_COLORS: Record<MemoryType, string> = {
-  preference: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  project_fact: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-  procedure: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-  correction: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
-  decision: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-  org_policy: 'bg-rose-500/10 text-rose-600 dark:text-rose-400',
+  preference: 'bg-info-surface text-info-fg',
+  project_fact: 'bg-success-surface text-success-fg',
+  procedure: 'bg-muted text-muted-foreground',
+  correction: 'bg-warning-surface text-warning-fg',
+  decision: 'bg-warning-surface text-warning-fg',
+  org_policy: 'bg-danger-surface text-danger-fg',
 }
 
 function formatRelativeDate(dateStr: string): string {
@@ -56,9 +56,9 @@ export function MemoryItemCard({ item, onArchive }: MemoryItemCardProps) {
   const confidencePct = Math.round(item.confidence * 100)
   const confidenceColor =
     item.confidence >= 0.8
-      ? 'text-emerald-600 dark:text-emerald-400'
+      ? 'text-success-fg'
       : item.confidence >= 0.5
-        ? 'text-amber-600 dark:text-amber-400'
+        ? 'text-warning-fg'
         : 'text-muted-foreground'
 
   return (

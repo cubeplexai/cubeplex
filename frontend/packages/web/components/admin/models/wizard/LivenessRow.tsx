@@ -23,7 +23,7 @@ export function LivenessRow({ step, running }: LivenessRowProps) {
       className={cn(
         'flex flex-col gap-1.5 rounded-lg border px-3 py-2.5',
         ok
-          ? 'border-green-500/40 bg-green-500/5'
+          ? 'border-success-border bg-success-surface'
           : status === 'fail'
             ? 'border-destructive/40 bg-destructive/5'
             : 'border-border/70',
@@ -33,7 +33,7 @@ export function LivenessRow({ step, running }: LivenessRowProps) {
         {!step && running ? (
           <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
         ) : ok ? (
-          <CheckCircle2 className="size-4 shrink-0 text-green-600 dark:text-green-400" />
+          <CheckCircle2 className="size-4 shrink-0 text-success-fg" />
         ) : status === 'fail' ? (
           <XCircle className="size-4 shrink-0 text-destructive" />
         ) : (

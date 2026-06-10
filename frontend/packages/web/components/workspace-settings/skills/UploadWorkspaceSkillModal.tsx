@@ -142,7 +142,7 @@ export function UploadWorkspaceSkillModal({
               </div>
             )}
             {success && (
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+              <div className="rounded-md border border-success-border bg-success-solid/5 px-3 py-2 text-xs text-success-fg">
                 {success}
               </div>
             )}

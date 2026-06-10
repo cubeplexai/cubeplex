@@ -150,7 +150,7 @@ export function TriggerDetailPanel({ wsId, triggerId }: TriggerDetailPanelProps)
               {trigger.enabled ? (
                 <Badge
                   variant="default"
-                  className="bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/20 hover:bg-green-500/15"
+                  className="bg-success-solid/15 text-success-fg border-success-border hover:bg-success-solid/15"
                 >
                   {t('statusEnabled')}
                 </Badge>
@@ -363,10 +363,10 @@ function EventRow({ event, onReplay, formatDate, t }: EventRowProps) {
   }
 
   const statusColorMap: Record<string, string> = {
-    accepted: 'text-green-600 dark:text-green-400',
+    accepted: 'text-success-fg',
     dead_lettered: 'text-destructive',
     failed: 'text-destructive',
-    rate_limited: 'text-yellow-600 dark:text-yellow-400',
+    rate_limited: 'text-warning-fg',
     filtered_out: 'text-muted-foreground',
     duplicate: 'text-muted-foreground',
   }

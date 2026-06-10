@@ -16,7 +16,7 @@ export function WarningCell({ warnings }: Props) {
   return (
     <Tooltip>
       <TooltipTrigger className="inline-flex items-center">
-        <AlertTriangle className="size-3.5 text-amber-500" />
+        <AlertTriangle className="size-3.5 text-warning-fg" />
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs text-xs">
         {label}

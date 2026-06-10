@@ -208,14 +208,14 @@ export function MCPAdminDetailPanel({
               className={cn(
                 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium',
                 connected
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-                  : 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300',
+                  ? 'bg-success-surface text-success-fg'
+                  : 'bg-danger-surface text-danger-fg',
               )}
             >
               <span
                 className={cn(
                   'h-1.5 w-1.5 rounded-full',
-                  connected ? 'bg-emerald-500' : 'bg-rose-500',
+                  connected ? 'bg-success-solid' : 'bg-danger-solid',
                 )}
               />
               {connected ? t('ready') : t('needsCredential')}

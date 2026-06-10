@@ -16,7 +16,7 @@ function StateBadge({ state }: { state: SkillSummary['install_state'] }) {
   const t = useTranslations('adminSkills')
   if (state === 'installed') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 transition-colors group-hover/skill-card:bg-emerald-500/20 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-success-surface px-1.5 py-0.5 text-[10px] font-medium text-success-fg transition-colors">
         <CheckCircle2 className="size-3" />
         {t('installed')}
       </span>
@@ -24,7 +24,7 @@ function StateBadge({ state }: { state: SkillSummary['install_state'] }) {
   }
   if (state === 'update_available') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-warning-surface px-1.5 py-0.5 text-[10px] font-medium text-warning-fg">
         <ArrowUpCircle className="size-3" />
         {t('upgradable')}
       </span>
@@ -69,7 +69,7 @@ export function SkillCard({ skill, active, onClick }: SkillCardProps) {
         {skill.installed_version &&
           skill.installed_version !== skill.current_version &&
           skill.install_state !== 'uninstalled' && (
-            <span className="font-mono text-[10px] text-amber-600 dark:text-amber-400">
+            <span className="font-mono text-[10px] text-warning-fg">
               {t('installedVersion', { version: skill.installed_version })}
             </span>
           )}
