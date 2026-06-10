@@ -25,12 +25,24 @@ sonner toast (new) / shadcn Sheet (new).
   (port 3001). Backend: port 8001.
 - All frontend commands run from `frontend/` with pnpm. `@cubebox/core`
   must build before web sees type changes.
-- After each stage: `pnpm -r typecheck && pnpm -r lint && pnpm -r test`
-  (incremental: only affected suites during the stage; the full sweep
-  happens in Stage 7), capture screenshots (see Stage 0 harness), run
-  `/code-review` (medium effort for restyle-only stages, high for Stage
-  3/5), fix findings, commit.
-- Commit per task (not per stage). Message style:
+- **Exact command forms** (script names verified against package.json —
+  do not improvise):
+  - Typecheck: `pnpm -r type-check` (NOT `typecheck` — that silently
+    no-ops with exit 0)
+  - Lint: `pnpm -r lint` · Unit tests: `pnpm --filter web test`
+  - E2E: ALWAYS from `frontend/` so `playwright.config.ts` (worktree
+    ports, baseURL, webServer) loads:
+    `pnpm exec playwright test packages/web/__tests__/e2e/<spec>` —
+    NEVER `pnpm --filter web exec playwright test …` (cwd=packages/web
+    loses the config and tests hit port 3000 = wrong server)
+- After each stage: incremental tests (only suites the stage touched;
+  full sweep happens in Stage 7) → screenshots (Stage 0 harness) →
+  `/code-review` → fix findings → commit. Review effort per stage
+  (single source of truth): Stage 0/1/2/6 = medium, Stage 3/4/5 = high,
+  Stage 7 = max.
+- Commit per coherent chunk (a task or a feature-area batch — see Stage
+  5). Each commit pays ~30s of whole-workspace lint hooks; don't slice
+  one-page diffs into per-page commits. Message style:
   `feat(ui): <stage>: <what>`.
 - i18n: every new/changed user-facing string gets keys in BOTH
   `messages/en.json` and `messages/zh.json` (pre-commit enforces parity).
@@ -65,48 +77,68 @@ Expected: `307` (or `200`). Test account exists from brainstorming:
 **Files:**
 - Create: `frontend/scripts/dev/capture-screens.mjs`
 
-- [ ] **Step 1:** Write the script. It logs in and screenshots key pages
-      in both themes into `.superpowers/screens/<stage>/`:
+- [ ] **Step 1:** Write the script. Auth: register a dedicated account on
+      first run (fresh worktree DBs have no users — never assume an
+      account exists), then reuse Playwright `storageState` so the other
+      7 invocations skip the login flow entirely (decouples the harness
+      from login-page churn during the redesign). Explicit paths — no
+      string surgery:
 
 ```js
-// Usage: node scripts/dev/capture-screens.mjs <stage-label>
+// Usage (from frontend/): node scripts/dev/capture-screens.mjs <stage-label>
 // Captures key pages light+dark into .superpowers/screens/<stage-label>/
 import { chromium } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, existsSync } from 'node:fs'
 
 const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:3001'
 const stage = process.argv[2] ?? 'adhoc'
-const outDir = new URL(`../../../.superpowers/screens/${stage}/`, import.meta.url).pathname
+const root = new URL('../../../', import.meta.url).pathname
+const outDir = `${root}.superpowers/screens/${stage}/`
+const stateFile = `${root}.superpowers/screens/.auth-state.json`
 mkdirSync(outDir, { recursive: true })
 
-const PAGES = [
-  ['login', '/login'],
-  ['chat-home', '/'], // redirects to /w/<ws>
-  ['ws-skills', null], // resolved after login from current URL
-  ['ws-settings', null],
-  ['admin-models', '/admin/models'],
-  ['admin-members', '/admin/members'],
-]
+const EMAIL = 'screens@cubebox.dev'
+const PASSWORD = 'Screens-Harness-2026'
 
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const ctx = await browser.newContext({
+  viewport: { width: 1440, height: 900 },
+  ...(existsSync(stateFile) ? { storageState: stateFile } : {}),
+})
+const page = await ctx.newPage()
 
-// login
-await page.goto(`${BASE}/login`)
-await page.getByRole('textbox', { name: 'Email' }).fill('design@cubebox.dev')
-await page.getByRole('textbox', { name: 'Password' }).fill('Design-Review-2026')
-await page.getByRole('button', { name: /sign in/i }).click()
-await page.waitForURL(/\/w\//)
+// establish session: storageState → login → register (first run, fresh DB)
+await page.goto(`${BASE}/`)
+if (!/\/w\//.test(page.url())) {
+  await page.goto(`${BASE}/login`)
+  await page.getByRole('textbox', { name: 'Email' }).fill(EMAIL)
+  await page.getByRole('textbox', { name: 'Password' }).fill(PASSWORD)
+  await page.getByRole('button', { name: /sign in/i }).click()
+  await page.waitForLoadState('networkidle')
+  if (!/\/w\//.test(page.url())) {
+    await page.goto(`${BASE}/register`)
+    await page.getByRole('textbox', { name: 'Email' }).fill(EMAIL)
+    await page.getByRole('textbox', { name: 'Password' }).fill(PASSWORD)
+    await page.getByRole('button', { name: /create account/i }).click()
+    await page.waitForURL(/\/w\//)
+  }
+  await ctx.storageState({ path: stateFile })
+}
 const wsUrl = new URL(page.url()).pathname // /w/<wsId>
 
+const PAGES = [
+  ['chat-home', wsUrl],
+  ['ws-skills', `${wsUrl}/skills`],
+  ['ws-settings', `${wsUrl}/settings?tab=workspace`],
+  ['admin-models', '/admin/models'],
+  ['admin-members', '/admin/members'],
+  ['login-page', '/login'], // captured last: leaves session cookies intact
+]
+
 for (const theme of ['light', 'dark']) {
-  await page.emulateMedia({ colorScheme: theme })
-  // force explicit theme via next-themes localStorage, then reload
   await page.evaluate((t) => localStorage.setItem('theme', t), theme)
   for (const [name, path] of PAGES) {
-    const target =
-      path ?? `${wsUrl}/${name.replace('ws-', '')}`.replace('settings', 'settings?tab=workspace')
-    await page.goto(`${BASE}${target}`)
+    await page.goto(`${BASE}${path}`)
     await page.waitForLoadState('networkidle')
     await page.screenshot({ path: `${outDir}/${name}-${theme}.png` })
   }
@@ -116,10 +148,11 @@ console.log(`screens -> ${outDir}`)
 ```
 
 - [ ] **Step 2:** Run `node scripts/dev/capture-screens.mjs 0-baseline`
-      from `frontend/`. Expected: 12 PNGs in
+      from `frontend/` (resolves `@playwright/test` from the workspace
+      root devDependency). Expected: 12 PNGs in
       `.superpowers/screens/0-baseline/`. These are the "before"
       reference.
-- [ ] **Step 3:** Commit the script:
+- [ ] **Step 3:** `/code-review` (medium) on the script; fix; commit:
 
 ```bash
 git add frontend/scripts/dev/capture-screens.mjs
@@ -243,15 +276,25 @@ the spec — done here because it's the same file.)
   --color-info-fg: #0a5cc2;
   --color-info-solid: #3b82f6;
 
+  /* shadcn `destructive` slot — 91 component files use bg-destructive /
+     text-destructive / aria-invalid:border-destructive and it is NOT
+     defined today (pre-existing dead classes). Map it onto danger: */
+  --color-destructive: #e5484d;
+  --color-destructive-foreground: #ffffff;
+
   /* shape */
   --radius-xs: 4px;   /* badges, chips */
   --radius: 6px;      /* buttons, inputs, cards */
   --radius-lg: 10px;  /* panels, modals */
 
-  /* motion */
-  --duration-fast: 120ms;
-  --duration-base: 200ms;
-  --duration-slow: 300ms;
+  /* motion — NOTE the namespace: Tailwind 4 generates duration-* utilities
+     from --transition-duration-*, NOT from --duration-* (verified by
+     compiling with the repo's tailwindcss; --duration-* silently emits
+     nothing). The duplicate plain vars below exist for var() references
+     in handwritten CSS (keyframes, panel transition). */
+  --transition-duration-fast: 120ms;
+  --transition-duration-base: 200ms;
+  --transition-duration-slow: 300ms;
   --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -295,20 +338,46 @@ the spec — done here because it's the same file.)
     --color-info-border: rgba(59, 130, 246, 0.35);
     --color-info-fg: #52a8ff;
     --color-info-solid: #3b82f6;
+
+    --color-destructive: #e5484d;
+    --color-destructive-foreground: #ffffff;
   }
 }
 ```
 
+- [ ] **Step 1b:** Animation utilities dependency — `animate-in`,
+      `fade-in`, `slide-in-from-bottom`, `zoom-in-*` used by existing
+      `ui/` components (and later stages) are tw-animate-css utilities,
+      and the package is NOT installed: those classes compile to NOTHING
+      today (pre-existing silent no-op). Fix:
+
+```bash
+pnpm --filter web add -D tw-animate-css
+```
+
+      and in `globals.css`, after `@import 'tailwindcss';` add
+      `@import 'tw-animate-css';`. Verify: `pnpm --filter web build`,
+      then grep the built CSS for `animate-in` — must now produce rules.
+
 Notes for the engineer:
 - Tailwind 4 generates `bg-raised`, `border-border-strong`,
   `text-success-fg`, `bg-warning-surface`, `rounded-xs`,
-  `duration-fast` etc. from these automatically.
+  `duration-fast` (from `--transition-duration-fast`) etc.
+  automatically.
 - Keep everything else in globals.css (resizable-panel fix,
   scrollbar-none, `@custom-variant dark`, hljs palettes). The light hljs
   palette stays; in Stage 4 the dark hljs bg moves onto `--color-sunken`.
 - Light-mode dark-value mirroring was eyeballed for WCAG AA; verify
   contrast in Step 3 and tune in place (`globals.css` is the source of
   truth — do NOT back-port into the spec).
+- **`accent` is the hover slot, but today it is ALSO used for
+  selected/open states** with no other indicator: `bg-accent/70`
+  selected file rows in `workspace-settings/skills/WorkspaceSkillDetail.tsx`
+  + `admin/skills/SkillDetailPanel.tsx`, `data-popup-open:bg-accent` in
+  `ui/dropdown-menu.tsx`. With the new darker accent these become
+  indistinguishable from hover. Stages 4/5 carry an explicit sweep:
+  selected rows → `bg-raised` + the 2px `before:bg-primary` indicator;
+  audit via `grep -rn "bg-accent" components app --include='*.tsx' | grep -v "hover:"`.
 
 - [ ] **Step 2:** Global utility adjustments in the same file: add
       tabular numerals helper + reduced motion guard at the end:
@@ -343,24 +412,29 @@ Notes for the engineer:
   (same pattern)
 - Test: `frontend/packages/web/__tests__/components/ThemeToggle.test.tsx` (create)
 
-- [ ] **Step 1:** Write the failing test:
+- [ ] **Step 1:** Write the failing test. Assert the OBSERVABLE outcome
+      (html class set by next-themes), not its private localStorage
+      format; stub matchMedia via `vi.stubGlobal` and restore it so the
+      mutation can't leak into sibling tests:
 
 ```tsx
 import { render, screen, fireEvent } from '@testing-library/react'
 import { ThemeProvider } from 'next-themes'
 import { NextIntlClientProvider } from 'next-intl'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-// system resolves dark; first click must set LIGHT (uses resolvedTheme)
+// system resolves dark; first click must flip to LIGHT (uses resolvedTheme)
 describe('ThemeToggle under theme=system', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
   it('first click flips against resolvedTheme, not raw theme', () => {
-    window.matchMedia = ((q: string) => ({
+    vi.stubGlobal('matchMedia', (q: string) => ({
       matches: q.includes('dark'),
       media: q, addListener: () => {}, removeListener: () => {},
-      addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
-      onchange: null,
-    })) as never
+      addEventListener: () => {}, removeEventListener: () => {},
+      dispatchEvent: () => false, onchange: null,
+    }))
     render(
       <NextIntlClientProvider locale="en" messages={{ avatar: { lightTheme: 'Light', darkTheme: 'Dark' } }}>
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -369,7 +443,7 @@ describe('ThemeToggle under theme=system', () => {
       </NextIntlClientProvider>,
     )
     fireEvent.click(screen.getByRole('button'))
-    expect(localStorage.getItem('theme')).toBe('light')
+    expect(document.documentElement.classList.contains('light')).toBe(true)
   })
 })
 ```
@@ -388,12 +462,72 @@ describe('ThemeToggle under theme=system', () => {
 - [ ] **Step 5:** Commit: `feat(ui): stage1: theme default follows
       system; toggles read resolvedTheme`
 
-### Task 1.4: Stage gate
+### Task 1.4: Raw-color eslint guard (lands NOW, not in Stage 7)
 
-- [ ] `pnpm -r typecheck && pnpm --filter web lint && pnpm --filter web test` — all green.
-- [ ] Run E2E smoke: `pnpm --filter web exec playwright test
-      __tests__/e2e/chat-flow.spec.ts` (worktree DB auto-routed).
-      Expected: PASS — no copy/selector changed yet.
+**Files:**
+- Modify: `frontend/packages/web/eslint.config.mjs`
+
+Landing the guard first means every later stage's `pnpm lint` gate
+catches new raw colors at the door, instead of Stage 7 discovering five
+stages of accumulated drift. Existing offenders go in a temporary
+allowlist that shrinks per stage and must be EMPTY by Stage 7.
+
+- [ ] **Step 1:** Generate the current-offender list:
+
+```bash
+grep -rlE "(bg|text|border|ring|divide|from|to)-(amber|blue|green|red|emerald|sky|yellow|purple|pink|orange|indigo|violet|teal|cyan|lime|rose|fuchsia|slate|gray|zinc|neutral|stone)-[0-9]" \
+  packages/web/components packages/web/app --include='*.tsx' | sort
+```
+
+- [ ] **Step 2:** Add to `eslint.config.mjs` (two selectors: plain string
+      literals AND template-literal chunks — template literals are how
+      raw colors usually sneak past `Literal`-only guards):
+
+```js
+// --- redesign color guard (docs/dev/specs/2026-06-10-ui-redesign-design.md §1)
+const RAW_PALETTE =
+  '(?:bg|text|border|ring|divide|from|to)-(?:amber|blue|green|red|emerald|sky|yellow|purple|pink|orange|indigo|violet|teal|cyan|lime|rose|fuchsia|slate|gray|zinc|neutral|stone)-[0-9]'
+
+const rawColorGuard = {
+  files: ['components/**/*.tsx', 'app/**/*.tsx'],
+  ignores: [
+    'components/chat/widget/**', // iframe srcdoc: literal hex is structural (see spec)
+    // TEMP ALLOWLIST — paste Step 1 output here; each stage deletes the
+    // files it cleans; MUST be empty by Stage 7 Task 7.2.
+  ],
+  rules: {
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector: `Literal[value=/${RAW_PALETTE}/]`,
+        message: 'Raw palette utilities are banned — use semantic tokens (spec §1).',
+      },
+      {
+        selector: `TemplateElement[value.raw=/${RAW_PALETTE}/]`,
+        message: 'Raw palette utilities are banned — use semantic tokens (spec §1).',
+      },
+    ],
+  },
+}
+```
+
+      (append `rawColorGuard` to the exported config array).
+- [ ] **Step 3:** `pnpm --filter web lint` — green with the allowlist in
+      place. Negative test: add `bg-amber-500` to a non-allowlisted file
+      inside a plain string AND inside a template literal — both must
+      fail; revert.
+- [ ] **Step 4:** Commit: `feat(ui): stage1: raw-color eslint guard with
+      shrinking allowlist`
+
+### Task 1.5: Stage gate
+
+- [ ] `pnpm -r type-check && pnpm --filter web lint && pnpm --filter web test` — all green.
+- [ ] E2E smoke (from `frontend/`): `pnpm exec playwright test
+      packages/web/__tests__/e2e/chat-flow.spec.ts` (worktree DB
+      auto-routed). Expected: PASS — no copy/selector changed yet; the
+      system-theme default resolves light under chromium's default
+      colorScheme, so existing specs are unaffected.
+- [ ] `node scripts/dev/capture-screens.mjs 1-tokens`
 - [ ] `/code-review` (medium) on the stage diff; fix actionable findings; commit fixes.
 
 ---
@@ -413,37 +547,43 @@ states. Apply this transformation table to every file:
 
 | Find | Replace with | Why |
 |---|---|---|
-| `rounded-md`, `rounded-lg` on buttons/inputs/cards | `rounded-[var(--radius)]` → just `rounded` (6px via token) | 3-step radius scale |
+| `rounded-md`, `rounded-lg` on buttons/inputs/cards | `rounded` (6px via `--radius`) | 3-step radius scale |
 | `rounded-[min(var(--radius-md),10px)]` (button xs/sm) | `rounded` | kill arbitrary values |
-| `rounded-full` on badges | `rounded-xs` | square-ish badges per direction B |
+| `rounded-full` — **ONLY in `badge.tsx`** | `rounded-xs` | square-ish badges per direction B. Do NOT touch the functional circles: `switch.tsx` (track+thumb), `radio-group.tsx` (circle+dot), `resizable.tsx` (drag handle) — those stay `rounded-full` |
 | `rounded-xl`, `rounded-2xl` on cards/popovers | `rounded-lg` (10px) | panels/modals step |
 | `transition-colors` without duration | `transition-colors duration-fast` | motion tokens |
 | any `focus-visible:ring-*` missing | `focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none` | visible focus everywhere |
-| `text-[0.8rem]`, `text-[11px]` etc. | nearest semantic step (`text-xs` = 12px, `text-sm` = 13px — see Step 1) | semantic type scale |
+| `text-[0.8rem]`, `text-[13px]` | `text-sm` (13px) | semantic type scale |
+| `text-[11px]`, `text-[9px]`, `text-[10px]` | `text-2xs` (11px) | semantic type scale |
 
-- [ ] **Step 1:** Add the type-scale override in `globals.css` `@theme`
-      (13px-based UI, per direction B):
+- [ ] **Step 1:** Add the type-scale override in `globals.css` `@theme`.
+      **CRITICAL — do NOT override `--text-base`**: it must stay 16px.
+      `input.tsx`/`textarea.tsx` use `text-base … md:text-sm` precisely
+      so mobile inputs are ≥16px (iOS Safari auto-zooms on focus below
+      16px — shrinking it would break the Stage 6 mobile work), and ~24
+      dialog/section titles use `text-base font-semibold` for 16px
+      hierarchy. Chat prose uses `prose prose-sm` (typography plugin,
+      independent of these tokens) and is untouched. The scale
+      11/12/13/14/16/20/24 maps as: `text-2xs`(new)/`text-xs`/`text-sm`/
+      `text-md`(new)/`text-base`(default)/`text-xl`/`text-2xl`:
 
 ```css
-  --text-xs: 11px;
-  --text-xs--line-height: 1.45;
-  --text-sm: 12px;
-  --text-sm--line-height: 1.5;
-  --text-base: 13px;
-  --text-base--line-height: 1.55;
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.45;
+  /* --text-xs stays default 12px */
+  --text-sm: 13px;
+  --text-sm--line-height: 1.55;
   --text-md: 14px;
   --text-md--line-height: 1.55;
-  --text-lg: 16px;
-  --text-lg--line-height: 1.5;
+  /* --text-base stays default 16px — iOS anti-zoom + title hierarchy */
   --text-xl: 20px;
   --text-xl--line-height: 1.35;
   --text-2xl: 24px;
   --text-2xl--line-height: 1.25;
 ```
 
-  Then set `font-size: 13px` is NOT needed — `text-base` covers it where
-  used; body inherits browser 16px only for prose (chat markdown keeps
-  `text-base`+).
+  UI chrome standardizes on `text-sm` (13px, direction B's UI size);
+  `text-lg` is unused in the new scale — don't introduce it.
 
 - [ ] **Step 2:** Apply the table file-by-file. For `button.tsx`
       additionally add a pressed state to the base CVA string:
@@ -458,17 +598,36 @@ states. Apply this transformation table to every file:
 **Files:**
 - Create: `frontend/packages/web/components/ui/sheet.tsx`
 
-- [ ] **Step 1:** `pnpm --filter web dlx shadcn@latest add sheet` from
-      `frontend/packages/web/` (components.json present, style
-      base-nova). If the generator fails offline, vendor the standard
-      shadcn sheet (Radix Dialog based) manually.
-- [ ] **Step 2:** Restyle generated file to tokens: overlay
-      `bg-black/60`→`bg-background/80 backdrop-blur-sm`, content
-      `border-l border-border bg-card`, width `w-[480px] max-w-[90vw]`,
-      animation classes use
-      `data-[state=open]:duration-slow ease-[var(--ease-out-quart)]`.
+- [ ] **Step 1:** Do NOT use the shadcn CLI and do NOT vendor a Radix
+      sheet: this codebase's primitives are **@base-ui/react**, which
+      emits `data-open`/`data-closed` attributes — Radix-style
+      `data-[state=open]:` selectors would never match. (Also note
+      `pnpm --filter web dlx` does not change cwd — dlx ignores
+      `--filter` — so the CLI invocation would run against the wrong
+      directory anyway.) Instead, build `ui/sheet.tsx` by hand from the
+      in-repo dialog pattern: copy the structure of
+      `components/ui/alert-dialog.tsx` (base-ui Dialog: Root/Trigger/
+      Portal/Backdrop/Popup parts) and restyle:
+      - Backdrop: `fixed inset-0 bg-background/80 backdrop-blur-sm
+        data-open:animate-in data-open:fade-in
+        data-closed:animate-out data-closed:fade-out duration-base`
+      - Popup (side="right" default): `fixed inset-y-0 right-0 z-50
+        w-[480px] max-w-[90vw] border-l border-border bg-card shadow-lg
+        outline-none data-open:animate-in
+        data-open:slide-in-from-right data-closed:animate-out
+        data-closed:slide-out-to-right duration-slow
+        ease-[var(--ease-out-quart)] flex flex-col`
+      - Add a `side?: 'right' | 'left'` prop (left variant flips border
+        and slide direction — Stage 6's mobile drawer uses it)
+      - Export: `Sheet`, `SheetTrigger`, `SheetContent`, `SheetHeader`,
+        `SheetTitle`, `SheetDescription`, `SheetFooter`, `SheetClose` —
+        mirroring alert-dialog's export names/pattern
+- [ ] **Step 2:** Smoke-test in the running app behind a scratch page or
+      Storybook-less manual mount; verify open/close animates (Task 1.2
+      Step 1b installed tw-animate-css — without it these classes are
+      no-ops).
 - [ ] **Step 3:** `pnpm --filter web build` green. Commit:
-      `feat(ui): stage2: add sheet primitive for slide-over forms`
+      `feat(ui): stage2: add base-ui sheet primitive for slide-over forms`
 
 ### Task 2.3: Add toast system (sonner)
 
@@ -476,8 +635,10 @@ states. Apply this transformation table to every file:
 - Modify: `frontend/packages/web/package.json` (pnpm add)
 - Create: `frontend/packages/web/components/ui/sonner.tsx`
 - Modify: `frontend/packages/web/app/layout.tsx` (mount `<Toaster />`)
-- Create: `frontend/packages/web/lib/useUndoableDelete.ts`
-- Test: `frontend/packages/web/__tests__/lib/useUndoableDelete.test.ts`
+- Create: `frontend/packages/web/hooks/useUndoableDelete.ts` (hooks live
+  in `hooks/`, NOT `lib/` — 18 existing hooks + the components.json
+  `hooks` alias establish the convention)
+- Test: `frontend/packages/web/__tests__/hooks/useUndoableDelete.test.ts`
 
 - [ ] **Step 1:** `pnpm --filter web add sonner`
 - [ ] **Step 2:** `components/ui/sonner.tsx`:
@@ -513,14 +674,14 @@ export function Toaster(props: React.ComponentProps<typeof Sonner>) {
 ```ts
 import { renderHook, act } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { useUndoableDelete } from '@/lib/useUndoableDelete'
+import { useUndoableDelete } from '@/hooks/useUndoableDelete'
 
 describe('useUndoableDelete', () => {
   it('commits after the grace window unless undone', () => {
     vi.useFakeTimers()
     const commit = vi.fn()
     const { result } = renderHook(() => useUndoableDelete())
-    act(() => result.current.requestDelete('item-1', commit))
+    act(() => result.current.requestDelete('item-1', commit, { label: 'Deleted', actionLabel: 'Undo' }))
     expect(commit).not.toHaveBeenCalled()          // delayed
     act(() => vi.advanceTimersByTime(5000))
     expect(commit).toHaveBeenCalledTimes(1)        // committed
@@ -531,16 +692,32 @@ describe('useUndoableDelete', () => {
     vi.useFakeTimers()
     const commit = vi.fn()
     const { result } = renderHook(() => useUndoableDelete())
-    act(() => result.current.requestDelete('item-2', commit))
+    act(() => result.current.requestDelete('item-2', commit, { label: 'Deleted', actionLabel: 'Undo' }))
     act(() => result.current.undo('item-2'))
     act(() => vi.advanceTimersByTime(5000))
     expect(commit).not.toHaveBeenCalled()
     vi.useRealTimers()
   })
+
+  it('FLUSHES (commits) pending deletes on unmount — never cancels them', () => {
+    vi.useFakeTimers()
+    const commit = vi.fn()
+    const { result, unmount } = renderHook(() => useUndoableDelete())
+    act(() => result.current.requestDelete('item-3', commit, { label: 'Deleted', actionLabel: 'Undo' }))
+    unmount() // user navigated away inside the grace window
+    expect(commit).toHaveBeenCalledTimes(1) // the delete the toast promised still happens
+    vi.useRealTimers()
+  })
 })
 ```
 
-- [ ] **Step 4:** Run it — FAIL (module missing). Implement:
+- [ ] **Step 4:** Run it — FAIL (module missing). Implement. Two
+      deliberate properties: the Map stores the COMMIT alongside the
+      timer (so unmount can flush, not just cancel — a cancelled timer
+      would mean "Deleted" toasts that silently never delete), and both
+      toast strings come in as required params (the hook hardcodes no
+      English — call sites pass `t('common.deleted')` /
+      `t('common.undo')`):
 
 ```ts
 'use client'
@@ -550,32 +727,46 @@ import { toast } from 'sonner'
 
 const UNDO_WINDOW_MS = 5000
 
-/** Optimistic-hide + delayed-commit delete with an undo toast. */
+interface PendingDelete {
+  timer: ReturnType<typeof setTimeout>
+  commit: () => void | Promise<void>
+}
+
+interface UndoableDeleteOpts {
+  /** translated toast text, e.g. t('common.deleted') */
+  label: string
+  /** translated action text, e.g. t('common.undo') */
+  actionLabel: string
+  onUndo?: () => void
+}
+
+/** Optimistic-hide + delayed-commit delete with an undo toast.
+ *  Unmount FLUSHES pending commits (the UI already promised deletion). */
 export function useUndoableDelete() {
-  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const pending = useRef(new Map<string, PendingDelete>())
 
   const undo = useCallback((id: string) => {
-    const timer = timers.current.get(id)
-    if (timer) {
-      clearTimeout(timer)
-      timers.current.delete(id)
+    const entry = pending.current.get(id)
+    if (entry) {
+      clearTimeout(entry.timer)
+      pending.current.delete(id)
     }
   }, [])
 
   const requestDelete = useCallback(
-    (id: string, commit: () => void | Promise<void>, opts?: { label?: string; onUndo?: () => void }) => {
+    (id: string, commit: () => void | Promise<void>, opts: UndoableDeleteOpts) => {
       const timer = setTimeout(() => {
-        timers.current.delete(id)
+        pending.current.delete(id)
         void commit()
       }, UNDO_WINDOW_MS)
-      timers.current.set(id, timer)
-      toast(opts?.label ?? 'Deleted', {
+      pending.current.set(id, { timer, commit })
+      toast(opts.label, {
         duration: UNDO_WINDOW_MS,
         action: {
-          label: 'Undo',
+          label: opts.actionLabel,
           onClick: () => {
             undo(id)
-            opts?.onUndo?.()
+            opts.onUndo?.()
           },
         },
       })
@@ -583,11 +774,15 @@ export function useUndoableDelete() {
     [undo],
   )
 
-  // commit pending deletes on unmount so nothing is silently lost
   useEffect(() => {
-    const pending = timers.current
+    const map = pending.current
     return () => {
-      for (const t of pending.values()) clearTimeout(t)
+      // flush, don't cancel: commit everything still pending
+      for (const { timer, commit } of map.values()) {
+        clearTimeout(timer)
+        void commit()
+      }
+      map.clear()
     }
   }, [])
 
@@ -595,18 +790,20 @@ export function useUndoableDelete() {
 }
 ```
 
-      Caller contract: hide the item optimistically (local state /
-      store), call `requestDelete(id, commitFn, { onUndo: restoreFn })`.
-      i18n of "Deleted"/"Undo" happens at call sites via
-      `useTranslations` — pass `label` and a translated action; add keys
-      `common.deleted` / `common.undo` to `messages/en.json` + `zh.json`.
+      Caller contract (see Stage 5 prerequisites — the current delete
+      flows are API-first and need rework before this hook is wirable):
+      hide the item optimistically, call
+      `requestDelete(id, commitFn, { label: t('common.deleted'),
+      actionLabel: t('common.undo'), onUndo: restoreFn })`. Add keys
+      `common.deleted` / `common.undo` to `messages/en.json` + `zh.json`
+      in this task.
 - [ ] **Step 5:** Tests PASS. `pnpm --filter web build` green.
 - [ ] **Step 6:** Commit: `feat(ui): stage2: sonner toaster + undoable
       delete hook`
 
 ### Task 2.4: Stage gate
 
-- [ ] `pnpm -r typecheck && pnpm --filter web lint && pnpm --filter web test`
+- [ ] `pnpm -r type-check && pnpm --filter web lint && pnpm --filter web test`
 - [ ] `node scripts/dev/capture-screens.mjs 2-primitives`
 - [ ] `/code-review` (medium); fix; commit.
 
@@ -765,9 +962,12 @@ export function PanelHeader({ source, actions, fullscreen, onClose }: PanelHeade
 ### Task 3.2: Fold the 4 sibling panels under the shared header
 
 **Files:**
-- Modify: `frontend/packages/web/components/panel/ArtifactPanel.tsx`
-  (delete its copy-pasted header markup; render `PanelHeader` with
-  `kind: 'plain'`, `actions={<VersionPopover…/><DownloadLink…/>}`)
+- Modify: `frontend/packages/web/components/panel/artifact/ArtifactPanel.tsx`
+  (NOTE the `artifact/` subdirectory — AppShell imports
+  `@/components/panel/artifact/ArtifactPanel`; do not create a new file
+  at `components/panel/ArtifactPanel.tsx`. Delete its copy-pasted header
+  markup; render `PanelHeader` with `kind: 'plain'`,
+  `actions={<VersionPopover…/><DownloadLink…/>}`)
 - Modify: `frontend/packages/web/components/panel/BrowserView.tsx`
   (header → `PanelHeader` with `actions={takeOver/handBack + refresh}`)
 - Modify: `frontend/packages/web/components/panel/SkillCandidatePanel.tsx`
@@ -792,33 +992,41 @@ export function PanelHeader({ source, actions, fullscreen, onClose }: PanelHeade
 - Modify: `frontend/packages/web/components/layout/AppShell.tsx`
 - Modify: `frontend/packages/web/app/globals.css` (one rule)
 
-- [ ] **Step 1:** Add CSS (globals.css):
+- [ ] **Step 1:** Add CSS (globals.css). Inverted gating — the
+      transition is ON by default and a `panel-dragging` class disables
+      it during pointer drags. No JS timers, no duration duplicated in
+      JS, no re-entrancy bug when the user spams open/close:
 
 ```css
-/* Panel open/close: sanctioned width transition, NEVER during drag.
-   .panel-animating is applied only around programmatic open/close. */
-.panel-animating [data-slot='resizable-panel'] {
-  transition: flex-basis var(--duration-slow) var(--ease-out-quart);
+/* Panel open/close: sanctioned width transition (spec motion exemption).
+   Disabled while the user drags the divider so resize stays 1:1. */
+[data-slot='resizable-panel-group']:not(.panel-dragging)
+  [data-slot='resizable-panel'] {
+  transition: flex-basis var(--transition-duration-slow) var(--ease-out-quart);
 }
 ```
 
-- [ ] **Step 2:** In `AppShell.tsx`, wrap panel-open state changes: set
-      `panelAnimating` true, flip open state, clear after 300ms
-      (`setTimeout` + cleanup). Apply `panel-animating` class on the
-      `ResizablePanelGroup` wrapper only while true. Drag interactions
-      never set it.
+- [ ] **Step 2:** In `AppShell.tsx`, wire the drag state to the existing
+      `ResizableHandle`: react-resizable-panels' handle exposes an
+      `onDragging={(isDragging) => …}` callback — toggle a
+      `panel-dragging` class on the group wrapper from it. Nothing else:
+      programmatic open/close transitions automatically; drags don't.
 - [ ] **Step 3:** Manual check in app: open/close eases; dragging the
-      divider stays 1:1 with the cursor (no lag).
+      divider stays 1:1 with the cursor (no lag); rapid open/close
+      mashing never sticks. Also check initial page load for a one-frame
+      animation flash — if hydration causes one, add the class on mount
+      and remove it in a `useEffect` after first paint.
 - [ ] **Step 4:** Commit: `feat(ui): stage3: eased panel open/close,
       drag-safe`
 
 ### Task 3.4: Stage gate
 
-- [ ] `pnpm -r typecheck && pnpm --filter web lint && pnpm --filter web test`
-- [ ] E2E: run panel-touching specs:
-      `pnpm --filter web exec playwright test __tests__/e2e/chat-flow.spec.ts __tests__/e2e/widget-shell.spec.ts`
+- [ ] `pnpm -r type-check && pnpm --filter web lint && pnpm --filter web test`
+- [ ] E2E (from `frontend/`): `pnpm exec playwright test
+      packages/web/__tests__/e2e/chat-flow.spec.ts
+      packages/web/__tests__/e2e/widget-shell.spec.ts`
 - [ ] `node scripts/dev/capture-screens.mjs 3-panel-shell`
-- [ ] `/code-review` (HIGH — structural stage); fix; commit.
+- [ ] `/code-review` (high — structural stage); fix; commit.
 
 ---
 
@@ -848,16 +1056,20 @@ Transformations (token classes only):
 
 - [ ] **Step 1:** Apply; verify in app (hover/active/focus all visible,
       both themes).
-- [ ] **Step 2:** Run sidebar-touching E2E:
-      `pnpm --filter web exec playwright test __tests__/e2e/workspace-switch.spec.ts`
+- [ ] **Step 2:** Run sidebar-touching E2E (from `frontend/`):
+      `pnpm exec playwright test packages/web/__tests__/e2e/workspace-switch.spec.ts`
 - [ ] **Step 3:** Commit: `feat(ui): stage4: sidebar on token language`
 
 ### Task 4.2: Message stream
 
 **Files:**
 - Modify: `frontend/packages/web/components/chat/UserMessage.tsx`
-- Modify: `frontend/packages/web/components/chat/AssistantMessage.tsx` +
-  `HistoryAssistantMessage.tsx` (remove avatar block, pure typography)
+- Modify: `frontend/packages/web/components/chat/AssistantMessage.tsx`
+  (remove avatar block, pure typography). NOTE: there is NO separate
+  `HistoryAssistantMessage.tsx` file — `HistoryAssistantMessage` is
+  `memo(AssistantMessage)` exported from the same file (line ~676);
+  editing AssistantMessage covers both render paths. Do not create a
+  fork.
 - Modify: `frontend/packages/web/components/chat/MessageList.tsx`
   (column: `max-w-[760px] mx-auto px-6`; replace `bg-amber-500/10
   border-amber-500/30` warning banner with
@@ -887,13 +1099,15 @@ Transformations (token classes only):
 - Modify: `frontend/packages/web/components/chat/FailoverBanner.tsx`
   (amber → warning set)
 
-UserMessage core (complete component body):
+UserMessage core (complete component body — `text-md` = 14px, matching
+the assistant's `prose-sm` body size so the two message types read at the
+same scale):
 
 ```tsx
 export function UserMessage({ children, attachments }: UserMessageProps) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[78%] rounded-lg rounded-br-xs border border-border bg-raised px-3.5 py-2.5 text-base leading-relaxed">
+      <div className="max-w-[78%] rounded-lg rounded-br-xs border border-border bg-raised px-3.5 py-2.5 text-md leading-relaxed">
         {children}
         {attachments}
       </div>
@@ -904,6 +1118,11 @@ export function UserMessage({ children, attachments }: UserMessageProps) {
 
 (Adapt prop names to the existing file — read it first; only the
 className set changes plus dropping the saturated `bg-primary`.)
+
+Also in this task — the `bg-accent` selected-state sweep for chat-area
+files (see Stage 1 note): any non-hover `bg-accent`/`bg-accent/70`
+selected state in files this task touches → `bg-raised` + 2px
+`before:bg-primary` indicator.
 
 - [ ] **Step 1:** Apply file-by-file; after each, eyeball in the running
       app with a real conversation (`design@cubebox.dev` workspace has
@@ -918,10 +1137,12 @@ className set changes plus dropping the saturated `bg-primary`.)
 **Files:**
 - Modify: `frontend/packages/web/components/layout/InputBar.tsx`
 - Modify: `frontend/packages/web/messages/en.json` + `messages/zh.json`
-- Modify (selectors): `frontend/packages/web/__tests__/e2e/chat-flow.spec.ts`,
+- Modify (selectors): exactly SIX e2e spec files use the placeholder —
+  `frontend/packages/web/__tests__/e2e/chat-flow.spec.ts`,
   `streaming.spec.ts`, `steering.spec.ts`, `workspace-switch.spec.ts`,
-  `memory-reflection.spec.ts`, `i18n.spec.ts`, plus the 7th file found by
-  `grep -rl "How can I help you" __tests__/`
+  `memory-reflection.spec.ts`, `i18n.spec.ts` (verified; there is no
+  seventh — `attachments.spec.ts` uses `getByTestId('chat-input')` and
+  needs no change). Re-run the Step 1 grep to confirm before editing.
 - Test first: `frontend/packages/web/__tests__/components/InputBar.test.tsx`
   (extend if exists, create otherwise)
 
@@ -935,13 +1156,17 @@ grep -rn "How can I help you\|有什么可以帮你的" frontend/packages/web --
       zh → `"描述一个任务…"`. Keep `pendingHitlLock` untouched.
 - [ ] **Step 3:** Layout change in `InputBar.tsx` (read file first; it
       holds streaming/steer logic — DO NOT touch handlers, `showStop`
-      logic, PendingSteers, attachments, dropzone): move `PresetPicker`
-      and `ThinkingControl` from the row above the textarea into the
-      internal bottom toolbar, right-aligned before the send button;
-      attach button stays left. Container: `bg-raised border
-      border-border-strong rounded-lg focus-within:border-primary
-      focus-within:ring-2 focus-within:ring-ring/30 transition
-      duration-base`. Hint row (`Enter to send…`) stays below.
+      logic, PendingSteers, attachments, dropzone): the current row
+      above the textarea contains THREE components — `PresetPicker`,
+      `ThinkingControl`, **and `ThinkingBadge`** (lines ~263-268; the
+      existing InputBar unit test asserts the badge renders whenever
+      thinking is non-off — keep it). Move all three into the internal
+      bottom toolbar: badge + preset + thinking selectors right-aligned
+      before the send button; attach button stays left. Container:
+      `bg-raised border border-border-strong rounded-lg
+      focus-within:border-primary focus-within:ring-2
+      focus-within:ring-ring/30 transition duration-base`. Hint row
+      (`Enter to send…`) stays below.
 - [ ] **Step 4:** Update every E2E selector from Step 1's list to the new
       copy (`getByPlaceholder('Describe a task…')`; zh assertion in
       i18n.spec.ts → `描述一个任务…`). Prefer switching to the existing
@@ -959,9 +1184,15 @@ grep -rn "How can I help you\|有什么可以帮你的" frontend/packages/web --
 ### Task 4.4: Empty-state home + prompt cards
 
 **Files:**
-- Modify: the empty-state JSX (locate via
-  `grep -rn "AI Agent System" frontend/packages/web/app frontend/packages/web/components`)
+- Modify: `frontend/packages/web/app/(app)/w/[wsId]/page.tsx` (the
+  empty-state home lives at lines ~104-110: Box logo block + h1
+  "cubebox" + subtitle. Do NOT grep for "AI Agent System" — that string
+  only exists in layout.tsx metadata, not in the page JSX). Update
+  `__tests__/components/WorkspaceHomePage.test.tsx` alongside.
 - Create: `frontend/packages/web/components/chat/PromptCards.tsx`
+- Create: `frontend/packages/web/hooks/useComposerDraft.ts`
+- Modify: `frontend/packages/web/components/layout/InputBar.tsx` (one
+  small effect — see Step 1b)
 - Modify: `messages/en.json` + `messages/zh.json` (`home.promptCards.*`)
 
 - [ ] **Step 1:** `PromptCards.tsx` — three cards (analyze a data file /
@@ -970,10 +1201,42 @@ grep -rn "How can I help you\|有什么可以帮你的" frontend/packages/web --
       text-left hover:border-border-strong hover:bg-accent
       hover:-translate-y-px transition duration-fast focus-visible:ring-2
       focus-visible:ring-ring`; icon row `font-mono text-info-fg`; title
-      `text-sm font-medium`; description `text-xs text-faint`. `onClick`
-      fills the input via the same store/setter InputBar reads (find the
-      draft setter in `@cubebox/core` stores; if none exists, lift a
-      `onPick(text)` prop up to the page that owns InputBar state).
+      `text-sm font-medium`; description `text-xs text-faint`.
+- [ ] **Step 1b:** Input filling — RESOLVED (no fork): there is no draft
+      setter in `@cubebox/core` (conversationStore's `draft` is a
+      creation flag) and InputBar's `content` is internal `useState`
+      that must not be hoisted (Task 4.3 forbids restructuring). Bridge
+      with a tiny module-level store:
+
+```ts
+// hooks/useComposerDraft.ts
+'use client'
+
+import { create } from 'zustand'
+
+interface ComposerDraftState {
+  draft: string | null
+  setDraft: (text: string) => void
+  consume: () => string | null
+}
+
+export const useComposerDraft = create<ComposerDraftState>((set, get) => ({
+  draft: null,
+  setDraft: (text) => set({ draft: text }),
+  consume: () => {
+    const d = get().draft
+    if (d !== null) set({ draft: null })
+    return d
+  },
+}))
+```
+
+      PromptCards `onClick`: `useComposerDraft.getState().setDraft(text)`.
+      InputBar adds ONE subscription effect (additive — no handler
+      changes): `const draft = useComposerDraft((s) => s.draft)` +
+      `useEffect(() => { if (draft !== null) { setContent(draft);
+      useComposerDraft.getState().consume() } }, [draft])`. (zustand is
+      already a dependency via the existing stores.)
 - [ ] **Step 2:** Replace logo block with placeholder mark (40px square,
       `rounded-lg bg-gradient-to-br from-border-strong to-raised border
       border-border-strong grid place-items-center font-mono text-xs
@@ -983,6 +1246,10 @@ grep -rn "How can I help you\|有什么可以帮你的" frontend/packages/web --
       `feat(ui): stage4: empty-state home with placeholder mark + prompt cards`
 
 ### Task 4.5: Loading skeletons + streaming cursor
+
+**Execute together with Tasks 4.1/4.2** — it edits the same two files
+(Sidebar, MessageList); fold these changes into those tasks' commits
+rather than a third round of edits/review on the same files.
 
 **Files:**
 - Create: `frontend/packages/web/components/ui/skeleton.tsx`
@@ -1002,9 +1269,24 @@ grep -rn "How can I help you\|有什么可以帮你的" frontend/packages/web --
 
 ### Task 4.6: Stage gate
 
-- [ ] `pnpm -r typecheck && pnpm --filter web lint && pnpm --filter web test`
-- [ ] Full chat E2E set: `pnpm --filter web exec playwright test __tests__/e2e/`
-      (chat specs at minimum; fix fallout now, not in Stage 7)
+- [ ] `pnpm -r type-check && pnpm --filter web lint && pnpm --filter web test`
+- [ ] Chat-touching E2E ONLY (the full 26-spec dir runs serial and
+      includes admin/skills surfaces Stage 5 is about to rewrite — full
+      sweep belongs to Stage 7). From `frontend/`:
+
+```bash
+pnpm exec playwright test \
+  packages/web/__tests__/e2e/chat-flow.spec.ts \
+  packages/web/__tests__/e2e/streaming.spec.ts \
+  packages/web/__tests__/e2e/steering.spec.ts \
+  packages/web/__tests__/e2e/attachments.spec.ts \
+  packages/web/__tests__/e2e/i18n.spec.ts \
+  packages/web/__tests__/e2e/memory-reflection.spec.ts \
+  packages/web/__tests__/e2e/workspace-switch.spec.ts \
+  packages/web/__tests__/e2e/widget-shell.spec.ts
+```
+
+      Fix fallout now, not in Stage 7.
 - [ ] `node scripts/dev/capture-screens.mjs 4-chat`
 - [ ] `/code-review` (high); fix; commit.
 
@@ -1111,7 +1393,11 @@ Per page checklist (apply uniformly):
 - [ ] Header → `PageHeader` (title 20px/600 + one-line description +
       single primary `Button`).
 - [ ] Search/filter row → `ToolbarRow` with restyled `ui/tabs` as the
-      segmented control (no new widget).
+      segmented control (no new widget). Explicit migration list — fold
+      the three existing hand-rolled toolbars into `ToolbarRow` (or the
+      fragmentation survives): `components/mcp/MCPToolbar.tsx`,
+      `components/admin/models/ModelsToolbar.tsx`,
+      `components/workspace-settings/skills/WorkspaceSkillsToolbar.tsx`.
 - [ ] Master-detail lists: selected item gets the same 2px left
       `before:bg-primary` indicator as the sidebar; detail empty state →
       `components/shared/EmptyState.tsx` (restyle it once: drop dashed
@@ -1129,12 +1415,36 @@ Per page checklist (apply uniformly):
       with retry (these pages DO have refetch — wire to the existing
       fetch hook).
 - [ ] Recoverable deletes (sandbox-env vars, triggers, scheduled tasks,
-      memory items) → `useUndoableDelete` (optimistic hide via local
-      store state; commit calls existing delete API). Dangerous deletes
-      (workspace itself) keep AlertDialog + type-the-name.
+      memory items) → `useUndoableDelete`. **PREREQUISITE per flow — the
+      current delete paths are API-first and cannot host an undo window
+      as-is** (e.g. `triggerStore.remove` calls the API then filters;
+      sandbox-env `handleDelete` is confirm→API→full `load()` refetch).
+      For each flow, first add a `pendingDeleteIds: Set<string>` to the
+      owning component/store with: `hide(id)` (add to set — list
+      rendering filters it out), `restore(id)` (remove from set), and
+      rendering that filters by the set so a concurrent refetch can NOT
+      resurrect the row mid-window. Then wire:
+      `hide(id); requestDelete(id, () => api.delete(id), { label:
+      t('common.deleted'), actionLabel: t('common.undo'), onUndo: () =>
+      restore(id) })`. Never call the existing API-first remove() inside
+      requestDelete's commit only AFTER the window — the API call must
+      not happen before commit fires, or Undo is a lie. Dangerous
+      deletes (workspace itself) keep AlertDialog + type-the-name.
+- [ ] `bg-accent` selected-state sweep for the files this stage touches
+      (`WorkspaceSkillDetail.tsx` selected file rows are a known case) →
+      `bg-raised` + 2px primary indicator.
+- [ ] Replace existing hand-rolled `animate-pulse` skeleton blocks with
+      `ui/skeleton.tsx` as pages are visited (known: admin
+      `SkillsList.tsx`, `memory/components/MemoryList.tsx`,
+      `ScheduledTasksList.tsx` — grep `animate-pulse` per page).
+- [ ] Remove cleaned files from the Task 1.4 eslint allowlist as each
+      page lands.
 
-- [ ] **Step N (last):** Commit per page:
-      `feat(ui): stage5: <page> on management modules`
+- [ ] **Step N (last):** Commit per feature-area batch, NOT per page
+      (each commit costs ~30s of whole-workspace lint hooks): workspace
+      pages in 2-3 commits (settings+members / skills+memory /
+      triggers+scheduled+sandbox-env),
+      `feat(ui): stage5: <area> on management modules`
 
 ### Task 5.3: Apply to admin pages (15 pages) + admin top bar
 
@@ -1161,13 +1471,18 @@ Per page checklist (apply uniformly):
       `EnvModal` → `Sheet` from `ui/sheet.tsx` (the Models add wizard
       stays full-page). ≤3-field dialogs (`AddOrgMemberDialog`,
       `AddWsMemberDialog`) stay dialogs.
-- [ ] **Step 4:** Commit per page/component cluster.
+- [ ] **Step 4:** Commit per feature-area cluster (3-4 commits for the
+      15 admin pages: top bar+nav / models+presets+settings /
+      skills+registries+mcp / sandbox+env+members+misc), not per page.
+      Remove cleaned files from the Task 1.4 eslint allowlist as
+      clusters land.
 
 ### Task 5.4: Stage gate
 
-- [ ] `pnpm -r typecheck && pnpm --filter web lint && pnpm --filter web test`
-- [ ] E2E: admin + settings specs
-      (`grep -l "admin\|settings" __tests__/e2e/*.spec.ts` → run those)
+- [ ] `pnpm -r type-check && pnpm --filter web lint && pnpm --filter web test`
+- [ ] E2E: management specs, from `frontend/`:
+      `ls packages/web/__tests__/e2e/ | grep -E "admin|settings|trigger|scheduled|skills"`
+      → `pnpm exec playwright test <those files, packages/web/-prefixed>`
 - [ ] `node scripts/dev/capture-screens.mjs 5-management`
 - [ ] `/code-review` (high — biggest diff); fix; commit.
 
@@ -1187,9 +1502,9 @@ Per page checklist (apply uniformly):
       triggered by a hamburger button visible `md:hidden` in a slim top
       bar (`h-11 border-b border-border flex items-center px-3`).
       Conversation click closes the drawer.
-- [ ] **Step 2:** Playwright mobile check (manual):
-      `pnpm --filter web exec playwright test __tests__/e2e/chat-flow.spec.ts`
-      still green (desktop), then manual viewport 390×844 in the running
+- [ ] **Step 2:** Desktop regression (from `frontend/`):
+      `pnpm exec playwright test packages/web/__tests__/e2e/chat-flow.spec.ts`
+      still green, then manual viewport 390×844 in the running
       app: drawer opens/closes, overlay dims.
 - [ ] **Step 3:** Commit: `feat(ui): stage6: sidebar drawer on mobile`
 
@@ -1200,18 +1515,21 @@ Per page checklist (apply uniformly):
   (`max-w-[760px]` → `max-w-full px-4 md:max-w-[760px] md:px-6`; user
   bubble `max-w-[88%] md:max-w-[78%]`)
 - Modify: `frontend/packages/web/components/layout/InputBar.tsx`
-  (container `pb-[env(safe-area-inset-bottom)]`; below `md`, hide
-  inline PresetPicker/ThinkingControl/attach and render a `+`
-  `DropdownMenu` that RE-HOSTS the same three components as menu
-  content — import the same components, no logic duplication)
+  (container `pb-[env(safe-area-inset-bottom)]`; below `md`, hide the
+  inline PresetPicker/ThinkingControl/attach controls and render a `+`
+  `DropdownMenu` that RE-HOSTS the same components as menu content —
+  import the same components, no logic duplication. `ThinkingBadge`
+  stays visible OUTSIDE the `+` menu on mobile — it is the user's only
+  indicator that elevated thinking is active)
 - Modify: `frontend/packages/web/components/layout/AppShell.tsx`
   (below `md`: right panel renders as a full-screen overlay —
   `fixed inset-0 z-50 bg-background flex flex-col` with slide-up
-  animation `data-[state=open]:animate-in slide-in-from-bottom
-  duration-slow` — instead of a ResizablePanel; gate by a
+  animation `animate-in slide-in-from-bottom duration-slow` applied on
+  mount (the overlay conditionally mounts; no data-state attr needed) —
+  instead of a ResizablePanel; gate by a
   `useMediaQuery('(min-width: 768px)')` hook, create
-  `lib/useMediaQuery.ts` if absent: standard `matchMedia` +
-  `useSyncExternalStore`)
+  `hooks/useMediaQuery.ts` (hooks dir, NOT lib/): standard `matchMedia`
+  + `useSyncExternalStore`)
 - [ ] **Step 1:** Implement each; manual viewport checks (390×844): no
       horizontal scroll, input above keyboard, panel overlay full-screen
       with working close.
@@ -1236,7 +1554,8 @@ found by `grep -rln "overflow-hidden" app/admin app/\(app\)/w --include='*.tsx' 
 
 ### Task 6.4: Stage gate
 
-- [ ] Typecheck/lint/test + `node scripts/dev/capture-screens.mjs 6-mobile`
+- [ ] `pnpm -r type-check && pnpm --filter web lint && pnpm --filter web test`
+- [ ] `node scripts/dev/capture-screens.mjs 6-mobile`
 - [ ] `/code-review` (medium); fix; commit.
 
 ---
@@ -1263,10 +1582,10 @@ found by `grep -rln "overflow-hidden" app/admin app/\(app\)/w --include='*.tsx' 
   to { opacity: 1; transform: scale(1); }
 }
 @utility animate-rise-in {
-  animation: rise-in var(--duration-base) var(--ease-out-quart) both;
+  animation: rise-in var(--transition-duration-base) var(--ease-out-quart) both;
 }
 @utility animate-scale-in {
-  animation: scale-in var(--duration-fast) var(--ease-out-quart) both;
+  animation: scale-in var(--transition-duration-fast) var(--ease-out-quart) both;
 }
 ```
 
@@ -1277,8 +1596,9 @@ found by `grep -rln "overflow-hidden" app/admin app/\(app\)/w --include='*.tsx' 
       via inline `style={{ animationDelay: `${i * 30}ms` }}` capped at
       10 items, applied only on first mount (a `useRef(true)` mounted
       flag at list level). Tool check icon: `animate-scale-in` keyed on
-      state transition. Dialog content: `data-[state=open]:animate-in
-      fade-in zoom-in-[0.96] duration-base`.
+      state transition. Dialog content (base-ui emits `data-open`, NOT
+      Radix's `data-state=open`): `data-open:animate-in data-open:fade-in
+      data-open:zoom-in-[0.96] duration-base`.
 - [ ] **Step 3:** Verify `prefers-reduced-motion` kills all of it
       (devtools emulation). Commit:
       `feat(ui): stage7: motion application pass`
@@ -1319,41 +1639,27 @@ export function getWidgetPalette(isDark: boolean) {
 ```
 
       `WidgetView.tsx` uses this instead of its literal palettes (keep
-      literals only as the SSR-safe fallbacks above). Run
-      `pnpm --filter web exec playwright test __tests__/e2e/widget-shell.spec.ts`
+      literals only as the SSR-safe fallbacks above). Run (from
+      `frontend/`)
+      `pnpm exec playwright test packages/web/__tests__/e2e/widget-shell.spec.ts`
       and update its fixture expectations to the token-derived values.
-- [ ] **Step 3:** eslint guard in `eslint.config.mjs`:
-
-```js
-{
-  files: ['components/**/*.tsx', 'app/**/*.tsx'],
-  ignores: ['components/chat/widget/**'],
-  rules: {
-    'no-restricted-syntax': [
-      'error',
-      {
-        selector:
-          'Literal[value=/\\b(?:bg|text|border|ring|divide|from|to)-(?:amber|blue|green|red|emerald|sky|yellow|purple|pink|orange|indigo|violet|teal|cyan|lime|rose|slate|gray|zinc|neutral|stone)-[0-9]/]',
-        message: 'Raw palette utilities are banned — use semantic tokens (see docs/dev/specs/2026-06-10-ui-redesign-design.md §1).',
-      },
-    ],
-  },
-},
-```
-
-      Run `pnpm --filter web lint` — green (and verify it FAILS if you
-      temporarily add `bg-amber-500` somewhere).
+- [ ] **Step 3:** The eslint guard already exists (Task 1.4). Here:
+      EMPTY its temporary allowlist (only the structural
+      `components/chat/widget/**` ignore remains), then
+      `pnpm --filter web lint` — must be green with zero allowlisted
+      files. Negative test: temporarily add `bg-amber-500` in a plain
+      string AND in a template literal — both must fail; revert.
 - [ ] **Step 4:** Commit: `feat(ui): stage7: color sweep + eslint
       enforcement + widget palette from tokens`
 
 ### Task 7.3: Full verification sweep
 
-- [ ] `pnpm -r typecheck && pnpm -r lint && pnpm -r test`
-- [ ] Full E2E: `pnpm --filter web exec playwright test` (worktree
-      ports/DB via conftest-equivalent env; backend running on 8001)
-- [ ] Backend untouched sanity: `cd backend && uv run pytest -x -q
-      tests/unit` (should be all-green/no-op — this initiative is
-      frontend-only)
+- [ ] `pnpm -r type-check && pnpm -r lint && pnpm --filter web test`
+- [ ] Full E2E from `frontend/`: `pnpm exec playwright test` (config
+      loads worktree ports/baseURL; backend running on 8001)
+- [ ] (No backend test run here — the branch has zero backend diff and
+      the pre-push hook + CI both run the backend suite anyway; a third
+      manual run is pure duplication)
 - [ ] `node scripts/dev/capture-screens.mjs 7-final` — review both
       themes against `.superpowers/screens/0-baseline/`
 - [ ] `/code-review` (max effort, whole-branch diff vs origin/main);
@@ -1378,11 +1684,24 @@ export function getWidgetPalette(isDark: boolean) {
 ## Self-review notes (already applied)
 
 - Spec coverage: §1→Stage 1+2.1(type scale); §2→Stages 3+4; §3→Stage 5;
-  §4→Stages 6+7.1; strategy §5/6→Stages 4.3 (selectors) + 7.2
-  (enforcement/carve-out). Undo toast → 2.3 + 5.2. Theme migration → 1.1
-  + 1.3. No-raw-colors → 7.2.
-- Placeholders: none — every code step carries code; sweep tasks carry
-  exact greps + transformation tables.
+  §4→Stages 6+7.1; strategy §5/6→Stages 4.3 (selectors) + 1.4/7.2
+  (enforcement: guard lands Stage 1 with shrinking allowlist, emptied in
+  7.2 + widget carve-out). Undo toast → 2.3 + 5.2 (with per-flow
+  pendingDeleteIds prerequisite). Theme migration → 1.1 + 1.3.
+- Plan-review fixes incorporated (2026-06-10 /code-review round):
+  motion namespace `--transition-duration-*` + tw-animate-css dependency
+  (1.2); destructive→danger token mapping (1.2); type scale preserves
+  16px text-base for iOS anti-zoom (2.1); sheet built on base-ui
+  `data-open` not Radix (2.2); useUndoableDelete flushes on unmount +
+  translated labels (2.3); command forms `pnpm -r type-check` + playwright
+  from `frontend/` (all gates); real paths for ArtifactPanel /
+  AssistantMessage memo alias / empty-state home / 6 placeholder specs
+  (3.2, 4.2-4.4); composer-draft bridge resolves the PromptCards fork
+  (4.4); accent selected-state sweep (1.2 note, 4.2, 5.2); rounded-full
+  scoped to badge.tsx only (2.1); feature-area commit batching (5.2/5.3);
+  chat-scoped 4.6 gate; no backend test duplication (7.3).
 - Type consistency: `PanelHeaderProps.source` union used in 3.1/3.2;
-  `useUndoableDelete` signature consistent between 2.3 and 5.2;
-  `--color-*` names consistent between 1.2 and all later class names.
+  `useUndoableDelete(id, commit, { label, actionLabel, onUndo })`
+  consistent between 2.3 and 5.2; `--color-*` /
+  `--transition-duration-*` names consistent between 1.2 and all later
+  class names/var() references.
