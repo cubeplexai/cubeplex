@@ -14,7 +14,7 @@ from cubebox.mcp._constants import slugify_for_namespace
 from cubebox.mcp.cubepi_runtime import (
     _NS_LENGTH_DEFENCE,
     _build_namespaced_name_with_prefix,
-    _load_tools_for_specs,
+    _load_tools_for_specs_deferred,
 )
 from cubebox.mcp.effective import MCPRuntimeConnectorSpec
 from cubebox.middleware.citations.config import CitationConfig
@@ -113,8 +113,10 @@ def build_deferred_groups(
     Returns (groups, citation_configs). citation_configs is populated when
     loader callbacks run (i.e., when the model calls load_tools).
 
-    loader_kwargs carries workspace_id, org_id, user_id, cred_service,
-    signer, token_manager, grant_repo — forwarded to _load_tools_for_specs.
+    loader_kwargs carries session-independent factory ingredients forwarded
+    to _load_tools_for_specs_deferred (workspace_id, org_id, user_id,
+    encryption_backend, http_client, metadata_discovery, redis, signer).
+    Each loader creates its own short-lived DB session.
     """
     shared_citations: dict[str, CitationConfig] = {}
     groups: list[DeferredToolGroup] = []
@@ -129,7 +131,7 @@ def build_deferred_groups(
             _kw: dict[str, Any] = loader_kwargs,
             _cit: dict[str, CitationConfig] = shared_citations,
         ) -> list[AgentTool[Any]]:
-            tools, citations = await _load_tools_for_specs(
+            tools, citations = await _load_tools_for_specs_deferred(
                 specs=[_s],
                 all_specs=_all,
                 **_kw,
