@@ -54,6 +54,7 @@ backend:
     auth:
       jwt_secret: ""
       csrf_secret: ""
+      vault_key: ""
     llm:
       providers: {}
     sandbox:

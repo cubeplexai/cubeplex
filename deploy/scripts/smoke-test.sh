@@ -15,7 +15,7 @@ set -euo pipefail
 NAMESPACE="${NAMESPACE:-cubebox}"
 RELEASE="${RELEASE:-cubebox}"
 HOST="${HOST:-cubebox.local}"
-INGRESS_IP="${INGRESS_IP:-127.0.0.1}"
+INGRESS_IP="${INGRESS_IP:-192.168.1.101}"
 INGRESS_PORT="${INGRESS_PORT:-30019}"
 
 step() { echo; echo "==> $*"; }
