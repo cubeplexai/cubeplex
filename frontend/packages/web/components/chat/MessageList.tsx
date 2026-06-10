@@ -398,7 +398,7 @@ export function MessageList({ conversationId }: MessageListProps) {
       <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto">
         {(messages ?? []).map((msg) => (
           <div key={msg.id}>
-            {msg.role === 'user' && (
+            {msg.role === 'user' && msg.metadata?.synthetic !== true && (
               <>
                 {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
                   <MessageAttachments

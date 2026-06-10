@@ -64,6 +64,11 @@ interface MessageBase {
     subagent_events?: SubagentSummary
     // Set on a steer user message committed mid-run; used for replay idempotency.
     steer_id?: string
+    // Framework-injected user-role message (cubepi synthetic_user_message):
+    // model-facing scaffolding like todo-guard nudges or goal continuations.
+    // Never rendered as a user bubble; synthetic_source is trace-only.
+    synthetic?: boolean
+    synthetic_source?: string
   }
 }
 
