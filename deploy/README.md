@@ -24,7 +24,8 @@ deploy/
     ├── build-and-push.sh              # build + push backend + frontend images
     ├── vendor-opensandbox.sh          # refresh OpenSandbox vendor from local clone
     ├── helm-install.sh                # helm dep update + helm upgrade --install
-    └── smoke-test.sh                  # post-install correctness checks
+    ├── smoke-test.sh                  # post-install correctness checks
+    └── e2e.sh                         # register → chat → LLM round-trip
 ```
 
 `egress-bundle/` next to this directory is a separate concern — k8s
@@ -47,7 +48,14 @@ deploy/scripts/helm-install.sh                       # helm upgrade --install
 
 # 4. Smoke test (on the cluster node)
 deploy/scripts/smoke-test.sh
+
+# 5. Live e2e (anywhere with reachability to the ingress IP)
+deploy/scripts/e2e.sh
 ```
+
+`e2e.sh` requires `backend.configOverrides.auth.cookie_secure: false` in
+`values.local.yaml` (since the default ingress is plain HTTP — secure
+cookies would be silently dropped by clients on a non-HTTPS connection).
 
 ## Conventions
 
