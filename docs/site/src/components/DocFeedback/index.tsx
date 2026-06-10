@@ -10,7 +10,7 @@ interface Props {
 type Phase = 'ask' | 'thanks' | 'comment' | 'submitted';
 
 function capture(event: string, payload: object) {
-  const ph = (window as any).__cubepi_posthog;
+  const ph = (window as any).__cubebox_posthog;
   if (ph && typeof ph.capture === 'function') ph.capture(event, payload);
 }
 
