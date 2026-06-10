@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eye, Hand, RefreshCw } from 'lucide-react'
+import { usePanelStore } from '@cubebox/core'
 
+import { PanelHeader } from '@/components/panel/PanelHeader'
 import { useBrowserLiveView } from '@/hooks/useBrowserLiveView'
 import { csrfHeaders } from '@/lib/csrf'
 
@@ -28,6 +30,7 @@ interface BrowserViewProps {
  */
 export function BrowserView({ workspaceId, enabled = true }: BrowserViewProps) {
   const { url, loading, error, refresh } = useBrowserLiveView(workspaceId, enabled)
+  const close = usePanelStore((s) => s.close)
   const [takeover, setTakeover] = useState(false)
   const overlayRef = useRef<HTMLDivElement>(null)
 
@@ -57,33 +60,37 @@ export function BrowserView({ workspaceId, enabled = true }: BrowserViewProps) {
 
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          {takeover ? (
-            <Hand className="h-4 w-4 text-amber-500" />
+      <PanelHeader
+        source={{
+          kind: 'plain',
+          icon: takeover ? (
+            <Hand className="size-3.5 text-warning-fg shrink-0" />
           ) : (
-            <Eye className="h-4 w-4 text-muted-foreground" />
-          )}
-          <span>{takeover ? 'You are in control' : 'Watching agent'}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => refresh()}
-            className="rounded p-1 text-muted-foreground hover:bg-accent"
-            aria-label="Refresh live view"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setTakeover((v) => !v)}
-            className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:opacity-90"
-          >
-            {takeover ? 'Hand back to agent' : 'Take over'}
-          </button>
-        </div>
-      </div>
+            <Eye className="size-3.5 text-muted-foreground shrink-0" />
+          ),
+          title: takeover ? 'You are in control' : 'Watching agent',
+        }}
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={() => refresh()}
+              className="p-1 rounded-xs text-muted-foreground hover:bg-accent transition-colors duration-fast"
+              aria-label="Refresh live view"
+            >
+              <RefreshCw className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setTakeover((v) => !v)}
+              className="rounded bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity duration-fast"
+            >
+              {takeover ? 'Hand back to agent' : 'Take over'}
+            </button>
+          </>
+        }
+        onClose={close}
+      />
 
       <div className="relative flex-1 overflow-hidden">
         {loading && (

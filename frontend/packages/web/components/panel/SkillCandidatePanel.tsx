@@ -4,9 +4,11 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Download, ExternalLink } from 'lucide-react'
+import { Download, ExternalLink, Sparkles } from 'lucide-react'
 import useSWR from 'swr'
+import { usePanelStore } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
+import { PanelHeader } from '@/components/panel/PanelHeader'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { csrfHeaders } from '@/lib/csrf'
 import { proseClasses } from '@/lib/utils'
@@ -54,6 +56,7 @@ export function SkillCandidatePanel({
 }) {
   const t = useTranslations('panel.skillCandidatePanel')
   const { workspaceId } = useWorkspaceContext()
+  const close = usePanelStore((s) => s.close)
 
   const url = workspaceId
     ? `/api/v1/ws/${workspaceId}/skills/discover/preview?candidate_id=${encodeURIComponent(candidateId)}`
@@ -92,7 +95,16 @@ export function SkillCandidatePanel({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col bg-background">
+      <PanelHeader
+        source={{
+          kind: 'plain',
+          icon: <Sparkles className="size-3.5 text-primary shrink-0" />,
+          title: data?.name ?? sourceName ?? t('loading'),
+          subtitle: sourceName && data ? sourceName : undefined,
+        }}
+        onClose={close}
+      />
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
         {isLoading && <p className="text-sm text-muted-foreground">{t('loading')}</p>}
 
@@ -110,31 +122,27 @@ export function SkillCandidatePanel({
 
         {data && (
           <>
-            <header className="flex flex-col gap-1">
-              <span className="font-mono font-semibold">{data.name}</span>
-              <div className="flex flex-wrap items-center gap-2">
-                {sourceName && <span className="text-xs text-muted-foreground">{sourceName}</span>}
-                {safeRepoUrl(repo) && (
-                  <a
-                    href={safeRepoUrl(repo)!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    <span>{repo!.replace('https://github.com/', '')}</span>
-                    <ExternalLink className="size-3" />
-                  </a>
-                )}
-                {data.env_vars.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    requires: {data.env_vars.join(', ')}
-                  </span>
-                )}
-              </div>
-            </header>
+            <div className="flex flex-wrap items-center gap-2">
+              {safeRepoUrl(repo) && (
+                <a
+                  href={safeRepoUrl(repo)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors duration-fast"
+                >
+                  <span>{repo!.replace('https://github.com/', '')}</span>
+                  <ExternalLink className="size-3" />
+                </a>
+              )}
+              {data.env_vars.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  requires: {data.env_vars.join(', ')}
+                </span>
+              )}
+            </div>
 
             {installError && (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <p className="rounded bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {installError}
               </p>
             )}

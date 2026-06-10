@@ -25,12 +25,7 @@ export function ToolDetailPanel() {
 
   return (
     <div className="flex flex-col h-full bg-background">
-      <PanelHeader
-        toolName={toolName}
-        toolArgs={toolArgs}
-        toolResult={toolResult}
-        onClose={close}
-      />
+      <PanelHeader source={{ kind: 'tool', toolName, toolArgs, toolResult }} onClose={close} />
       <ScrollArea className="flex-1">
         {contentType === 'terminal' && <TerminalView args={toolArgs} result={toolResult} />}
         {contentType === 'search' && (

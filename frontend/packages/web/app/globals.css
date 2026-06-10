@@ -8,6 +8,12 @@
   flex-grow: 1;
 }
 
+/* Panel open/close: sanctioned width transition (spec motion exemption).
+   Disabled while the user drags the divider so resize stays 1:1. */
+[data-slot='resizable-panel-group']:not(.panel-dragging) [data-slot='resizable-panel'] {
+  transition: flex var(--transition-duration-slow) var(--ease-out-quart);
+}
+
 /* Hide scrollbar but keep scrollable */
 @utility scrollbar-none {
   -ms-overflow-style: none;

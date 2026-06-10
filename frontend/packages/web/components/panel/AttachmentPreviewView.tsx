@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
-import { Download, X } from 'lucide-react'
+import { Download } from 'lucide-react'
 import type { AttachmentPanelInfo } from '@cubebox/core'
 import { usePanelStore } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
@@ -10,6 +10,7 @@ import { useTranslations } from 'next-intl'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { PreviewLoading } from '@/components/panel/artifact/PreviewLoading'
+import { PanelHeader } from '@/components/panel/PanelHeader'
 import { getFileVisual } from '@/lib/fileIcons'
 import { cn } from '@/lib/utils'
 
@@ -40,35 +41,29 @@ export function AttachmentPreviewView({ info }: Props): React.ReactElement {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-        <div className={cn('size-7 grid place-items-center rounded', visual.bg)}>
-          <visual.Icon className={cn('size-3.5', visual.fg)} />
-        </div>
-        <div className="flex flex-col leading-tight min-w-0">
-          <span className="truncate text-sm font-medium" title={info.filename}>
-            {info.filename}
-          </span>
-          <span className="text-[10px] text-muted-foreground">
-            {visual.label} · {humanSize(info.sizeBytes)}
-          </span>
-        </div>
-        <a
-          href={info.downloadUrl}
-          download
-          className="ml-auto grid size-7 place-items-center rounded hover:bg-muted"
-          aria-label={t('download')}
-        >
-          <Download className="size-3.5" />
-        </a>
-        <button
-          type="button"
-          onClick={close}
-          className="grid size-7 place-items-center rounded hover:bg-muted"
-          aria-label={t('close')}
-        >
-          <X className="size-3.5" />
-        </button>
-      </header>
+      <PanelHeader
+        source={{
+          kind: 'plain',
+          icon: (
+            <div className={cn('size-5 grid place-items-center rounded-xs shrink-0', visual.bg)}>
+              <visual.Icon className={cn('size-3', visual.fg)} />
+            </div>
+          ),
+          title: info.filename,
+          subtitle: `${visual.label} · ${humanSize(info.sizeBytes)}`,
+        }}
+        actions={
+          <a
+            href={info.downloadUrl}
+            download
+            className="p-1 rounded-xs hover:bg-accent transition-colors duration-fast"
+            aria-label={t('download')}
+          >
+            <Download className="size-3.5 text-muted-foreground" />
+          </a>
+        }
+        onClose={close}
+      />
       <Body info={info} family={visual.family} />
     </div>
   )
