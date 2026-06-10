@@ -347,3 +347,117 @@ class TestDeferredLoaderSessionLifecycle:
         assert len(tools) == 1
         assert tools[0].name == "GitHub__create_issue"
         mock_signer.sign.assert_called_once()
+
+
+@pytest.mark.e2e
+class TestCachePrefixStability:
+    """Disclosure catalog is byte-stable; expansions are append-only."""
+
+    @staticmethod
+    def _build_middleware(
+        specs: list[MCPRuntimeConnectorSpec],
+        extra: dict[str, Any],
+    ) -> DeferredToolsMiddleware:
+        groups, _ = build_deferred_groups(
+            specs=specs,
+            all_specs=specs,
+            loader_kwargs={
+                "workspace_id": "ws-1",
+                "org_id": "org-1",
+                "user_id": "user-1",
+                "encryption_backend": AsyncMock(),
+                "http_client": AsyncMock(),
+                "metadata_discovery": AsyncMock(),
+                "redis": AsyncMock(),
+                "signer": AsyncMock(),
+            },
+        )
+        return DeferredToolsMiddleware(groups=groups, extra_ref=lambda: extra)
+
+    async def test_catalog_byte_stable_across_turns(self) -> None:
+        """With nothing expanded, the catalog portion is identical on two calls."""
+        specs = [
+            _make_spec(
+                "GitHub",
+                tools_cache=[{"name": "create_issue"}, {"name": "list_repos"}],
+                discovery_metadata={"server": {"description": "GitHub tools"}},
+            ),
+            _make_spec(
+                "Slack",
+                tools_cache=[{"name": "send_message"}],
+                discovery_metadata={"server": {"description": "Slack messaging"}},
+            ),
+        ]
+        extra: dict[str, Any] = {}
+        mw = self._build_middleware(specs, extra)
+        ctx = AsyncMock()
+
+        prompt_1 = await mw.transform_system_prompt("Base.", ctx=ctx, signal=None)
+        prompt_2 = await mw.transform_system_prompt("Base.", ctx=ctx, signal=None)
+
+        assert prompt_1 == prompt_2
+
+    async def test_expansion_append_only(self) -> None:
+        """Expanding group A then B: the expanded-schemas section is append-only.
+
+        The catalog section naturally shrinks as groups expand (expanded groups
+        are removed from the catalog). The cache-relevant invariant is that
+        the expanded-schemas block grows by appending — turn-2's schemas start
+        with everything from turn-1.
+        """
+        github_tools = [
+            _make_fake_tool("GitHub__create_issue"),
+            _make_fake_tool("GitHub__list_repos"),
+        ]
+        slack_tools = [
+            _make_fake_tool("Slack__send_message"),
+        ]
+
+        async def _github_loader() -> list[AgentTool[Any]]:
+            return github_tools
+
+        async def _slack_loader() -> list[AgentTool[Any]]:
+            return slack_tools
+
+        groups = [
+            DeferredToolGroup(
+                group_id="mcp:GitHub",
+                display_name="GitHub",
+                description="GitHub tools",
+                tool_names=["GitHub__create_issue", "GitHub__list_repos"],
+                loader=_github_loader,
+            ),
+            DeferredToolGroup(
+                group_id="mcp:Slack",
+                display_name="Slack",
+                description="Slack messaging",
+                tool_names=["Slack__send_message"],
+                loader=_slack_loader,
+            ),
+        ]
+
+        extra: dict[str, Any] = {}
+        mw = DeferredToolsMiddleware(groups=groups, extra_ref=lambda: extra)
+        ctx = AsyncMock()
+        ctx.tools = list(mw.tools)
+
+        # Turn 1: expand GitHub
+        await mw._expand(group_id="mcp:GitHub", tool_names=None, context=ctx)
+        prompt_turn1 = await mw.transform_system_prompt("Base.", ctx=ctx, signal=None)
+
+        # Turn 2: expand Slack
+        await mw._expand(group_id="mcp:Slack", tool_names=None, context=ctx)
+        prompt_turn2 = await mw.transform_system_prompt("Base.", ctx=ctx, signal=None)
+
+        # Extract the expanded-schemas section from both prompts.
+        marker = "# Expanded tool groups"
+        assert marker in prompt_turn1
+        assert marker in prompt_turn2
+        schemas_turn1 = prompt_turn1[prompt_turn1.index(marker) :]
+        schemas_turn2 = prompt_turn2[prompt_turn2.index(marker) :]
+
+        # Turn-2's expanded section starts with turn-1's expanded section.
+        assert schemas_turn2.startswith(schemas_turn1)
+        # The Slack schema block is the appended portion.
+        appended = schemas_turn2[len(schemas_turn1) :]
+        assert "Slack__send_message" in appended
