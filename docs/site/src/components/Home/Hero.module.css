@@ -1,0 +1,17 @@
+.hero { max-width: 880px; margin: 48px auto 64px; padding: 0 24px; text-align: left; }
+.banner { display: block; width: 100%; height: auto; border: 1px solid var(--ink-5); border-radius: 6px; margin-bottom: 40px; }
+.eyebrow { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px; color: var(--ink-7); letter-spacing: 0.06em; margin-bottom: 12px; }
+.h1 { font-family: 'Inter Tight', 'Inter', system-ui; font-size: 52px; line-height: 1.05; letter-spacing: -0.03em; font-weight: 600; color: var(--ink-12); margin: 0 0 20px; }
+.h1sub { display: block; margin-top: 12px; font-family: 'Inter Tight', 'Inter', system-ui; font-size: 22px; line-height: 1.35; letter-spacing: -0.01em; font-style: italic; font-weight: 400; color: var(--ink-11); }
+.lead { font-size: 16px; line-height: 1.55; color: var(--ink-9); margin: 0 0 28px; max-width: 640px; }
+.lead code { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 14px; padding: 1px 5px; background: var(--ink-3); border-radius: 3px; color: var(--ink-11); }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.cta { display: inline-flex; align-items: center; gap: 10px; height: 36px; padding: 0 14px; border: 1px solid var(--ink-5); border-radius: 5px; background: var(--surface); font-size: 14px; color: var(--ink-11); font-weight: 500; cursor: pointer; text-decoration: none; }
+.cta:hover { background: var(--ink-3); }
+.ctaPrimary { background: var(--ink-12); border-color: var(--ink-12); color: var(--surface); }
+.ctaPrimary:hover { background: var(--ink-11); }
+.ctaPrimary code { background: transparent; color: inherit; font-size: 13px; }
+.ctaGhost { background: transparent; }
+.kbd { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 10.5px; height: 18px; min-width: 18px; padding: 0 5px; display: inline-flex; align-items: center; border: 1px solid var(--ink-5); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); color: var(--ink-9); opacity: 0.85; }
+.ctaPrimary .kbd { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85); border-color: transparent; }
+@media (max-width: 640px) { .h1 { font-size: 36px; } .h1sub { font-size: 18px; } .hero { margin-top: 24px; } }

@@ -1,0 +1,21 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://cubepi.ai/sitemap.xml
+Sitemap: https://cubepi.ai/zh-Hans/sitemap.xml
+
+# AI/LLM crawlers — explicitly allowed
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+# LLM context file (https://llmstxt.org)
+LLMs: https://cubepi.ai/llms.txt

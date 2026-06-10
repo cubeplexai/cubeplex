@@ -1,0 +1,106 @@
+/* ============== Fonts ============== */
+@font-face { font-family: 'Inter';        src: url('/fonts/Inter-Regular.woff2')        format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Inter';        src: url('/fonts/Inter-Medium.woff2')         format('woff2'); font-weight: 500; font-display: swap; }
+@font-face { font-family: 'Inter';        src: url('/fonts/Inter-SemiBold.woff2')       format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Inter Tight';  src: url('/fonts/InterTight-SemiBold.woff2')  format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'JetBrains Mono'; src: url('/fonts/JetBrainsMono-Medium.woff2')  format('woff2'); font-weight: 500; font-display: swap; }
+
+/* ============== Operator tokens ============== */
+:root {
+  --ink-12: #0a0a0b;
+  --ink-11: #1f1f22;
+  --ink-9:  #52525b;
+  --ink-7:  #a1a1aa;
+  --ink-5:  #e4e4e7;
+  --ink-3:  #f4f4f5;
+  --ink-1:  #fafafa;
+  --surface: #ffffff;
+  --accent: #3b5bd9;
+  --accent-soft: #eef1fe;
+  --accent-ink: #1e3aa8;
+  --ok:   #16a34a;
+  --warn: #d97706;
+  --err:  #dc2626;
+
+  /* Docusaurus overrides */
+  --ifm-color-primary: var(--accent);
+  --ifm-color-primary-dark:        #2f4fc4;
+  --ifm-color-primary-darker:      #2c4abc;
+  --ifm-color-primary-darkest:     #243d9b;
+  --ifm-color-primary-light:       #5470de;
+  --ifm-color-primary-lighter:     #6a83e3;
+  --ifm-color-primary-lightest:    #93a6ec;
+  --ifm-background-color: var(--ink-1);
+  --ifm-background-surface-color: var(--surface);
+  --ifm-color-content: var(--ink-11);
+  --ifm-heading-color: var(--ink-12);
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
+  --ifm-heading-font-family: 'Inter Tight', 'Inter', system-ui;
+  --ifm-font-family-monospace: 'JetBrains Mono', ui-monospace, monospace;
+  --ifm-font-size-base: 14px;
+  --ifm-line-height-base: 1.55;
+  --ifm-navbar-height: 56px;
+  --ifm-navbar-background-color: var(--surface);
+  --ifm-navbar-shadow: none;
+  --ifm-toc-border-color: var(--ink-5);
+  --ifm-hr-border-color: var(--ink-5);
+  --ifm-code-font-size: 92%;
+  --docusaurus-highlighted-code-line-bg: var(--ink-3);
+}
+
+[data-theme='dark'] {
+  --ink-12: #f4f4f5;
+  --ink-11: #e4e4e7;
+  --ink-9:  #a1a1aa;
+  --ink-7:  #71717a;
+  --ink-5:  #3f3f46;
+  --ink-3:  #27272a;
+  --ink-1:  #18181b;
+  --surface: #0a0a0b;
+  --accent: #6a83e3;
+  --accent-soft: #1e3aa820;
+  --accent-ink: #93a6ec;
+  --ifm-color-primary: var(--accent);
+  --ifm-background-color: var(--ink-1);
+  --ifm-background-surface-color: var(--surface);
+}
+
+html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* No shadows except modals (which Docusaurus does not use in docs). */
+.navbar { border-bottom: 1px solid var(--ink-5); }
+.menu__link, .navbar__link { font-weight: 500; }
+.menu__link--active, .navbar__link--active { color: var(--accent); }
+
+/* Tabular numerals globally in code and tables */
+code, pre, table td.num, .num { font-variant-numeric: tabular-nums; }
+
+/* On mobile, keep the GitHub icon visible in the header (right side).
+   Docusaurus hides .navbar__items--right entirely on small screens and
+   moves everything to the sidebar. Re-show the container but hide every
+   item inside it except the GitHub link. */
+@media (max-width: 996px) {
+  .navbar__items.navbar__items--right {
+    display: flex !important;
+  }
+  .navbar__items--right > *:not(.header-github-link) {
+    display: none !important;
+  }
+  .header-github-link {
+    display: flex !important;
+  }
+}
+
+/* GitHub icon in navbar (light + dark) */
+.header-github-link::before {
+  content: '';
+  display: flex;
+  width: 24px;
+  height: 24px;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+}
+[data-theme='dark'] .header-github-link::before {
+  filter: invert(1);
+}
