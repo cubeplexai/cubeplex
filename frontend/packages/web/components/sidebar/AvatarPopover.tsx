@@ -62,12 +62,12 @@ export function AvatarPopover() {
     <Popover>
       <PopoverTrigger
         aria-label={tShell('accountMenu')}
-        className="w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/60 transition-colors group"
+        className="w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent transition-colors duration-fast group"
       >
-        <div className="size-7 rounded-full bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-[11px] font-semibold shrink-0 ring-1 ring-primary/20 shadow-sm">
+        <div className="size-7 rounded bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-2xs font-semibold shrink-0">
           {initials}
         </div>
-        <span className="text-[12.5px] truncate flex-1 text-left text-foreground/90">
+        <span className="text-xs truncate flex-1 text-left text-foreground">
           {user?.email ?? '...'}
         </span>
       </PopoverTrigger>
@@ -75,9 +75,9 @@ export function AvatarPopover() {
         side="top"
         align="start"
         sideOffset={8}
-        className="w-56 p-1 shadow-lg border-border/80"
+        className="w-56 p-1 shadow-lg border-border-strong"
       >
-        <div className="px-2 py-2 text-[11px] text-muted-foreground border-b border-border/60 mb-1 truncate">
+        <div className="px-2 py-2 text-2xs text-muted-foreground border-b border-border mb-1 truncate">
           {user?.email}
         </div>
 

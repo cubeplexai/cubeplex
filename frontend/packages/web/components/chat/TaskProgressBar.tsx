@@ -46,7 +46,7 @@ export function TaskProgressBar({ todos }: TaskProgressBarProps) {
               truncate ml-2 flex items-center gap-1"
           >
             <Circle
-              className="size-2.5 text-blue-500
+              className="size-2.5 text-info-fg
                 animate-pulse inline-block shrink-0"
             />
             {inProgress.description}
@@ -77,12 +77,12 @@ export function TaskProgressBar({ todos }: TaskProgressBarProps) {
             >
               {todo.status === 'completed' ? (
                 <CheckCircle2
-                  className="size-3.5 text-emerald-500
+                  className="size-3.5 text-success-fg
                     shrink-0"
                 />
               ) : todo.status === 'in_progress' ? (
                 <Circle
-                  className="size-3.5 text-blue-500
+                  className="size-3.5 text-info-fg
                     animate-pulse shrink-0"
                 />
               ) : (

@@ -24,8 +24,7 @@ export function RunErrorBubble({ data }: { data: ErrorEventData }) {
   return (
     <div
       role="alert"
-      className="flex items-start gap-2 px-3 py-2.5 rounded-lg
-      bg-destructive/10 border border-destructive/20 text-destructive text-sm"
+      className="border border-danger-border bg-danger-surface text-danger-fg rounded px-3 py-2 flex items-start gap-2"
     >
       <AlertCircle className="size-4 shrink-0 mt-0.5" />
       <span>{localized}</span>

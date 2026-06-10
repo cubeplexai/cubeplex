@@ -36,7 +36,7 @@ export function WorkspacesSection() {
 
   return (
     <div className="px-2 py-2">
-      <p className="px-2 mb-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
+      <p className="px-2 mb-1 text-2xs font-medium uppercase tracking-wider text-faint">
         {t('title')}
       </p>
       <ul className="space-y-0.5">
@@ -47,20 +47,17 @@ export function WorkspacesSection() {
               <Link
                 href={`/w/${ws.id}`}
                 className={cn(
-                  'group relative flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] transition-colors',
+                  'group relative flex items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors duration-fast',
                   active
-                    ? 'bg-primary/8 text-foreground font-medium'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
+                    ? 'bg-accent text-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                 )}
               >
                 {active && (
-                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-r-full" />
+                  <span className="absolute left-0 top-[22%] bottom-[22%] w-0.5 bg-primary rounded-r" />
                 )}
                 <Folder
-                  className={cn(
-                    'size-3.5 shrink-0',
-                    active ? 'text-primary' : 'text-muted-foreground/60',
-                  )}
+                  className={cn('size-3.5 shrink-0', active ? 'text-primary' : 'text-faint')}
                 />
                 <span className="truncate flex-1">{ws.name}</span>
               </Link>
@@ -72,7 +69,7 @@ export function WorkspacesSection() {
             <button
               type="button"
               onClick={() => setShowAll(true)}
-              className="w-full text-left px-2 py-1 text-[11px] text-muted-foreground/60 hover:text-foreground transition-colors"
+              className="w-full text-left px-2 py-1 text-2xs text-faint hover:text-foreground transition-colors duration-fast"
             >
               {t('showMore', { count: hidden })}
             </button>
@@ -81,7 +78,7 @@ export function WorkspacesSection() {
         <li>
           <Link
             href="/workspaces"
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] text-muted-foreground/70 hover:text-foreground hover:bg-accent/60 transition-colors"
+            className="flex items-center gap-2 rounded px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-fast"
           >
             <Plus className="size-3.5 shrink-0" />
             <span>{t('new')}</span>

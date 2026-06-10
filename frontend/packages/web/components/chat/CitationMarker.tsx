@@ -242,7 +242,7 @@ function FileSourceHoverContent({
         </span>
         {range && <span className="rounded bg-muted px-1.5 py-0.5 font-medium">{range}</span>}
         {metadata.truncated && (
-          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-700 dark:text-amber-400">
+          <span className="rounded bg-warning-surface px-1.5 py-0.5 font-medium text-warning-fg">
             {t('citationTruncated')}
           </span>
         )}

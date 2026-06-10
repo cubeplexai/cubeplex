@@ -22,7 +22,7 @@ export function ThinkingBadge({ wsId }: ThinkingBadgeProps): React.ReactElement 
     <span
       role="status"
       aria-label={`Thinking level ${thinking}`}
-      className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-200"
+      className="rounded bg-warning-surface border border-warning-border px-1.5 py-0.5 text-xs font-medium text-warning-fg"
     >
       thinking: {thinking}
     </span>

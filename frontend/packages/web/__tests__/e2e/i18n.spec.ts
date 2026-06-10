@@ -37,15 +37,15 @@ test.describe('i18n — language preference', () => {
     // Switch to Chinese via avatar popover
     await page.getByRole('button', { name: 'Account menu' }).click()
     await page.getByRole('button', { name: '中文' }).click()
-    await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByPlaceholder('描述一个任务…')).toBeVisible({ timeout: 8_000 })
 
     // Chinese persists after full reload
     await page.reload()
-    await expect(page.getByPlaceholder('有什么可以帮你的？')).toBeVisible()
+    await expect(page.getByPlaceholder('描述一个任务…')).toBeVisible()
 
     // Switch back to English (aria-label is now localized to Chinese here)
     await page.getByRole('button', { name: '账号菜单' }).click()
     await page.getByRole('button', { name: 'EN', exact: true }).click()
-    await expect(page.getByPlaceholder('How can I help you?')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByPlaceholder('Describe a task…')).toBeVisible({ timeout: 8_000 })
   })
 })

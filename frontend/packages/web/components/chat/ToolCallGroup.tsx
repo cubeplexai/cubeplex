@@ -83,12 +83,6 @@ export function ToolCallGroup({
   if (children.every((c) => c === null)) return null
 
   return (
-    <div
-      className="bg-card border border-border rounded-xl
-        overflow-hidden border-l-2
-        border-l-muted-foreground/20"
-    >
-      {children}
-    </div>
+    <div className="border border-border rounded bg-card divide-y divide-border">{children}</div>
   )
 }

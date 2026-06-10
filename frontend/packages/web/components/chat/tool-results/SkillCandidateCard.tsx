@@ -24,13 +24,13 @@ export interface SkillCandidate {
 }
 
 const TRUST_BADGE: Record<string, string> = {
-  official: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  community: 'bg-amber-500/10 text-amber-700 dark:text-amber-400',
+  official: 'bg-info-surface text-info-fg',
+  community: 'bg-warning-surface text-warning-fg',
   untrusted: 'bg-muted text-muted-foreground',
 }
 
 const STATE_BADGE: Record<string, string> = {
-  enabled: 'bg-green-500/10 text-green-700 dark:text-green-400',
+  enabled: 'bg-success-surface text-success-fg',
   in_catalog: 'bg-muted text-muted-foreground',
   available: 'bg-muted text-muted-foreground',
 }

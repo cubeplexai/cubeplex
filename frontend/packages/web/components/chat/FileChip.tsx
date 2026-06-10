@@ -65,7 +65,7 @@ export function FileChip({ item, thumbnailUrl, onCancel }: Props): React.ReactEl
               r={radius}
               fill="none"
               stroke="currentColor"
-              className={isError ? 'text-rose-200' : 'text-white'}
+              className={isError ? 'text-danger-surface' : 'text-white'}
               strokeWidth="2"
               strokeDasharray={circumference}
               strokeDashoffset={offset}
