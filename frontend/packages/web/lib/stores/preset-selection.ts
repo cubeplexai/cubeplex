@@ -65,6 +65,16 @@ export function getPresetSelectionStore(
           presetLabel: state.presetLabel,
           thinking: state.thinking,
         }),
+        // v2 dropped the `minimal` level (deepseek's schema doesn't accept it
+        // and we never had a sensible mapping for the other providers either).
+        // Rewrite stale persisted values so the dropdown doesn't render an
+        // orphan selection after upgrade.
+        version: 2,
+        migrate: (persisted, _version) => {
+          const p = (persisted as Partial<PresetSelectionState>) ?? {}
+          if ((p.thinking as string) === 'minimal') p.thinking = 'low'
+          return p as PresetSelectionState
+        },
       },
     ),
   )

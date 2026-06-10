@@ -74,7 +74,7 @@ export type AgentEventType =
  * and the SSE event types share one source of truth — the web package
  * (`@/lib/types/presets`) re-uses this directly.
  */
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh'
 
 /**
  * Emitted by the backend ``FallbackBoundModel`` chain when a leg fails and

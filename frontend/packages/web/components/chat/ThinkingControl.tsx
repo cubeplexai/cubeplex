@@ -20,7 +20,6 @@ interface ThinkingControlProps {
 
 const LEVEL_KEYS = [
   { value: 'off', labelKey: 'thinkingLevelOff' },
-  { value: 'minimal', labelKey: 'thinkingLevelMinimal' },
   { value: 'low', labelKey: 'thinkingLevelLow' },
   { value: 'medium', labelKey: 'thinkingLevelMedium' },
   { value: 'high', labelKey: 'thinkingLevelHigh' },

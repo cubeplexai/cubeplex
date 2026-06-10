@@ -10,6 +10,7 @@ import {
   useMessageStore,
 } from '@cubebox/core'
 import { InputBar } from '@/components/layout/InputBar'
+import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
 import { Box } from 'lucide-react'
 
 export default function WorkspaceHomePage({
@@ -75,9 +76,23 @@ export default function WorkspaceHomePage({
       }
 
       useAttachmentStore.getState().clear(convId)
-      send(client, convId, content, attachedIds, optimisticAttachments).catch((err) => {
-        console.error('Failed to send message:', err)
-      })
+      // Mirror InputBar.handleSubmit: the composer's preset + thinking choice
+      // is a per-message field, so the home page's first-send path must read
+      // and forward it too. Without this, the first message after opening a
+      // new conversation always shipped as `thinking: "off"` regardless of
+      // the dropdown — subsequent sends went through InputBar's own handler
+      // and looked correct, which made the bug look like "the model picked
+      // a different mode between turns."
+      const selection = getPresetSelectionStore(wsId).getState()
+      const sendOptions = {
+        preset_label: selection.presetLabel,
+        thinking: selection.thinking,
+      }
+      send(client, convId, content, attachedIds, optimisticAttachments, sendOptions).catch(
+        (err) => {
+          console.error('Failed to send message:', err)
+        },
+      )
       router.push(`/w/${wsId}/conversations/${convId}`)
     } catch (err) {
       console.error('Failed to create conversation:', err)

@@ -24,7 +24,7 @@ describe('ThinkingBadge', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it.each<ThinkingLevel>(['minimal', 'low', 'medium', 'high', 'xhigh'])(
+  it.each<ThinkingLevel>(['low', 'medium', 'high', 'xhigh'])(
     'renders the badge when thinking === %s',
     (level) => {
       getPresetSelectionStore(`ws_${level}`).getState().setThinking(level)

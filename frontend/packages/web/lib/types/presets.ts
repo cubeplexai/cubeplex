@@ -1,4 +1,4 @@
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ThinkingLevel = 'off' | 'low' | 'medium' | 'high' | 'xhigh'
 export type TaskPresetKey = 'title' | 'compaction' | 'summarize'
 
 export interface AdminPresetEntry {
