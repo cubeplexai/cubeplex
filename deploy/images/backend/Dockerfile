@@ -1,9 +1,12 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for the cubebox FastAPI backend.
 #
-# Stage 1 (builder): install Python deps via uv into a .venv that we copy
-#   into the runtime image. Keeps build-time toolchains out of runtime.
-# Stage 2 (runtime): slim image with only the venv + app code.
+# Stage 1 (builder): generate a flat requirements file from uv.lock, rewrite
+#   the cubepi github URL to a CN-friendly mirror, then pip-install all deps
+#   into /app/.venv using the Tsinghua PyPI mirror. We do NOT use
+#   `uv sync --frozen` because its locked URLs point at files.pythonhosted.org
+#   (Fastly), which is unreliable from CN networks.
+# Stage 2 (runtime): slim image with the venv + app code.
 
 ARG PYTHON_VERSION=3.12
 
@@ -12,11 +15,13 @@ FROM python:${PYTHON_VERSION}-slim AS builder
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/app/.venv
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_HTTP_TIMEOUT=60
 
 WORKDIR /app
 
-# Use Tsinghua mirror for apt + pip — orders-of-magnitude faster from CN.
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
       sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
@@ -28,19 +33,25 @@ RUN set -eux; \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    UV_HTTP_TIMEOUT=30 \
-    UV_CONCURRENT_DOWNLOADS=4
-
 RUN pip install uv
 
-# Redirect github.com → kkgithub.com mirror so uv can fetch the cubepi git
-# dependency from inside CN networks (direct github.com TLS gets terminated).
+# CN-friendly mirror for the cubepi git dep (direct github.com fetch from
+# inside CN networks gets TLS-terminated by middleboxes).
 RUN git config --global url."https://githubfast.com/".insteadOf "https://github.com/"
 
+# Resolve all deps to a flat requirements file, rewrite cubepi URL, then
+# `uv pip install` from the Tsinghua mirror. This forces blob URLs onto
+# Tsinghua's CDN instead of using the lockfile's Fastly URLs.
+RUN python -m venv /app/.venv
+ENV PATH=/app/.venv/bin:$PATH
+
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv export \
+        --format requirements-txt \
+        --no-hashes --no-dev --no-editable --no-emit-project \
+    > /tmp/requirements.txt \
+    && sed -i 's|https://github.com/|https://githubfast.com/|g' /tmp/requirements.txt \
+    && uv pip install -r /tmp/requirements.txt
 
 COPY backend/cubebox ./cubebox
 COPY backend/alembic ./alembic
@@ -51,7 +62,9 @@ COPY backend/scripts ./scripts
 COPY backend/seeders ./seeders
 COPY backend/config.yaml backend/config.development.yaml backend/config.production.yaml backend/config.test.yaml ./
 
-RUN uv sync --frozen --no-dev
+# Install the cubebox project itself (-e by default is undesirable; use
+# regular install so /app/cubebox is just the source on PYTHONPATH).
+RUN uv pip install --no-deps .
 
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
