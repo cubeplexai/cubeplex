@@ -227,11 +227,17 @@ async def generate_image_client(
     )
 
     # Monkeypatch cubebox.llm.builder.build_provider to return our FauxProvider
-    # regardless of the snapshot's resolved provider slug.
-    monkeypatch.setattr(
-        "cubebox.llm.builder.build_provider",
-        lambda snap, slug, **kw: faux_provider,
-    )
+    # regardless of the snapshot's resolved provider slug. We dynamically stamp
+    # faux_provider.provider_id with the requested slug so downstream lookups
+    # like `snap.providers[this_run_model.spec.provider_id]` resolve back to a
+    # real key in the snapshot (run_manager:_build_agent_for_conversation does
+    # exactly this when reading model max_tokens / reasoning). Without the
+    # stamp, FauxProvider defaults to provider_id="" → KeyError("") at lookup.
+    def _build_faux_provider(snap: object, slug: str, **kw: object) -> object:
+        faux_provider.provider_id = slug
+        return faux_provider
+
+    monkeypatch.setattr("cubebox.llm.builder.build_provider", _build_faux_provider)
 
     # --- 5. Create temp sandbox directory ---
     with tempfile.TemporaryDirectory(prefix="cubebox_e2e_img_") as tmpdir:
