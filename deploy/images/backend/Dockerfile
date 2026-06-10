@@ -57,9 +57,10 @@ COPY backend/scripts ./scripts
 COPY backend/skills ./skills
 COPY backend/config.yaml backend/config.development.yaml backend/config.production.yaml backend/config.test.yaml ./
 
-# Install the cubebox project itself (-e by default is undesirable; use
-# regular install so /app/cubebox is just the source on PYTHONPATH).
-RUN uv pip install --no-deps .
+# cubebox itself runs from /app via `python main.py` (which imports
+# `cubebox.*` from the same directory). No pip install of the project is
+# needed — keeping the source uninstalled also avoids pulling in hatchling
+# and re-validating pyproject metadata at build time.
 
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
