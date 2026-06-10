@@ -21,12 +21,13 @@ export function PromptCards() {
 
   return (
     <div className="grid w-full max-w-2xl grid-cols-1 gap-2 px-4 sm:grid-cols-3">
-      {CARDS.map(({ key, icon: Icon }) => (
+      {CARDS.map(({ key, icon: Icon }, i) => (
         <button
           key={key}
           type="button"
           onClick={() => setDraft(t(`${key}.prompt`))}
-          className="group flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 text-left transition duration-fast hover:border-border-strong hover:bg-accent hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          style={{ animationDelay: `${i * 30}ms` }}
+          className="group flex flex-col gap-1.5 rounded-lg border border-border bg-card p-3.5 text-left transition duration-fast hover:border-border-strong hover:bg-accent hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring animate-rise-in"
         >
           <Icon className="size-4 text-info-fg" strokeWidth={1.75} />
           <span className="text-sm font-medium text-foreground">{t(`${key}.title`)}</span>

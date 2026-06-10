@@ -250,6 +250,33 @@
   color: #8b949e;
 }
 
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@utility animate-rise-in {
+  animation: rise-in var(--transition-duration-base) var(--ease-out-quart) both;
+}
+@utility animate-scale-in {
+  animation: scale-in var(--transition-duration-fast) var(--ease-out-quart) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
