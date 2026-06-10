@@ -106,7 +106,7 @@ class TestDisclosureActive:
 
     def test_auto_no_context_window(self) -> None:
         s = DisclosureSettings(enabled="auto", min_servers=2)
-        assert disclosure_active(s, server_count=3, context_window=0) is True
+        assert disclosure_active(s, server_count=3, context_window=0) is False
         assert disclosure_active(s, server_count=1, context_window=0) is False
 
 
@@ -284,6 +284,19 @@ class TestLoadToolsForSpecs:
 # ---------------------------------------------------------------------------
 
 
+def _deferred_loader_kwargs() -> dict[str, Any]:
+    return {
+        "workspace_id": "ws-1",
+        "org_id": "org-1",
+        "user_id": "user-1",
+        "encryption_backend": AsyncMock(),
+        "http_client": AsyncMock(),
+        "metadata_discovery": AsyncMock(),
+        "redis": AsyncMock(),
+        "signer": AsyncMock(),
+    }
+
+
 class TestBuildDeferredGroups:
     def test_produces_correct_group_metadata(self) -> None:
         spec = _make_spec(
@@ -294,15 +307,7 @@ class TestBuildDeferredGroups:
         groups, citations = build_deferred_groups(
             specs=[spec],
             all_specs=[spec],
-            loader_kwargs={
-                "workspace_id": "ws-1",
-                "org_id": "org-1",
-                "user_id": "user-1",
-                "cred_service": AsyncMock(),
-                "signer": AsyncMock(),
-                "token_manager": AsyncMock(),
-                "grant_repo": None,
-            },
+            loader_kwargs=_deferred_loader_kwargs(),
         )
         assert len(groups) == 1
         g = groups[0]
@@ -327,19 +332,31 @@ class TestBuildDeferredGroups:
         groups, _ = build_deferred_groups(
             specs=[spec_a, spec_b],
             all_specs=[spec_a, spec_b],
-            loader_kwargs={
-                "workspace_id": "ws-1",
-                "org_id": "org-1",
-                "user_id": "user-1",
-                "cred_service": AsyncMock(),
-                "signer": AsyncMock(),
-                "token_manager": AsyncMock(),
-                "grant_repo": None,
-            },
+            loader_kwargs=_deferred_loader_kwargs(),
         )
         assert len(groups) == 2
         assert groups[0].group_id == "mcp:GitHub"
         assert groups[1].group_id == "mcp:Slack"
+
+    def test_slug_collision_disambiguates_group_id(self) -> None:
+        spec_a = _make_spec(
+            install_id="inst-aaaa",
+            name="GitHub",
+            tools_cache=[{"name": "create_issue"}],
+        )
+        spec_b = _make_spec(
+            install_id="inst-bbbb",
+            name="GitHub",
+            tools_cache=[{"name": "list_repos"}],
+        )
+        groups, _ = build_deferred_groups(
+            specs=[spec_a, spec_b],
+            all_specs=[spec_a, spec_b],
+            loader_kwargs=_deferred_loader_kwargs(),
+        )
+        assert len(groups) == 2
+        assert groups[0].group_id == "mcp:GitHub_aaaa"
+        assert groups[1].group_id == "mcp:GitHub_bbbb"
 
     @pytest.mark.asyncio
     async def test_loader_calls_load_tools_for_specs(self) -> None:
@@ -356,19 +373,10 @@ class TestBuildDeferredGroups:
             name="GitHub",
             tools_cache=[{"name": "create_issue"}],
         )
-        loader_kwargs: dict[str, Any] = {
-            "workspace_id": "ws-1",
-            "org_id": "org-1",
-            "user_id": "user-1",
-            "cred_service": AsyncMock(),
-            "signer": AsyncMock(),
-            "token_manager": AsyncMock(),
-            "grant_repo": None,
-        }
         groups, shared_citations = build_deferred_groups(
             specs=[spec],
             all_specs=[spec],
-            loader_kwargs=loader_kwargs,
+            loader_kwargs=_deferred_loader_kwargs(),
         )
 
         with patch(

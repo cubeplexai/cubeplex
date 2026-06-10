@@ -2153,7 +2153,7 @@ class RunManager:
 
         try:
             from cubebox.credentials.dependencies import build_credential_service
-            from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+            from cubebox.mcp.cubepi_runtime import _load_tools_for_specs
             from cubebox.mcp.disclosure import (
                 build_deferred_groups,
                 disclosure_active,
@@ -2240,7 +2240,7 @@ class RunManager:
                             "signer": self._app.state.mcp_user_token_signer,
                         },
                     )
-                    mcp_citation_configs.update(_deferred_citations)
+                    mcp_citation_configs = _deferred_citations
                     logger.info(
                         "MCP progressive disclosure: {} servers deferred ({} tools)",
                         len(_deferred_groups),
@@ -2250,14 +2250,15 @@ class RunManager:
                     (
                         _new_tools,
                         _new_citations,
-                    ) = await load_workspace_mcp_tools_for_cubepi(
-                        effective_service=_effective_service,
-                        token_manager=_token_manager,
+                    ) = await _load_tools_for_specs(
+                        specs=_mcp_specs,
+                        all_specs=_mcp_specs,
                         workspace_id=ctx.workspace_id,
                         org_id=ctx.org_id,
                         user_id=ctx.user_id,
                         cred_service=effective_cred_service,
                         signer=self._app.state.mcp_user_token_signer,
+                        token_manager=_token_manager,
                         grant_repo=_grant_repo,
                     )
                     _builtin_tools.extend(_new_tools)
