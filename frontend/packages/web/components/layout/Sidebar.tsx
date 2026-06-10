@@ -382,16 +382,22 @@ export function Sidebar(): React.ReactElement {
           </p>
         </div>
         <ScrollArea className="flex-1 px-2">
-          <ul className="space-y-0.5">
-            {conversations.map((convo) => (
-              <ConversationRow
-                key={convo.id}
-                convo={convo}
-                isActive={activeId === convo.id}
-                currentWsId={currentWsId}
-              />
-            ))}
-          </ul>
+          {conversations.length === 0 ? (
+            <p className="px-2 py-1.5 text-xs text-muted-foreground/60">
+              {tSidebar('noRecentChats')}
+            </p>
+          ) : (
+            <ul className="space-y-0.5">
+              {conversations.map((convo) => (
+                <ConversationRow
+                  key={convo.id}
+                  convo={convo}
+                  isActive={activeId === convo.id}
+                  currentWsId={currentWsId}
+                />
+              ))}
+            </ul>
+          )}
         </ScrollArea>
       </div>
 

@@ -123,7 +123,7 @@ test('Scheduled Tasks: create via UI form', async ({ page }) => {
   await page.getByLabel('Prompt').fill('Run a quick summary of recent news')
 
   // Switch to interval frequency and set to 1 hour
-  await page.getByRole('button', { name: '每隔…' }).click()
+  await page.getByRole('button', { name: 'Every…' }).click()
   await page.locator('input[type="number"]').fill('1')
 
   // Submit
@@ -142,22 +142,22 @@ test('Scheduled Tasks: new-task dialog shows frequency pills, not cron input', a
   await expect(page.getByTestId('task-form-dialog')).toBeVisible()
 
   // Frequency pills visible
-  await expect(page.getByRole('button', { name: '每天' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '每周' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '每月' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Daily' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Weekly' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Monthly' })).toBeVisible()
 
   // No raw cron input
   await expect(page.locator('input[placeholder="0 9 * * 1-5"]')).not.toBeVisible()
 
-  // Switch to 每周 and confirm weekday pills appear (exact match so '一'
-  // doesn't collide with the '一次' frequency pill that's still in the DOM).
-  await page.getByRole('button', { name: '每周' }).click()
-  await expect(page.getByRole('button', { name: '一', exact: true })).toBeVisible()
+  // Switch to Weekly and confirm weekday pills appear (exact match so 'Mon'
+  // doesn't collide with the 'Monthly' frequency pill that's still in the DOM).
+  await page.getByRole('button', { name: 'Weekly' }).click()
+  await expect(page.getByRole('button', { name: 'Mon', exact: true })).toBeVisible()
 
-  // Switch to 每月 and confirm day grid appears
-  await page.getByRole('button', { name: '每月' }).click()
+  // Switch to Monthly and confirm day grid appears
+  await page.getByRole('button', { name: 'Monthly' }).click()
   await expect(page.getByRole('button', { name: '15' })).toBeVisible()
-  await expect(page.getByRole('button', { name: /月末/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Last day of month/ })).toBeVisible()
 })
 
 test('Scheduled Tasks: create daily task via new UI → API receives 5-field cron', async ({
@@ -172,7 +172,7 @@ test('Scheduled Tasks: create daily task via new UI → API receives 5-field cro
   await page.getByRole('button', { name: /new task/i }).click()
   await page.getByLabel('Name').fill('Daily E2E')
   await page.getByLabel('Prompt').fill('Say hello')
-  // Default is 每天 09:00 — just submit
+  // Default is Daily 09:00 — just submit
   await page.getByRole('button', { name: /create task/i }).click()
 
   // Wait for the UI to confirm the POST landed before querying the API —

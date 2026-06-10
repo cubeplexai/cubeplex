@@ -45,12 +45,24 @@ export function StackedSection({
   showAllInitially,
 }: Props) {
   const t = useTranslations('adminInsights.cost')
+  const tInsights = useTranslations('adminInsights')
   const [showAll, setShowAll] = useState(!!showAllInitially)
 
   const { kept, otherCount } = topNWithOther(tableRows, topN, (r) => r.cost_amount_micro)
   const visible = showAll
     ? [...tableRows].sort((a, b) => b.cost_amount_micro - a.cost_amount_micro)
     : kept
+
+  if (tableRows.length === 0) {
+    return (
+      <section className="space-y-2">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <p className="rounded-md border border-dashed bg-muted/20 px-4 py-6 text-center text-xs text-muted-foreground">
+          {tInsights('noData')}
+        </p>
+      </section>
+    )
+  }
 
   return (
     <section className="space-y-2">

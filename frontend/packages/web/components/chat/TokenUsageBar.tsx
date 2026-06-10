@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { ChevronDown, ChevronRight, BarChart3 } from 'lucide-react'
 import type { TurnUsage, SessionUsage } from '@cubebox/core'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
 
 function formatTokenCount(n: number): string {
@@ -61,80 +62,79 @@ export function TokenUsageBar({
       : null
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setIsExpanded((prev) => !prev)}
-        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs
-          bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted
-          transition-colors"
+    <Popover open={isExpanded} onOpenChange={setIsExpanded}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs
+              bg-muted/60 text-muted-foreground hover:text-foreground hover:bg-muted
+              transition-colors"
+          >
+            <BarChart3 aria-hidden className="size-3" />
+            <span>{t('tokenUsage')}</span>
+            {isExpanded ? (
+              <ChevronDown className="size-3 opacity-60" />
+            ) : (
+              <ChevronRight className="size-3 opacity-60" />
+            )}
+          </button>
+        }
+      />
+      <PopoverContent
+        align="start"
+        sideOffset={8}
+        className="w-72 gap-0 space-y-3 border border-border px-3 py-2.5 text-xs
+          text-muted-foreground"
       >
-        <BarChart3 aria-hidden className="size-3" />
-        <span>{t('tokenUsage')}</span>
-        {isExpanded ? (
-          <ChevronDown className="size-3 opacity-60" />
-        ) : (
-          <ChevronRight className="size-3 opacity-60" />
+        {turnUsage && (
+          <div>
+            <div className="font-medium text-foreground/70 mb-1">{t('turnLabel')}</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+              <span>{t('inputTokens')}</span>
+              <span className="text-right font-mono">
+                {formatTokenCount(turnUsage.input_tokens)}
+              </span>
+              <span>{t('outputTokens')}</span>
+              <span className="text-right font-mono">
+                {formatTokenCount(turnUsage.output_tokens)}
+              </span>
+              <span>{t('cacheHitRate')}</span>
+              <span className="text-right font-mono">{formatPercent(cacheHitRate, 1)}</span>
+            </div>
+          </div>
         )}
-      </button>
 
-      {isExpanded && (
-        <div
-          className="absolute left-0 top-full mt-2 z-10 text-xs text-muted-foreground bg-popover
-            border border-border rounded-lg px-3 py-2.5 space-y-3 shadow-md
-            max-w-xs w-72"
-        >
-          {turnUsage && (
-            <div>
-              <div className="font-medium text-foreground/70 mb-1">{t('turnLabel')}</div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                <span>{t('inputTokens')}</span>
-                <span className="text-right font-mono">
-                  {formatTokenCount(turnUsage.input_tokens)}
-                </span>
-                <span>{t('outputTokens')}</span>
-                <span className="text-right font-mono">
-                  {formatTokenCount(turnUsage.output_tokens)}
-                </span>
-                <span>{t('cacheHitRate')}</span>
-                <span className="text-right font-mono">{formatPercent(cacheHitRate, 1)}</span>
-              </div>
+        {sessionUsage && (
+          <div>
+            <div className="font-medium text-foreground/70 mb-1">{t('sessionLabel')}</div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+              <span>{t('totalTokens')}</span>
+              <span className="text-right font-mono">
+                {formatTokenCount(
+                  sessionUsage.total_input_tokens + sessionUsage.total_output_tokens,
+                )}
+              </span>
+              <span>{t('cacheHitRate')}</span>
+              <span className="text-right font-mono">{formatPercent(sessionCacheHitRate, 1)}</span>
             </div>
-          )}
-
-          {sessionUsage && (
-            <div>
-              <div className="font-medium text-foreground/70 mb-1">{t('sessionLabel')}</div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                <span>{t('totalTokens')}</span>
-                <span className="text-right font-mono">
-                  {formatTokenCount(
-                    sessionUsage.total_input_tokens + sessionUsage.total_output_tokens,
-                  )}
-                </span>
-                <span>{t('cacheHitRate')}</span>
-                <span className="text-right font-mono">
-                  {formatPercent(sessionCacheHitRate, 1)}
-                </span>
-              </div>
-              {ctxPct !== null && (
-                <div className="mt-1.5">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span>{t('contextWindow')}</span>
-                    <span className="font-mono">{ctxPct.toFixed(1)}%</span>
-                  </div>
-                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${progressColor(ctxPct)}`}
-                      style={{ width: `${Math.min(ctxPct, 100)}%` }}
-                    />
-                  </div>
+            {ctxPct !== null && (
+              <div className="mt-1.5">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span>{t('contextWindow')}</span>
+                  <span className="font-mono">{ctxPct.toFixed(1)}%</span>
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${progressColor(ctxPct)}`}
+                    style={{ width: `${Math.min(ctxPct, 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }

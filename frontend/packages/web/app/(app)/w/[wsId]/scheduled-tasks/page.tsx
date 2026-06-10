@@ -1,6 +1,7 @@
 'use client'
 
 import { use, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { CalendarClock, Plus } from 'lucide-react'
 import type { ScheduledTaskOut } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,7 @@ export default function ScheduledTasksPage({
   params,
 }: ScheduledTasksPageProps): React.ReactElement {
   const { wsId } = use(params)
+  const t = useTranslations('scheduledTasks')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<ScheduledTaskOut | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -42,10 +44,8 @@ export default function ScheduledTasksPage({
             <CalendarClock className="size-4.5" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold leading-tight">Scheduled Tasks</h1>
-            <p className="text-sm text-muted-foreground">
-              Run prompts automatically on a cron, interval, or one-time schedule
-            </p>
+            <h1 className="text-xl font-semibold leading-tight">{t('pageTitle')}</h1>
+            <p className="text-sm text-muted-foreground">{t('pageSubtitle')}</p>
           </div>
         </div>
 
@@ -56,12 +56,17 @@ export default function ScheduledTasksPage({
           data-testid="new-task-button"
         >
           <Plus className="size-3.5" />
-          New task
+          {t('newTask')}
         </Button>
       </div>
 
       {/* Task list */}
-      <ScheduledTasksList wsId={wsId} onEdit={openEdit} refreshKey={refreshKey} />
+      <ScheduledTasksList
+        wsId={wsId}
+        onEdit={openEdit}
+        onCreate={openCreate}
+        refreshKey={refreshKey}
+      />
 
       {/* Create / edit dialog */}
       <ScheduledTaskFormDialog

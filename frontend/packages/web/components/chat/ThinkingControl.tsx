@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo } from 'react'
+import { useTranslations } from 'next-intl'
+import { Brain } from 'lucide-react'
 
 import {
   Select,
@@ -16,19 +18,14 @@ interface ThinkingControlProps {
   wsId: string
 }
 
-interface LevelOption {
-  value: ThinkingLevel
-  label: string
-}
-
-const LEVELS: LevelOption[] = [
-  { value: 'off', label: 'Standard' },
-  { value: 'minimal', label: 'Minimal' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'xhigh', label: 'Extra High' },
-]
+const LEVEL_KEYS = [
+  { value: 'off', labelKey: 'thinkingLevelOff' },
+  { value: 'minimal', labelKey: 'thinkingLevelMinimal' },
+  { value: 'low', labelKey: 'thinkingLevelLow' },
+  { value: 'medium', labelKey: 'thinkingLevelMedium' },
+  { value: 'high', labelKey: 'thinkingLevelHigh' },
+  { value: 'xhigh', labelKey: 'thinkingLevelXhigh' },
+] as const satisfies readonly { value: ThinkingLevel; labelKey: string }[]
 
 /**
  * Composer dropdown for the thinking depth. Sticky across messages (D5);
@@ -36,17 +33,25 @@ const LEVELS: LevelOption[] = [
  * silent bill shock.
  */
 export function ThinkingControl({ wsId }: ThinkingControlProps): React.ReactElement {
+  const t = useTranslations('chat')
   const useStore = useMemo(() => getPresetSelectionStore(wsId), [wsId])
   const thinking = useStore((s) => s.thinking)
   const setThinking = useStore((s) => s.setThinking)
 
+  const items = LEVEL_KEYS.map((l) => ({ value: l.value, label: t(l.labelKey) }))
+
   return (
-    <Select value={thinking} onValueChange={(v) => setThinking((v ?? 'off') as ThinkingLevel)}>
-      <SelectTrigger className="w-32" aria-label="Thinking level">
+    <Select
+      value={thinking}
+      items={items}
+      onValueChange={(v) => setThinking((v ?? 'off') as ThinkingLevel)}
+    >
+      <SelectTrigger className="min-w-32" aria-label={t('thinkingAriaLabel')}>
+        <Brain aria-hidden className="size-3.5 text-muted-foreground" />
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {LEVELS.map((l) => (
+        {items.map((l) => (
           <SelectItem key={l.value} value={l.value}>
             {l.label}
           </SelectItem>

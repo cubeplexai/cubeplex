@@ -99,8 +99,14 @@ test.describe('Admin Insights page', () => {
     await expect(page.getByRole('heading', { name: /Cache efficiency/ })).toBeVisible({
       timeout: 10_000,
     })
-    // At least one Hit rate header cell + value cell rendered as "<n>%" or em-dash placeholder
-    await expect(page.getByRole('columnheader', { name: 'Hit rate' })).toBeVisible()
+    // A fresh org has no cost rows yet, so the section renders its empty state
+    // instead of a bare table; with data, the Hit rate column header appears.
+    await expect(
+      page
+        .getByRole('columnheader', { name: 'Hit rate' })
+        .or(page.getByText('No data in this period'))
+        .first(),
+    ).toBeVisible()
   })
 
   test('a non-admin org member cannot access /admin/insights', async ({ page: _page }) => {

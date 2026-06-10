@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
 import { createApiClient, createScheduledTask, patchScheduledTask } from '@cubebox/core'
@@ -48,6 +49,7 @@ export function ScheduledTaskFormDialog({
   task,
   onSuccess,
 }: ScheduledTaskFormDialogProps) {
+  const t = useTranslations('scheduledTasks')
   const isEdit = task !== null
 
   const [name, setName] = useState('')
@@ -134,7 +136,7 @@ export function ScheduledTaskFormDialog({
         >
           <div className="flex items-start justify-between gap-3">
             <DialogPrimitive.Title className="text-base font-semibold">
-              {isEdit ? 'Edit scheduled task' : 'New scheduled task'}
+              {isEdit ? t('dialogEditTitle') : t('dialogNewTitle')}
             </DialogPrimitive.Title>
             <DialogPrimitive.Close
               render={
@@ -152,12 +154,12 @@ export function ScheduledTaskFormDialog({
           <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 flex flex-col gap-3">
             {/* Name */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-name">Name</Label>
+              <Label htmlFor="task-name">{t('name')}</Label>
               <Input
                 id="task-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Daily digest"
+                placeholder={t('namePlaceholder')}
                 required
                 maxLength={255}
               />
@@ -165,12 +167,12 @@ export function ScheduledTaskFormDialog({
 
             {/* Prompt */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-prompt">Prompt</Label>
+              <Label htmlFor="task-prompt">{t('prompt')}</Label>
               <Textarea
                 id="task-prompt"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Summarize today's news and send me a digest…"
+                placeholder={t('promptPlaceholder')}
                 required
                 rows={3}
                 className="resize-y"
@@ -179,30 +181,34 @@ export function ScheduledTaskFormDialog({
 
             {/* Schedule */}
             <div className="flex flex-col gap-1.5">
-              <Label>Schedule</Label>
+              <Label>{t('schedule')}</Label>
               <ScheduleEditor value={scheduleValue} onChange={setScheduleValue} />
             </div>
 
             {/* Target mode */}
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="task-target-mode">Conversation target</Label>
+              <Label htmlFor="task-target-mode">{t('target')}</Label>
               <Select
                 value={targetMode}
+                items={[
+                  { value: 'new_each_run', label: t('targetNewEachRun') },
+                  { value: 'fixed', label: t('targetFixed') },
+                ]}
                 onValueChange={(v) => setTargetMode(v as typeof targetMode)}
               >
                 <SelectTrigger id="task-target-mode">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="new_each_run">New conversation each run</SelectItem>
-                  <SelectItem value="fixed">Fixed conversation</SelectItem>
+                  <SelectItem value="new_each_run">{t('targetNewEachRun')}</SelectItem>
+                  <SelectItem value="fixed">{t('targetFixed')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {targetMode === 'fixed' && (
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="task-conversation-id">Conversation ID</Label>
+                <Label htmlFor="task-conversation-id">{t('conversationId')}</Label>
                 <Input
                   id="task-conversation-id"
                   value={targetConversationId}
@@ -210,9 +216,7 @@ export function ScheduledTaskFormDialog({
                   placeholder="conv_…"
                   required={targetMode === 'fixed'}
                 />
-                <p className="text-xs text-muted-foreground">
-                  Must be one of your own conversations
-                </p>
+                <p className="text-xs text-muted-foreground">{t('conversationIdHint')}</p>
               </div>
             )}
 
@@ -226,18 +230,18 @@ export function ScheduledTaskFormDialog({
               <DialogPrimitive.Close
                 render={
                   <Button type="button" variant="ghost" size="sm" disabled={saving}>
-                    Cancel
+                    {t('cancel')}
                   </Button>
                 }
               />
               <Button type="submit" size="sm" disabled={saving || !name.trim() || !prompt.trim()}>
                 {saving
                   ? isEdit
-                    ? 'Saving…'
-                    : 'Creating…'
+                    ? t('saving')
+                    : t('creating')
                   : isEdit
-                    ? 'Save changes'
-                    : 'Create task'}
+                    ? t('saveChanges')
+                    : t('createTask')}
               </Button>
             </div>
           </form>

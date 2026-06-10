@@ -3,9 +3,11 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { MoreHorizontal, ExternalLink, Trash2 } from 'lucide-react'
+import { MoreHorizontal, ExternalLink, Plus, Trash2, Webhook } from 'lucide-react'
 import { type Trigger } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/shared/EmptyState'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +30,7 @@ interface TriggersListProps {
   loading: boolean
   onToggleEnabled: (id: string, enabled: boolean) => Promise<void>
   onDelete: (id: string) => void
+  onCreate: () => void
 }
 
 export function TriggersList({
@@ -36,6 +39,7 @@ export function TriggersList({
   loading,
   onToggleEnabled,
   onDelete,
+  onCreate,
 }: TriggersListProps) {
   const t = useTranslations('triggers')
 
@@ -45,16 +49,18 @@ export function TriggersList({
 
   if (triggers.length === 0) {
     return (
-      <div
-        className={
-          'rounded-xl border border-dashed border-border/60 ' +
-          'bg-muted/20 px-6 py-12 text-center text-sm text-muted-foreground'
-        }
+      <EmptyState
+        icon={Webhook}
+        title={t('emptyTitle')}
+        description={t('emptyHint')}
         data-testid="triggers-empty"
-      >
-        <p className="font-medium mb-1">{t('emptyTitle')}</p>
-        <p className="text-xs">{t('emptyHint')}</p>
-      </div>
+        action={
+          <Button size="sm" className="gap-1.5" onClick={onCreate}>
+            <Plus className="size-3.5" />
+            {t('createTrigger')}
+          </Button>
+        }
+      />
     )
   }
 

@@ -124,7 +124,7 @@ function ConnectorRow({
       <div className="flex items-center gap-2">
         <Plug className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-semibold">{name}</span>
-        {provider ? (
+        {provider && provider.toLowerCase() !== name.toLowerCase() ? (
           <Badge variant="outline" className="shrink-0 text-[10px]">
             {provider}
           </Badge>
@@ -423,16 +423,12 @@ export function McpPanel({ wsId }: McpPanelProps) {
     [connectors, selectedId],
   )
 
-  const enabledCount = connectors.filter((c) => c.workspace_state?.enabled).length
-
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <header className="flex items-center justify-between gap-2 border-b border-border/70 px-6 py-4">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">MCP Connectors</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t('workspaceStateSummary', { enabled: enabledCount, total: connectors.length })}
-          </p>
+          <h2 className="text-lg font-semibold tracking-tight">{tMcp('wsTitle')}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{tMcp('wsSubtitle')}</p>
         </div>
         <Input
           type="search"

@@ -94,7 +94,7 @@ export function AvailableConnectorRow({
       <div className="flex min-w-0 flex-col gap-0.5">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-semibold">{name}</span>
-          {provider ? (
+          {provider && provider.toLowerCase() !== name.toLowerCase() ? (
             <Badge variant="outline" className="text-[10px]">
               {provider}
             </Badge>
@@ -105,7 +105,13 @@ export function AvailableConnectorRow({
         ) : null}
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
       </div>
-      <Button type="button" size="sm" disabled={busy} onClick={() => void handleConnect()}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={busy}
+        onClick={() => void handleConnect()}
+      >
         {busy ? <Loader2 className="mr-2 size-3.5 animate-spin" /> : null}
         {t('connect')}
       </Button>

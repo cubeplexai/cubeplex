@@ -155,7 +155,7 @@ export function MCPConnectorList({
           >
             <div className="flex items-center gap-2">
               <span className="truncate text-sm font-semibold">{nameOf(c)}</span>
-              {providerOf(c) ? (
+              {providerOf(c) && providerOf(c).toLowerCase() !== nameOf(c).toLowerCase() ? (
                 <Badge variant="outline" className="shrink-0 text-[10px]">
                   {providerOf(c)}
                 </Badge>
