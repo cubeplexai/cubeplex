@@ -372,7 +372,7 @@ class TestBuildDeferredGroups:
         )
 
         with patch(
-            "cubebox.mcp.disclosure._load_tools_for_specs",
+            "cubebox.mcp.disclosure._load_tools_for_specs_deferred",
             new_callable=AsyncMock,
             return_value=([fake_tool], {"GitHub__create_issue": object()}),
         ) as mock_load:
