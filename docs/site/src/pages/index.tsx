@@ -12,6 +12,7 @@ export default function Home(): React.ReactElement {
     description: 'Your AI agent workspace — chat, automate, extend.',
     url: 'https://cubebox.ai',
     applicationCategory: 'BusinessApplication',
+    operatingSystem: 'Web',
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
     author: { '@type': 'Organization', name: 'CubeBox', url: 'https://cubebox.ai' },
   };
