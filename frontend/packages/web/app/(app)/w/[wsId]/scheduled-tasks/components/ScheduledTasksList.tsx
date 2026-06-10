@@ -1,22 +1,29 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
+import { CalendarClock, Plus } from 'lucide-react'
 import { createApiClient, listScheduledTasks, useAuthStore, useWorkspaceStore } from '@cubebox/core'
 import type { ScheduledTaskOut } from '@cubebox/core'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { ScheduledTaskCard } from './ScheduledTaskCard'
 import { ScheduledTaskRunsPanel } from './ScheduledTaskRunsPanel'
 
 interface ScheduledTasksListProps {
   wsId: string
   onEdit: (task: ScheduledTaskOut) => void
+  onCreate: () => void
   refreshKey: number
 }
 
 export function ScheduledTasksList({
   wsId,
   onEdit,
+  onCreate,
   refreshKey,
 }: ScheduledTasksListProps): React.ReactElement {
+  const t = useTranslations('scheduledTasks')
   const [tasks, setTasks] = useState<ScheduledTaskOut[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -42,8 +49,7 @@ export function ScheduledTasksList({
         if (!cancelled) setTasks(data)
       })
       .catch((err: unknown) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : 'Failed to load scheduled tasks')
+        if (!cancelled) setError(err instanceof Error ? err.message : t('loadFailed'))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -51,7 +57,7 @@ export function ScheduledTasksList({
     return () => {
       cancelled = true
     }
-  }, [client, refreshKey])
+  }, [client, refreshKey, t])
 
   function handleUpdate(updated: ScheduledTaskOut): void {
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
@@ -84,15 +90,18 @@ export function ScheduledTasksList({
 
   if (tasks.length === 0) {
     return (
-      <div
-        className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-center"
+      <EmptyState
+        icon={CalendarClock}
+        title={t('emptyTitle')}
+        description={t('emptyHint')}
         data-testid="empty-state"
-      >
-        <p className="text-sm font-medium text-muted-foreground">No scheduled tasks yet</p>
-        <p className="text-xs text-muted-foreground/60">
-          Create a task to run prompts on a schedule automatically.
-        </p>
-      </div>
+        action={
+          <Button size="sm" className="gap-1.5" onClick={onCreate}>
+            <Plus className="size-3.5" />
+            {t('newTask')}
+          </Button>
+        }
+      />
     )
   }
 

@@ -85,6 +85,7 @@ export function TriggersPanel({ wsId }: TriggersPanelProps) {
           loading={loading}
           onToggleEnabled={handleToggleEnabled}
           onDelete={setDeletingId}
+          onCreate={() => setCreateOpen(true)}
         />
 
         {deletingId && (

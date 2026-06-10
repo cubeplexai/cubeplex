@@ -51,53 +51,57 @@ export function InsightsFilterSidebar({
         </div>
       </section>
 
-      <section>
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t('workspaces')}
-        </p>
-        <div className="space-y-1">
-          {availableWorkspaces.map((w) => {
-            const on = filters.workspaceIds.includes(w.id)
-            return (
-              <button
-                key={w.id}
-                onClick={() =>
-                  onChange({ ...filters, workspaceIds: toggle(filters.workspaceIds, w.id) })
-                }
-                className={cn(
-                  'w-full rounded-md px-2 py-1 text-left text-xs',
-                  on ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
-                )}
-              >
-                {w.name}
-              </button>
-            )
-          })}
-        </div>
-      </section>
+      {availableWorkspaces.length > 0 && (
+        <section>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {t('workspaces')}
+          </p>
+          <div className="space-y-1">
+            {availableWorkspaces.map((w) => {
+              const on = filters.workspaceIds.includes(w.id)
+              return (
+                <button
+                  key={w.id}
+                  onClick={() =>
+                    onChange({ ...filters, workspaceIds: toggle(filters.workspaceIds, w.id) })
+                  }
+                  className={cn(
+                    'w-full rounded-md px-2 py-1 text-left text-xs',
+                    on ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
+                  )}
+                >
+                  {w.name}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
-      <section>
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t('models')}
-        </p>
-        <div className="space-y-1">
-          {availableModels.map((m) => {
-            const on = filters.models.includes(m)
-            return (
-              <button
-                key={m}
-                onClick={() => onChange({ ...filters, models: toggle(filters.models, m) })}
-                className={cn(
-                  'w-full rounded-md px-2 py-1 text-left text-[11px] font-mono',
-                  on ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
-                )}
-              >
-                {m}
-              </button>
-            )
-          })}
-        </div>
-      </section>
+      {availableModels.length > 0 && (
+        <section>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            {t('models')}
+          </p>
+          <div className="space-y-1">
+            {availableModels.map((m) => {
+              const on = filters.models.includes(m)
+              return (
+                <button
+                  key={m}
+                  onClick={() => onChange({ ...filters, models: toggle(filters.models, m) })}
+                  className={cn(
+                    'w-full rounded-md px-2 py-1 text-left text-[11px] font-mono',
+                    on ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
+                  )}
+                >
+                  {m}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <section>
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

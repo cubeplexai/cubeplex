@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useMemo } from 'react'
+import { useTranslations } from 'next-intl'
 
+import { Badge } from '@/components/ui/badge'
 import {
   Select,
   SelectContent,
@@ -23,6 +25,7 @@ interface PresetPickerProps {
  * it to `null` (workspace default) if the label no longer exists (D4).
  */
 export function PresetPicker({ wsId }: PresetPickerProps): React.ReactElement {
+  const t = useTranslations('chat')
   const useStore = useMemo(() => getPresetSelectionStore(wsId), [wsId])
   const presets = useStore((s) => s.presets)
   const presetLabel = useStore((s) => s.presetLabel)
@@ -52,15 +55,25 @@ export function PresetPicker({ wsId }: PresetPickerProps): React.ReactElement {
   }, [wsId, setPresets, setPresetLabel, useStore])
 
   return (
-    <Select value={presetLabel ?? ''} onValueChange={(v) => setPresetLabel(v ? v : null)}>
-      <SelectTrigger className="w-36" aria-label="Model preset">
-        <SelectValue placeholder="Preset" />
+    <Select
+      value={presetLabel}
+      items={presets.map((p) => ({ value: p.label, label: p.label }))}
+      onValueChange={(v) => setPresetLabel(v ? v : null)}
+    >
+      <SelectTrigger className="min-w-36" aria-label={t('presetAriaLabel')}>
+        <SelectValue placeholder={t('presetPlaceholder')} />
       </SelectTrigger>
       <SelectContent>
         {presets.map((p) => (
           <SelectItem key={p.label} value={p.label}>
-            {p.label}
-            {p.is_default ? ' (default)' : ''}
+            <span className="flex items-center gap-1.5">
+              {p.label}
+              {p.is_default && (
+                <Badge variant="secondary" className="px-1 text-[10px]">
+                  {t('defaultPresetBadge')}
+                </Badge>
+              )}
+            </span>
           </SelectItem>
         ))}
       </SelectContent>

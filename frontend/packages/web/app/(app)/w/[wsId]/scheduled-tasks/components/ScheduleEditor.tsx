@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
@@ -17,13 +18,13 @@ import type {
 
 type FreqKind = 'daily' | 'weekly' | 'monthly' | 'interval' | 'once'
 
-const FREQ_LABELS: { kind: FreqKind; label: string }[] = [
-  { kind: 'daily', label: '每天' },
-  { kind: 'weekly', label: '每周' },
-  { kind: 'monthly', label: '每月' },
-  { kind: 'interval', label: '每隔…' },
-  { kind: 'once', label: '一次' },
-]
+const FREQ_KEYS = [
+  { kind: 'daily', labelKey: 'freqDaily' },
+  { kind: 'weekly', labelKey: 'freqWeekly' },
+  { kind: 'monthly', labelKey: 'freqMonthly' },
+  { kind: 'interval', labelKey: 'freqInterval' },
+  { kind: 'once', labelKey: 'freqOnce' },
+] as const
 
 function FrequencyPills({
   value,
@@ -32,9 +33,10 @@ function FrequencyPills({
   value: FreqKind
   onChange: (kind: FreqKind) => void
 }) {
+  const t = useTranslations('scheduledTasks')
   return (
     <div className="flex flex-wrap gap-1.5">
-      {FREQ_LABELS.map(({ kind, label }) => (
+      {FREQ_KEYS.map(({ kind, labelKey }) => (
         <button
           key={kind}
           type="button"
@@ -46,7 +48,7 @@ function FrequencyPills({
               : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground',
           )}
         >
-          {label}
+          {t(labelKey)}
         </button>
       ))}
     </div>
@@ -81,6 +83,7 @@ function TimeInput({
 // ── Timezone input ───────────────────────────────────────────────────────────
 
 function TimezoneInput({ value, onChange }: { value: string; onChange: (tz: string) => void }) {
+  const t = useTranslations('scheduledTasks')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [error, setError] = useState(false)
@@ -143,7 +146,7 @@ function TimezoneInput({ value, onChange }: { value: string; onChange: (tz: stri
         className={cn('h-7 max-w-[200px] text-xs', error && 'border-destructive')}
         placeholder="Asia/Shanghai"
       />
-      {error && <span className="text-xs text-destructive">无效时区</span>}
+      {error && <span className="text-xs text-destructive">{t('invalidTimezone')}</span>}
     </div>
   )
 }
@@ -157,6 +160,7 @@ function EndDateInput({
   value: string | null
   onChange: (date: string | null) => void
 }) {
+  const t = useTranslations('scheduledTasks')
   const enabled = value !== null
   return (
     <div className="flex flex-col gap-1.5">
@@ -179,7 +183,7 @@ function EndDateInput({
           />
         </button>
         <Label className="text-xs font-normal text-muted-foreground">
-          截止日期 <span className="text-primary text-[10px]">可选</span>
+          {t('endDate')} <span className="text-primary text-[10px]">{t('optional')}</span>
         </Label>
       </div>
       {enabled && (
@@ -191,17 +195,25 @@ function EndDateInput({
             className="max-w-[160px] text-xs"
             min={new Date().toISOString().slice(0, 10)}
           />
-          <span className="text-xs text-muted-foreground">到期后自动停止</span>
+          <span className="text-xs text-muted-foreground">{t('endDateStop')}</span>
         </div>
       )}
-      {!enabled && <p className="text-xs italic text-muted-foreground">未设置 — 永久运行</p>}
+      {!enabled && <p className="text-xs italic text-muted-foreground">{t('endDateUnset')}</p>}
     </div>
   )
 }
 
 // ── Weekday picker ───────────────────────────────────────────────────────────
 
-const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
+const WEEKDAY_KEYS = [
+  'weekdaySun',
+  'weekdayMon',
+  'weekdayTue',
+  'weekdayWed',
+  'weekdayThu',
+  'weekdayFri',
+  'weekdaySat',
+] as const
 
 function WeekdayPicker({
   value,
@@ -210,13 +222,14 @@ function WeekdayPicker({
   value: number[]
   onChange: (days: number[]) => void
 }) {
+  const t = useTranslations('scheduledTasks')
   function toggle(day: number) {
     const next = value.includes(day) ? value.filter((d) => d !== day) : [...value, day]
     if (next.length > 0) onChange(next)
   }
   return (
     <div className="flex gap-1">
-      {WEEKDAYS.map((label, i) => (
+      {WEEKDAY_KEYS.map((key, i) => (
         <button
           key={i}
           type="button"
@@ -228,7 +241,7 @@ function WeekdayPicker({
               : 'border-border text-muted-foreground hover:border-primary/40',
           )}
         >
-          {label}
+          {t(key)}
         </button>
       ))}
     </div>
@@ -244,6 +257,7 @@ function DayOfMonthPicker({
   value: number | 'last'
   onChange: (day: number | 'last') => void
 }) {
+  const t = useTranslations('scheduledTasks')
   return (
     <div className="flex flex-col gap-1.5">
       <div className="grid grid-cols-7 gap-1">
@@ -272,15 +286,13 @@ function DayOfMonthPicker({
               : 'border-dashed border-primary/30 text-primary/60 hover:border-primary/50 hover:text-primary',
           )}
         >
-          📅 月末最后一天
+          📅 {t('lastDayOfMonth')}
         </button>
         {Array.from({ length: 4 }).map((_, i) => (
           <div key={`fill-${i}`} />
         ))}
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        1–28 避免短月 skip；月末选项自动适配每月实际天数
-      </p>
+      <p className="text-[10px] text-muted-foreground">{t('dayOfMonthHint')}</p>
     </div>
   )
 }
@@ -294,9 +306,10 @@ function IntervalInput({
   value: IntervalSchedule
   onChange: (s: IntervalSchedule) => void
 }) {
+  const t = useTranslations('scheduledTasks')
   return (
     <div className="flex items-center gap-2">
-      <span className="text-sm text-muted-foreground">每隔</span>
+      <span className="text-sm text-muted-foreground">{t('intervalPrefix')}</span>
       <Input
         type="number"
         min={1}
@@ -312,11 +325,10 @@ function IntervalInput({
         onChange={(e) => onChange({ ...value, unit: e.target.value as IntervalSchedule['unit'] })}
         className="rounded-md border border-border bg-input px-2 py-1.5 text-sm"
       >
-        <option value="minutes">分钟</option>
-        <option value="hours">小时</option>
-        <option value="days">天</option>
+        <option value="minutes">{t('unitMinutes')}</option>
+        <option value="hours">{t('unitHours')}</option>
+        <option value="days">{t('unitDays')}</option>
       </select>
-      <span className="text-sm text-muted-foreground">执行一次</span>
     </div>
   )
 }
@@ -358,6 +370,7 @@ function defaultForKind(kind: FreqKind, timezone: string): ScheduleState {
 }
 
 export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
+  const t = useTranslations('scheduledTasks')
   const s = value.schedule
   const isLegacy = s.kind === 'unsupported_cron'
 
@@ -373,7 +386,7 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
     return (
       <div className="flex flex-col gap-3">
         <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
-          ⚠ 当前使用了自定义 cron 表达式：
+          ⚠ {t('legacyCron')}
           <code className="ml-1 font-mono">{s.cronExpr}</code>
         </div>
         <button
@@ -381,7 +394,7 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
           onClick={() => setSchedule({ kind: 'daily', hour: 9, minute: 0 })}
           className="self-start rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
         >
-          切换到可视化配置（将清除当前 cron）
+          {t('switchToVisual')}
         </button>
       </div>
     )
@@ -392,7 +405,9 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <Label className="text-xs uppercase tracking-wide text-muted-foreground">频率</Label>
+        <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+          {t('frequency')}
+        </Label>
         <FrequencyPills value={freqKind} onChange={handleFreqChange} />
       </div>
 
@@ -403,7 +418,7 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
           {s.kind === 'weekly' && (
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-                运行日（可多选）
+                {t('runDays')}
               </Label>
               <WeekdayPicker
                 value={(s as WeeklySchedule).days}
@@ -413,7 +428,9 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
           )}
           {s.kind === 'monthly' && (
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs uppercase tracking-wide text-muted-foreground">日期</Label>
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                {t('dayOfMonth')}
+              </Label>
               <DayOfMonthPicker
                 value={(s as MonthlySchedule).day}
                 onChange={(day) => setSchedule({ ...(s as MonthlySchedule), day })}
@@ -422,7 +439,7 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
           )}
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              运行时间
+              {t('runTime')}
             </Label>
             <div className="flex items-center gap-2">
               <TimeInput
@@ -443,7 +460,9 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
 
       {s.kind === 'once' && (
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs uppercase tracking-wide text-muted-foreground">运行时间</Label>
+          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+            {t('runTime')}
+          </Label>
           <div className="flex items-center gap-2">
             <Input
               type="datetime-local"

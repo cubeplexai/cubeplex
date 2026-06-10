@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useTranslations } from 'next-intl'
+import { useFormatter, useTranslations } from 'next-intl'
 import { Plus, Trash2 } from 'lucide-react'
 import { createApiClient, useAuthStore, useMemberStore, type WsMember } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
@@ -28,6 +28,7 @@ interface WsMembersTableProps {
 
 export function WsMembersTable({ wsId }: WsMembersTableProps) {
   const t = useTranslations('wsMembers')
+  const format = useFormatter()
   const client = useMemo(() => createApiClient(''), [])
   const currentUser = useAuthStore((s) => s.user)
   const {
@@ -77,7 +78,7 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
 
   function formatDate(iso: string): string {
     try {
-      return new Date(iso).toLocaleDateString()
+      return format.dateTime(new Date(iso), { dateStyle: 'medium' })
     } catch {
       return iso
     }
@@ -181,6 +182,10 @@ function WsMemberRow({
       <TableCell>
         <Select
           value={member.role}
+          items={[
+            { value: 'admin', label: t('admin') },
+            { value: 'member', label: t('member') },
+          ]}
           onValueChange={(v) => {
             if (v) void onRoleChange(member.user_id, v)
           }}

@@ -13,6 +13,7 @@ interface Props {
 
 export function CacheSection({ timeseriesByModel, summary, palette }: Props) {
   const t = useTranslations('adminInsights.cost')
+  const tInsights = useTranslations('adminInsights')
 
   const series: RateSeries[] = timeseriesByModel.series.slice(0, palette.length).map((s, i) => ({
     bucket: s.bucket,
@@ -37,6 +38,17 @@ export function CacheSection({ timeseriesByModel, summary, palette }: Props) {
       date,
       rate: computeCacheHitRate({ input: v.inp, cacheRead: v.cr }),
     }))
+
+  if (summary.by_model.length === 0) {
+    return (
+      <section className="space-y-2 mt-4">
+        <h2 className="text-sm font-semibold">{t('cacheEfficiency')}</h2>
+        <p className="rounded-md border border-dashed bg-muted/20 px-4 py-6 text-center text-xs text-muted-foreground">
+          {tInsights('noData')}
+        </p>
+      </section>
+    )
+  }
 
   return (
     <section className="space-y-2 mt-4">
