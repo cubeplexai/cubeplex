@@ -135,6 +135,11 @@ describe('WorkspaceHomePage', () => {
         '',
         ['file-1'],
         expect.any(Array),
+        // The home page now forwards the composer's preset + thinking choice
+        // on the first send (mirrors InputBar.handleSubmit), so the bug where
+        // turn-1 silently shipped `thinking: "off"` while turn-2 honored the
+        // dropdown can't recur.
+        { preset_label: null, thinking: 'off' },
       )
     })
     expect(storeMocks.push).toHaveBeenCalledWith('/w/ws-1/conversations/conv-1')

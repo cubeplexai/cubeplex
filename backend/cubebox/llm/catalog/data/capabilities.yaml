@@ -7,7 +7,7 @@ anthropic-native:
   reasoning_level:
     path: thinking.budget_tokens
     kind: int_budget
-    level_budgets: { "off": 0, minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
+    level_budgets: { "off": 0, low: 2048, medium: 8192, high: 16384, xhigh: 16384 }
   temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
   max_tokens_field: max_tokens
   supports_tools: true
@@ -20,7 +20,7 @@ openai-responses:
   reasoning_level:
     path: reasoning.effort
     kind: effort
-    level_to_effort: { minimal: minimal, low: low, medium: medium, high: high, xhigh: high }
+    level_to_effort: { low: low, medium: medium, high: high, xhigh: high }
   temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
   max_tokens_field: max_tokens
   supports_tools: true
@@ -52,7 +52,7 @@ deepseek-anthropic:
   reasoning_level:
     path: output_config.effort
     kind: effort
-    level_to_effort: { minimal: minimal, low: low, medium: medium, high: high, xhigh: max }
+    level_to_effort: { low: low, medium: medium, high: high, xhigh: max }
   temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
 
 deepseek-openai:
