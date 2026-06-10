@@ -5,19 +5,20 @@ import styles from './FeatureGrid.module.css';
 
 type Icon = React.FC<React.SVGProps<SVGSVGElement>>;
 
-const IconBox: Icon = (p) => (
+const IconChat: Icon = (p) => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
-    <rect x="2" y="2" width="12" height="12" rx="2" />
+    <path d="M2 3h12v8H5l-3 3V3z" />
   </svg>
 );
-const IconStream: Icon = (p) => (
+const IconPuzzle: Icon = (p) => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
-    <path d="M1 4h14M1 8h14M1 12h10" />
+    <path d="M6 2v2a2 2 0 104 0V2h4v4h-2a2 2 0 100 4h2v4H6v-2a2 2 0 10-4 0v2H2V2h4z" />
   </svg>
 );
-const IconTool: Icon = (p) => (
+const IconBrain: Icon = (p) => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
-    <path d="M11 2l3 3-2 2-3-3zM10 5l-7 7v3h3l7-7" />
+    <path d="M8 1C5.2 1 3 3.2 3 6c0 1.8.9 3.3 2.3 4.2.2.1.2.3.2.5V14h5v-3.3c0-.2.1-.4.2-.5C12.1 9.3 13 7.8 13 6c0-2.8-2.2-5-5-5z" />
+    <path d="M6 14h4" />
   </svg>
 );
 const IconPlug: Icon = (p) => (
@@ -25,55 +26,34 @@ const IconPlug: Icon = (p) => (
     <path d="M5 1v4M11 1v4M3 5h10v4a4 4 0 01-4 4H7a4 4 0 01-4-4V5zM8 13v2" />
   </svg>
 );
-const IconDisk: Icon = (p) => (
-  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
-    <ellipse cx="8" cy="4" rx="6" ry="2" />
-    <path d="M2 4v8c0 1.1 2.7 2 6 2s6-.9 6-2V4M2 8c0 1.1 2.7 2 6 2s6-.9 6-2" />
-  </svg>
-);
-const IconMcp: Icon = (p) => (
+const IconClock: Icon = (p) => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
     <circle cx="8" cy="8" r="6" />
-    <path d="M2 8h12M8 2v12" />
+    <path d="M8 4v4l3 2" />
   </svg>
 );
-const IconTrace: Icon = (p) => (
+const IconShield: Icon = (p) => (
   <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
-    <path d="M2 3h9M5 7h9M3 11h11" />
-    <circle cx="2" cy="3" r="1" fill="currentColor" />
-    <circle cx="5" cy="7" r="1" fill="currentColor" />
-    <circle cx="3" cy="11" r="1" fill="currentColor" />
-  </svg>
-);
-
-const IconHitl: Icon = (p) => (
-  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" {...p}>
-    <circle cx="6" cy="5" r="2.5" />
-    <path d="M2 13.5a4 4 0 017.2-2.4" />
-    <path d="M10 9.5l1.6 1.6L15 7.7" />
+    <path d="M8 1L2 4v4c0 3.3 2.6 6.4 6 7 3.4-.6 6-3.7 6-7V4L8 1z" />
   </svg>
 );
 
 const CARDS_EN = [
-  { Icon: IconBox,    title: 'Agents',             body: 'One async loop, fully typed events.',          href: '/docs/guides/agents/first-agent' },
-  { Icon: IconStream, title: 'Streaming',           body: 'async for event in stream.',                  href: '/docs/guides/agents/streaming' },
-  { Icon: IconTool,   title: 'Tools',               body: 'Plain functions, parallel execution.',        href: '/docs/guides/agents/tool-use' },
-  { Icon: IconPlug,   title: 'Providers',           body: 'Anthropic, OpenAI, or write your own.',       href: '/docs/guides/providers/overview' },
-  { Icon: IconDisk,   title: 'Checkpointing',       body: 'Append-only, O(1) per turn.',                href: '/docs/guides/checkpointing/sqlite' },
-  { Icon: IconHitl,   title: 'Human-in-the-loop',  body: 'Pause for confirm, approve, or ask.',         href: '/docs/guides/hitl/overview' },
-  { Icon: IconMcp,    title: 'MCP',                 body: 'Load remote tools at startup.',               href: '/docs/guides/mcp/loading' },
-  { Icon: IconTrace,  title: 'Tracing',             body: 'OpenTelemetry, OTLP / JSONL, GenAI semconv.', href: '/docs/guides/tracing/overview' },
+  { Icon: IconChat,    title: 'Conversations',  body: 'Multi-model chat with file attachments and artifact generation.',  href: '/docs/guides/conversations/basics' },
+  { Icon: IconPuzzle,  title: 'Skills',          body: 'Discover and install agent capabilities in one click.',            href: '/docs/guides/skills/overview' },
+  { Icon: IconBrain,   title: 'Memory',          body: 'Three-tier memory — the agent learns as you work.',               href: '/docs/guides/memory/overview' },
+  { Icon: IconPlug,    title: 'MCP Tools',       body: 'Connect external services; the agent calls APIs for you.',        href: '/docs/guides/mcp/overview' },
+  { Icon: IconClock,   title: 'Automation',       body: 'Scheduled tasks + webhook triggers for hands-free operation.',    href: '/docs/guides/automation/scheduled-tasks' },
+  { Icon: IconShield,  title: 'Administration',   body: 'Model management, team roles, cost tracking, sandbox policies.', href: '/docs/admin/models' },
 ];
 
 const CARDS_ZH = [
-  { Icon: IconBox,    title: 'Agent',          body: '一个 async 循环，完整类型化事件。',             href: '/docs/guides/agents/first-agent' },
-  { Icon: IconStream, title: '流式输出',        body: 'async for event in stream。',                 href: '/docs/guides/agents/streaming' },
-  { Icon: IconTool,   title: '工具调用',        body: '普通函数，并行执行。',                         href: '/docs/guides/agents/tool-use' },
-  { Icon: IconPlug,   title: 'Provider',       body: 'Anthropic、OpenAI，或自定义。',               href: '/docs/guides/providers/overview' },
-  { Icon: IconDisk,   title: '检查点',          body: '追加式，每轮 O(1)。',                         href: '/docs/guides/checkpointing/sqlite' },
-  { Icon: IconHitl,   title: '人机协同',        body: '暂停等待确认、审批或问答。',                   href: '/docs/guides/hitl/overview' },
-  { Icon: IconMcp,    title: 'MCP',            body: '启动时加载远程工具。',                         href: '/docs/guides/mcp/loading' },
-  { Icon: IconTrace,  title: 'Tracing',        body: 'OpenTelemetry、OTLP / JSONL、GenAI semconv。', href: '/docs/guides/tracing/overview' },
+  { Icon: IconChat,    title: '对话',       body: '多模型对话，文件附件，Artifact 生成。',         href: '/docs/guides/conversations/basics' },
+  { Icon: IconPuzzle,  title: '技能',       body: '一键发现安装，扩展 Agent 能力。',               href: '/docs/guides/skills/overview' },
+  { Icon: IconBrain,   title: '记忆',       body: '三层记忆 — Agent 越用越懂你。',                href: '/docs/guides/memory/overview' },
+  { Icon: IconPlug,    title: 'MCP 工具',   body: '连接外部服务，Agent 替你调 API。',             href: '/docs/guides/mcp/overview' },
+  { Icon: IconClock,   title: '自动化',     body: '定时任务 + Webhook 触发，无人值守运行。',       href: '/docs/guides/automation/scheduled-tasks' },
+  { Icon: IconShield,  title: '管理',       body: '模型管理、团队角色、费用追踪、沙箱策略。',      href: '/docs/admin/models' },
 ];
 
 export default function FeatureGrid() {
@@ -87,7 +67,6 @@ export default function FeatureGrid() {
             <c.Icon className={styles.icon} width={16} height={16} />
             <h3 className={styles.title}>{c.title}</h3>
             <p className={styles.body}>{c.body}</p>
-            <span className={styles.more}>→ {zh ? '指南 / ' : 'Guides / '}{c.title}</span>
           </Link>
         ))}
       </div>
