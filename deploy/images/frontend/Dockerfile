@@ -17,7 +17,9 @@ ENV PNPM_HOME=/pnpm \
 
 WORKDIR /app
 
-RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
+RUN corepack enable && corepack prepare pnpm@10.23.0 --activate \
+    && npm config set registry https://registry.npmmirror.com \
+    && pnpm config set registry https://registry.npmmirror.com
 
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 COPY frontend/packages/core/package.json ./packages/core/
