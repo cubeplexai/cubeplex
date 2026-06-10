@@ -1,0 +1,29 @@
+{{- $pgHost := include "cubebox.postgresql.host" . -}}
+{{- $redisHost := include "cubebox.redis.host" . -}}
+{{- $minioHost := include "cubebox.minio.host" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cubebox.backend.fullname" . }}-config
+  labels:
+    {{- include "cubebox.labels" . | nindent 4 }}
+data:
+  config.production.local.yaml: |
+    dynaconf_merge: true
+    production:
+      {{- with .Values.backend.configOverrides }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      database:
+        host: {{ $pgHost | quote }}
+        port: 5432
+        user: {{ .Values.postgres.auth.username | quote }}
+        name: {{ .Values.postgres.auth.database | quote }}
+      objectstore:
+        provider: "s3"
+        endpoint: {{ printf "http://%s:9000" $minioHost | quote }}
+        bucket: {{ .Values.minio.defaultBucket | quote }}
+        region: "us-east-1"
+      sandbox:
+        enabled: {{ .Values.opensandbox.enabled }}
+        use_server_proxy: false

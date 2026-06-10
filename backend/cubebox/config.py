@@ -22,6 +22,10 @@ settings_files = [
     str(backend_dir / "config.yaml"),  # Base configuration
     str(backend_dir / f"config.{env}.yaml"),
     str(backend_dir / f"config.{env}.local.yaml"),
+    # Helm deploys mount non-secret overrides via a ConfigMap (.local.yaml)
+    # and credentials via a Secret (.secrets.yaml). Both are dynaconf-merged
+    # so operators can split safe-vs-sensitive without an init container.
+    str(backend_dir / f"config.{env}.secrets.yaml"),
 ]
 
 # Load worktree-specific allocations (ports, DB schema, Redis prefix) from

@@ -1,0 +1,22 @@
+# Build context root is the repo root; ignore everything except backend/ + this file.
+*
+!backend/
+!backend/**
+
+backend/.venv/
+backend/.pytest_cache/
+backend/.ruff_cache/
+backend/.mypy_cache/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/tests/
+backend/cubepi-traces/
+backend/logs/
+backend/skills_cache/
+backend/coverage.xml
+backend/.coverage*
+backend/.env
+backend/config.*.local.yaml
+backend/config.*.backup-*.yaml
+backend/certs/

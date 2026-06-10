@@ -1,0 +1,51 @@
+# Operator-local overrides for cubebox helm install.
+# Copy this file to `values.local.yaml` on the operator workstation (NOT
+# committed — gitignored via `*.local.yaml`). Fill in real secrets and
+# model provider keys.
+#
+# Apply: helm upgrade --install cubebox ./deploy/charts/cubebox \
+#          -n cubebox --create-namespace \
+#          -f values.yaml -f values.local.yaml
+
+image:
+  backend:
+    tag: "<git-sha-short>"   # filled by build-and-push.sh
+  frontend:
+    tag: "<git-sha-short>"
+
+backend:
+  secrets:
+    auth:
+      # openssl rand -hex 32
+      jwt_secret: "REPLACE_ME"
+      csrf_secret: "REPLACE_ME"
+    # Mirror of backend/config.development.local.yaml `llm` block. Written
+    # verbatim into the backend Secret as config.production.secrets.yaml.
+    llm:
+      default_model: "deepseek/deepseek-v4-flash"
+      fallback_models:
+        - "cubebox/qwen3.5-plus-thinking"
+      providers:
+        deepseek:
+          preset: "deepseek/cn/anthropic-messages"
+          api_key: "sk-..."
+        cubebox:
+          base_url: "https://..."
+          api_key: "..."
+          api: "openai-completions"
+    sandbox:
+      domain: "cubebox-opensandbox-server.cubebox.svc.cluster.local:8090"
+      image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260531"
+      api_key: "REPLACE_ME"
+
+postgres:
+  auth:
+    password: "REPLACE_ME"
+
+redis:
+  auth:
+    password: "REPLACE_ME"
+
+minio:
+  auth:
+    rootPassword: "REPLACE_ME"

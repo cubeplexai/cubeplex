@@ -1,0 +1,146 @@
+{{- if .Values.minio.enabled -}}
+{{- $minioPass := required "minio.auth.rootPassword must be set in values.local.yaml" .Values.minio.auth.rootPassword -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-minio
+  labels:
+    {{- include "cubebox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+type: Opaque
+stringData:
+  MINIO_ROOT_USER: {{ .Values.minio.auth.rootUser | quote }}
+  MINIO_ROOT_PASSWORD: {{ $minioPass | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-minio
+  labels:
+    {{- include "cubebox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  type: ClusterIP
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+    - name: console
+      port: 9001
+      targetPort: console
+  selector:
+    app.kubernetes.io/name: {{ include "cubebox.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: minio
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-minio
+  labels:
+    {{- include "cubebox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+spec:
+  replicas: 1
+  serviceName: {{ .Release.Name }}-minio
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cubebox.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: minio
+  template:
+    metadata:
+      labels:
+        {{- include "cubebox.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+        - name: minio
+          image: {{ .Values.minio.image }}
+          imagePullPolicy: IfNotPresent
+          args: ["server", "/data", "--console-address", ":9001"]
+          envFrom:
+            - secretRef:
+                name: {{ .Release.Name }}-minio
+          ports:
+            - name: s3
+              containerPort: 9000
+            - name: console
+              containerPort: 9001
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: s3
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.minio.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: {{ .Values.minio.persistence.storageClass }}
+        resources:
+          requests:
+            storage: {{ .Values.minio.persistence.size }}
+---
+# One-shot Job that creates the default bucket using mc client.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-minio-bucket
+  labels:
+    {{- include "cubebox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio-bucket
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        {{- include "cubebox.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio-bucket
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: {{ .Values.minio.mcImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-minio
+                  key: MINIO_ROOT_USER
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-minio
+                  key: MINIO_ROOT_PASSWORD
+            - name: BUCKET
+              value: {{ .Values.minio.defaultBucket | quote }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              until mc alias set local http://{{ .Release.Name }}-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                echo "waiting for minio..."; sleep 3
+              done
+              mc mb --ignore-existing local/"$BUCKET"
+              echo "bucket $BUCKET ready"
+{{- end }}

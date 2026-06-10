@@ -15,6 +15,10 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=500']
       - id: check-yaml
+        # Helm chart templates use go-template syntax that is not valid YAML
+        # on its own (e.g. `{{- if ... }}`). Skip them — `helm lint` is the
+        # right check, and the helm-install.sh script runs it.
+        exclude: ^deploy/charts/.*/templates/.*\.yaml$|^deploy/charts/.*/vendor/.*
       - id: check-json
       - id: check-toml
       - id: check-merge-conflict

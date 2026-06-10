@@ -1,0 +1,13 @@
+cubebox has been deployed.
+
+  Namespace: {{ .Release.Namespace }}
+  Release:   {{ .Release.Name }}
+
+Add to /etc/hosts on your workstation:
+  192.168.1.101 {{ .Values.ingress.host }}
+
+Then visit: http://{{ .Values.ingress.host }}/
+
+Inspect:
+  kubectl -n {{ .Release.Namespace }} get pods,svc,ingress
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "cubebox.backend.fullname" . }}

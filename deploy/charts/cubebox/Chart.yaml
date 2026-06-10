@@ -1,0 +1,18 @@
+apiVersion: v2
+name: cubebox
+description: cubebox AI agent platform (backend + frontend + bundled infra)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.21.0-0"
+
+# Postgres / Redis / MinIO are rendered from this chart's own templates
+# (templates/infra-*.yaml) — minimal single-node StatefulSets, no bitnami
+# dependency. Keeping it self-contained avoids fetching from chart repos
+# at install time on networks where Docker OCI is unreliable.
+dependencies:
+  - name: opensandbox
+    version: "0.2.0"
+    repository: "file://./vendor/opensandbox"
+    condition: opensandbox.enabled
