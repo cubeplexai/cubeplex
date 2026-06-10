@@ -61,7 +61,7 @@ def disclosure_active(
     if server_count < settings.min_servers:
         return False
     if context_window <= 0:
-        return server_count >= settings.min_servers
+        return False
     return (total_tool_tokens / context_window * 100) >= settings.threshold_pct
 
 
@@ -121,9 +121,18 @@ def build_deferred_groups(
     shared_citations: dict[str, CitationConfig] = {}
     groups: list[DeferredToolGroup] = []
 
+    proposed_slugs = {s.install_id: slugify_for_namespace(s.name) for s in all_specs}
+    slug_counts: Counter[str] = Counter(proposed_slugs.values())
+
     for spec in specs:
-        slug = slugify_for_namespace(spec.name)
+        slug = proposed_slugs[spec.install_id]
         tool_names = _compute_namespaced_tool_names(spec, all_specs)
+
+        if slug_counts[slug] > 1:
+            safe = spec.install_id.replace("-", "")
+            gid = f"mcp:{slug}_{safe[-4:] if len(safe) >= 4 else safe}"
+        else:
+            gid = f"mcp:{slug}"
 
         async def _loader(
             _s: MCPRuntimeConnectorSpec = spec,
@@ -141,7 +150,7 @@ def build_deferred_groups(
 
         groups.append(
             DeferredToolGroup(
-                group_id=f"mcp:{slug}",
+                group_id=gid,
                 display_name=spec.name,
                 description=_spec_description(spec),
                 tool_names=tool_names,
