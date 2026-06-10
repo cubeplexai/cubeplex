@@ -54,7 +54,7 @@ COPY backend/alembic.ini ./alembic.ini
 COPY backend/main.py ./main.py
 COPY backend/babel.cfg ./babel.cfg
 COPY backend/scripts ./scripts
-COPY backend/seeders ./seeders
+COPY backend/skills ./skills
 COPY backend/config.yaml backend/config.development.yaml backend/config.production.yaml backend/config.test.yaml ./
 
 # Install the cubebox project itself (-e by default is undesirable; use
