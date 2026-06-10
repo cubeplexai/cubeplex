@@ -29,7 +29,9 @@ RUN set -eux; \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    UV_HTTP_TIMEOUT=30 \
+    UV_CONCURRENT_DOWNLOADS=4
 
 RUN pip install uv
 
