@@ -239,6 +239,59 @@ async def _load_tools_for_specs(
     return all_tools, all_citations
 
 
+async def _load_tools_for_specs_deferred(
+    *,
+    specs: list[MCPRuntimeConnectorSpec],
+    all_specs: list[MCPRuntimeConnectorSpec],
+    workspace_id: str,
+    org_id: str,
+    user_id: str,
+    encryption_backend: Any,
+    http_client: Any,
+    metadata_discovery: Any,
+    redis: Any,
+    signer: MCPUserTokenSigner,
+) -> tuple[list[AgentTool[Any]], dict[str, CitationConfig]]:
+    """Load tools in a self-contained DB session — for deferred group loaders.
+
+    The eager path holds a session open for the duration of the MCP load
+    block.  Deferred loaders run later during the agent loop, long after
+    that session has closed.  This wrapper creates a short-lived session
+    per invocation so each group expansion is self-contained.
+    """
+    from cubebox.credentials.dependencies import build_credential_service
+    from cubebox.db.engine import async_session_maker
+    from cubebox.repositories.credential import CredentialRepository
+    from cubebox.repositories.mcp import MCPCredentialGrantRepository as _GrantRepo
+
+    async with async_session_maker() as session:
+        cred_service = build_credential_service(
+            session,
+            encryption_backend,
+            org_id=org_id,
+            actor_user_id=user_id,
+        )
+        token_manager = OAuthTokenManager(
+            http_client=http_client,
+            redis=redis,
+            encryption_backend=encryption_backend,
+            credential_repo=CredentialRepository(session, org_id=org_id),
+            metadata=metadata_discovery,
+        )
+        grant_repo = _GrantRepo(session, org_id=org_id)
+        return await _load_tools_for_specs(
+            specs=specs,
+            all_specs=all_specs,
+            workspace_id=workspace_id,
+            org_id=org_id,
+            user_id=user_id,
+            cred_service=cred_service,
+            signer=signer,
+            token_manager=token_manager,
+            grant_repo=grant_repo,
+        )
+
+
 def _inject_query_param(server_url: str, name: str, value: str) -> str:
     """Append ``name=value`` to ``server_url``'s query string.
 

@@ -12,6 +12,7 @@ from typing import Any
 
 from cubepi import Agent
 from cubepi.agent.types import AgentTool
+from cubepi.deferred import DeferredToolGroup
 from cubepi.hitl import HitlChannel
 from cubepi.middleware.base import Middleware
 from cubepi.providers.base import BaseProvider, ThinkingLevel
@@ -34,6 +35,7 @@ def create_cubebox_agent(
     reasoning: bool = False,
     thinking: ThinkingLevel = "off",
     channel: HitlChannel | None = None,
+    deferred_tool_groups: list[DeferredToolGroup] | None = None,
 ) -> Agent[Any]:
     """Build a cubepi.Agent for cubebox's cubepi runtime path.
 
@@ -58,6 +60,7 @@ def create_cubebox_agent(
         thread_id=thread_id,
         middleware=mw_list,
         channel=channel,
+        deferred_tool_groups=deferred_tool_groups,
         # See compose_after_tool_call for why we override the default.
         after_tool_call=compose_after_tool_call(mw_list),
     )

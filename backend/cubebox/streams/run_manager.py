@@ -2149,10 +2149,16 @@ class RunManager:
         # the four-layer ``mcp_connector_installs`` / ``mcp_workspace_connector_states`` /
         # ``mcp_credential_grants`` tables via :class:`MCPEffectiveConnectorService`.
         mcp_citation_configs: dict[str, Any] = {}
+        _deferred_groups: list[Any] = []
 
         try:
             from cubebox.credentials.dependencies import build_credential_service
             from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+            from cubebox.mcp.disclosure import (
+                build_deferred_groups,
+                disclosure_active,
+                load_disclosure_settings,
+            )
             from cubebox.mcp.effective import MCPEffectiveConnectorService
             from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
             from cubebox.mcp.oauth.token_manager import OAuthTokenManager
@@ -2164,6 +2170,17 @@ class RunManager:
                 MCPWorkspaceConnectorStateRepository,
             )
 
+            _http_client = getattr(self._app.state, "_mcp_oauth_http_client", None)
+            if _http_client is None:
+                import httpx as _httpx
+
+                _http_client = _httpx.AsyncClient(timeout=30.0)
+                self._app.state._mcp_oauth_http_client = _http_client
+            _metadata = getattr(self._app.state, "_mcp_oauth_metadata_discovery", None)
+            if _metadata is None:
+                _metadata = OAuthMetadataDiscovery(_http_client)
+                self._app.state._mcp_oauth_metadata_discovery = _metadata
+
             async with async_session_maker() as effective_session:
                 effective_cred_service = build_credential_service(
                     effective_session,
@@ -2171,21 +2188,6 @@ class RunManager:
                     org_id=ctx.org_id,
                     actor_user_id=ctx.user_id,
                 )
-                # Reuse the shared OAuth metadata cache + httpx client if the
-                # app already has them (the request-scoped DI providers stash
-                # one on app.state). When absent (first ever MCP run) build a
-                # short-lived pair — the next request-scoped consumer will
-                # promote them onto app.state.
-                _http_client = getattr(self._app.state, "_mcp_oauth_http_client", None)
-                if _http_client is None:
-                    import httpx as _httpx
-
-                    _http_client = _httpx.AsyncClient(timeout=30.0)
-                    self._app.state._mcp_oauth_http_client = _http_client
-                _metadata = getattr(self._app.state, "_mcp_oauth_metadata_discovery", None)
-                if _metadata is None:
-                    _metadata = OAuthMetadataDiscovery(_http_client)
-                    self._app.state._mcp_oauth_metadata_discovery = _metadata
                 _token_manager = OAuthTokenManager(
                     http_client=_http_client,
                     redis=self._redis,
@@ -2206,21 +2208,60 @@ class RunManager:
                     org_id=ctx.org_id,
                     token_manager=_token_manager,
                 )
-                (
-                    _new_tools,
-                    _new_citations,
-                ) = await load_workspace_mcp_tools_for_cubepi(
-                    effective_service=_effective_service,
-                    token_manager=_token_manager,
-                    workspace_id=ctx.workspace_id,
-                    org_id=ctx.org_id,
-                    user_id=ctx.user_id,
-                    cred_service=effective_cred_service,
-                    signer=self._app.state.mcp_user_token_signer,
-                    grant_repo=_grant_repo,
+
+                _disclosure_settings = load_disclosure_settings()
+                _mcp_specs = await _effective_service.list_runtime_specs(
+                    ctx.workspace_id,
+                    ctx.user_id,
                 )
-                _builtin_tools.extend(_new_tools)
-                mcp_citation_configs.update(_new_citations)
+
+                import json as _json
+
+                _total_tool_tokens = sum(len(_json.dumps(s.tools_cache)) // 4 for s in _mcp_specs)
+                _mcp_ctx_window = int(_model_config.context_window or 0)
+
+                if disclosure_active(
+                    _disclosure_settings,
+                    server_count=len(_mcp_specs),
+                    total_tool_tokens=_total_tool_tokens,
+                    context_window=_mcp_ctx_window,
+                ):
+                    _deferred_groups, _deferred_citations = build_deferred_groups(
+                        specs=_mcp_specs,
+                        all_specs=_mcp_specs,
+                        loader_kwargs={
+                            "workspace_id": ctx.workspace_id,
+                            "org_id": ctx.org_id,
+                            "user_id": ctx.user_id,
+                            "encryption_backend": self._app.state.encryption_backend,
+                            "http_client": _http_client,
+                            "metadata_discovery": _metadata,
+                            "redis": self._redis,
+                            "signer": self._app.state.mcp_user_token_signer,
+                        },
+                    )
+                    mcp_citation_configs.update(_deferred_citations)
+                    logger.info(
+                        "MCP progressive disclosure: {} servers deferred ({} tools)",
+                        len(_deferred_groups),
+                        sum(len(g.tool_names) for g in _deferred_groups),
+                    )
+                else:
+                    (
+                        _new_tools,
+                        _new_citations,
+                    ) = await load_workspace_mcp_tools_for_cubepi(
+                        effective_service=_effective_service,
+                        token_manager=_token_manager,
+                        workspace_id=ctx.workspace_id,
+                        org_id=ctx.org_id,
+                        user_id=ctx.user_id,
+                        cred_service=effective_cred_service,
+                        signer=self._app.state.mcp_user_token_signer,
+                        grant_repo=_grant_repo,
+                    )
+                    _builtin_tools.extend(_new_tools)
+                    mcp_citation_configs.update(_new_citations)
         except Exception as _exc:
             logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
 
@@ -2676,6 +2717,7 @@ class RunManager:
             reasoning=_model_config.reasoning,
             thinking="medium" if _model_config.reasoning else "off",
             channel=sandbox_hitl_channel,
+            deferred_tool_groups=_deferred_groups or None,
         )
 
         # Stash provider_name / model_id / memory-repo factory on the bridge
