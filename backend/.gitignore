@@ -6,3 +6,4 @@ skills_cache/
 # cubepi tracing output (default tracing.directory); may contain prompt/tool payloads
 cubepi-traces/
 certs/
+/requirements-frozen.txt
