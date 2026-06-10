@@ -46,7 +46,7 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
 
         {allDone ? (
           <>
-            <CheckCircle2 className="size-3 text-emerald-500 shrink-0" />
+            <CheckCircle2 className="size-3 text-success-fg shrink-0" />
             <span className="text-foreground">
               {t('tasksDone', { completed, total: todos.length })}
             </span>
@@ -74,7 +74,7 @@ export function TaskProgressCard({ todos, isStreaming }: TaskProgressCardProps) 
           {todos.map((todo, i) => (
             <div key={todo.id ?? i} className="flex items-center gap-2 py-0.5 text-xs">
               {todo.status === 'completed' ? (
-                <CheckCircle2 className="size-3 text-emerald-500 shrink-0" />
+                <CheckCircle2 className="size-3 text-success-fg shrink-0" />
               ) : todo.status === 'in_progress' ? (
                 <Loader2 className="size-3 text-primary animate-spin shrink-0" />
               ) : (

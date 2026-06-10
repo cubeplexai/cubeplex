@@ -150,12 +150,9 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
   }
 
   return (
-    <div className="my-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950/30">
+    <div className="my-2 rounded-lg border border-info-border bg-info-surface p-3">
       <div className="flex items-start gap-2">
-        <MessageCircleQuestion
-          className="mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-300"
-          aria-hidden
-        />
+        <MessageCircleQuestion className="mt-0.5 h-4 w-4 shrink-0 text-info-fg" aria-hidden />
         <div className="flex flex-1 flex-col gap-3">
           {pending.questions.map((q) => (
             <QuestionField
@@ -167,7 +164,7 @@ export function AskUserCard({ pending, onSubmit, onCancel }: AskUserCardProps) {
           ))}
         </div>
         {secondsLeft !== null && secondsLeft > 0 && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-xs tabular-nums text-blue-600 dark:text-blue-400">
+          <span className="inline-flex shrink-0 items-center gap-1 text-xs tabular-nums text-info-fg">
             <Clock className="h-3 w-3" />
             {secondsLeft}s
           </span>

@@ -14,9 +14,9 @@ function formatTokenCount(n: number): string {
 }
 
 function progressColor(pct: number): string {
-  if (pct >= 80) return 'bg-red-500'
-  if (pct >= 50) return 'bg-amber-500'
-  return 'bg-emerald-500'
+  if (pct >= 80) return 'bg-danger-solid'
+  if (pct >= 50) return 'bg-warning-solid'
+  return 'bg-success-solid'
 }
 
 interface TokenUsageBarProps {
@@ -92,15 +92,17 @@ export function TokenUsageBar({
             <div className="font-medium text-foreground/70 mb-1">{t('turnLabel')}</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
               <span>{t('inputTokens')}</span>
-              <span className="text-right font-mono">
+              <span className="text-right font-mono tabular-nums">
                 {formatTokenCount(turnUsage.input_tokens)}
               </span>
               <span>{t('outputTokens')}</span>
-              <span className="text-right font-mono">
+              <span className="text-right font-mono tabular-nums">
                 {formatTokenCount(turnUsage.output_tokens)}
               </span>
               <span>{t('cacheHitRate')}</span>
-              <span className="text-right font-mono">{formatPercent(cacheHitRate, 1)}</span>
+              <span className="text-right font-mono tabular-nums">
+                {formatPercent(cacheHitRate, 1)}
+              </span>
             </div>
           </div>
         )}
@@ -110,19 +112,21 @@ export function TokenUsageBar({
             <div className="font-medium text-foreground/70 mb-1">{t('sessionLabel')}</div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
               <span>{t('totalTokens')}</span>
-              <span className="text-right font-mono">
+              <span className="text-right font-mono tabular-nums">
                 {formatTokenCount(
                   sessionUsage.total_input_tokens + sessionUsage.total_output_tokens,
                 )}
               </span>
               <span>{t('cacheHitRate')}</span>
-              <span className="text-right font-mono">{formatPercent(sessionCacheHitRate, 1)}</span>
+              <span className="text-right font-mono tabular-nums">
+                {formatPercent(sessionCacheHitRate, 1)}
+              </span>
             </div>
             {ctxPct !== null && (
               <div className="mt-1.5">
                 <div className="flex items-center justify-between mb-0.5">
                   <span>{t('contextWindow')}</span>
-                  <span className="font-mono">{ctxPct.toFixed(1)}%</span>
+                  <span className="font-mono tabular-nums">{ctxPct.toFixed(1)}%</span>
                 </div>
                 <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                   <div

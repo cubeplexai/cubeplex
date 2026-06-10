@@ -105,11 +105,11 @@ function ConversationRow({
   }
 
   const stateClass = isActive
-    ? 'text-foreground bg-primary/8'
-    : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+    ? 'text-foreground bg-accent'
+    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
   const baseRowClasses =
     'group relative flex items-center gap-1 pl-2 pr-1 py-1.5 ' +
-    `rounded-md transition-colors ${stateClass}`
+    `rounded transition-colors duration-fast ${stateClass}`
 
   if (isEditing) {
     return (
@@ -141,7 +141,7 @@ function ConversationRow({
         className={baseRowClasses}
       >
         {isActive && (
-          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
+          <div className="absolute left-0 top-[22%] bottom-[22%] w-0.5 bg-primary rounded-r" />
         )}
         {convo.is_pinned && <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />}
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
@@ -316,13 +316,16 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
           <Link
             key={entry.key}
             href={entry.href}
-            className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-colors ${
+            className={`group relative flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors duration-fast ${
               entry.isActive
-                ? 'text-foreground bg-primary/8 font-medium'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+                ? 'text-foreground bg-accent font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
             }`}
             aria-label={tSidebar(entry.labelKey)}
           >
+            {entry.isActive && (
+              <div className="absolute left-0 top-[22%] bottom-[22%] w-0.5 bg-primary rounded-r" />
+            )}
             <Icon className="size-3.5 shrink-0" />
             <span>{tSidebar(entry.labelKey)}</span>
           </Link>
@@ -349,9 +352,9 @@ export function Sidebar(): React.ReactElement {
       className="w-56 bg-card border-r border-border flex flex-col h-screen shrink-0"
     >
       {/* Brand + new chat */}
-      <div className="px-4 pt-4 pb-3 border-b border-border/60">
+      <div className="px-4 pt-4 pb-3 border-b border-border">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0 shadow-sm">
+          <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
             <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
           </div>
           <span className="text-sm font-semibold tracking-tight">cubebox</span>
@@ -377,15 +380,13 @@ export function Sidebar(): React.ReactElement {
       {/* Recent conversations — flex-1 so it stretches to the footer. */}
       <div className="flex-1 flex flex-col min-h-0">
         <div className="px-2 pt-2 pb-1">
-          <p className="px-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground/60">
+          <p className="px-2 text-2xs font-medium uppercase tracking-wider text-faint">
             {tSidebar('recentChats')}
           </p>
         </div>
         <ScrollArea className="flex-1 px-2">
           {conversations.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-muted-foreground/60">
-              {tSidebar('noRecentChats')}
-            </p>
+            <p className="px-2 py-1.5 text-xs text-faint">{tSidebar('noRecentChats')}</p>
           ) : (
             <ul className="space-y-0.5">
               {conversations.map((convo) => (
@@ -402,7 +403,7 @@ export function Sidebar(): React.ReactElement {
       </div>
 
       {/* Footer: avatar popover */}
-      <div className="border-t border-border/60 p-2 flex items-center gap-1">
+      <div className="border-t border-border p-2 flex items-center gap-1">
         <div className="min-w-0 flex-1">
           <AvatarPopover />
         </div>

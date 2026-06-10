@@ -42,7 +42,7 @@
     "new": "New workspace"
   },
   "input": {
-    "placeholder": "How can I help you?",
+    "placeholder": "Describe a task…",
     "hint": "Enter to send / Shift+Enter for newline",
     "pendingHitlLock": "Answer the pending question above first."
   },
@@ -117,7 +117,24 @@
     "allDone": "{count} tasks completed"
   },
   "home": {
-    "subtitle": "AI Agent System"
+    "subtitle": "AI Agent System",
+    "promptCards": {
+      "analyze": {
+        "title": "Analyze a data file",
+        "description": "Upload CSV/Excel — clean, summarize, visualize.",
+        "prompt": "Analyze this dataset and summarize the key trends, anomalies, and a few visualizations I should share with the team.\n\n[attach your CSV or Excel file]"
+      },
+      "research": {
+        "title": "Research a topic",
+        "description": "Multi-source search with citations.",
+        "prompt": "Research the topic below across multiple credible sources, cross-check key facts, and produce a concise report with inline citations.\n\nTopic: "
+      },
+      "automate": {
+        "title": "Automate a workflow",
+        "description": "Write a script, schedule, or webhook.",
+        "prompt": "Help me automate the following workflow. Walk through the design, write the code/script, and suggest how to schedule or trigger it.\n\nWorkflow: "
+      }
+    }
   },
   "adminInsights": {
     "heading": "Insights",

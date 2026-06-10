@@ -17,7 +17,7 @@ test('preference message triggers reflection and surfaces memory chip', async ({
   test.setTimeout(180_000)
   await registerAndLand(page)
 
-  const input = page.getByPlaceholder('How can I help you?')
+  const input = page.getByPlaceholder('Describe a task…')
   await input.fill('Please remember that I prefer concise, direct answers in our conversations.')
   await input.press('Enter')
 

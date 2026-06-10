@@ -60,7 +60,7 @@ function SkillInstallButton({
     return (
       <button
         disabled
-        className="flex size-8 items-center justify-center rounded-md text-green-600 dark:text-green-400"
+        className="flex size-8 items-center justify-center rounded-md text-success-fg"
       >
         <Check className="size-4" />
       </button>

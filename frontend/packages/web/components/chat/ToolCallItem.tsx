@@ -113,7 +113,7 @@ export const ToolCallItem = memo(function ToolCallItem({
         title={labelTooltip}
         className={`flex w-full items-center gap-2 px-3
           py-2 text-sm transition-colors
-          ${canOpen ? 'hover:bg-muted/50 cursor-pointer' : ''}`}
+          ${canOpen ? 'hover:bg-accent cursor-pointer' : ''}`}
       >
         {mcpIcon ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -152,7 +152,7 @@ export const ToolCallItem = memo(function ToolCallItem({
           {pendingConfirm ? null : isPending ? (
             <>
               <Circle
-                className="size-2.5 text-blue-500
+                className="size-2.5 text-info-fg
                   animate-pulse"
               />
               <span
@@ -164,7 +164,7 @@ export const ToolCallItem = memo(function ToolCallItem({
             </>
           ) : toolResult ? (
             <>
-              <CheckCircle2 className="size-3 text-emerald-500" />
+              <CheckCircle2 className="size-3 text-success-fg" />
               <span
                 className="text-xs
                   text-muted-foreground"

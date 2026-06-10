@@ -10,8 +10,8 @@ import {
   useMessageStore,
 } from '@cubebox/core'
 import { InputBar } from '@/components/layout/InputBar'
+import { PromptCards } from '@/components/chat/PromptCards'
 import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
-import { Box } from 'lucide-react'
 
 export default function WorkspaceHomePage({
   params,
@@ -100,13 +100,13 @@ export default function WorkspaceHomePage({
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center">
-      <div className="text-center mb-8">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 mb-5">
-          <Box className="size-6 text-primary" strokeWidth={2} />
+    <div className="flex-1 flex flex-col items-center justify-center gap-8 pb-12">
+      <div className="text-center">
+        <div className="inline-flex items-center justify-center w-10 h-10 rounded-lg border border-border-strong bg-gradient-to-br from-card to-raised mb-5 font-mono text-xs text-muted-foreground">
+          cx
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-1.5">cubebox</h1>
-        <p className="text-sm text-muted-foreground/70">{t('subtitle')}</p>
+        <h1 className="text-2xl font-semibold tracking-tight mb-1">cubebox</h1>
+        <p className="text-sm text-muted-foreground">{t('subtitle')}</p>
       </div>
       <div className="w-full max-w-2xl px-4">
         <InputBar
@@ -115,6 +115,7 @@ export default function WorkspaceHomePage({
           onSubmit={handleSubmit}
         />
       </div>
+      <PromptCards />
     </div>
   )
 }

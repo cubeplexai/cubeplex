@@ -14,7 +14,7 @@ async function registerAndLand(page: Page): Promise<void> {
 test('can send a message and see a response', async ({ page }) => {
   await registerAndLand(page)
 
-  const input = page.getByPlaceholder('How can I help you?')
+  const input = page.getByPlaceholder('Describe a task…')
   await input.fill('Say the word "hello" and nothing else.')
   await input.press('Enter')
 
@@ -36,7 +36,7 @@ test('can send a message and see a response', async ({ page }) => {
 test('conversation history persists after page reload', async ({ page }) => {
   await registerAndLand(page)
 
-  const input = page.getByPlaceholder('How can I help you?')
+  const input = page.getByPlaceholder('Describe a task…')
   await input.fill('My favorite color is blue.')
   await input.press('Enter')
 

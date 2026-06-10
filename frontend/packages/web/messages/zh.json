@@ -42,7 +42,7 @@
     "new": "新建工作区"
   },
   "input": {
-    "placeholder": "有什么可以帮你的？",
+    "placeholder": "描述一个任务…",
     "hint": "Enter 发送 / Shift+Enter 换行",
     "pendingHitlLock": "请先回答上方待处理的问题。"
   },
@@ -117,7 +117,24 @@
     "allDone": "{count} 个任务已完成"
   },
   "home": {
-    "subtitle": "AI 智能体系统"
+    "subtitle": "AI 智能体系统",
+    "promptCards": {
+      "analyze": {
+        "title": "分析数据文件",
+        "description": "上传 CSV/Excel，清洗、统计、可视化。",
+        "prompt": "帮我分析这份数据，总结关键趋势、异常点，并产出几张可分享给团队的可视化图表。\n\n【请附上你的 CSV 或 Excel 文件】"
+      },
+      "research": {
+        "title": "调研一个主题",
+        "description": "多源搜索 + 引用核对。",
+        "prompt": "请对下面这个主题做多源调研，交叉核对关键事实，产出一份带引用的简洁报告。\n\n主题："
+      },
+      "automate": {
+        "title": "自动化一个流程",
+        "description": "写脚本、定时执行、Webhook 触发。",
+        "prompt": "帮我自动化下面这个流程：先讲方案、再写代码或脚本，并建议如何定时或通过 Webhook 触发。\n\n流程："
+      }
+    }
   },
   "adminInsights": {
     "heading": "运营洞察",

@@ -16,7 +16,7 @@ test('workspace switching isolates conversation lists', async ({ page }) => {
   const firstWsUrl = page.url()
   const firstWsId = firstWsUrl.split('/w/')[1]
 
-  const input = page.getByPlaceholder('How can I help you?')
+  const input = page.getByPlaceholder('Describe a task…')
   await input.fill('Hello in workspace 1')
   await input.press('Enter')
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })

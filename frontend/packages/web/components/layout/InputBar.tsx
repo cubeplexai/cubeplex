@@ -13,6 +13,7 @@ import { PresetPicker } from '@/components/chat/PresetPicker'
 import { ThinkingControl } from '@/components/chat/ThinkingControl'
 import { ThinkingBadge } from '@/components/chat/ThinkingBadge'
 import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
+import { useComposerDraft } from '@/hooks/useComposerDraft'
 
 interface InputBarProps {
   conversationId?: string
@@ -71,6 +72,23 @@ export function InputBar({
     if (workspaceId) client.setWorkspaceId(workspaceId)
     void hydrate(client, conversationId)
   }, [conversationId, workspaceId, hydrate])
+
+  // Composer-draft bridge: PromptCards (or other callers) push a string
+  // into useComposerDraft; we consume it once into local content.
+  const draft = useComposerDraft((s) => s.draft)
+  useEffect(() => {
+    if (draft === null) return
+    setContent(draft)
+    const consumed = useComposerDraft.getState().consume()
+    if (consumed !== null && textareaRef.current) {
+      // sync textarea height to the injected text
+      const ta = textareaRef.current
+      ta.style.height = 'auto'
+      ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'
+      ta.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft])
 
   const uploadInFlight = stagingItems.some((u) => u.status === 'uploading')
   // Streaming no longer locks the textarea — the user can type to steer.
@@ -260,26 +278,10 @@ export function InputBar({
           ))}
         </div>
       )}
-      {workspaceId && (
-        <div className="flex items-center gap-2 pb-1.5">
-          <PresetPicker wsId={workspaceId} />
-          <ThinkingControl wsId={workspaceId} />
-          <ThinkingBadge wsId={workspaceId} />
-        </div>
-      )}
       <div
-        className="relative flex cursor-text items-end gap-2 rounded-xl border border-border bg-card px-3 py-2.5 transition-colors focus-within:border-primary/40"
+        className="flex flex-col rounded-lg border border-border-strong bg-raised transition focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/30 duration-base"
         onMouseDown={handleShellMouseDown}
       >
-        <button
-          type="button"
-          aria-label={tShell('inputBarAttach')}
-          onClick={() => fileInputRef.current?.click()}
-          disabled={!canAttach}
-          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-lg text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
-        >
-          <Paperclip className="size-3.5" />
-        </button>
         <textarea
           ref={textareaRef}
           data-testid="chat-input"
@@ -289,45 +291,98 @@ export function InputBar({
           placeholder={hasPendingHitl ? t('pendingHitlLock') : t('placeholder')}
           title={hasPendingHitl ? t('pendingHitlLock') : undefined}
           rows={1}
-          className="flex-1 bg-transparent resize-none outline-none text-sm text-foreground placeholder:text-muted-foreground/40 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto py-0.5 disabled:cursor-not-allowed"
+          className="resize-none bg-transparent outline-none text-md text-foreground placeholder:text-muted-foreground/60 leading-relaxed min-h-7 max-h-[180px] overflow-y-auto px-3.5 pt-3 pb-1 disabled:cursor-not-allowed"
           disabled={(isSubmitting && !messageIsStreaming) || hasPendingHitl}
         />
-        {showStop ? (
+        <div className="flex items-center gap-1 px-2 pb-2">
           <button
-            data-testid="stop-button"
             type="button"
-            onClick={() => void handleCancel()}
-            aria-label={tShell('inputBarStop')}
-            className="group relative flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80"
+            aria-label={tShell('inputBarAttach')}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={!canAttach}
+            className="grid size-7 shrink-0 cursor-pointer place-items-center rounded text-muted-foreground hover:bg-accent transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-30"
           >
-            <Loader2 className="absolute inset-0 m-auto size-5 animate-spin opacity-90" />
-            <span className="relative size-2 rounded-[2px] bg-white transition-transform group-hover:scale-110" />
+            <Paperclip className="size-3.5" />
           </button>
-        ) : (
-          <button
-            data-testid="send-button"
-            onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
-            disabled={
-              (!content.trim() && stagedFileCount === 0) ||
-              (isSubmitting && !messageIsStreaming) ||
-              uploadInFlight ||
-              hasPendingHitl
-            }
-            title={hasPendingHitl ? t('pendingHitlLock') : undefined}
-            className={cn(
-              'flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-white transition-all hover:bg-primary/80',
-              'disabled:cursor-not-allowed disabled:opacity-25',
-            )}
-          >
-            {isSubmitting ? (
-              <Loader2 className="size-3.5 animate-spin" />
+          {workspaceId && (
+            <div className="ml-auto flex items-center gap-1">
+              <PresetPicker wsId={workspaceId} />
+              <ThinkingControl wsId={workspaceId} />
+              <ThinkingBadge wsId={workspaceId} />
+              {showStop ? (
+                <button
+                  data-testid="stop-button"
+                  type="button"
+                  onClick={() => void handleCancel()}
+                  aria-label={tShell('inputBarStop')}
+                  className="group relative flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80"
+                >
+                  <Loader2 className="absolute inset-0 m-auto size-5 animate-spin opacity-90" />
+                  <span className="relative size-2 rounded-xs bg-primary-foreground transition-transform group-hover:scale-110" />
+                </button>
+              ) : (
+                <button
+                  data-testid="send-button"
+                  onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
+                  disabled={
+                    (!content.trim() && stagedFileCount === 0) ||
+                    (isSubmitting && !messageIsStreaming) ||
+                    uploadInFlight ||
+                    hasPendingHitl
+                  }
+                  title={hasPendingHitl ? t('pendingHitlLock') : undefined}
+                  className={cn(
+                    'flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80',
+                    'disabled:cursor-not-allowed disabled:opacity-25',
+                  )}
+                >
+                  {isSubmitting ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <ArrowUp className="size-3.5" />
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+          {!workspaceId &&
+            (showStop ? (
+              <button
+                data-testid="stop-button"
+                type="button"
+                onClick={() => void handleCancel()}
+                aria-label={tShell('inputBarStop')}
+                className="group relative ml-auto flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80"
+              >
+                <Loader2 className="absolute inset-0 m-auto size-5 animate-spin opacity-90" />
+                <span className="relative size-2 rounded-xs bg-primary-foreground transition-transform group-hover:scale-110" />
+              </button>
             ) : (
-              <ArrowUp className="size-3.5" />
-            )}
-          </button>
-        )}
+              <button
+                data-testid="send-button"
+                onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
+                disabled={
+                  (!content.trim() && stagedFileCount === 0) ||
+                  (isSubmitting && !messageIsStreaming) ||
+                  uploadInFlight ||
+                  hasPendingHitl
+                }
+                title={hasPendingHitl ? t('pendingHitlLock') : undefined}
+                className={cn(
+                  'ml-auto flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80',
+                  'disabled:cursor-not-allowed disabled:opacity-25',
+                )}
+              >
+                {isSubmitting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <ArrowUp className="size-3.5" />
+                )}
+              </button>
+            ))}
+        </div>
       </div>
-      <p className="text-center mt-1 text-[10px] text-muted-foreground/35">{t('hint')}</p>
+      <p className="text-center mt-1 text-2xs text-faint">{t('hint')}</p>
     </div>
   )
 }

@@ -220,10 +220,10 @@ export const SubAgentCard = memo(function SubAgentCard({
         {/* Activity dots */}
         <div className="flex items-center gap-1">
           {Array.from({ length: completedCount }, (_, i) => (
-            <span key={`done-${i}`} className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span key={`done-${i}`} className="w-1.5 h-1.5 rounded-full bg-success-solid" />
           ))}
           {isRunning && pendingTc && (
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-info-solid animate-pulse" />
           )}
           {isRunning && !pendingTc && (
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
@@ -256,7 +256,7 @@ export const SubAgentCard = memo(function SubAgentCard({
               ))}
             </span>
           )}
-          {!isRunning && hasContent && <CheckCircle2 className="size-3 text-emerald-500" />}
+          {!isRunning && hasContent && <CheckCircle2 className="size-3 text-success-fg" />}
           {displayTime >= 1000 && <span>{formatDuration(displayTime)}</span>}
         </span>
       </div>
