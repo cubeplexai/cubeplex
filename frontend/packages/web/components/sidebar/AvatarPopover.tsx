@@ -23,7 +23,7 @@ export function AvatarPopover() {
   const router = useRouter()
   const user = useAuthStore((s) => s.user)
   const { isAdmin } = useAdminAccess()
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -95,15 +95,15 @@ export function AvatarPopover() {
         {mounted && (
           <button
             type="button"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
           >
-            {theme === 'dark' ? (
+            {resolvedTheme === 'dark' ? (
               <Sun className="size-3.5 text-muted-foreground" />
             ) : (
               <Moon className="size-3.5 text-muted-foreground" />
             )}
-            <span>{theme === 'dark' ? t('lightTheme') : t('darkTheme')}</span>
+            <span>{resolvedTheme === 'dark' ? t('lightTheme') : t('darkTheme')}</span>
           </button>
         )}
 

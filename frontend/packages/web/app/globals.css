@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 @plugin "@tailwindcss/typography";
 
 /* Prevent layout shift: react-resizable-panels SSR renders panels with only
@@ -19,56 +20,128 @@
 /* Use .dark class (not prefers-color-scheme) so dark: variants work with the theme toggle */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Default: light mode */
+/* Token layer — "Vercel Mono" direction.
+   Source of truth: this file (spec docs/dev/specs/2026-06-10-ui-redesign-design.md §1).
+   Light mode is the default @theme; .dark overrides below. */
 @theme {
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(240 10% 4%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(240 10% 4%);
-  /* hsl(210 100% 38%) ≈ #0061C2 — white text on this gives ~6.2:1, passes WCAG AA */
-  --color-primary: hsl(210 100% 38%);
-  --color-primary-foreground: hsl(0 0% 100%);
-  --color-secondary: hsl(240 5% 96%);
-  --color-secondary-foreground: hsl(240 6% 10%);
-  --color-muted: hsl(240 5% 96%);
-  /* hsl(240 5% 38%) ≈ #5c5c66 — on white gives ~5.9:1, passes WCAG AA */
-  --color-muted-foreground: hsl(240 5% 38%);
-  --color-accent: hsl(240 5% 96%);
-  --color-accent-foreground: hsl(240 10% 4%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(240 10% 4%);
-  --color-border: hsl(240 6% 90%);
-  --color-input: hsl(240 6% 90%);
-  --color-ring: hsl(210 100% 38%);
-  --radius: 0.5rem;
+  /* fonts: Geist + CJK fallback chain */
+  --font-sans:
+    var(--font-geist-sans), -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC',
+    sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, 'SFMono-Regular', monospace;
+
+  --color-background: #ffffff;
+  --color-foreground: #171717;
+  --color-card: #fafafa; /* panel surface */
+  --color-card-foreground: #171717;
+  --color-raised: #f5f5f5; /* input bar, user bubble, hover fills */
+  --color-sunken: #fafafa; /* code blocks, terminal */
+  --color-primary: #0070f3; /* THE accent */
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f5f5f5;
+  --color-secondary-foreground: #171717;
+  --color-muted: #f5f5f5;
+  --color-muted-foreground: #666666;
+  --color-faint: #999999;
+  --color-accent: #f0f0f0; /* hover slot (shadcn) — selected states use raised+indicator */
+  --color-accent-foreground: #171717;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #171717;
+  --color-border: #eaeaea;
+  --color-border-strong: #d4d4d4;
+  --color-input: #eaeaea;
+  --color-ring: #0070f3;
+
+  /* status sets: surface / border / fg / solid */
+  --color-success-surface: #e6f6ee;
+  --color-success-border: #b3e6cc;
+  --color-success-fg: #0f7b3f;
+  --color-success-solid: #17a35a;
+  --color-warning-surface: #fff7e6;
+  --color-warning-border: #ffe1a6;
+  --color-warning-fg: #925f00;
+  --color-warning-solid: #f5a623;
+  --color-danger-surface: #fdebeb;
+  --color-danger-border: #f5c2c2;
+  --color-danger-fg: #c22929;
+  --color-danger-solid: #e5484d;
+  --color-info-surface: #e9f2fe;
+  --color-info-border: #c0dcfb;
+  --color-info-fg: #0a5cc2;
+  --color-info-solid: #3b82f6;
+
+  /* shadcn `destructive` slot, mapped onto danger */
+  --color-destructive: #e5484d;
+  --color-destructive-foreground: #ffffff;
+
+  /* shape */
+  --radius-xs: 4px; /* badges, chips */
+  --radius: 6px; /* buttons, inputs, cards */
+  --radius-lg: 10px; /* panels, modals */
+
+  /* type scale: 11(text-2xs)/12(text-xs)/13(text-sm)/14(text-md)/16(text-base)/20/24.
+     --text-base stays default 16px: iOS anti-zoom on inputs + title hierarchy. */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.45;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.55;
+  --text-md: 14px;
+  --text-md--line-height: 1.55;
+  --text-xl: 20px;
+  --text-xl--line-height: 1.35;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 1.25;
+
+  /* motion — duration utilities come from --transition-duration-* */
+  --transition-duration-fast: 120ms;
+  --transition-duration-base: 200ms;
+  --transition-duration-slow: 300ms;
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @layer base {
-  :root {
-    --color-popover: hsl(0 0% 100%);
-    --color-popover-foreground: hsl(240 10% 4%);
-  }
-
   .dark {
-    --color-background: hsl(222 20% 7%);
-    --color-foreground: hsl(215 20% 92%);
-    --color-card: hsl(222 18% 10%);
-    --color-card-foreground: hsl(215 20% 92%);
-    /* hsl(210 100% 62%) ≈ #3d9eff — on dark bg gives ~6.8:1, passes WCAG AA */
-    --color-primary: hsl(210 100% 62%);
-    --color-primary-foreground: hsl(222 20% 7%);
-    --color-secondary: hsl(222 18% 13%);
-    --color-secondary-foreground: hsl(215 20% 92%);
-    --color-muted: hsl(222 18% 13%);
-    /* hsl(215 14% 62%) — on dark bg gives ~5.8:1, passes WCAG AA */
-    --color-muted-foreground: hsl(215 14% 62%);
-    --color-accent: hsl(222 18% 14%);
-    --color-accent-foreground: hsl(215 20% 92%);
-    --color-popover: hsl(222 18% 12%);
-    --color-popover-foreground: hsl(215 20% 92%);
-    --color-border: hsl(222 16% 16%);
-    --color-input: hsl(222 16% 14%);
-    --color-ring: hsl(210 100% 62%);
+    --color-background: #000000;
+    --color-foreground: #ededed;
+    --color-card: #0a0a0a;
+    --color-card-foreground: #ededed;
+    --color-raised: #111111;
+    --color-sunken: #050505;
+    --color-primary: #0070f3;
+    --color-primary-foreground: #ffffff;
+    --color-secondary: #111111;
+    --color-secondary-foreground: #ededed;
+    --color-muted: #111111;
+    --color-muted-foreground: #a1a1a1;
+    --color-faint: #666666;
+    --color-accent: #161616;
+    --color-accent-foreground: #ededed;
+    --color-popover: #0a0a0a;
+    --color-popover-foreground: #ededed;
+    --color-border: #1f1f1f;
+    --color-border-strong: #333333;
+    --color-input: #1f1f1f;
+    --color-ring: #0070f3;
+
+    --color-success-surface: rgba(23, 163, 90, 0.12);
+    --color-success-border: rgba(23, 163, 90, 0.35);
+    --color-success-fg: #3dd68c;
+    --color-success-solid: #17a35a;
+    --color-warning-surface: rgba(245, 166, 35, 0.12);
+    --color-warning-border: rgba(245, 166, 35, 0.35);
+    --color-warning-fg: #f5b95e;
+    --color-warning-solid: #f5a623;
+    --color-danger-surface: rgba(229, 72, 77, 0.12);
+    --color-danger-border: rgba(229, 72, 77, 0.35);
+    --color-danger-fg: #ff6369;
+    --color-danger-solid: #e5484d;
+    --color-info-surface: rgba(59, 130, 246, 0.12);
+    --color-info-border: rgba(59, 130, 246, 0.35);
+    --color-info-fg: #52a8ff;
+    --color-info-solid: #3b82f6;
+
+    --color-destructive: #e5484d;
+    --color-destructive-foreground: #ffffff;
   }
 }
 
@@ -169,4 +242,13 @@
 }
 .dark .hljs-meta {
   color: #8b949e;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
