@@ -35,6 +35,10 @@ ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
 
 RUN pip install uv
 
+# Redirect github.com → kkgithub.com mirror so uv can fetch the cubepi git
+# dependency from inside CN networks (direct github.com TLS gets terminated).
+RUN git config --global url."https://githubfast.com/".insteadOf "https://github.com/"
+
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
