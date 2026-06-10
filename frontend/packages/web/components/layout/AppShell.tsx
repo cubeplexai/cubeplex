@@ -1,7 +1,7 @@
 'use client'
 
 import { ReactNode, useEffect, useRef, useState } from 'react'
-import { Monitor } from 'lucide-react'
+import { Monitor, X } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
@@ -11,6 +11,7 @@ import { BrowserView } from '@/components/panel/BrowserView'
 import { SkillCandidatePanel } from '@/components/panel/SkillCandidatePanel'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { usePanelStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 
@@ -27,6 +28,8 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
   // (sandbox support enabled); otherwise the button opens a panel that 404s.
   const { sandboxEnabled } = useDeploymentMode()
   const panelOpen = view.type !== 'closed'
+  const isDesktop = useMediaQuery('(min-width: 768px)')
+  const close = usePanelStore((s) => s.close)
   // DOM-level drag detection on the resize handle; CSS disables the
   // width transition while .panel-dragging is set so resize stays 1:1.
   const groupRef = useRef<HTMLDivElement>(null)
@@ -48,6 +51,69 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
     }
   }, [panelOpen])
 
+  const panelContent =
+    view.type === 'artifact' ? (
+      <ArtifactPanel />
+    ) : view.type === 'attachment' ? (
+      <AttachmentPreviewView info={view.info} />
+    ) : view.type === 'browser' ? (
+      <BrowserView workspaceId={workspaceId} />
+    ) : view.type === 'skill-candidate' ? (
+      <SkillCandidatePanel
+        candidateId={view.candidateId}
+        repo={view.repo}
+        sourceName={view.sourceName}
+      />
+    ) : (
+      <ToolDetailPanel />
+    )
+
+  const main = (
+    <div className="flex flex-col h-full overflow-hidden">
+      <header className="h-11 border-b border-border flex items-center px-4 shrink-0">
+        <span className="text-sm text-muted-foreground truncate flex-1">{headerTitle || ''}</span>
+        {workspaceId && sandboxEnabled && (
+          <button
+            type="button"
+            onClick={openBrowser}
+            className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
+            aria-label="Open sandbox browser"
+            title="Open sandbox browser"
+          >
+            <Monitor className="h-4 w-4" />
+          </button>
+        )}
+        <ThemeToggle />
+      </header>
+      <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
+    </div>
+  )
+
+  if (!isDesktop) {
+    return (
+      <div className="relative flex h-full flex-col">
+        {main}
+        {panelOpen && (
+          <div
+            className="fixed inset-0 z-40 flex flex-col bg-background animate-in slide-in-from-bottom duration-slow"
+            role="dialog"
+            aria-modal="true"
+          >
+            {panelContent}
+            <button
+              type="button"
+              onClick={close}
+              className="absolute top-2 right-2 z-50 grid size-8 place-items-center rounded text-muted-foreground hover:bg-accent transition-colors duration-fast"
+              aria-label="Close panel"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <ResizablePanelGroup
       orientation="horizontal"
@@ -55,47 +121,14 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
       elementRef={groupRef}
     >
       <ResizablePanel defaultSize={panelOpen ? 50 : 100} minSize={30}>
-        <div className="flex flex-col h-full overflow-hidden">
-          <header className="h-11 border-b border-border flex items-center px-4 shrink-0">
-            <span className="text-sm text-muted-foreground truncate flex-1">
-              {headerTitle || ''}
-            </span>
-            {workspaceId && sandboxEnabled && (
-              <button
-                type="button"
-                onClick={openBrowser}
-                className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent"
-                aria-label="Open sandbox browser"
-                title="Open sandbox browser"
-              >
-                <Monitor className="h-4 w-4" />
-              </button>
-            )}
-            <ThemeToggle />
-          </header>
-          <main className="flex-1 flex flex-col overflow-hidden">{children}</main>
-        </div>
+        {main}
       </ResizablePanel>
 
       {panelOpen && (
         <>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={50} minSize={25}>
-            {view.type === 'artifact' ? (
-              <ArtifactPanel />
-            ) : view.type === 'attachment' ? (
-              <AttachmentPreviewView info={view.info} />
-            ) : view.type === 'browser' ? (
-              <BrowserView workspaceId={workspaceId} />
-            ) : view.type === 'skill-candidate' ? (
-              <SkillCandidatePanel
-                candidateId={view.candidateId}
-                repo={view.repo}
-                sourceName={view.sourceName}
-              />
-            ) : (
-              <ToolDetailPanel />
-            )}
+            {panelContent}
           </ResizablePanel>
         </>
       )}
