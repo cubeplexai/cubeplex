@@ -16,6 +16,7 @@ NAMESPACE="${NAMESPACE:-cubebox}"
 RELEASE="${RELEASE:-cubebox}"
 HOST="${HOST:-cubebox.local}"
 INGRESS_IP="${INGRESS_IP:-127.0.0.1}"
+INGRESS_PORT="${INGRESS_PORT:-30019}"
 
 step() { echo; echo "==> $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -48,13 +49,13 @@ if [[ -n "$job" ]]; then
 fi
 
 step "4. Backend /health/live via ingress"
-curl -fsS --resolve "$HOST:80:$INGRESS_IP" "http://$HOST/health/live" \
+curl -fsS --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP" "http://$HOST:$INGRESS_PORT/health/live" \
   | tee /tmp/cubebox-live.json
 grep -q '"status":"ok"' /tmp/cubebox-live.json \
   || fail "live probe response unexpected"
 
 step "5. Frontend root page renders"
-body=$(curl -fsS --resolve "$HOST:80:$INGRESS_IP" "http://$HOST/")
+body=$(curl -fsS --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP" "http://$HOST:$INGRESS_PORT/")
 echo "$body" | head -c 200
 echo
 echo "$body" | grep -qiE "<title>|<html" \
@@ -62,8 +63,8 @@ echo "$body" | grep -qiE "<title>|<html" \
 
 step "6. Backend API reachable through /api"
 code=$(curl -s -o /dev/null -w '%{http_code}' \
-  --resolve "$HOST:80:$INGRESS_IP" \
-  "http://$HOST/api/v1/system/status" || true)
+  --resolve "$HOST:$INGRESS_PORT:$INGRESS_IP" \
+  "http://$HOST:$INGRESS_PORT/api/v1/system/status" || true)
 echo "  /api/v1/system/status → HTTP $code"
 [[ "$code" =~ ^(200|401|403|404)$ ]] \
   || fail "backend /api unreachable (got $code)"
