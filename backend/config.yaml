@@ -198,6 +198,11 @@ default:
   # MCP connectors are managed via the DB-backed catalog (mcp_catalog_connectors)
   # plus per-org/per-workspace installs (mcp_servers). The legacy
   # `mcp.servers` config block was removed in M2.
+  mcp:
+    progressive_disclosure:
+      enabled: "auto"        # "auto" | "on" | "off"
+      threshold_pct: 10.0    # collapse when deferrable schemas >= this % of context
+      min_servers: 2         # never collapse below this server count
 
   # Object Storage Configuration (S3-compatible)
   objectstore:
