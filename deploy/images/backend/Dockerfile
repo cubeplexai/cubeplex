@@ -87,6 +87,13 @@ RUN set -eux; \
 
 COPY --from=builder --chown=cubebox:cubebox /app /app
 
+# Ensure /app/logs exists and is writable — loguru creates one file sink per
+# hostname under {backend_dir}/logs/. K8s could instead mount an emptyDir,
+# but a pre-created dir with the right owner is simpler and the volume
+# would be cleared anyway.
+RUN mkdir -p /app/logs /app/cubepi-traces /app/skills_cache \
+    && chown -R cubebox:cubebox /app/logs /app/cubepi-traces /app/skills_cache
+
 USER cubebox
 
 EXPOSE 8000
