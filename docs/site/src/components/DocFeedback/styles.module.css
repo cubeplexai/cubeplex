@@ -1,0 +1,7 @@
+.box { margin: 32px 0 0; padding: 14px 16px; border: 1px solid var(--ink-5); border-radius: 6px; background: var(--surface); display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--ink-9); }
+.q { color: var(--ink-11); font-weight: 500; }
+.btn { font: inherit; background: var(--surface); border: 1px solid var(--ink-5); border-radius: 5px; padding: 4px 10px; cursor: pointer; color: var(--ink-11); }
+.btn:hover { background: var(--ink-3); border-color: var(--ink-7); }
+.commentWrap { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.textarea { font: inherit; font-family: 'Inter'; padding: 8px 10px; border: 1px solid var(--ink-5); border-radius: 5px; background: var(--surface); color: var(--ink-12); resize: vertical; }
+.textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,91,217,0.12); }
