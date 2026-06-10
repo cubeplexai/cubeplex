@@ -3,7 +3,8 @@
 Helm chart + Dockerfiles + glue scripts to deploy cubebox (backend, frontend,
 and all required infrastructure) onto a Kubernetes cluster.
 
-Design: [docs/dev/specs/2026-06-10-helm-deploy-design.md](../docs/dev/specs/2026-06-10-helm-deploy-design.md).
+- **完整安装手册：** [INSTALL.md](INSTALL.md)（前置依赖、`values.local.yaml` 字段详解、故障排查）
+- **设计文档：** [docs/dev/specs/2026-06-10-helm-deploy-design.md](../docs/dev/specs/2026-06-10-helm-deploy-design.md)
 
 ## Layout
 
