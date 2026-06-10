@@ -31,6 +31,8 @@ development:
       base_url: "http://localhost:5001"
 
   # Tracing on by default in dev so local runs emit trace files.
+  # To also ship spans to Grafana Tempo, set `tracing.otlp.endpoint` in
+  # config.development.local.yaml (per-machine, not checked in).
   tracing:
     enabled: true
     record_content: true

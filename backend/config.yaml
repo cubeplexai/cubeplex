@@ -361,9 +361,18 @@ default:
 
   # cubepi agent tracing (OTLP/JSON spans on disk; default off; opt-in per env)
   # When enabled, each run writes <directory>/<YYYY-MM-DD>/<run_id>.jsonl.
+  # Optionally also ship spans to an OTLP HTTP collector (e.g. Grafana Tempo)
+  # by setting `otlp.endpoint` to the full /v1/traces URL.
   tracing:
     enabled: false
     directory: "./cubepi-traces"
     # record_content=true captures full prompts / responses / tool args+results
     # in the trace — useful for debugging, larger files, may contain sensitive data.
     record_content: false
+    otlp:
+      # Full OTLP HTTP traces URL, e.g. "http://localhost:4318/v1/traces".
+      # Leave null to keep tracing JSONL-only.
+      endpoint: null
+      # Optional bearer / auth headers, as a flat dict of string→string.
+      headers: null
+      timeout_seconds: 10

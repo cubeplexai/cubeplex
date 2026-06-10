@@ -46,5 +46,37 @@ async def test_build_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
     )
     tracer = tracing_mod.build_tracer()
     assert isinstance(tracer, Tracer)
+    # Without otlp.endpoint, only the JSONL processor is attached.
+    assert len(tracer._processors) == 1
     # Clean up so the BatchSpanProcessor / atexit hook doesn't leak.
     await tracer.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_build_tracer_attaches_otlp_when_endpoint_set(monkeypatch, tmp_path):
+    from cubepi.tracing import Tracer
+
+    monkeypatch.setattr(
+        tracing_mod,
+        "config",
+        _fake_config(
+            {
+                "tracing.enabled": True,
+                "tracing.directory": str(tmp_path),
+                "tracing.record_content": False,
+                "tracing.otlp.endpoint": "http://localhost:4318/v1/traces",
+                "tracing.otlp.headers": {"Authorization": "Bearer x"},
+                "env": "development",
+            }
+        ),
+    )
+    tracer = tracing_mod.build_tracer()
+    assert isinstance(tracer, Tracer)
+    # JSONL + OTLP → two BatchSpanProcessors.
+    assert len(tracer._processors) == 2
+    await tracer.shutdown()
+
+
+def test_build_otlp_exporter_none_when_endpoint_unset(monkeypatch):
+    monkeypatch.setattr(tracing_mod, "config", _fake_config({}))
+    assert tracing_mod._build_otlp_exporter() is None
