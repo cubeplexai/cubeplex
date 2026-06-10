@@ -26,9 +26,6 @@ importers:
       clsx:
         specifier: ^2.0.0
         version: 2.1.1
-      posthog-js:
-        specifier: ^1.373.4
-        version: 1.383.2
       prism-react-renderer:
         specifier: ^2.3.0
         version: 2.4.1(react@19.2.7)
@@ -1711,12 +1708,6 @@ packages:
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
 
-  '@posthog/core@1.30.13':
-    resolution: {integrity: sha512-d+4r6spHsllDUNc9LLJ3bT7GCiN9aurTMv1XKweyvOcujYq/w+PcjqxfZeOQZ2x9recdp+o9Z+hWgnuA2Sk4lw==}
-
-  '@posthog/types@1.383.2':
-    resolution: {integrity: sha512-rci/AXDgu3s+5H32bIDipXlIiM++Z5A4VB7LKs6IX0jW1JrcJ8zA3hX1HcKKQWkA4MqoEt8gWphrZt4HgMSrrg==}
-
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
 
@@ -2386,9 +2377,6 @@ packages:
 
   '@types/sockjs@0.3.36':
     resolution: {integrity: sha512-MK9V6NzAS1+Ud7JV9lJLFqW85VbC9dq3LmwZCuBe4wBDgKC0Kj/jd8Xl+nSviU+Qc3+m7umHHyHg//2KSa0a0Q==}
-
-  '@types/trusted-types@2.0.7':
-    resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
   '@types/unist@2.0.11':
     resolution: {integrity: sha512-CmBKiL6NNo/OqgmMn95Fk9Whlp2mtvIv+KNpQKN2F4SjvrEesubTRWGYSg+BnWZOnlCaSTU1sMpsBOzgbYhnsA==}
@@ -3293,9 +3281,6 @@ packages:
     resolution: {integrity: sha512-cgwlv/1iFQiFnU96XXgROh8xTeetsnJiDsTc7TYCLFd9+/WNkIqPTxiM/8pSd8VIrhXGTf1Ny1q1hquVqDJB5w==}
     engines: {node: '>= 4'}
 
-  dompurify@3.4.8:
-    resolution: {integrity: sha512-yb1cEmaOum7wFvOCSQxyfgVlv5D47Rc30iZWoMpbDIWTnJ6grDDQyu2KFJzB2k7u0pMuJcQ1zphH//fFnw2tjQ==}
-
   domutils@2.5.2:
     resolution: {integrity: sha512-MHTthCb1zj8f1GVfRpeZUbohQf/HdBos0oX5gZcQFepOZPLLRyj6Wn7XS7EMnY7CVpwv8863u2vyE83Hfu28HQ==}
 
@@ -3541,9 +3526,6 @@ packages:
   feed@4.2.2:
     resolution: {integrity: sha512-u5/sxGfiMfZNtJ3OvQpXcvotFpYkL0n9u9mM2vkui2nGo8b4wvDkJ8gAkYqbA8QpGyFCv3RK0Z+Iv+9veCS9bQ==}
     engines: {node: '>=0.4.0'}
-
-  fflate@0.4.8:
-    resolution: {integrity: sha512-FJqqoDBR00Mdj9ppamLa/Y7vxm+PRmNWA67N846RvsoYVMKB4q3y/de5PA7gUmRMYK/8CMz2GDZQmCRN1wBcWA==}
 
   file-loader@6.2.0:
     resolution: {integrity: sha512-qo3glqyTa61Ytg4u73GultjHGjdRyig3tG6lPtyX/jOEJvHif9uB0/OCI2Kif6ctF3caQTW2G5gym21oAsI4pw==}
@@ -5238,12 +5220,6 @@ packages:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
 
-  posthog-js@1.383.2:
-    resolution: {integrity: sha512-Ze9KV7//2a0Fmq4k/dhcVBtEmfSaH16RtoBg7K/YsIrwiFBsSkzwHhg/VrEqmbbvY4+CtCIDPHFoS5j/4jTp3w==}
-
-  preact@10.29.2:
-    resolution: {integrity: sha512-7tNmwg/7mzzAoB/8kSg6Hl37JraAZw3Z3A0JSY7VXlZwo82Xn0G7wKbNNs2qoF4ZEEsQGTwDAroNdqKs1ofJxQ==}
-
   pretty-error@4.0.0:
     resolution: {integrity: sha512-AoJ5YMAcXKYxKhuJGdcvse+Voc6v1RgnsR3nWcYU7q4t6z0Q6T86sv5Zq8VIRbOWWFpvdGE83LtdSMNd+6Y0xw==}
 
@@ -5308,9 +5284,6 @@ packages:
   qs@6.15.2:
     resolution: {integrity: sha512-Rzq0KEyX/w/tEybncDgdkZrJgVUsUMk3xjh3t5bv3S1HTAtg+uOYt72+ZfwiQwKdysThkTBdL/rTi6HDmX9Ddw==}
     engines: {node: '>=0.6'}
-
-  query-selector-shadow-dom@1.0.1:
-    resolution: {integrity: sha512-lT5yCqEBgfoMYpf3F2xQRK7zEr1rhIIZuceDK6+xRkJQ4NMbHTwXqk4NkwDwQMNqXgG9r9fyHnzwNVs6zV5KRw==}
 
   querystringify@2.2.0:
     resolution: {integrity: sha512-FIqgj2EUvTa7R50u0rGsyTftzjYmv/a3hO345bZNrqabNqjtgiDMgmo4mkUjd+nzU5oF3dClKqFIPUKybUyqoQ==}
@@ -6229,9 +6202,6 @@ packages:
 
   web-namespaces@2.0.1:
     resolution: {integrity: sha512-bKr1DkiNa2krS7qxNtdrtHAmzuYGFQLiQ13TsorsdT6ULTkPLKuu5+GsFpDlg6JFjUTwX2DyhMPG2be8uPrqsQ==}
-
-  web-vitals@5.3.0:
-    resolution: {integrity: sha512-q6LWsLatGYZp5VGBIOvbTj6JBV2nOmC8KvWztXBmwJcfFAzhwKwbOxhUH306XY3CcaZDUlSmSuNPBsCn0bFu+g==}
 
   webidl-conversions@7.0.0:
     resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
@@ -9180,12 +9150,6 @@ snapshots:
 
   '@polka/url@1.0.0-next.29': {}
 
-  '@posthog/core@1.30.13':
-    dependencies:
-      '@posthog/types': 1.383.2
-
-  '@posthog/types@1.383.2': {}
-
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
   '@rollup/rollup-android-arm-eabi@4.61.1':
@@ -9774,9 +9738,6 @@ snapshots:
   '@types/sockjs@0.3.36':
     dependencies:
       '@types/node': 25.9.2
-
-  '@types/trusted-types@2.0.7':
-    optional: true
 
   '@types/unist@2.0.11': {}
 
@@ -10751,10 +10712,6 @@ snapshots:
     dependencies:
       domelementtype: 2.3.0
 
-  dompurify@3.4.8:
-    optionalDependencies:
-      '@types/trusted-types': 2.0.7
-
   domutils@2.5.2:
     dependencies:
       dom-serializer: 1.0.1
@@ -11040,8 +10997,6 @@ snapshots:
   feed@4.2.2:
     dependencies:
       xml-js: 1.6.11
-
-  fflate@0.4.8: {}
 
   file-loader@6.2.0(webpack@5.107.2(@swc/core@1.15.40)(lightningcss@1.32.0)(postcss@8.5.15)):
     dependencies:
@@ -13093,19 +13048,6 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  posthog-js@1.383.2:
-    dependencies:
-      '@posthog/core': 1.30.13
-      '@posthog/types': 1.383.2
-      core-js: 3.49.0
-      dompurify: 3.4.8
-      fflate: 0.4.8
-      preact: 10.29.2
-      query-selector-shadow-dom: 1.0.1
-      web-vitals: 5.3.0
-
-  preact@10.29.2: {}
-
   pretty-error@4.0.0:
     dependencies:
       lodash: 4.18.1
@@ -13174,8 +13116,6 @@ snapshots:
   qs@6.15.2:
     dependencies:
       side-channel: 1.1.1
-
-  query-selector-shadow-dom@1.0.1: {}
 
   querystringify@2.2.0: {}
 
@@ -14180,8 +14120,6 @@ snapshots:
       minimalistic-assert: 1.0.1
 
   web-namespaces@2.0.1: {}
-
-  web-vitals@5.3.0: {}
 
   webidl-conversions@7.0.0: {}
 
