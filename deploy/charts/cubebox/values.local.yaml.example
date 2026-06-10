@@ -19,6 +19,8 @@ backend:
       # openssl rand -hex 32
       jwt_secret: "REPLACE_ME"
       csrf_secret: "REPLACE_ME"
+      # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      vault_key: "REPLACE_ME"
     # Mirror of backend/config.development.local.yaml `llm` block. Written
     # verbatim into the backend Secret as config.production.secrets.yaml.
     llm:
