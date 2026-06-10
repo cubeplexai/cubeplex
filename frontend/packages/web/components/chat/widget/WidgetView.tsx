@@ -19,10 +19,24 @@ interface ThemeTokens {
   accent: string
 }
 
+/** Iframe srcdoc cannot inherit parent CSS variables, so we must inject
+ *  literal hex into the widget shell. To avoid drift from the design
+ *  tokens, derive from computed styles at serialization time; the SSR
+ *  fallbacks here mirror the token palette (see globals.css §1). */
 function resolveThemeTokens(isDark: boolean): ThemeTokens {
-  return isDark
-    ? { bg: '#0e1116', fg: '#e6edf3', muted: '#161b22', border: '#30363d', accent: '#58a6ff' }
-    : { bg: '#ffffff', fg: '#0a0a0f', muted: '#f5f5f7', border: '#e5e7eb', accent: '#0061c2' }
+  const fallback: ThemeTokens = isDark
+    ? { bg: '#050505', fg: '#ededed', muted: '#111111', border: '#1f1f1f', accent: '#0070f3' }
+    : { bg: '#fafafa', fg: '#171717', muted: '#f5f5f5', border: '#eaeaea', accent: '#0070f3' }
+  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback
+  const styles = getComputedStyle(document.documentElement)
+  const v = (name: string): string => styles.getPropertyValue(name).trim()
+  return {
+    bg: v('--color-sunken') || fallback.bg,
+    fg: v('--color-foreground') || fallback.fg,
+    muted: v('--color-raised') || fallback.muted,
+    border: v('--color-border') || fallback.border,
+    accent: v('--color-primary') || fallback.accent,
+  }
 }
 
 function isAppDark(): boolean {
