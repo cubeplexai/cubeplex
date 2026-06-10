@@ -49,6 +49,9 @@ where this spec explicitly changes them.
 | Empty-state home | Keep the logo + name lockup (mark itself becomes the placeholder); add 3 clickable example-task prompt cards |
 | Logo | Out of scope; use a simple geometric placeholder mark |
 | CJK fonts | Geist falls back to `PingFang SC / Microsoft YaHei / Noto Sans CJK` |
+| Execution mode | Single branch (`feat/ui-redesign`), staged commits, local `/code-review` after EVERY stage; no per-area PRs. One big PR at the end → codex review loop → merge |
+| Undo toast | In scope this round, including toast infrastructure and delayed-deletion semantics at call sites |
+| Small in-flight decisions | Made autonomously per spec principles; per-stage screenshots archived for async review; only spec-level changes interrupt the user |
 
 ## 1. Design tokens (foundation layer)
 
@@ -191,8 +194,8 @@ markup). Therefore: **extend, don't rebuild**:
 - Switching content updates the header in place — no full-panel flash
 - Terminal adapter: real terminal feel — darker bg, mono, ANSI color
   mapping
-- This generalization is its own PR (see implementation strategy), not a
-  clause inside the chat restyle PR — it touches panel open/close,
+- This generalization is its own stage (see implementation strategy), not
+  a clause inside the chat restyle stage — it touches panel open/close,
   content switching, and resize behavior, the highest regression surface
   in the app
 
@@ -261,7 +264,7 @@ level only.
   slide-over panels from the right (list stays visible). The Models add
   wizard stays a full-page wizard. **New primitive required**: `ui/` has
   no sheet/drawer today — add `ui/sheet.tsx` (shadcn Sheet) in the UI
-  primitives PR; every slide-over uses it (otherwise each area PR
+  primitives stage; every slide-over uses it (otherwise each area
   hand-rolls its own overlay and we recreate the fragmentation this spec
   exists to kill)
 - Inline editing for rename-class operations (conversation title, workspace
@@ -269,9 +272,10 @@ level only.
 - Delete confirmation, two tiers: AlertDialog + type-the-name (dangerous) or
   undo toast (recoverable). **New infrastructure required**: there is no
   toast system in the codebase — add one (shadcn/sonner) in the UI
-  primitives PR, and note undo-toast implies delayed/cancellable deletion
-  semantics in the calling code. These two additions are the sanctioned
-  exceptions to the "no new component libraries" non-goal
+  primitives stage, and note undo-toast implies delayed/cancellable
+  deletion semantics in the calling code (confirmed in scope). These two
+  additions are the sanctioned exceptions to the "no new component
+  libraries" non-goal
 
 **State completeness**: every management page gets a layout-matched loading
 skeleton, an empty state (icon + guidance + primary action), and an error
@@ -319,11 +323,18 @@ state with retry.
 
 ## Implementation strategy
 
-Order chosen to maximize visual impact early while keeping every PR small
-and reviewable (no rewrite — restyle in place, per the existing stack:
-Tailwind 4 + shadcn/ui + CVA):
+**Execution mode (user decision):** everything happens on the single
+`feat/ui-redesign` branch as a sequence of stages — no per-area PRs. Each
+stage ends with: incremental tests green → a local `/code-review` round →
+findings fixed → stage commit(s). Screenshots (dark/light) are archived
+per stage for async user review; the user is interrupted only for
+spec-level changes. Delivery: after the final stage, full E2E suite + one
+big PR → codex review loop → merge.
 
-1. **Token PR** — `globals.css` variable redefinition + Geist font wiring
+Stage order (visual impact early; no rewrite — restyle in place, per the
+existing stack: Tailwind 4 + shadcn/ui + CVA):
+
+1. **Token stage** — `globals.css` variable redefinition + Geist font wiring
    + the theme-default migration (layout.tsx provider flags + the two
    toggle components reading `resolvedTheme`). Fonts come from the
    `geist` npm package (self-hosted via `pnpm add geist`), NOT
@@ -332,23 +343,24 @@ Tailwind 4 + shadcn/ui + CVA):
    **Honest scope statement**: token-respecting surfaces shift at once,
    but the ~127 hardcoded color classes do NOT — the app runs in a
    deliberate mixed state (new base + old-palette islands like
-   AskUserCard/ThinkingBadge) until each area PR lands. This window is
-   accepted; chat (the biggest offender cluster) lands first to shorten
-   it
-2. **UI primitives PR** — restyle the 25 `components/ui/` shadcn
+   AskUserCard/ThinkingBadge) until the area stages land. Acceptable:
+   nothing ships mid-initiative (single branch, one PR at the end); chat
+   (the biggest offender cluster) lands first to shorten the window
+2. **UI primitives stage** — restyle the 25 `components/ui/` shadcn
    components against new tokens (radius, borders, states); everything
    downstream inherits. Adds the two new primitives the redesign needs:
    `ui/sheet.tsx` (slide-overs) and a toast system (undo deletions)
-3. **Panel Shell PR** — generalize PanelHeader + fold the 4 sibling
-   panels under it (own PR: highest regression surface)
-4. **Area PRs**: chat (sidebar → message stream → input bar) →
+3. **Panel Shell stage** — generalize PanelHeader + fold the 4 sibling
+   panels under it (own stage: highest regression surface)
+4. **Area stages**: chat (sidebar → message stream → input bar) →
    management modules + pages → mobile → motion polish
-5. One PR per area. E2E note: beyond styling-class selectors, the
-   placeholder copy change breaks 13 `getByPlaceholder` usages across 7
-   spec files (incl. the zh assertion in i18n.spec.ts) — update them in
-   the same PR as the copy change
+5. E2E note: beyond styling-class selectors, the placeholder copy change
+   breaks 13 `getByPlaceholder` usages across 7 spec files (incl. the zh
+   assertion in i18n.spec.ts) — update them in the same stage as the copy
+   change. Incremental tests per stage; full suite (incl. E2E) once
+   before the final PR
 6. Hardcoded colors removed area-by-area. The invariant is then
-   ENFORCED, not just swept: the final PR adds an eslint
+   ENFORCED, not just swept: the final stage adds an eslint
    `no-restricted-syntax` rule (or CI grep step) rejecting raw palette
    utilities/hex literals in components, with a documented carve-out for
    `chat/widget/` — the widget iframe receives literal hex via srcdoc
@@ -356,11 +368,11 @@ Tailwind 4 + shadcn/ui + CVA):
    CSS variables; its palette values are derived from the token values
    at serialization time instead
 
-**Verification**: each PR posts Playwright screenshots (dark/light × the
-pages it touches) for human review — the judgment is the reviewer's, there
-is no automated pixel baseline. A hi-fi prototype + user sign-off is
-required only for screens where this spec leaves a visual question open
-(not for every screen — the direction is already validated).
+**Verification**: each stage archives Playwright screenshots (dark/light ×
+the pages it touches) for async human review — no automated pixel
+baseline. All remaining visual questions were resolved up front with the
+user (input bar variant, prompt cards, execution decisions); in-flight
+micro-decisions are made autonomously per the user's standing instruction.
 
 ## Non-goals
 
