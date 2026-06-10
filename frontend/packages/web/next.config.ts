@@ -26,6 +26,10 @@ const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-
 export const nextConfig: NextConfig = {
   allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111', '192.168.1.150'],
   compress: false,
+  // Produce a self-contained Next.js bundle (node_modules + server.js) for
+  // container deploys. Gated on an env var so dev / E2E aren't affected —
+  // the Dockerfile sets NEXT_OUTPUT=standalone before `next build`.
+  output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
   transpilePackages: ['katex', '@cubebox/core'],
   // Pin the workspace root to the frontend monorepo. Otherwise Next walks up,
   // finds the user's global ~/pnpm-lock.yaml (for global CLI tools), and picks

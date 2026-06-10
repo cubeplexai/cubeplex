@@ -1,0 +1,170 @@
+# Copyright 2026 Alibaba Group Holding Ltd.
+# Server resources: ServiceAccount, ClusterRole, ClusterRoleBinding, ConfigMap, Deployment, Service.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "opensandbox-server.serviceAccountName" . }}
+  namespace: {{ include "opensandbox-server.namespace" . }}
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+---
+apiVersion: {{ include "opensandbox-server.rbac.apiVersion" . }}
+kind: ClusterRole
+metadata:
+  name: {{ include "opensandbox-server.roleName" . }}
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/status", "events", "services", "configmaps"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "delete", "get", "list", "patch"]
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["batchsandboxes", "batchsandboxes/status", "batchsandboxes/finalizers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["pools", "pools/status", "pools/finalizers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["sandboxsnapshots", "sandboxsnapshots/status", "sandboxsnapshots/finalizers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+---
+apiVersion: {{ include "opensandbox-server.rbac.apiVersion" . }}
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "opensandbox-server.fullname" . }}-rolebinding
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "opensandbox-server.roleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "opensandbox-server.serviceAccountName" . }}
+    namespace: {{ include "opensandbox-server.namespace" . }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "opensandbox-server.fullname" . }}-config
+  namespace: {{ include "opensandbox-server.namespace" . }}
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+data:
+  config.toml: |
+{{ .Values.configToml | indent 4 }}
+{{ include "opensandbox-server.ingressConfigToml" . | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "opensandbox-server.fullname" . }}
+  namespace: {{ include "opensandbox-server.namespace" . }}
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.server.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "opensandbox-server.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "opensandbox-server.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/part-of: opensandbox
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "opensandbox-server.serviceAccountName" . }}
+      containers:
+        - name: main
+          image: {{ include "opensandbox-server.serverImage" . }}
+          imagePullPolicy: {{ include "opensandbox-server.imagePullPolicy" . }}
+          args:
+            - "--config"
+            - "/etc/opensandbox/config.toml"
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            - name: SANDBOX_CONFIG_PATH
+              value: "/etc/opensandbox/config.toml"
+            {{- with .Values.server.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/opensandbox/config.toml
+              subPath: config.toml
+              readOnly: true
+            {{- with .Values.server.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "opensandbox-server.fullname" . }}-config
+        {{- with .Values.server.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.server.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.server.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "opensandbox-server.fullname" . }}
+  namespace: {{ include "opensandbox-server.namespace" . }}
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.server.service.type | default "ClusterIP" }}
+  ports:
+    - port: {{ .Values.server.service.port | default 80 }}
+      targetPort: http
+      protocol: TCP
+      name: http
+      {{- if and (eq (.Values.server.service.type | default "ClusterIP") "NodePort") .Values.server.service.nodePort }}
+      nodePort: {{ .Values.server.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "opensandbox-server.selectorLabels" . | nindent 4 }}

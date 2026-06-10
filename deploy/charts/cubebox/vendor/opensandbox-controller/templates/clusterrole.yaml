@@ -1,0 +1,145 @@
+{{- if .Values.rbac.create -}}
+---
+# Leader election role
+apiVersion: {{ include "opensandbox.rbac.apiVersion" . }}
+kind: Role
+metadata:
+  name: {{ include "opensandbox.leaderElectionRoleName" . }}
+  namespace: {{ include "opensandbox.namespace" . }}
+  labels:
+    {{- include "opensandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+
+---
+# Manager ClusterRole
+apiVersion: {{ include "opensandbox.rbac.apiVersion" . }}
+kind: ClusterRole
+metadata:
+  name: {{ include "opensandbox.managerRoleName" . }}
+  labels:
+    {{- include "opensandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - sandbox.opensandbox.io
+  resources:
+  - batchsandboxes
+  - pools
+  - sandboxsnapshots
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - sandbox.opensandbox.io
+  resources:
+  - batchsandboxes/finalizers
+  - pools/finalizers
+  - sandboxsnapshots/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - sandbox.opensandbox.io
+  resources:
+  - batchsandboxes/status
+  - pools/status
+  - sandboxsnapshots/status
+  verbs:
+  - get
+  - patch
+  - update
+
+{{- end }}

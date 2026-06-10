@@ -1,0 +1,157 @@
+# cubebox umbrella chart — DEFAULTS ONLY.
+# Real secrets, model api_keys, OSS keys, and the operator-specific sandbox
+# image / domain live in `values.local.yaml` (gitignored).
+#
+# Apply with: helm upgrade --install cubebox ./deploy/charts/cubebox \
+#               -n cubebox --create-namespace \
+#               -f values.yaml -f values.local.yaml
+
+global:
+  imageRegistry: "192.168.1.101:8050"
+  imagePullSecrets: []
+
+image:
+  registry: "192.168.1.101:8050"
+  repository: library
+  pullPolicy: IfNotPresent
+  # Tags must come from values.local.yaml (set by build-and-push.sh).
+  backend:
+    name: cubebox-backend
+    tag: ""
+  frontend:
+    name: cubebox-frontend
+    tag: ""
+
+backend:
+  replicaCount: 1
+  service:
+    port: 8000
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "512Mi"
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+  env:
+    ENV_FOR_DYNACONF: production
+  # Anything here is rendered into the ConfigMap as YAML overrides applied
+  # AFTER config.production.yaml. Use for non-secret deployment-specific
+  # tuning. Secrets live under `backend.secrets` below.
+  configOverrides:
+    api:
+      host: "0.0.0.0"
+      port: 8000
+      public_url: "http://cubebox.local"
+    deployment:
+      mode: single_tenant
+    public_base_url: "http://cubebox.local"
+    frontend_base_url: "http://cubebox.local"
+  # ALL secret fields go into a k8s Secret. Operator fills these in
+  # values.local.yaml; the chart fails the install if jwt_secret/csrf_secret
+  # are still empty.
+  secrets:
+    auth:
+      jwt_secret: ""
+      csrf_secret: ""
+    llm:
+      providers: {}
+    sandbox:
+      api_key: ""
+
+frontend:
+  replicaCount: 1
+  service:
+    port: 3000
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  host: "cubebox.local"
+  tls:
+    enabled: false
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "60m"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+
+# Storage class for cubebox's PVCs. Points at /work (1.8 T) on node-1 so
+# we don't fill the 51 G root partition where the default openebs SC lives.
+storageClass:
+  create: true
+  name: cubebox-work-hostpath
+  basePath: /work/cubebox
+
+# ── Bundled infrastructure (single-node defaults) ───────────────────────
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  auth:
+    username: cubebox
+    database: cubebox
+    password: ""      # required in values.local.yaml
+  persistence:
+    storageClass: cubebox-work-hostpath
+    size: 8Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+redis:
+  enabled: true
+  image: redis:7-alpine
+  auth:
+    password: ""      # required in values.local.yaml
+  persistence:
+    storageClass: cubebox-work-hostpath
+    size: 2Gi
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+minio:
+  enabled: true
+  image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+  mcImage: minio/mc:RELEASE.2025-04-08T15-39-49Z
+  auth:
+    rootUser: cubebox
+    rootPassword: ""  # required in values.local.yaml
+  defaultBucket: cubebox
+  persistence:
+    storageClass: cubebox-work-hostpath
+    size: 20Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+# ── OpenSandbox umbrella subchart (alibaba) ──────────────────────────────
+opensandbox:
+  enabled: true
+  # Inherits defaults from the upstream chart; only override surface knobs
+  # we care about for the smoke test deployment.
+  opensandbox-server:
+    server:
+      replicaCount: 1
+  opensandbox-controller:
+    controller:
+      replicaCount: 1

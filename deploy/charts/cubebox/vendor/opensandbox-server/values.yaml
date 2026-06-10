@@ -1,0 +1,115 @@
+# Copyright 2026 Alibaba Group Holding Ltd.
+# Default values for opensandbox-server.
+
+# -- Override the name of the chart
+nameOverride: ""
+# -- Resource names and app.kubernetes.io/name are fixed to this value, independent of release name
+fullnameOverride: "opensandbox-server"
+
+# -- Override the namespace (default: opensandbox-system)
+namespaceOverride: ""
+
+# -- Image pull secrets for the server deployment. Each entry: {name: <secret-name>}.
+imagePullSecrets: []
+
+# Server configuration
+server:
+  # -- Additional environment variables for the server container.
+  env: []
+  # - name: OPENSANDBOX_SERVER_API_KEY
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: opensandbox-api-key
+  #       key: api-key
+
+  # -- Server image configuration
+  image:
+    repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server
+    tag: "v0.1.14"
+
+  # -- Server Service configuration
+  service:
+    # -- Service type: ClusterIP or NodePort
+    type: ClusterIP
+    # -- Service port
+    port: 80
+    # -- NodePort to expose when type is NodePort. Empty lets Kubernetes auto-assign.
+    nodePort: ""
+
+  # -- Number of server replicas
+  replicaCount: 2
+
+  # -- Resource requests and limits
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: "1"
+      memory: 4Gi
+
+  tolerations: []
+  affinity: {}
+  volumeMounts: []
+  volumes: []
+
+  # Gateway (components/ingress): when enabled, writes config [ingress] and deploys the gateway
+  gateway:
+    enabled: false
+    host: opensandbox.example.com
+    gatewayRouteMode: "header"
+    # Service exposure for the gateway (default ClusterIP to match upstream).
+    service:
+      type: ClusterIP
+      nodePort: ""
+    image:
+      repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress
+      tag: "v1.0.7"
+    replicaCount: 2
+    port: 28888
+    dataplaneNamespace: "opensandbox"
+    providerType: "batchsandbox"
+    logLevel: "info"
+    resources:
+      limits:
+        cpu: "2"
+        memory: 8Gi
+      requests:
+        cpu: "1"
+        memory: 4Gi
+    # OSEP-0011 signing keys shared between server and ingress.
+    # When keys are provided, the server signs route tokens with the active key
+    # and the ingress gateway verifies them.
+    secureAccess:
+      activeKey: ""
+      # List of signing keys. Each entry: { key_id: "a", key: "<base64-secret>" }.
+      # key_id must be exactly one character in [0-9a-z].
+      keys: []
+
+# -- Server config (TOML). Mounted at /etc/opensandbox/config.toml.
+configToml: |
+  [server]
+  host = "0.0.0.0"
+  port = 80
+  api_key = ""
+
+  [log]
+  level = "INFO"
+
+  [runtime]
+  type = "kubernetes"
+  execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.18"
+
+  [kubernetes]
+  kubeconfig_path = ""
+  namespace = "opensandbox"
+  informer_enabled = true
+  informer_resync_seconds = 300
+  informer_watch_timeout_seconds = 60
+  snapshot_create_timeout_seconds = 900
+  workload_provider = "batchsandbox"
+  batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
+  
+  [egress]
+  image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
+  mode = "dns+nft"

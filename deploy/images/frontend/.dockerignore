@@ -1,0 +1,16 @@
+# Build context root is the repo root; ignore everything except frontend/.
+*
+!frontend/
+!frontend/**
+
+frontend/**/node_modules/
+frontend/**/.next/
+frontend/**/.turbo/
+frontend/**/.vitest/
+frontend/**/coverage/
+frontend/**/dist/
+frontend/**/tsconfig.tsbuildinfo
+frontend/playwright-report/
+frontend/test-results/
+frontend/packages/web/__tests__/
+frontend/.env*
