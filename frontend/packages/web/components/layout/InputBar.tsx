@@ -239,7 +239,7 @@ export function InputBar({
   }
 
   return (
-    <div className="w-full max-w-3xl mx-auto">
+    <div className="w-full max-w-3xl mx-auto pb-[env(safe-area-inset-bottom)]">
       {conversationId && <PendingSteers conversationId={conversationId} />}
       {conversationId && <UploadDropzone conversationId={conversationId} />}
       {conversationId && <AttachmentChips conversationId={conversationId} />}

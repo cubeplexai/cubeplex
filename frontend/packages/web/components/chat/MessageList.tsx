@@ -395,7 +395,7 @@ export function MessageList({ conversationId }: MessageListProps) {
 
   return (
     <ScrollArea ref={scrollRef} className="flex-1 p-4" onScroll={handleScroll}>
-      <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto">
+      <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto px-4 md:px-0">
         {(messages ?? []).map((msg) => (
           <div key={msg.id}>
             {msg.role === 'user' && msg.metadata?.synthetic !== true && (

@@ -34,17 +34,17 @@ export function CommandRulesTable({ rules, onChange, disabled }: Props) {
           No command rules. All shell commands run unmodified.
         </p>
       ) : (
-        <div className="overflow-hidden rounded border border-border/70 bg-card/40">
-          <div className="grid grid-cols-[140px_1fr_44px] items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        <div className="overflow-x-auto rounded border border-border bg-card">
+          <div className="grid min-w-[480px] grid-cols-[140px_1fr_44px] items-center gap-2 border-b border-border bg-accent px-3 py-2 text-2xs font-medium uppercase tracking-wide text-muted-foreground">
             <span>Action</span>
             <span>Pattern (glob)</span>
             <span className="sr-only">Remove</span>
           </div>
-          <ul className="divide-y divide-border/40">
+          <ul className="divide-y divide-border">
             {rules.map((rule, idx) => (
               <li
                 key={idx}
-                className="grid grid-cols-[140px_1fr_44px] items-center gap-2 px-3 py-2"
+                className="grid min-w-[480px] grid-cols-[140px_1fr_44px] items-center gap-2 px-3 py-2"
               >
                 <Select
                   value={rule.action}
