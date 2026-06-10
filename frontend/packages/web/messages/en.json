@@ -835,7 +835,9 @@
   "panel": {
     "header": {
       "copy": "Copy",
-      "close": "Close"
+      "close": "Close",
+      "fullscreen": "Fullscreen",
+      "exitFullscreen": "Exit fullscreen"
     },
     "skillView": {
       "labelPrefix": "Skill:",

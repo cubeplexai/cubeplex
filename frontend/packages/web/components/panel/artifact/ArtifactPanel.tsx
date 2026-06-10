@@ -4,10 +4,11 @@ import { useState, useEffect, useRef } from 'react'
 import dynamic from 'next/dynamic'
 import { useArtifactStore, usePanelStore, createApiClient } from '@cubebox/core'
 import type { Artifact, ArtifactVersion } from '@cubebox/core'
-import { X, Download, ChevronDown, Maximize2, Minimize2 } from 'lucide-react'
+import { Download, ChevronDown } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { PanelHeader } from '@/components/panel/PanelHeader'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { getArtifactIcon } from './artifactIcons'
 import { PreviewLoading } from './PreviewLoading'
@@ -142,45 +143,34 @@ function ArtifactPanelHeader({
   const downloadUrl = buildDownloadUrl(artifact, workspaceId, selectedVersion)
 
   return (
-    <header className="h-11 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-card">
-      {/* eslint-disable-next-line react-hooks/static-components */}
-      <Icon className="size-3.5 text-primary shrink-0" />
-      <span className="text-sm font-medium text-foreground truncate flex-1">{artifact.name}</span>
-      <VersionPopover
-        artifact={artifact}
-        versions={versions}
-        selectedVersion={selectedVersion}
-        onSelectVersion={onSelectVersion}
-        portalContainer={portalContainer}
-      />
-      <span className="flex items-center gap-1">
-        <button
-          onClick={onToggleFullscreen}
-          className="p-1 rounded hover:bg-muted/50 transition-colors"
-          title={isFullscreen ? t('exitFullscreen') : t('fullscreen')}
-        >
-          {isFullscreen ? (
-            <Minimize2 className="size-3.5 text-muted-foreground" />
-          ) : (
-            <Maximize2 className="size-3.5 text-muted-foreground" />
-          )}
-        </button>
-        <a
-          href={downloadUrl}
-          className="p-1 rounded hover:bg-muted/50 transition-colors"
-          title={t('download')}
-        >
-          <Download className="size-3.5 text-muted-foreground" />
-        </a>
-        <button
-          onClick={onClose}
-          className="p-1 rounded hover:bg-muted/50 transition-colors"
-          title={t('close')}
-        >
-          <X className="size-3.5 text-muted-foreground" />
-        </button>
-      </span>
-    </header>
+    <PanelHeader
+      source={{
+        kind: 'plain',
+        /* eslint-disable-next-line react-hooks/static-components */
+        icon: <Icon className="size-3.5 text-primary shrink-0" />,
+        title: artifact.name,
+      }}
+      actions={
+        <>
+          <VersionPopover
+            artifact={artifact}
+            versions={versions}
+            selectedVersion={selectedVersion}
+            onSelectVersion={onSelectVersion}
+            portalContainer={portalContainer}
+          />
+          <a
+            href={downloadUrl}
+            className="p-1 rounded-xs hover:bg-accent transition-colors duration-fast"
+            title={t('download')}
+          >
+            <Download className="size-3.5 text-muted-foreground" />
+          </a>
+        </>
+      }
+      fullscreen={{ active: isFullscreen, onToggle: onToggleFullscreen }}
+      onClose={onClose}
+    />
   )
 }
 

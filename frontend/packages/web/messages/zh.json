@@ -835,7 +835,9 @@
   "panel": {
     "header": {
       "copy": "复制",
-      "close": "关闭"
+      "close": "关闭",
+      "fullscreen": "全屏",
+      "exitFullscreen": "退出全屏"
     },
     "skillView": {
       "labelPrefix": "Skill：",
