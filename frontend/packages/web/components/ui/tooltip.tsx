@@ -33,7 +33,7 @@ function TooltipContent({
     <div
       data-slot="tooltip-content"
       className={cn(
-        'z-50 inline-flex w-fit max-w-xs items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs text-background',
+        'z-50 inline-flex w-fit max-w-xs items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs text-background',
         className,
       )}
       {...props}

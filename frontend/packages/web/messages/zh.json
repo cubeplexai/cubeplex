@@ -917,7 +917,9 @@
     "preview": "预览",
     "download": "下载",
     "cancel": "取消",
-    "delete": "删除"
+    "delete": "删除",
+    "deleted": "已删除",
+    "undo": "撤销"
   },
   "chatExtras": {
     "imageClose": "关闭",

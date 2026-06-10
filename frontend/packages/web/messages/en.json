@@ -917,7 +917,9 @@
     "preview": "Preview",
     "download": "Download",
     "cancel": "Cancel",
-    "delete": "Delete"
+    "delete": "Delete",
+    "deleted": "Deleted",
+    "undo": "Undo"
   },
   "chatExtras": {
     "imageClose": "Close",
