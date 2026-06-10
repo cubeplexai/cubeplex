@@ -178,7 +178,7 @@ function WebSourceHoverContent({
                   ref={isActive ? activeRef : undefined}
                   className={`text-xs leading-relaxed rounded px-2 py-1 ${
                     isActive
-                      ? 'bg-primary/8 text-foreground border-l-2 border-primary'
+                      ? 'bg-accent text-foreground border-l-2 border-primary'
                       : 'text-muted-foreground/50'
                   }`}
                 >
@@ -259,7 +259,7 @@ function FileSourceHoverContent({
                   ref={isActive ? activeRef : undefined}
                   className={`text-xs leading-relaxed rounded px-2 py-1 ${
                     isActive
-                      ? 'bg-primary/8 text-foreground border-l-2 border-primary'
+                      ? 'bg-accent text-foreground border-l-2 border-primary'
                       : 'text-muted-foreground/50'
                   }`}
                 >

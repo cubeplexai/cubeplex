@@ -307,7 +307,7 @@ export function OrgLLMSettingsCard() {
             )}
             {!saveError && savedAt && (
               <span
-                className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400"
+                className="mr-auto inline-flex items-center gap-1 text-xs text-success-fg"
                 data-testid="settings-saved"
               >
                 <Check className="size-3" />

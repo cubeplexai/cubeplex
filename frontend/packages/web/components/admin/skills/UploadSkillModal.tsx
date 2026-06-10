@@ -138,7 +138,7 @@ export function UploadSkillModal({ open, onOpenChange, onUploaded }: UploadSkill
             )}
             {success && (
               <div
-                className="rounded-md border border-emerald-500/30 bg-emerald-500/5 px-2.5 py-1.5 text-xs text-emerald-600 dark:text-emerald-400"
+                className="rounded-md border border-success-border bg-success-surface px-2.5 py-1.5 text-xs text-success-fg"
                 data-testid="upload-skill-success"
               >
                 {success}

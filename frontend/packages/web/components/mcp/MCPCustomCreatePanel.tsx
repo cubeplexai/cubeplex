@@ -258,7 +258,7 @@ export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanel
           {testResult ? (
             <div
               className={`flex items-center gap-1.5 text-sm ${
-                testResult.ok ? 'text-emerald-600' : 'text-destructive'
+                testResult.ok ? 'text-success-fg' : 'text-destructive'
               }`}
             >
               {testResult.ok ? (

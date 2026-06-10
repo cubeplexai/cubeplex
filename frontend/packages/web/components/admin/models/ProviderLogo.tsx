@@ -23,16 +23,12 @@ import {
 import { cn } from '@/lib/utils'
 
 const COLORS = [
-  { bg: 'bg-blue-100', text: 'text-blue-600', dark: 'dark:bg-blue-900/40 dark:text-blue-300' },
-  { bg: 'bg-green-100', text: 'text-green-600', dark: 'dark:bg-green-900/40 dark:text-green-300' },
-  {
-    bg: 'bg-purple-100',
-    text: 'text-purple-600',
-    dark: 'dark:bg-purple-900/40 dark:text-purple-300',
-  },
-  { bg: 'bg-amber-100', text: 'text-amber-600', dark: 'dark:bg-amber-900/40 dark:text-amber-300' },
-  { bg: 'bg-rose-100', text: 'text-rose-600', dark: 'dark:bg-rose-900/40 dark:text-rose-300' },
-  { bg: 'bg-cyan-100', text: 'text-cyan-600', dark: 'dark:bg-cyan-900/40 dark:text-cyan-300' },
+  { bg: 'bg-info-surface', text: 'text-info-fg', dark: '' },
+  { bg: 'bg-success-surface', text: 'text-success-fg', dark: '' },
+  { bg: 'bg-muted', text: 'text-muted-foreground', dark: '' },
+  { bg: 'bg-warning-surface', text: 'text-warning-fg', dark: '' },
+  { bg: 'bg-danger-surface', text: 'text-danger-fg', dark: '' },
+  { bg: 'bg-accent', text: 'text-accent-foreground', dark: '' },
 ]
 
 // The @lobehub/icons brand exports are SVG components that accept a numeric

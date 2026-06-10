@@ -152,17 +152,17 @@ function tokenizeCode(code: string, language: string | null): Token[] {
 function tokenClassName(type: Token['type']): string {
   switch (type) {
     case 'comment':
-      return 'text-emerald-700 dark:text-emerald-400'
+      return 'text-success-fg'
     case 'string':
-      return 'text-amber-700 dark:text-amber-300'
+      return 'text-warning-fg'
     case 'keyword':
-      return 'text-sky-700 dark:text-sky-300'
+      return 'text-info-fg'
     case 'number':
-      return 'text-fuchsia-700 dark:text-fuchsia-300'
+      return 'text-info-fg'
     case 'tag':
-      return 'text-rose-700 dark:text-rose-300'
+      return 'text-danger-fg'
     case 'property':
-      return 'text-cyan-700 dark:text-cyan-300'
+      return 'text-info-fg'
     default:
       return 'text-foreground'
   }

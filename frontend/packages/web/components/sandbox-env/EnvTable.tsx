@@ -20,13 +20,13 @@ interface Props {
 function ScopeBadge({ scope }: { scope: 'workspace' | 'user' }) {
   if (scope === 'workspace') {
     return (
-      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-accent text-accent-foreground">
         ws
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-info-surface text-info-fg">
       me
     </span>
   )

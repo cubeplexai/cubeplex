@@ -67,11 +67,11 @@ export function KpiRow({ summary, priorSummary, rangeDays }: Props) {
         ? 'text-muted-foreground'
         : kind === 'up-bad'
           ? isUp
-            ? 'text-red-600'
-            : 'text-green-600'
+            ? 'text-danger-fg'
+            : 'text-success-fg'
           : isUp
-            ? 'text-green-600'
-            : 'text-red-600'
+            ? 'text-success-fg'
+            : 'text-danger-fg'
     return (
       <div className="rounded-md border bg-card px-3 py-2.5">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

@@ -85,9 +85,9 @@ interface ProviderDetailProps {
 }
 
 function livenessDotClass(status: string | null | undefined): string {
-  if (status === 'ok' || status === 'pass') return 'bg-green-500'
-  if (status === 'fail' || status === 'error') return 'bg-red-500'
-  return 'bg-zinc-400'
+  if (status === 'ok' || status === 'pass') return 'bg-success-solid'
+  if (status === 'fail' || status === 'error') return 'bg-danger-solid'
+  return 'bg-faint'
 }
 
 function authTypeLabel(
@@ -275,7 +275,7 @@ export function ProviderDetail({
 
           <div className="mt-1 text-xs">
             {provider.has_api_key ? (
-              <span className="text-emerald-600 dark:text-emerald-400">{t('apiKeySet')}</span>
+              <span className="text-success-fg">{t('apiKeySet')}</span>
             ) : (
               <span className="text-muted-foreground/60">{t('apiKeyMissing')}</span>
             )}

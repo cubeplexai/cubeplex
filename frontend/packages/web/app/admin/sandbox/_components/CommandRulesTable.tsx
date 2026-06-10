@@ -34,7 +34,7 @@ export function CommandRulesTable({ rules, onChange, disabled }: Props) {
           No command rules. All shell commands run unmodified.
         </p>
       ) : (
-        <div className="overflow-hidden rounded-md border border-border/70 bg-card/40">
+        <div className="overflow-hidden rounded border border-border/70 bg-card/40">
           <div className="grid grid-cols-[140px_1fr_44px] items-center gap-2 border-b border-border/60 bg-muted/30 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             <span>Action</span>
             <span>Pattern (glob)</span>
@@ -86,7 +86,7 @@ export function CommandRulesTable({ rules, onChange, disabled }: Props) {
         </div>
       )}
       {hasConfirm && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-950/30 dark:text-amber-200">
+        <div className="flex items-start gap-2 rounded border border-warning-border bg-warning-surface px-3 py-2 text-xs text-warning-fg">
           <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
           <span>
             <strong className="font-medium">confirm</strong> pauses the agent and asks a human to

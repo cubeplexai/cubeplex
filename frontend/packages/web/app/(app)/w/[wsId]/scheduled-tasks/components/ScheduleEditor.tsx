@@ -385,7 +385,7 @@ export function ScheduleEditor({ value, onChange }: ScheduleEditorProps) {
   if (isLegacy) {
     return (
       <div className="flex flex-col gap-3">
-        <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-600 dark:text-amber-400">
+        <div className="rounded-md border border-warning-border bg-warning-surface px-3 py-2 text-xs text-warning-fg">
           ⚠ {t('legacyCron')}
           <code className="ml-1 font-mono">{s.cronExpr}</code>
         </div>

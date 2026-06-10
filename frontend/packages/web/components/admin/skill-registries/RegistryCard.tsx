@@ -15,7 +15,7 @@ function KindBadge({ kind }: { kind: string }) {
 function TrustBadge({ tier }: { tier: string }) {
   if (tier === 'official') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-success-surface px-1.5 py-0.5 text-[10px] font-medium text-success-fg">
         <ShieldCheck className="size-3" />
         Official
       </span>
@@ -23,14 +23,14 @@ function TrustBadge({ tier }: { tier: string }) {
   }
   if (tier === 'community') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-info-surface px-1.5 py-0.5 text-[10px] font-medium text-info-fg">
         <ShieldAlert className="size-3" />
         Community
       </span>
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+    <span className="inline-flex items-center gap-1 rounded-full bg-warning-surface px-1.5 py-0.5 text-[10px] font-medium text-warning-fg">
       <ShieldOff className="size-3" />
       Unvetted
     </span>

@@ -32,7 +32,7 @@ export function CopyIngestUrl({ wsId, triggerId }: CopyIngestUrlProps) {
       onClick={() => void handleCopy()}
       data-testid="copy-ingest-url"
     >
-      {copied ? <Check className="size-3.5 text-green-500" /> : <Copy className="size-3.5" />}
+      {copied ? <Check className="size-3.5 text-success-fg" /> : <Copy className="size-3.5" />}
       {copied ? 'Copied!' : 'Copy ingest URL'}
     </Button>
   )

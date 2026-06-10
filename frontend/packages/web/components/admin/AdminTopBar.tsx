@@ -1,9 +1,8 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
+import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
-import { Box } from 'lucide-react'
 import { AdminAvatarMenu } from './AdminAvatarMenu'
 
 interface AdminTopBarProps {
@@ -22,23 +21,25 @@ function handleBackToApp() {
 export function AdminTopBar({ orgName }: AdminTopBarProps) {
   const t = useTranslations('admin')
   return (
-    <header className="flex items-center gap-3 border-b border-border bg-card/80 backdrop-blur supports-[backdrop-filter]:bg-card/60 px-4 h-14 shrink-0">
+    <header className="flex items-center gap-2 border-b border-border bg-card px-4 h-11 shrink-0">
       <div className="flex items-center gap-2">
-        <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0 shadow-sm">
-          <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
+        <div className="size-6 rounded bg-gradient-to-br from-card to-raised border border-border-strong grid place-items-center font-mono text-2xs text-muted-foreground">
+          cx
         </div>
-        <span className="text-sm font-semibold tracking-tight">cubebox</span>
-      </div>
-      <Separator orientation="vertical" className="h-5" />
-      <h1 className="text-sm font-medium">{t('title')}</h1>
-      {orgName && (
-        <span className="text-sm text-muted-foreground/70 before:content-['·'] before:mr-2 before:text-muted-foreground/40">
-          {orgName}
+        <span className="text-2xs uppercase tracking-wider font-medium text-faint">
+          {t('title')}
         </span>
-      )}
+        {orgName && (
+          <>
+            <span className="text-faint">/</span>
+            <span className="text-sm font-medium text-foreground">{orgName}</span>
+          </>
+        )}
+      </div>
 
       <div className="ml-auto flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={handleBackToApp}>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={handleBackToApp}>
+          <ArrowLeft className="size-3.5" />
           {t('backToApp')}
         </Button>
         <AdminAvatarMenu />

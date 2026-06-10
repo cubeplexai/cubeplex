@@ -31,19 +31,19 @@ function StateBadge({ state }: StateBadgeProps): React.ReactElement {
   const config: Record<ScheduledTaskRunState, { label: string; className: string }> = {
     claimed: {
       label: 'Claimed',
-      className: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+      className: 'bg-info-surface text-info-fg',
     },
     started: {
       label: 'Running',
-      className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300',
+      className: 'bg-warning-surface text-warning-fg',
     },
     succeeded: {
       label: 'Succeeded',
-      className: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+      className: 'bg-success-surface text-success-fg',
     },
     failed: {
       label: 'Failed',
-      className: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+      className: 'bg-danger-surface text-danger-fg',
     },
     skipped_missed: {
       label: 'Skipped (missed)',
@@ -51,7 +51,7 @@ function StateBadge({ state }: StateBadgeProps): React.ReactElement {
     },
     skipped_busy_max_retries: {
       label: 'Skipped (busy)',
-      className: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
+      className: 'bg-warning-surface text-warning-fg',
     },
   }
   const { label, className } = config[state] ?? {

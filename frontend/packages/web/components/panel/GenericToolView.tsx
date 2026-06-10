@@ -29,7 +29,7 @@ function CopyButton({ text }: { text: string }) {
       title={t('copy')}
     >
       {copied ? (
-        <Check className="size-3 text-emerald-500" />
+        <Check className="size-3 text-success-fg" />
       ) : (
         <Copy className="size-3 text-muted-foreground" />
       )}

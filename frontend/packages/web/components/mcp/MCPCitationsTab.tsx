@@ -101,7 +101,7 @@ export function MCPCitationsTab({ install, client, onUpdated }: MCPCitationsTabP
               <span
                 className={
                   citations[tool.name]
-                    ? 'text-[10px] font-medium uppercase tracking-wide text-emerald-600'
+                    ? 'text-[10px] font-medium uppercase tracking-wide text-success-fg'
                     : 'text-[10px] uppercase tracking-wide text-muted-foreground'
                 }
               >

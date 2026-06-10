@@ -79,9 +79,7 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
         {loaded !== null && (
           <span
             className={`rounded-full px-1.5 py-0.5 text-xs ${
-              loaded
-                ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-                : 'bg-red-500/10 text-red-600 dark:text-red-400'
+              loaded ? 'bg-success-solid/10 text-success-fg' : 'bg-danger-solid/10 text-danger-fg'
             }`}
           >
             {loaded ? tPanel('loaded') : tPanel('failed')}
@@ -90,7 +88,7 @@ export function SkillView({ args, result, skillId }: SkillViewProps) {
       </div>
 
       {displayError && (
-        <div className="rounded-md bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
+        <div className="rounded-md bg-danger-solid/10 p-3 text-sm text-danger-fg">
           {displayError}
         </div>
       )}

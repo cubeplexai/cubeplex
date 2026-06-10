@@ -248,10 +248,7 @@ export function PolicyEditor() {
         )}
         {!saveError && savedAt && (
           <span
-            className={cn(
-              'mr-auto inline-flex items-center gap-1 text-xs',
-              'text-emerald-600 dark:text-emerald-400',
-            )}
+            className={cn('mr-auto inline-flex items-center gap-1 text-xs', 'text-success-fg')}
             data-testid="sandbox-policy-saved"
           >
             <Check className="size-3" />

@@ -234,11 +234,9 @@ function StaticTokenForm({
 // ---------- banner shell ---------- //
 
 const BANNER_COLORS = {
-  emerald:
-    'border-emerald-300/60 bg-emerald-50 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100',
-  amber:
-    'border-amber-300/60 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100',
-  rose: 'border-rose-300/60 bg-rose-50 text-rose-900 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-100',
+  emerald: 'border-success-border bg-success-surface text-success-fg',
+  amber: 'border-warning-border bg-warning-surface text-warning-fg',
+  rose: 'border-danger-border bg-danger-surface text-danger-fg',
 } as const
 
 function Banner({

@@ -42,7 +42,7 @@ export function WorkspaceCreateForm() {
           placeholder={t('namePlaceholder')}
         />
       </label>
-      {error && <div className="text-sm text-red-500">{error}</div>}
+      {error && <div className="text-sm text-danger-fg">{error}</div>}
       <button
         type="submit"
         disabled={submitting || !name.trim()}

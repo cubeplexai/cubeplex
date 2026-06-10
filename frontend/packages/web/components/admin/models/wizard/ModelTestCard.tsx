@@ -21,9 +21,9 @@ interface ModelTestCardProps {
 function StepChip({ step }: { step: ProbeStep }) {
   const tone =
     step.status === 'pass'
-      ? 'border-green-500/40 bg-green-500/5 text-green-700 dark:text-green-300'
+      ? 'border-success-border bg-success-surface text-success-fg'
       : step.status === 'warn'
-        ? 'border-amber-500/40 bg-amber-500/5 text-amber-700 dark:text-amber-300'
+        ? 'border-warning-border bg-warning-surface text-warning-fg'
         : step.status === 'fail'
           ? 'border-destructive/40 bg-destructive/5 text-destructive'
           : 'border-border/70 bg-muted/30 text-muted-foreground'
@@ -50,8 +50,8 @@ function StepChip({ step }: { step: ProbeStep }) {
 }
 
 const OUTCOME_TONE: Record<ProbeResult['overall'], string> = {
-  pass: 'bg-green-500/10 text-green-700 dark:text-green-300',
-  warn: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  pass: 'bg-success-surface text-success-fg',
+  warn: 'bg-warning-surface text-warning-fg',
   fail: 'bg-destructive/10 text-destructive',
   unavailable: 'bg-destructive/10 text-destructive',
 }
@@ -88,11 +88,9 @@ export function ModelTestCard({ state, onRetest }: ModelTestCardProps) {
                 {isFail ? (
                   <X className="mt-0.5 size-3 shrink-0 text-destructive" />
                 ) : (
-                  <TriangleAlert className="mt-0.5 size-3 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <TriangleAlert className="mt-0.5 size-3 shrink-0 text-warning-fg" />
                 )}
-                <span
-                  className={cn(isFail ? 'text-destructive' : 'text-amber-700 dark:text-amber-300')}
-                >
+                <span className={cn(isFail ? 'text-destructive' : 'text-warning-fg')}>
                   <span className="font-medium">{s.name}</span>
                   {detail ? ` — ${detail}` : ''}
                 </span>

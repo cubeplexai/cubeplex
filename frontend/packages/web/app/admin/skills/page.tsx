@@ -9,6 +9,7 @@ import { SkillDetailPanel } from '@/components/admin/skills/SkillDetailPanel'
 import { AdminCandidateDetailPanel } from '@/components/admin/skills/AdminCandidateDetailPanel'
 import { UploadSkillModal } from '@/components/admin/skills/UploadSkillModal'
 import { useAdminSkills } from '@/hooks/useAdminSkills'
+import { PageHeader } from '@/components/management/PageHeader'
 
 type Selection = { kind: 'skill'; id: string } | { kind: 'candidate'; candidateId: string }
 
@@ -42,10 +43,7 @@ export default function SkillsPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">{t('skills')}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('skillsSubtitle')}</p>
-      </header>
+      <PageHeader title={t('skills')} description={t('skillsSubtitle')} />
 
       <SkillsToolbar
         filters={filters}
