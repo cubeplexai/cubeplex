@@ -110,10 +110,38 @@ async def load_workspace_mcp_tools_for_cubepi(
       scoping.
     """
     specs = await effective_service.list_runtime_specs(workspace_id, user_id)
+    return await _load_tools_for_specs(
+        specs=specs,
+        all_specs=specs,
+        workspace_id=workspace_id,
+        org_id=org_id,
+        user_id=user_id,
+        cred_service=cred_service,
+        signer=signer,
+        token_manager=token_manager,
+        grant_repo=grant_repo,
+    )
 
-    # Pre-compute proposed slugs to detect cross-server collisions.
+
+async def _load_tools_for_specs(
+    *,
+    specs: list[MCPRuntimeConnectorSpec],
+    all_specs: list[MCPRuntimeConnectorSpec],
+    workspace_id: str,
+    org_id: str,
+    user_id: str,
+    cred_service: CredentialService,
+    signer: MCPUserTokenSigner,
+    token_manager: OAuthTokenManager,
+    grant_repo: MCPCredentialGrantRepository | None = None,
+) -> tuple[list[AgentTool[Any]], dict[str, CitationConfig]]:
+    """Load and namespace MCP tools for a subset of runtime specs.
+
+    ``all_specs`` is the full workspace spec set used for slug collision
+    detection; ``specs`` is the subset to actually load.
+    """
     proposed_slugs: dict[str, str] = {
-        spec.install_id: _slugify_for_namespace(spec.name) for spec in specs
+        s.install_id: _slugify_for_namespace(s.name) for s in all_specs
     }
     slug_counts: Counter[str] = Counter(proposed_slugs.values())
 
@@ -147,9 +175,6 @@ async def load_workspace_mcp_tools_for_cubepi(
             continue
 
         if resolved is None:
-            # Credential resolution returned no token for a non-passthrough
-            # spec — the effective service should already have flagged this
-            # spec as unusable, but defend in depth.
             continue
         headers, server_url = resolved
 
@@ -191,7 +216,11 @@ async def load_workspace_mcp_tools_for_cubepi(
 
         for tool in tools:
             bare_name = tool.name
-            namespaced_name = _build_namespaced_name_with_prefix(slug, bare_name, suffix=suffix)
+            namespaced_name = _build_namespaced_name_with_prefix(
+                slug,
+                bare_name,
+                suffix=suffix,
+            )
             namespaced = dataclasses.replace(tool, name=namespaced_name)
             all_tools.append(namespaced)
             raw = spec.tool_citations.get(bare_name)
