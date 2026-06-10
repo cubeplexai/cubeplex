@@ -3,10 +3,15 @@ cubebox has been deployed.
   Namespace: {{ .Release.Namespace }}
   Release:   {{ .Release.Name }}
 
+Ingress: ingress-nginx is reachable on this cluster via NodePort 30019
+(http) and 30999 (https). On 192.168.1.101 the host already binds :80
+(unrelated nginx), so don't expect `cubebox.local` on the default port —
+use :30019 explicitly.
+
 Add to /etc/hosts on your workstation:
   192.168.1.101 {{ .Values.ingress.host }}
 
-Then visit: http://{{ .Values.ingress.host }}/
+Then visit: http://{{ .Values.ingress.host }}:30019/
 
 Inspect:
   kubectl -n {{ .Release.Namespace }} get pods,svc,ingress
