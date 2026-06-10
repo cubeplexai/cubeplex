@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react'
 
 export function ThemeToggle() {
   const t = useTranslations('avatar')
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -18,7 +18,7 @@ export function ThemeToggle() {
 
   if (!mounted) return null
 
-  const label = theme === 'dark' ? t('lightTheme') : t('darkTheme')
+  const label = resolvedTheme === 'dark' ? t('lightTheme') : t('darkTheme')
 
   return (
     <Button
@@ -26,9 +26,9 @@ export function ThemeToggle() {
       size="sm"
       aria-label={label}
       title={label}
-      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
     >
-      {theme === 'dark' ? (
+      {resolvedTheme === 'dark' ? (
         <Sun aria-hidden className="size-4" />
       ) : (
         <Moon aria-hidden className="size-4" />
