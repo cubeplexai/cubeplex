@@ -1,826 +1,790 @@
 # MCP Progressive Disclosure Implementation Plan
 
-> **⚠ PENDING REVISION (2026-06-09):** The spec has been updated with three
-> significant design changes from the hermes-agent research pass:
-> 1. **cubepi/cubebox layering** — core mechanism (`DeferredToolGroup`, `expand_tools`,
->    middleware) moves into cubepi as a generic primitive; cubebox provides MCP → group mapping.
-> 2. **Catalog includes tool names** — not just server slug + description.
-> 3. **Threshold = context-window token %** (default 10%) + `min_servers` secondary guard.
->
-> The tasks below still reference the old names (`expand_mcp_server`,
-> `MCPDisclosureMiddleware`, `min_servers`-only threshold). A plan revision is needed
-> before implementation begins. The cubepi-side work is tracked as a separate cubepi
-> issue and should land first.
+> For agentic workers: use superpowers:subagent-driven-development (recommended)
+> or superpowers:executing-plans. Tasks use checkbox syntax for progress tracking.
 
-> For agentic workers: execute tasks top to bottom. Each task is TDD — write the
-> test first, watch it fail, implement, watch it pass. Stay on branch
-> `feat/mcp-progressive-disclosure`; never switch to main or merge mid-execution.
-> First command in the worktree is always `cat .worktree.env` (slot 89, backend
-> `:8089`, DB `cubebox_feat_mcp_progressive_disclosure`). Run the per-module tests
-> shown under each task during dev; reserve the full suite for the pre-PR sweep.
-> **Task 0 (the spike) gates the whole plan** — its answer selects the deferral
-> mode for Task 6. Do not skip or reorder it.
+**Goal:** When a workspace has many MCP servers, hide their full tool schemas
+behind a compact catalog and let the model expand groups on demand — saving
+cache/context cost on every turn where most servers are unused.
 
-Date: 2026-05-27 (spec revised 2026-06-09)
+**Architecture:** cubepi already provides the generic `DeferredToolGroup` /
+`DeferredToolsMiddleware` / `load_tools` primitive (PR #168, pinned at
+`5a85696`). cubebox maps MCP servers → deferred groups and wires them into
+`run_manager._run_cubepi_path`. No custom middleware, catalog renderer, or
+expand-tool in cubebox — cubepi handles all of that.
+
+**Tech Stack:** FastAPI + cubepi 0.9.0, Postgres/SQLModel, Python 3.13,
+mypy strict, ruff, line length 100.
+
+Date: 2026-05-27 (spec revised 2026-06-09, plan revised 2026-06-10)
 Spec: `docs/dev/specs/2026-05-27-mcp-progressive-disclosure-design.md`
 Issue: #143
 
 ---
 
-## Goal
+## File Map
 
-Stop injecting every enabled MCP server's full tool schemas into the prompt on
-every turn. Instead inject a **compact catalog** (server slug + one-line
-description + tool count + trigger hint) as a stable system-prompt suffix, and
-let the model call a new `expand_mcp_server(server)` builtin to make a server's
-real, callable tools available for the rest of the conversation. Collapsed
-servers contribute **zero** tool definitions to `tools=` and zero schema text —
-that is the only thing that actually saves cache/attention cost. Expanded
-servers' callable tools come from the **real runtime loader**
-(`load_workspace_mcp_tools_for_cubepi` → `load_mcp_tools_http`) **filtered to the
-expanded set**, never synthesized from `tools_cache` (cache is index/preview
-only — cached JSON schemas are not executable). The prompt-cache prefix must stay
-byte-stable: catalog sorted by slug, expanded-schema text appended in **expansion
-order** (append-only, never re-sorted). Feature is config-gated and off below a
-server-count threshold so small workspaces keep today's exact behavior.
-
-## Architecture
-
-Mirror the **skills** subsystem at server granularity:
-
-| Skills (existing) | MCP progressive disclosure (this plan) |
-|---|---|
-| `SKILLS_PROMPT_TEMPLATE` index in system-prompt suffix, sorted by name | MCP catalog renderer, suffix, sorted by **slug** |
-| `load_skill(name)` builtin returns SKILL.md JSON | `expand_mcp_server(server)` builtin returns server tool summary JSON |
-| `SkillsMiddleware`: `after_tool_call` writes `extra["loaded_skills"]` (dict); `transform_system_prompt` appends bodies sorted by name | `MCPDisclosureMiddleware`: `after_tool_call` appends slug to `extra["expanded_mcp_servers"]` (**ordered list**, dedup, first-expanded-first); `transform_system_prompt` appends each expanded server's schema text in **expansion order** |
-
-Key divergence from skills: the **enabled** skill set is fixed up front, so
-skills can sort by name. MCP servers expand **incrementally mid-conversation**, so
-slug-sorting the expanded blocks could insert a later expansion *before* an
-already-cached block and invalidate the prefix. Therefore expanded-schema text is
-ordered by **expansion order**, persisted as an **ordered list** in `extra`, and
-replayed unchanged across turns.
-
-The load-bearing unknown — can cubepi add callable tools to a *live* agent mid-run
-and re-mark the cache boundary? — is resolved by **Task 0 (spike)**. The plan
-branches there:
-
-- **True deferral** (cubepi supports mid-run tool-set change): a just-expanded
-  server is callable within the same turn.
-- **Next-turn fallback** (cubepi cannot, current pinned rev): the expanded
-  server's tools enter `tools=` on the **next** user turn; the tool set is frozen
-  per run. Still saves all the cost (collapsed servers never in `tools=`); costs a
-  one-turn delay before a just-expanded server is callable.
-
-Either way **pre-register-all is rejected** — shipping every collapsed server's
-schema in `tools=` while hiding it from the catalog prose saves nothing.
-
-## Tech Stack
-
-- Backend: FastAPI + cubepi agent runtime, Postgres (SQLModel + Alembic),
-  Python 3.13, mypy strict, line length 100.
-- Tests: pytest + pytest-asyncio. E2E under `tests/e2e/`, unit under
-  `tests/unit/` (directory marker is auto-applied by `tests/conftest.py`).
-- MCP E2E uses the existing `stub_discover_tools` fixture
-  (`tests/e2e/conftest.py:696`) **only to avoid the post-grant discovery network
-  probe** — it is a no-op that patches `run_post_grant_discovery`, nothing more.
-  It does **not** seed `tools_cache` and does **not** simulate a runtime MCP
-  server returning callable tools. The disclosure tests therefore additionally
-  need: (a) installs whose `tools_cache` is seeded directly (for catalog + expand
-  previews + schema text), and (b) a fake `load_mcp_tools_http` (or equivalent
-  monkeypatch in `cubepi_runtime`) that returns callable tools for the expanded
-  set so an expanded server's tools actually execute. Build these as part of
-  Task 6d; do not assume `stub_discover_tools` provides them.
-- Touch points (all confirmed by reading the code):
-  - `backend/cubebox/streams/run_manager.py` — tool assembly (~1034), middleware
-    stack (~1136–1353), final tool merge (~1359), `create_cubebox_agent` call
-    (~1384), system-prompt suffix assembly (~1799).
-  - `backend/cubebox/mcp/cubepi_runtime.py` — `load_workspace_mcp_tools_for_cubepi`.
-  - `backend/cubebox/mcp/effective.py` — `list_runtime_specs`,
-    `MCPRuntimeConnectorSpec` (carries `install_id`, `name`, `tools_cache`,
-    `discovery_metadata`; **note: no `description` field** — see Task 2).
-  - `backend/cubebox/models/mcp.py` — `MCPConnectorInstall.tools_cache`,
-    `.discovery_metadata`, `.slug_name`, `.description` (via template).
-  - `backend/cubebox/middleware/skills.py`,
-    `backend/cubebox/tools/builtin/load_skill.py`,
-    `backend/cubebox/prompts/skills.py` — the analog to copy.
-  - `backend/cubebox/config.py` — `config.get("mcp.progressive_disclosure...")`.
+| File | Action | Responsibility |
+|---|---|---|
+| `cubebox/mcp/disclosure.py` | Create | Config settings, threshold gate, spec→group mapping |
+| `cubebox/mcp/cubepi_runtime.py` | Modify | Add `load_tools_for_specs` (per-spec-list loader) |
+| `cubebox/streams/run_manager.py` | Modify | Wire deferred groups into `_run_cubepi_path` |
+| `config.yaml` | Modify | Add `mcp.progressive_disclosure` block |
+| `tests/unit/test_mcp_disclosure.py` | Create | Config, threshold, spec→group mapping |
+| `tests/e2e/test_mcp_disclosure_runtime.py` | Create | Full wiring, catalog, expand, threshold bypass |
 
 ---
 
-## Task 0 — SPIKE: does cubepi support mid-run tool-set change? (GATES THE PLAN)
+## Task 1 — Config flags + threshold gate
 
-**This task produces a written decision, not shippable code.** It selects the
-Task 6 branch (true deferral vs next-turn fallback).
-
-What we already know from reading the **pinned** cubepi
-(`backend/.venv/.../cubepi/agent/agent.py`, `loop.py`):
-
-- `Agent._state.tools` has a property setter (`agent.state.tools = [...]`).
-- BUT `Agent.prompt()` calls `_create_context_snapshot()` **once** and the loop
-  runs against that single `current_context`; `run_agent_loop` reads
-  `context.tools` to build `tools_defs` (`loop.py` ~381) and never re-reads
-  `agent.state.tools` between iterations. So mutating `agent.state.tools` from a
-  middleware hook during a run does **not** change the tools the model sees this
-  run.
-
-Steps:
-
-1. Write a throwaway probe `backend/scripts/dev/spike_mcp_live_tools.py` that
-   builds a minimal cubepi `Agent` with a tool whose `after_tool_call` (or a
-   middleware) appends a second `AgentTool` to `agent.state.tools`, then checks
-   whether the model is offered the new tool in the **same** `prompt()` call.
-   Drive it with a stub provider that records the `tools_defs` passed on each
-   model call.
-2. Inspect cubepi for any hook to mutate `current_context.tools` mid-loop (e.g. a
-   `transform_context` that returns tools, or a documented "register tool"
-   surface). Grep `~/cubepi` source, not just the installed wheel — but remember
-   runtime uses the **pinned** wheel (`reference_cubepi_pinned_dep`), so any new
-   capability must be released + the pin bumped before it reaches runtime.
-
-Run:
-```bash
-cd backend && uv run python scripts/dev/spike_mcp_live_tools.py
-```
-Expected output (one of):
-```
-SPIKE RESULT: MID_RUN_SUPPORTED   # new tool appears in same-run tools_defs
-SPIKE RESULT: MID_RUN_UNSUPPORTED # snapshot frozen; next-turn fallback required
-```
-
-Record the result and the chosen branch in
-`docs/dev/notes/2026-05-27-mcp-disclosure-cubepi-spike.md` (one new note file is
-allowed — it is the decision record this plan depends on). Delete the probe
-script after.
-
-**Decision rule:**
-- `MID_RUN_UNSUPPORTED` → build **next-turn fallback** in v1 (expected, given the
-  snapshot finding). File a cubepi upstream follow-up (`~/cubepi`, upstream-first)
-  to add mid-run tool-set change + cache re-establishment; do **not** hand-edit
-  cubepi vendor behavior in cubebox.
-- `MID_RUN_SUPPORTED` → build **true deferral** (Task 6 variant B).
-
-Verify: the note exists and states the branch explicitly.
-
----
-
-## Task 1 — Config flags + threshold gate (unit)
-
-Add the config surface and a pure helper deciding when disclosure is active.
+Add the config surface and pure helpers deciding when disclosure is active.
 
 Files:
-- `backend/cubebox/mcp/disclosure.py` (new) — pure functions, no I/O.
-- `backend/config.development.yaml` and `backend/config.yaml` (whichever holds the
-  `mcp` block; add the `progressive_disclosure` subkey).
-- `backend/tests/unit/test_mcp_disclosure_gate.py` (new).
+- Create: `backend/cubebox/mcp/disclosure.py`
+- Modify: `backend/config.yaml` (add `mcp.progressive_disclosure` block)
+- Create: `backend/tests/unit/test_mcp_disclosure.py`
 
-`disclosure.py`:
+- [ ] **Step 1: Write the failing tests**
+
 ```python
-"""Progressive-disclosure gating + catalog/schema rendering (pure, no I/O)."""
+# tests/unit/test_mcp_disclosure.py
+from __future__ import annotations
+
+
+class TestDisclosureSettings:
+    def test_defaults(self) -> None:
+        from cubebox.mcp.disclosure import DisclosureSettings
+
+        s = DisclosureSettings()
+        assert s.enabled == "auto"
+        assert s.threshold_pct == 10.0
+        assert s.min_servers == 2
+
+    def test_disabled_never_active(self) -> None:
+        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+
+        s = DisclosureSettings(enabled="off")
+        assert disclosure_active(s, server_count=10, total_tool_tokens=9999) is False
+
+    def test_on_always_active(self) -> None:
+        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+
+        s = DisclosureSettings(enabled="on")
+        assert disclosure_active(s, server_count=1, total_tool_tokens=1) is True
+
+    def test_auto_below_min_servers(self) -> None:
+        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+
+        s = DisclosureSettings(enabled="auto", min_servers=3)
+        # Even if tokens are high, too few servers → inactive.
+        assert disclosure_active(s, server_count=2, total_tool_tokens=99999) is False
+
+    def test_auto_below_threshold_pct(self) -> None:
+        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+
+        s = DisclosureSettings(enabled="auto", threshold_pct=10.0, min_servers=2)
+        # 3 servers but tool tokens are only 5% of context → inactive.
+        assert (
+            disclosure_active(
+                s, server_count=3, total_tool_tokens=5_000, context_window=100_000,
+            )
+            is False
+        )
+
+    def test_auto_above_both_thresholds(self) -> None:
+        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+
+        s = DisclosureSettings(enabled="auto", threshold_pct=10.0, min_servers=2)
+        # 3 servers, 15% of context → active.
+        assert (
+            disclosure_active(
+                s, server_count=3, total_tool_tokens=15_000, context_window=100_000,
+            )
+            is True
+        )
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend && uv run pytest tests/unit/test_mcp_disclosure.py -v`
+Expected: ImportError — `cubebox.mcp.disclosure` does not exist yet.
+
+- [ ] **Step 3: Implement `disclosure.py`**
+
+```python
+# cubebox/mcp/disclosure.py
+"""MCP progressive disclosure — config, threshold gate, spec→group mapping."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
 
 from cubebox.config import config
 
 
 @dataclass(frozen=True)
 class DisclosureSettings:
-    enabled: bool
-    min_servers: int
+    enabled: Literal["auto", "on", "off"] = "auto"
+    threshold_pct: float = 10.0
+    min_servers: int = 2
 
 
 def load_disclosure_settings() -> DisclosureSettings:
     return DisclosureSettings(
-        enabled=bool(config.get("mcp.progressive_disclosure.enabled", False)),
-        min_servers=int(config.get("mcp.progressive_disclosure.min_servers", 3)),
+        enabled=str(config.get("mcp.progressive_disclosure.enabled", "auto")),
+        threshold_pct=float(config.get("mcp.progressive_disclosure.threshold_pct", 10.0)),
+        min_servers=int(config.get("mcp.progressive_disclosure.min_servers", 2)),
     )
 
 
-def disclosure_active(settings: DisclosureSettings, usable_server_count: int) -> bool:
+def disclosure_active(
+    settings: DisclosureSettings,
+    *,
+    server_count: int,
+    total_tool_tokens: int = 0,
+    context_window: int = 0,
+) -> bool:
     """True when the catalog/expand machinery replaces eager tool loading."""
-    return settings.enabled and usable_server_count >= settings.min_servers
+    if settings.enabled == "off":
+        return False
+    if settings.enabled == "on":
+        return True
+    # "auto": both guards must pass.
+    if server_count < settings.min_servers:
+        return False
+    if context_window <= 0:
+        return server_count >= settings.min_servers
+    return (total_tool_tokens / context_window * 100) >= settings.threshold_pct
 ```
 
-Test (write first, must fail before `disclosure.py` exists):
-```python
-from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+- [ ] **Step 4: Add config block to `config.yaml`**
 
+Under the existing MCP comment (~line 198), add:
 
-def test_disabled_never_active() -> None:
-    s = DisclosureSettings(enabled=False, min_servers=2)
-    assert disclosure_active(s, 10) is False
-
-
-def test_below_threshold_inactive() -> None:
-    s = DisclosureSettings(enabled=True, min_servers=3)
-    assert disclosure_active(s, 2) is False
-
-
-def test_at_threshold_active() -> None:
-    s = DisclosureSettings(enabled=True, min_servers=3)
-    assert disclosure_active(s, 3) is True
-```
-
-Config block (add under existing `mcp:`):
 ```yaml
 mcp:
   progressive_disclosure:
-    enabled: false      # off by default — small workspaces keep today's behavior
-    min_servers: 3      # only collapse when this many usable servers connected
+    enabled: "auto"        # "auto" | "on" | "off"
+    threshold_pct: 10.0    # collapse when deferrable schemas >= this % of context
+    min_servers: 2         # never collapse below this server count
 ```
 
-Run:
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `cd backend && uv run pytest tests/unit/test_mcp_disclosure.py -v`
+Expected: 6 passed.
+
+- [ ] **Step 6: Commit**
+
 ```bash
-cd backend && uv run pytest tests/unit/test_mcp_disclosure_gate.py -q
+git add cubebox/mcp/disclosure.py tests/unit/test_mcp_disclosure.py config.yaml
+git commit -m "feat(mcp): disclosure config flags + threshold gate (#143)"
 ```
-Expected: `3 passed`.
 
 ---
 
-## Task 2 — Catalog renderer (unit, determinism + cache-stability)
+## Task 2 — Spec-to-group mapping + per-spec-list loader
 
-Render the compact catalog from data already in Postgres
-(`MCPRuntimeConnectorSpec.tools_cache` + spec `name`/`install_id`) — **no live
-discovery**. Sorted by slug → byte-identical every turn.
+Build the function that converts `MCPRuntimeConnectorSpec` objects into
+`DeferredToolGroup` objects and a helper that loads tools for a subset of specs.
 
-**Description source (important):** `MCPRuntimeConnectorSpec` has **no
-`description` field** (confirmed at `effective.py:206`). Do not call
-`spec.description`. Derive the one-line description from data the spec already
-carries: prefer a value pulled from `spec.discovery_metadata` (server
-description/summary captured at discovery), else fall back to the slug itself.
-If a richer source is wanted, widen `MCPRuntimeConnectorSpec` /
-`list_runtime_specs` to carry a `description` from the template/discovery row —
-but that is an explicit extra step, not assumed by the renderer. Pick one and
-make `render_catalog` take the resolved description string (or `None`).
+The loader reuses the existing auth-resolution and namespacing pipeline from
+`load_workspace_mcp_tools_for_cubepi` — extracted into a shared inner function
+so both the eager (all-at-once) and deferred (per-group) paths call the same
+code.
 
 Files:
-- `backend/cubebox/mcp/disclosure.py` (extend).
-- `backend/cubebox/prompts/mcp_catalog.py` (new) — the template, mirroring
-  `prompts/skills.py`.
-- `backend/tests/unit/test_mcp_catalog_render.py` (new).
+- Modify: `backend/cubebox/mcp/cubepi_runtime.py` — extract `_load_tools_for_specs`
+- Modify: `backend/cubebox/mcp/disclosure.py` — add `build_deferred_groups`
+- Extend: `backend/tests/unit/test_mcp_disclosure.py`
 
-`prompts/mcp_catalog.py`:
-```python
-"""MCP catalog template — injected by run_manager when disclosure is active."""
-
-MCP_CATALOG_HEADER = """\
-
-# Connected tool servers (collapsed)
-
-These servers are connected but their tools are not loaded yet. Call
-`expand_mcp_server(server)` with a name below to load that server's tools for the
-rest of this conversation.
-"""
-```
-
-`disclosure.py` (add):
-```python
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
-from cubebox.mcp._constants import slugify_for_namespace
-from cubebox.prompts.mcp_catalog import MCP_CATALOG_HEADER
-
-
-def _one_line(text: str | None, limit: int = 140) -> str:
-    s = " ".join((text or "").split())
-    return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
-
-
-def _spec_description(spec: MCPRuntimeConnectorSpec) -> str | None:
-    """No `description` field on the spec — derive from discovery_metadata."""
-    meta = spec.discovery_metadata or {}
-    return meta.get("description") or meta.get("summary")
-
-
-def render_catalog(specs: list[MCPRuntimeConnectorSpec]) -> str:
-    """Compact, slug-sorted catalog. Never contains per-tool JSON schemas."""
-    lines: list[str] = []
-    for spec in sorted(specs, key=lambda s: slugify_for_namespace(s.name)):
-        slug = slugify_for_namespace(spec.name)
-        count = len(spec.tools_cache)
-        desc = _one_line(_spec_description(spec) or slug)
-        lines.append(f"- `{slug}` — {desc} ({count} tools)")
-    return MCP_CATALOG_HEADER + "\n" + "\n".join(lines) + "\n"
-```
-(Confirm the actual `discovery_metadata` key by reading a real install row; the
-keys above are a guess. Trigger-hint line is derived from description for v1 —
-the spec leaves an authored `trigger_hints` field as a Later item; do **not**
-add a migration now.)
-
-Test (write first):
-```python
-from cubebox.mcp.disclosure import render_catalog
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
-
-
-def _spec(name: str, desc: str, n_tools: int) -> MCPRuntimeConnectorSpec:
-    # No `description` field — push the one-liner through discovery_metadata.
-    return MCPRuntimeConnectorSpec(
-        install_id=f"inst-{name}", name=name,
-        discovery_metadata={"description": desc},
-        tools_cache=[{"name": f"t{i}"} for i in range(n_tools)],
-        # ...remaining required fields filled with neutral defaults...
-    )
-
-
-def test_catalog_sorted_by_slug_and_byte_stable() -> None:
-    # slugify_for_namespace PRESERVES case (`Alpha` → `Alpha`, not `alpha`):
-    # use lowercase names so expected slugs match, or assert on the actual
-    # slug. Sorting is by the slug as produced — confirm by reading
-    # _constants.py:38, do not assume lowercasing.
-    specs = [_spec("zeta", "z server", 2), _spec("alpha", "a server", 5)]
-    out1 = render_catalog(specs)
-    out2 = render_catalog(list(reversed(specs)))  # input order must not matter
-    assert out1 == out2
-    assert out1.index("`alpha`") < out1.index("`zeta`")
-    assert "(5 tools)" in out1 and "(2 tools)" in out1
-
-
-def test_catalog_has_no_input_schemas() -> None:
-    specs = [_spec("Alpha", "a", 1)]
-    assert "input_schema" not in render_catalog(specs)
-```
-(Inspect `MCPRuntimeConnectorSpec` field list at `effective.py:207` to fill the
-constructor; do not guess.)
-
-Run:
-```bash
-cd backend && uv run pytest tests/unit/test_mcp_catalog_render.py -q
-```
-Expected: `2 passed`.
-
----
-
-## Task 3 — Expanded-schema renderer (unit, expansion-order stability)
-
-Render the full tool definitions of expanded servers, from `tools_cache`, in
-**expansion order** (never sorted). Adding one expansion must only **append**.
-
-**Names must match the real callable tools.** The runtime loader namespaces and
-may suffix/truncate each tool name via `_build_namespaced_name_with_prefix` +
-the collision/truncation logic in `cubepi_runtime.py` (~113–199): explicit slug
-collisions and risky truncations get a `_{last4}` suffix. The schema text the
-model reads here, the `tool_names` from Task 4, and the catalog must all use the
-**same** namespaced names the model will actually call — otherwise the model
-sees one name in the schema and a different name in `tools=`. Compute namespaced
-names by reusing that loader logic (extract a pure helper, or call the same
-namespacing pass over the spec's `tools_cache`), not by emitting raw
-`tools_cache["name"]` values.
-
-Files:
-- `backend/cubebox/mcp/disclosure.py` (extend).
-- `backend/tests/unit/test_mcp_expanded_render.py` (new).
-
-`disclosure.py` (add):
-```python
-import json
-
-EXPANDED_SECTION_HEADER = "[Expanded MCP servers]"
-
-
-def render_expanded_schemas(
-    expanded_slugs: list[str],
-    specs_by_slug: dict[str, MCPRuntimeConnectorSpec],
-) -> str:
-    """Append-only schema text, ordered by EXPANSION ORDER (not slug).
-
-    A newly expanded server's block always lands after every already-rendered
-    block → earlier cache segments stay byte-identical.
-    """
-    blocks: list[str] = []
-    for slug in expanded_slugs:  # expansion order, as-stored
-        spec = specs_by_slug.get(slug)
-        if spec is None:
-            continue
-        tools_json = json.dumps(spec.tools_cache, sort_keys=True, ensure_ascii=False)
-        blocks.append(f"## Server: {slug}\n\n{tools_json}")
-    if not blocks:
-        return ""
-    return f"\n\n{EXPANDED_SECTION_HEADER}\n\n" + "\n\n".join(blocks)
-```
-
-Test (write first):
-```python
-def test_expansion_order_preserved_not_sorted() -> None:
-    specs = {"zeta": _spec("zeta",...), "alpha": _spec("alpha",...)}
-    out = render_expanded_schemas(["zeta", "alpha"], specs)
-    assert out.index("## Server: zeta") < out.index("## Server: alpha")
-
-
-def test_adding_expansion_only_appends() -> None:
-    specs = {"a": _spec("a",...), "b": _spec("b",...)}
-    first = render_expanded_schemas(["a"], specs)
-    second = render_expanded_schemas(["a", "b"], specs)
-    assert second.startswith(first)  # prefix preserved → cache-safe
-
-
-def test_json_keys_sorted_for_byte_stability() -> None:
-    out = render_expanded_schemas(["a"], {"a": _spec("a", tools=[{"b":1,"a":2}])})
-    assert out == render_expanded_schemas(["a"], {"a": _spec("a", tools=[{"a":2,"b":1}])})
-```
-
-Run:
-```bash
-cd backend && uv run pytest tests/unit/test_mcp_expanded_render.py -q
-```
-Expected: `3 passed`.
-
----
-
-## Task 4 — `expand_mcp_server` builtin (unit)
-
-A sibling of `load_skill`. Validates the slug against the workspace's usable
-installs, returns a JSON summary (namespaced tool names + descriptions, **no
-schemas in the result** — middleware injects schema text). Placed in the fixed
-tool order **where MCP tools used to go** — as the last builtin, immediately
-before the MCP tools (after `generate_image`); see Task 6b for exact placement.
-
-**`tool_names` must be the namespaced, collision-resolved names** the model will
-actually call (see Task 3) — not bare `tools_cache["name"]`. `list_usable_slugs`
-therefore returns the post-namespacing names per slug, computed with the same
-loader logic.
-
-Files:
-- `backend/cubebox/tools/builtin/expand_mcp_server.py` (new).
-- `backend/tests/unit/test_expand_mcp_server_tool.py` (new).
+- [ ] **Step 1: Write the failing tests for `_load_tools_for_specs`**
 
 ```python
-"""expand_mcp_server builtin — sibling of load_skill.
-
-Returns a summary of a connected MCP server's tools so the model knows what it
-just unlocked. Schema text is injected into the system prompt by
-MCPDisclosureMiddleware (mirrors how SkillsMiddleware injects skill bodies),
-NOT re-emitted in this tool result.
-"""
-
-from __future__ import annotations
-
-from collections.abc import Awaitable, Callable
-
-from cubepi.agent.types import AgentTool, AgentToolResult
-from cubepi.providers.base import TextContent
-from pydantic import BaseModel, Field
+# tests/unit/test_mcp_disclosure.py (append)
+import pytest
 
 
-class ExpandMCPServerInput(BaseModel):
-    server: str = Field(description="The server slug from your 'Connected tool servers' list.")
+class TestLoadToolsForSpecs:
+    @pytest.fixture()
+    def _patch_load_mcp_tools_http(self, monkeypatch: pytest.MonkeyPatch):
+        """Patch cubepi.mcp.load_mcp_tools_http to return dummy tools."""
+        from unittest.mock import AsyncMock
+        from cubepi.agent.types import AgentTool, AgentToolResult
+        from cubepi.providers.base import TextContent
+        from pydantic import BaseModel
 
+        class _E(BaseModel):
+            pass
 
-class ExpandMCPServerOutput(BaseModel):
-    server: str
-    expanded: bool
-    tool_names: list[str]
-    error: str | None = None
+        async def _exec(tool_call_id, args, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="ok")])
 
-    def __str__(self) -> str:
-        return self.model_dump_json()
+        class FakeDiscovery:
+            def __init__(self, names: list[str]):
+                self.tools = [
+                    AgentTool(name=n, description=f"Tool {n}", parameters=_E, execute=_exec)
+                    for n in names
+                ]
 
+        async def _fake_load(url, *, headers=None, timeout=30.0, transport="sse"):
+            return FakeDiscovery(["create_issue", "search_repos"])
 
-def create_expand_mcp_server_tool(
-    *,
-    list_usable_slugs: Callable[[], Awaitable[dict[str, list[str]]]],
-) -> AgentTool[ExpandMCPServerInput]:
-    """list_usable_slugs() → {slug: [bare_tool_name, ...]} for usable installs."""
+        monkeypatch.setattr("cubebox.mcp.cubepi_runtime.load_mcp_tools_http", _fake_load)
 
-    async def _execute(tool_call_id, args, *, signal=None, on_update=None):
-        del tool_call_id, signal, on_update
-        usable = await list_usable_slugs()
-        if args.server not in usable:
-            out = ExpandMCPServerOutput(
-                server=args.server, expanded=False, tool_names=[],
-                error=f"Server '{args.server}' is not connected to this workspace",
-            )
-            return AgentToolResult(content=[TextContent(text=out.model_dump_json())], is_error=True)
-        out = ExpandMCPServerOutput(
-            server=args.server, expanded=True, tool_names=usable[args.server],
+    @pytest.mark.usefixtures("_patch_load_mcp_tools_http")
+    async def test_loads_and_namespaces_tools(self) -> None:
+        from cubebox.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+
+        spec = MCPRuntimeConnectorSpec(
+            install_id="inst-001",
+            name="GitHub",
+            server_url="http://localhost:9999/mcp",
+            transport="sse",
+            auth_method="none",
+            grant_scope=None,
+            credential_id=None,
+            refresh_credential_id=None,
+            tool_citations={},
+            tools_cache=[{"name": "create_issue"}, {"name": "search_repos"}],
         )
-        return AgentToolResult(content=[TextContent(text=out.model_dump_json())])
+        # _load_tools_for_specs needs auth dependencies — pass stubs.
+        tools, citations = await _load_tools_for_specs(
+            specs=[spec],
+            all_specs=[spec],
+            workspace_id="ws-1",
+            org_id="org-1",
+            user_id="u-1",
+            cred_service=...,    # see Step 3 note
+            signer=...,
+            token_manager=...,
+            grant_repo=None,
+        )
+        assert len(tools) == 2
+        assert tools[0].name.startswith("GitHub__")
+```
 
-    return AgentTool(
-        name="expand_mcp_server",
-        description=(
-            "Load a connected MCP server's tools for the rest of this conversation. "
-            "Pass the exact server slug from your 'Connected tool servers' list."
-        ),
-        parameters=ExpandMCPServerInput,
-        execute=_execute,
+> **Note:** The exact fixture setup for `cred_service`, `signer`, and
+> `token_manager` depends on the `_resolve_auth_from_spec` call. For an
+> `auth_method="none"` spec, `signer` must be a real or mocked
+> `MCPUserTokenSigner`. Use the E2E fixtures from
+> `tests/e2e/conftest.py` as reference. Alternatively, monkeypatch
+> `_resolve_auth_from_spec` to return `({}, "http://localhost:9999/mcp")`
+> for unit tests.
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `cd backend && uv run pytest tests/unit/test_mcp_disclosure.py::TestLoadToolsForSpecs -v`
+Expected: ImportError — `_load_tools_for_specs` does not exist.
+
+- [ ] **Step 3: Extract `_load_tools_for_specs` from `load_workspace_mcp_tools_for_cubepi`**
+
+Refactor `cubepi_runtime.py`: extract the per-spec loop (lines 123–209) into a
+new `_load_tools_for_specs` that takes `specs` + `all_specs` (for slug
+collision detection) + the auth dependencies, and returns
+`tuple[list[AgentTool], dict[str, CitationConfig]]`. Then
+`load_workspace_mcp_tools_for_cubepi` becomes:
+
+```python
+async def load_workspace_mcp_tools_for_cubepi(...) -> tuple[...]:
+    specs = await effective_service.list_runtime_specs(workspace_id, user_id)
+    return await _load_tools_for_specs(
+        specs=specs,
+        all_specs=specs,
+        workspace_id=workspace_id,
+        org_id=org_id,
+        user_id=user_id,
+        cred_service=cred_service,
+        signer=signer,
+        token_manager=token_manager,
+        grant_repo=grant_repo,
     )
 ```
 
-Test (write first): valid slug → `expanded=True` with tool names; unknown slug →
-`is_error=True`, `expanded=False`.
-
-Run:
-```bash
-cd backend && uv run pytest tests/unit/test_expand_mcp_server_tool.py -q
-```
-Expected: `2 passed`.
-
----
-
-## Task 5 — `MCPDisclosureMiddleware` (unit)
-
-Port of `SkillsMiddleware`. `after_tool_call` for a successful `expand_mcp_server`
-appends the slug to `extra["expanded_mcp_servers"]` (ordered list, dedup,
-first-expanded-first; **never sort**). `transform_system_prompt` appends the
-expanded-schema text via `render_expanded_schemas` in stored order.
-
-Files:
-- `backend/cubebox/middleware/mcp_disclosure.py` (new).
-- `backend/tests/unit/test_mcp_disclosure_middleware.py` (new).
+`_load_tools_for_specs` is a module-private function with signature:
 
 ```python
-"""MCPDisclosureMiddleware — server-granularity port of SkillsMiddleware."""
+async def _load_tools_for_specs(
+    *,
+    specs: list[MCPRuntimeConnectorSpec],
+    all_specs: list[MCPRuntimeConnectorSpec],
+    workspace_id: str,
+    org_id: str,
+    user_id: str,
+    cred_service: CredentialService,
+    signer: MCPUserTokenSigner,
+    token_manager: OAuthTokenManager,
+    grant_repo: MCPCredentialGrantRepository | None = None,
+) -> tuple[list[AgentTool[Any]], dict[str, CitationConfig]]:
+```
 
+`all_specs` is the full set of usable specs (for slug collision pre-computation);
+`specs` is the subset to actually load. This way the per-group loader can pass
+`specs=[this_group_spec]` and `all_specs=all_workspace_specs` to get correct
+namespacing.
+
+- [ ] **Step 4: Run existing MCP tests to verify the refactor didn't break anything**
+
+Run: `cd backend && uv run pytest tests/ -k "mcp" -v --timeout=60`
+Expected: all existing MCP tests pass.
+
+- [ ] **Step 5: Write failing tests for `build_deferred_groups`**
+
+```python
+# tests/unit/test_mcp_disclosure.py (append)
+class TestBuildDeferredGroups:
+    def test_builds_groups_from_specs(self) -> None:
+        from cubebox.mcp.disclosure import build_deferred_groups
+        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+
+        spec = MCPRuntimeConnectorSpec(
+            install_id="inst-001",
+            name="GitHub",
+            server_url="http://localhost:9999/mcp",
+            transport="sse",
+            auth_method="none",
+            grant_scope=None,
+            credential_id=None,
+            refresh_credential_id=None,
+            tool_citations={},
+            tools_cache=[
+                {"name": "create_issue", "description": "Create an issue"},
+                {"name": "search_repos", "description": "Search repos"},
+            ],
+            discovery_metadata={"server": {"name": "GitHub"}},
+        )
+        groups = build_deferred_groups(
+            specs=[spec],
+            all_specs=[spec],
+            loader_kwargs={},  # auth deps — not called in this test
+        )
+        assert len(groups) == 1
+        g = groups[0]
+        assert g.group_id == "mcp:GitHub"
+        assert g.display_name == "GitHub"
+        assert "create_issue" in g.tool_names[0]  # namespaced
+        assert "search_repos" in g.tool_names[1]
+        assert callable(g.loader)
+
+    def test_description_from_discovery_metadata(self) -> None:
+        from cubebox.mcp.disclosure import build_deferred_groups
+        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+
+        spec = MCPRuntimeConnectorSpec(
+            install_id="inst-002",
+            name="Linear",
+            server_url="http://localhost:9999/mcp",
+            transport="sse",
+            auth_method="none",
+            grant_scope=None,
+            credential_id=None,
+            refresh_credential_id=None,
+            tool_citations={},
+            tools_cache=[{"name": "create_issue"}],
+            discovery_metadata={
+                "server": {"name": "Linear", "description": "Issue tracking and PM"},
+            },
+        )
+        groups = build_deferred_groups(
+            specs=[spec], all_specs=[spec], loader_kwargs={},
+        )
+        assert "Issue tracking" in groups[0].description
+
+    def test_fallback_description_when_no_metadata(self) -> None:
+        from cubebox.mcp.disclosure import build_deferred_groups
+        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+
+        spec = MCPRuntimeConnectorSpec(
+            install_id="inst-003",
+            name="MyServer",
+            server_url="http://localhost:9999/mcp",
+            transport="sse",
+            auth_method="none",
+            grant_scope=None,
+            credential_id=None,
+            refresh_credential_id=None,
+            tool_citations={},
+            tools_cache=[{"name": "do_thing"}],
+        )
+        groups = build_deferred_groups(
+            specs=[spec], all_specs=[spec], loader_kwargs={},
+        )
+        # Falls back to spec name when no discovery_metadata description.
+        assert groups[0].description != ""
+```
+
+- [ ] **Step 6: Implement `build_deferred_groups`**
+
+```python
+# cubebox/mcp/disclosure.py (append)
 from __future__ import annotations
 
-import json
-from collections.abc import Callable
+from collections import Counter
 from typing import Any
 
-from cubepi.agent.types import AfterToolCallContext
-from cubepi.middleware.base import Middleware
+from cubepi.deferred import DeferredToolGroup
 
-from cubebox.mcp.disclosure import render_expanded_schemas
+from cubebox.mcp._constants import slugify_for_namespace
+from cubebox.mcp.cubepi_runtime import (
+    _build_namespaced_name_with_prefix,
+    _load_tools_for_specs,
+    _NS_LENGTH_DEFENCE,
+)
 from cubebox.mcp.effective import MCPRuntimeConnectorSpec
-from cubebox.tools.builtin.expand_mcp_server import ExpandMCPServerOutput
-
-EXPANDED_KEY = "expanded_mcp_servers"
 
 
-class MCPDisclosureMiddleware(Middleware):
-    def __init__(
-        self,
-        *,
-        extra_ref: Callable[[], dict[str, Any]],
-        specs_by_slug: dict[str, MCPRuntimeConnectorSpec],
-    ) -> None:
-        self._extra_ref = extra_ref
-        self._specs_by_slug = specs_by_slug
+def _spec_description(spec: MCPRuntimeConnectorSpec) -> str:
+    """One-line description from discovery metadata, falling back to name."""
+    server = (spec.discovery_metadata or {}).get("server") or {}
+    desc = server.get("description") or server.get("summary") or ""
+    s = " ".join(desc.split())
+    if len(s) > 140:
+        s = s[:139].rstrip() + "…"
+    return s or spec.name
 
-    async def after_tool_call(self, ctx: AfterToolCallContext, *, signal: Any = None) -> None:
-        del signal
-        if ctx.tool_call.name != "expand_mcp_server" or ctx.is_error or not ctx.result.content:
-            return None
-        raw = next((b.text for b in ctx.result.content if hasattr(b, "text")), "")
-        if not raw:
-            return None
-        try:
-            out = ExpandMCPServerOutput.model_validate_json(raw)
-        except (json.JSONDecodeError, ValueError):
-            return None
-        if not out.expanded:
-            return None
-        extra = self._extra_ref()
-        ordered: list[str] = extra.setdefault(EXPANDED_KEY, [])
-        if out.server not in ordered:           # dedup, preserve first-expanded order
-            ordered.append(out.server)
-        return None
 
-    async def transform_system_prompt(self, system_prompt: str, *, signal: Any = None) -> str:
-        del signal
-        ordered: list[str] = self._extra_ref().get(EXPANDED_KEY, [])
-        if not ordered:
-            return system_prompt
-        return system_prompt + render_expanded_schemas(ordered, self._specs_by_slug)
+def _compute_namespaced_tool_names(
+    spec: MCPRuntimeConnectorSpec,
+    all_specs: list[MCPRuntimeConnectorSpec],
+) -> list[str]:
+    """Predict namespaced tool names using the same logic as the runtime loader."""
+    proposed_slugs = {s.install_id: slugify_for_namespace(s.name) for s in all_specs}
+    slug_counts: Counter[str] = Counter(proposed_slugs.values())
+    slug = proposed_slugs[spec.install_id]
+    explicit_collision = slug_counts[slug] > 1
+    risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
+    if explicit_collision or risky_truncation:
+        safe = spec.install_id.replace("-", "")
+        suffix = f"_{safe[-4:] if len(safe) >= 4 else safe}"
+    else:
+        suffix = ""
+    return [
+        _build_namespaced_name_with_prefix(slug, tc.get("name", ""), suffix=suffix)
+        for tc in spec.tools_cache
+        if tc.get("name")
+    ]
+
+
+def build_deferred_groups(
+    *,
+    specs: list[MCPRuntimeConnectorSpec],
+    all_specs: list[MCPRuntimeConnectorSpec],
+    loader_kwargs: dict[str, Any],
+) -> list[DeferredToolGroup]:
+    """Convert MCP runtime specs into cubepi DeferredToolGroup objects.
+
+    ``loader_kwargs`` carries the auth dependencies
+    (workspace_id, org_id, user_id, cred_service, signer, token_manager,
+    grant_repo) forwarded to ``_load_tools_for_specs`` when the model
+    calls ``load_tools``.
+    """
+    groups: list[DeferredToolGroup] = []
+    for spec in specs:
+        slug = slugify_for_namespace(spec.name)
+        tool_names = _compute_namespaced_tool_names(spec, all_specs)
+
+        async def _loader(_s=spec, _all=all_specs, _kw=loader_kwargs):
+            tools, _citations = await _load_tools_for_specs(
+                specs=[_s], all_specs=_all, **_kw,
+            )
+            return tools
+
+        groups.append(
+            DeferredToolGroup(
+                group_id=f"mcp:{slug}",
+                display_name=spec.name,
+                description=_spec_description(spec),
+                tool_names=tool_names,
+                loader=_loader,
+            ),
+        )
+    return groups
 ```
 
-Test (write first):
-- Calling `after_tool_call` twice for the same slug stores it once.
-- Two distinct slugs are stored in call order; `transform_system_prompt` output
-  reflects that order and is append-only (the Task 3 invariant, exercised through
-  the middleware).
-- A non-`expand_mcp_server` tool call is a no-op.
+- [ ] **Step 7: Run tests**
 
-Run:
+Run: `cd backend && uv run pytest tests/unit/test_mcp_disclosure.py -v`
+Expected: all passed.
+
+- [ ] **Step 8: Commit**
+
 ```bash
-cd backend && uv run pytest tests/unit/test_mcp_disclosure_middleware.py -q
+git add cubebox/mcp/disclosure.py cubebox/mcp/cubepi_runtime.py \
+    tests/unit/test_mcp_disclosure.py
+git commit -m "feat(mcp): spec→DeferredToolGroup mapping + per-spec-list loader (#143)"
 ```
-Expected: `3 passed`.
 
 ---
 
-## Task 6 — Wire into run_manager: filtered loader + catalog suffix + middleware (integration)
+## Task 3 — Wire into run_manager
 
-This is where the spec's true-deferral commitment lands. **Branch on Task 0.**
+Integrate the disclosure gate + deferred groups into
+`run_manager._run_cubepi_path`. When disclosure is active, MCP servers become
+deferred groups instead of eagerly loaded tools. When inactive (below threshold
+or `"off"`), the existing eager-load path runs unchanged.
 
 Files:
-- `backend/cubebox/mcp/cubepi_runtime.py` — add `only_install_ids` filter.
-- `backend/cubebox/streams/run_manager.py` — tool load (~1034), middleware
-  append (after SkillsMiddleware ~1267), system-prompt suffix (~1818).
-- `backend/tests/e2e/test_mcp_disclosure_runtime.py` (new, uses
-  `stub_discover_tools`).
+- Modify: `backend/cubebox/streams/run_manager.py`
 
-### 6a. Filter the live loader (not a tools_cache synthesizer)
+- [ ] **Step 1: Add the disclosure branch to `_run_cubepi_path`**
 
-In `load_workspace_mcp_tools_for_cubepi`, add a keyword-only
-`only_install_ids: set[str] | None = None`. When provided, after
-`specs = await effective_service.list_runtime_specs(...)`, filter:
-```python
-specs = await effective_service.list_runtime_specs(workspace_id, user_id)
-if only_install_ids is not None:
-    specs = [s for s in specs if s.install_id in only_install_ids]
-```
-Everything downstream (auth resolve, `load_mcp_tools_http`, namespacing,
-citations) is unchanged — these are the **real callable** tools, filtered to the
-expanded set. `tools_cache` is never a tool source.
+In `_run_cubepi_path`, the MCP tool load block (~line 2155) currently:
+1. Opens a session, builds auth services
+2. Calls `load_workspace_mcp_tools_for_cubepi(...)` → `_new_tools`, `_new_citations`
+3. Extends `_builtin_tools` and `mcp_citation_configs`
 
-Also export a cheap helper used by Task 4's `list_usable_slugs` and the catalog:
-return `list_runtime_specs(...)` already gives `install_id`, `name`, `tools_cache`
-— map slug→bare tool names from `tools_cache` for the summary (preview only),
-slug→install_id for the filter, slug→spec for the renderers.
-
-### 6b. run_manager assembly
-
-At the MCP block (~1034), compute `specs = list_runtime_specs(...)` once, build
-`specs_by_slug` and `usable_count`. Then:
+Replace with a disclosure-aware branch:
 
 ```python
-from cubebox.mcp.disclosure import load_disclosure_settings, disclosure_active
+from cubebox.mcp.disclosure import (
+    build_deferred_groups,
+    disclosure_active,
+    load_disclosure_settings,
+)
 
-settings = load_disclosure_settings()
-active = disclosure_active(settings, usable_count)
+# ... inside the MCP load block, after building _effective_service ...
 
-if active:
-    expanded: list[str] = []  # populated from agent._extra on replay (see 6c)
-    only_ids = {specs_by_slug[s].install_id for s in expanded if s in specs_by_slug}
-    _new_tools, _new_citations = await load_workspace_mcp_tools_for_cubepi(
-        ..., only_install_ids=only_ids,
+_disclosure_settings = load_disclosure_settings()
+specs = await _effective_service.list_runtime_specs(
+    ctx.workspace_id, ctx.user_id,
+)
+
+# Estimate tool tokens from tools_cache for the threshold gate.
+import json as _json
+_total_tool_tokens = sum(
+    len(_json.dumps(s.tools_cache)) // 4 for s in specs  # rough token estimate
+)
+
+_deferred_groups: list = []
+
+if disclosure_active(
+    _disclosure_settings,
+    server_count=len(specs),
+    total_tool_tokens=_total_tool_tokens,
+    context_window=_ctx_window,
+):
+    # Build deferred groups — loader callbacks will call
+    # _load_tools_for_specs with the auth deps captured here.
+    _loader_kwargs = dict(
+        workspace_id=ctx.workspace_id,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        cred_service=effective_cred_service,
+        signer=self._app.state.mcp_user_token_signer,
+        token_manager=_token_manager,
+        grant_repo=_grant_repo,
     )
-    _builtin_tools.append(create_expand_mcp_server_tool(list_usable_slugs=...))
-    # catalog suffix appended to effective_system_prompt below
+    _deferred_groups = build_deferred_groups(
+        specs=specs,
+        all_specs=specs,
+        loader_kwargs=_loader_kwargs,
+    )
+    # No tools loaded eagerly — they'll come from load_tools calls.
+    # Citations for expanded servers are returned by the per-group
+    # loader; wire them into mcp_citation_configs at expand time.
+    # (For v1, citations from the loader are added to the agent's
+    # citation middleware when the group expands — handled by the
+    # DeferredToolsMiddleware's on_tools_expanded callback.)
 else:
-    # today's path: load ALL servers, no catalog, no expand tool
-    _new_tools, _new_citations = await load_workspace_mcp_tools_for_cubepi(...)
+    # Eager path — today's behavior, unchanged.
+    (
+        _new_tools,
+        _new_citations,
+    ) = await load_workspace_mcp_tools_for_cubepi(
+        effective_service=_effective_service,
+        token_manager=_token_manager,
+        workspace_id=ctx.workspace_id,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        cred_service=effective_cred_service,
+        signer=self._app.state.mcp_user_token_signer,
+        grant_repo=_grant_repo,
+    )
+    _builtin_tools.extend(_new_tools)
+    mcp_citation_configs.update(_new_citations)
 ```
 
-`expand_mcp_server` is appended to `_builtin_tools` **immediately before the MCP
-tools and after every existing builtin** — do not insert it right after
-`load_skill`, which would shift `view_images`/`generate_image`. The actual
-current order (confirmed in `run_manager.py` ~927–1032) is: memory → load_skill →
-view_images → generate_image → mcp_tools. Insert `expand_mcp_server` as the last
-builtin so the prefix becomes: … → memory → load_skill → view_images →
-generate_image → **expand_mcp_server** → mcp_tools. Everything before it stays
-byte-identical.
+- [ ] **Step 2: Pass deferred groups to agent creation**
 
-Append `MCPDisclosureMiddleware(extra_ref=_extra_ref, specs_by_slug=specs_by_slug)`
-to `cubepi_middleware` immediately after `SkillsMiddleware` (~1267). The
-`extra_ref` closure resolves to `agent._extra` once it's late-bound at ~1403,
-exactly like skills/compaction/todo.
+At the `create_cubebox_agent(...)` call (~line 2663), add
+`deferred_tool_groups=_deferred_groups or None`:
 
-When `active`, append the catalog suffix to `effective_system_prompt`. The suffix
-is built in `_run_cubepi_path` (where `specs` are loaded), not at ~1799 (which
-runs before the run path and has no specs). Move/duplicate the catalog injection
-into the run path right after the MCP load, mirroring how skills append to the
-prompt — append `render_catalog(specs)` to `effective_system_prompt` before
-`create_cubebox_agent`.
+```python
+agent = create_cubebox_agent(
+    ...
+    tools=all_tools,
+    deferred_tool_groups=_deferred_groups or None,
+    ...
+)
+```
 
-### 6c. The deferral branch (from Task 0)
+This requires `create_cubebox_agent` to accept and forward
+`deferred_tool_groups` to `Agent(...)`. Find the wrapper function and add the
+parameter — it likely just passes kwargs through to `Agent()`.
 
-- **Next-turn fallback (`MID_RUN_UNSUPPORTED`, expected):** on each run, build
-  `only_install_ids` from the **persisted prior-run** expanded set
-  (`expanded_mcp_servers` ordered list) before the MCP tools are loaded.
-  **Ordering problem to fix:** the MCP tool load is at ~1098 but the existing
-  `init_checkpointer()`/`cp.load(conversation_id)` (citation seeding) is at ~1375
-  — *after* the tool load. The live `agent._extra` is also only available after
-  `create_cubebox_agent` (~1384). So the fallback needs an **earlier** load of the
-  persisted `_extra` (an `init_checkpointer()`/`cp.load` call hoisted above the MCP
-  block at ~1041, or a small helper that reads just the persisted
-  `expanded_mcp_servers` for the conversation) so `only_install_ids` is known when
-  `load_workspace_mcp_tools_for_cubepi(..., only_install_ids=...)` runs. Do not
-  read the live `_extra` for this — it is empty until the agent is built and only
-  reflects this run. A server expanded on turn N becomes callable on turn N+1: the
-  `expand_mcp_server` call on turn N records the slug into the live `_extra`, which
-  is persisted (`save_extra` at `agent_end`, same as `loaded_skills`) and read back
-  on turn N+1's early load. **Document this one-turn delay in the
-  `expand_mcp_server` tool description** so the model expects it ("the server's
-  tools become available on your next turn"). Confirm `save_extra` actually
-  persists arbitrary `_extra` keys (verify `loaded_skills` round-trips today)
-  before relying on it for `expanded_mcp_servers`.
-- **True deferral (`MID_RUN_SUPPORTED`):** after `after_tool_call` records the
-  slug, also load that server's callable tools via the filtered loader and add
-  them to the live agent through cubepi's mid-run mechanism (whatever Task 0
-  found), and re-mark the cache boundary. Tool description drops the "next turn"
-  caveat. This depends on the released+pinned cubepi capability.
+- [ ] **Step 3: Verify `list_runtime_specs` is available outside the session**
 
-> Confirm which branch you are on by re-reading the Task 0 note. Do not build both.
+The `specs` call needs `_effective_service` which is built inside an
+`async with async_session_maker() as effective_session:` block. Ensure the
+`specs` query and `build_deferred_groups` both run inside that block. The
+loader callbacks capture `_effective_service` (and the session) in their
+closure — confirm the session is still open when the loader runs during the
+agent loop. If the session closes when the `async with` block exits, the
+loader must create its own session. Inspect the lifecycle and adjust — this
+is the most likely gotcha.
 
-### 6d. E2E test (write first)
+> **Likely fix:** Each loader callback opens its own short-lived session
+> (matching the pattern in `_resolve_auth_from_spec`), or the outer session
+> block is widened to encompass the entire agent run. Check what the existing
+> MCP load does and follow its pattern.
 
-`tests/e2e/test_mcp_disclosure_runtime.py`, using `stub_discover_tools` (to skip
-the discovery probe) plus the install-creation pattern from
-`tests/e2e/test_mcp_four_layer_runtime.py`. Additionally seed each install's
-`tools_cache` directly and monkeypatch the runtime tool loader
-(`load_mcp_tools_http` / `cubepi_runtime`) to return callable tools for the
-expanded set — `stub_discover_tools` alone supplies neither (see Tech Stack):
+- [ ] **Step 4: Run mypy + ruff**
 
-1. With disclosure enabled and ≥ `min_servers` usable servers installed: assert
-   the assembled `tools=` contains `expand_mcp_server` and **no** namespaced MCP
-   tools from collapsed servers; assert the system prompt contains the catalog
-   (server slugs, tool counts) and **no** `input_schema`.
-2. Drive a run that calls `expand_mcp_server("<slug>")`; assert the slug is in
-   `agent._extra["expanded_mcp_servers"]` and (per branch) the expanded server's
-   namespaced tools are callable (same run for true deferral / next run for
-   fallback) and produce a result.
-3. Assert citations still attach for the expanded server (`mcp_citation_configs`
-   populated for it; `CitationMiddleware` unchanged).
-
-Run:
 ```bash
-cd backend && uv run pytest tests/e2e/test_mcp_disclosure_runtime.py -q
+cd backend && uv run mypy cubebox/streams/run_manager.py cubebox/mcp/disclosure.py \
+    cubebox/mcp/cubepi_runtime.py && uv run ruff check cubebox tests
 ```
-Expected: all pass (real simulated MCP discovery via `stub_discover_tools`).
+Expected: no errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add cubebox/streams/run_manager.py cubebox/mcp/disclosure.py \
+    cubebox/mcp/cubepi_runtime.py
+git commit -m "feat(mcp): wire deferred groups into run_manager (#143)"
+```
 
 ---
 
-## Task 7 — Threshold below-min byte-identical guard (E2E)
+## Task 4 — E2E: disclosure flow + threshold bypass
 
-Prove the small-workspace path is unchanged: below `min_servers`, no catalog, no
-`expand_mcp_server`, all servers' tools eagerly loaded exactly as today.
+Write E2E tests that prove (a) when disclosure is active, collapsed servers are
+absent from `tools=` and the catalog is in the prompt; (b) the model can expand
+a group and the tools become callable; (c) below threshold, behavior is exactly
+today's eager load.
 
 Files:
-- `backend/tests/e2e/test_mcp_disclosure_runtime.py` (add a case).
+- Create: `backend/tests/e2e/test_mcp_disclosure_runtime.py`
 
-Assert: with `min_servers=3` and 2 usable servers, the assembled prompt has no
-catalog header and `tools=` contains every server's namespaced tools (status
-quo), and `expand_mcp_server` is **absent**.
+- [ ] **Step 1: Write the E2E test**
 
-Run:
+Use `stub_discover_tools` to skip the discovery probe, seed `tools_cache` on
+installs directly, and monkeypatch `load_mcp_tools_http` (or
+`_load_tools_for_specs`) to return callable tools. Reference
+`tests/e2e/test_mcp_four_layer_runtime.py` for install-creation patterns.
+
+Tests to write:
+
+1. **`test_disclosure_active_catalog_in_prompt`** — with `enabled="on"` and
+   ≥ `min_servers` installs: the assembled `tools=` contains `load_tools` and
+   **no** namespaced MCP tools; the system prompt contains the catalog (group
+   ids, tool names, tool counts).
+
+2. **`test_expand_group_makes_tools_callable`** — drive a run that calls
+   `load_tools("mcp:github")`; assert the expanded server's tools appear in
+   the agent's live tool set after expansion.
+
+3. **`test_threshold_bypass_eager_load`** — with `min_servers=5` and only 2
+   installs: no catalog, no `load_tools` tool, all servers' tools eagerly
+   loaded (today's behavior).
+
+4. **`test_disabled_always_eager`** — with `enabled="off"` and many servers:
+   all tools loaded eagerly.
+
+- [ ] **Step 2: Run E2E**
+
 ```bash
-cd backend && uv run pytest tests/e2e/test_mcp_disclosure_runtime.py -q -k threshold
+cd backend && uv run pytest tests/e2e/test_mcp_disclosure_runtime.py -v
+```
+Expected: all pass.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/e2e/test_mcp_disclosure_runtime.py
+git commit -m "test(mcp): E2E for disclosure flow + threshold bypass (#143)"
+```
+
+---
+
+## Task 5 — Cache-prefix stability E2E
+
+Extend the cache regression tests to assert disclosure doesn't break
+prompt-cache stability.
+
+Files:
+- Modify or create: `backend/tests/e2e/test_mcp_disclosure_runtime.py` (extend)
+
+- [ ] **Step 1: Write cache stability tests**
+
+1. **`test_catalog_byte_stable_across_turns`** — with disclosure active and
+   nothing expanded, the system-prompt suffix (catalog portion) is
+   byte-identical on two consecutive prompt assemblies.
+
+2. **`test_expansion_append_only`** — expand group A on turn 1, expand group
+   B on turn 2. The turn-2 system prompt starts with the turn-1 system prompt
+   as a prefix (the B block is appended, never inserted before A).
+
+These can be unit-ish (call the middleware's `transform_system_prompt` twice
+with different expansion states) or full E2E — either works as long as the
+byte-identity assertion is exact.
+
+- [ ] **Step 2: Run**
+
+```bash
+cd backend && uv run pytest tests/e2e/test_mcp_disclosure_runtime.py -v -k cache
 ```
 Expected: pass.
 
----
+- [ ] **Step 3: Commit**
 
-## Task 8 — Cache-prefix stability E2E (THE GATE)
-
-Extend the existing real-LLM cache regression. This is the single most important
-test per the spec.
-
-Files:
-- `backend/tests/e2e/memory/test_prompt_cache.py` (extend, mirroring
-  `test_cache_hit_rate_meets_bar`).
-
-Assert, with disclosure active and ≥ `min_servers` servers:
-1. **Catalog stability:** the cache-eligible prefix is byte-stable across turns
-   with the catalog present and nothing expanded (catalog derived purely from DB,
-   slug-sorted → identical every turn).
-2. **Append-only after expansion:** after the model expands one server, the next
-   turn's prefix **starts with** the previous turn's expanded-schema text and only
-   appends the new block — no mid-prefix mutation, no reorder. Expanding a second
-   server appends after the first (expansion order, not slug order).
-3. Reuse the existing `CUBEBOX_E2E_LLM_CACHE_CAPABLE` skip semantics so the test
-   discriminates "endpoint doesn't honor cache" from "we broke the prefix".
-
-Run:
 ```bash
-cd backend && CUBEBOX_E2E_LLM_CACHE_CAPABLE=true uv run pytest \
-  tests/e2e/memory/test_prompt_cache.py -q
+git add tests/e2e/test_mcp_disclosure_runtime.py
+git commit -m "test(mcp): cache-prefix stability for disclosure (#143)"
 ```
-Expected: pass (or principled SKIP if the endpoint can't cache — never weaken the
-bar to make it pass; per `prompt-cache-discipline.md` find the dynamic content
-instead).
 
 ---
 
-## Task 9 — Pre-PR sweep + self-review
+## Task 6 — Pre-PR sweep
 
 Files: none (verification only).
 
-1. Full backend suite on the worktree slot DB:
-   ```bash
-   cd backend && uv run pytest -q
-   ```
-   Expected: green (the worktree conftest auto-routes to
-   `cubebox_test_feat_mcp_progressive_disclosure`).
-2. Type + lint:
-   ```bash
-   cd backend && uv run mypy cubebox && uv run ruff check cubebox tests
-   ```
-   Expected: no errors; lines ≤ 100.
-3. Confirm: collapsed servers contribute zero entries to `tools=` (grep the E2E
-   assertions); `tools_cache` is used only by the catalog/expand-preview/schema
-   renderers, never as an `AgentTool` source; expanded state is an **ordered
-   list** end to end (model → tool → middleware `after_tool_call` → `_extra` →
-   checkpointer persist → next-run replay) and never re-sorted.
-4. Confirm the Task 0 note records the chosen branch and that only that branch was
-   built.
+- [ ] **Step 1: Full backend suite**
+
+```bash
+cd backend && uv run pytest -q --timeout=120
+```
+Expected: green.
+
+- [ ] **Step 2: Type-check + lint**
+
+```bash
+cd backend && uv run mypy cubebox && uv run ruff check cubebox tests
+```
+Expected: no errors; lines ≤ 100.
+
+- [ ] **Step 3: Manual verification checklist**
+
+- Collapsed servers contribute zero entries to `tools=` (grep assertions).
+- `tools_cache` is used only for catalog display and namespaced-name prediction,
+  never as an `AgentTool` source.
+- Expanded state is an ordered dict in `extra["expanded_groups"]` end to end and
+  survives checkpointing (via cubepi's `DeferredToolsMiddleware`).
+- Below-threshold / disabled path is byte-identical to today's behavior.
 
 ---
 
-## Open items carried from the spec (not blocking v1)
+## Open items (not blocking v1)
 
-- Authored `trigger_hints` field + editing UI — Later (no migration in v1; v1
-  derives the hint from description).
-- Per-tool (sub-server) disclosure, semantic retrieval, code-mode,
-  provider-native deferred tools — Later.
-- Subagent expanded-set inheritance — v1: subagents start collapsed (their own
-  assembly); revisit if needed.
-- Re-collapse mid-conversation — explicitly **not** in v1 (monotonic growth is
-  what keeps the cache safe).
-- Stale `tools_cache`: callable tools always come from live discovery on expand,
-  so a stale cache cannot make the model call a non-existent tool; only the
-  catalog/preview text can drift — accepted for v1, refresh `tools_cache` out of
-  band.
+- Authored `trigger_hints` field + editing UI — Later.
+- Per-tool (sub-server) disclosure — Later.
+- Semantic retrieval, code-mode, provider-native deferred tools — Later.
+- Subagent expanded-set inheritance — v1: subagents start collapsed.
+- Re-collapse mid-conversation — explicitly not in v1.
+- Citation wiring for expanded groups — v1 relies on the per-group loader
+  returning citations; a follow-up may wire them into `CitationMiddleware`
+  dynamically.
+- Stale `tools_cache`: only the catalog/preview text can drift — accepted
+  for v1.
