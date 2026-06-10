@@ -1,11 +1,23 @@
-"""MCP progressive disclosure — config, threshold gate."""
+"""MCP progressive disclosure — config, threshold gate, deferred groups."""
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Any, Literal, cast
+
+from cubepi.agent.types import AgentTool
+from cubepi.deferred import DeferredToolGroup
 
 from cubebox.config import config
+from cubebox.mcp._constants import slugify_for_namespace
+from cubebox.mcp.cubepi_runtime import (
+    _NS_LENGTH_DEFENCE,
+    _build_namespaced_name_with_prefix,
+    _load_tools_for_specs,
+)
+from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubebox.middleware.citations.config import CitationConfig
 
 
 @dataclass(frozen=True)
@@ -24,8 +36,12 @@ def load_disclosure_settings() -> DisclosureSettings:
         raw_enabled = "auto"
     return DisclosureSettings(
         enabled=cast(_EnabledLiteral, raw_enabled),
-        threshold_pct=float(config.get("mcp.progressive_disclosure.threshold_pct", 10.0)),
-        min_servers=int(config.get("mcp.progressive_disclosure.min_servers", 2)),
+        threshold_pct=float(
+            config.get("mcp.progressive_disclosure.threshold_pct", 10.0),
+        ),
+        min_servers=int(
+            config.get("mcp.progressive_disclosure.min_servers", 2),
+        ),
     )
 
 
@@ -47,3 +63,88 @@ def disclosure_active(
     if context_window <= 0:
         return server_count >= settings.min_servers
     return (total_tool_tokens / context_window * 100) >= settings.threshold_pct
+
+
+# ---------------------------------------------------------------------------
+# Deferred-group helpers
+# ---------------------------------------------------------------------------
+
+
+def _spec_description(spec: MCPRuntimeConnectorSpec) -> str:
+    """One-line description from discovery metadata, falling back to name."""
+    server = (spec.discovery_metadata or {}).get("server") or {}
+    desc: str = server.get("description") or server.get("summary") or ""
+    s = " ".join(desc.split())
+    if len(s) > 140:
+        s = s[:139].rstrip() + "…"
+    return s or spec.name
+
+
+def _compute_namespaced_tool_names(
+    spec: MCPRuntimeConnectorSpec,
+    all_specs: list[MCPRuntimeConnectorSpec],
+) -> list[str]:
+    """Predict namespaced tool names using the same logic as the runtime loader."""
+    proposed_slugs = {s.install_id: slugify_for_namespace(s.name) for s in all_specs}
+    slug_counts: Counter[str] = Counter(proposed_slugs.values())
+    slug = proposed_slugs[spec.install_id]
+    explicit_collision = slug_counts[slug] > 1
+    risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
+    if explicit_collision or risky_truncation:
+        safe = spec.install_id.replace("-", "")
+        suffix = f"_{safe[-4:] if len(safe) >= 4 else safe}"
+    else:
+        suffix = ""
+    return [
+        _build_namespaced_name_with_prefix(slug, tc.get("name", ""), suffix=suffix)
+        for tc in spec.tools_cache
+        if tc.get("name")
+    ]
+
+
+def build_deferred_groups(
+    *,
+    specs: list[MCPRuntimeConnectorSpec],
+    all_specs: list[MCPRuntimeConnectorSpec],
+    loader_kwargs: dict[str, Any],
+) -> tuple[list[DeferredToolGroup], dict[str, CitationConfig]]:
+    """Convert MCP runtime specs into cubepi DeferredToolGroup objects.
+
+    Returns (groups, citation_configs). citation_configs is populated when
+    loader callbacks run (i.e., when the model calls load_tools).
+
+    loader_kwargs carries workspace_id, org_id, user_id, cred_service,
+    signer, token_manager, grant_repo — forwarded to _load_tools_for_specs.
+    """
+    shared_citations: dict[str, CitationConfig] = {}
+    groups: list[DeferredToolGroup] = []
+
+    for spec in specs:
+        slug = slugify_for_namespace(spec.name)
+        tool_names = _compute_namespaced_tool_names(spec, all_specs)
+
+        async def _loader(
+            _s: MCPRuntimeConnectorSpec = spec,
+            _all: list[MCPRuntimeConnectorSpec] = all_specs,
+            _kw: dict[str, Any] = loader_kwargs,
+            _cit: dict[str, CitationConfig] = shared_citations,
+        ) -> list[AgentTool[Any]]:
+            tools, citations = await _load_tools_for_specs(
+                specs=[_s],
+                all_specs=_all,
+                **_kw,
+            )
+            _cit.update(citations)
+            return tools
+
+        groups.append(
+            DeferredToolGroup(
+                group_id=f"mcp:{slug}",
+                display_name=spec.name,
+                description=_spec_description(spec),
+                tool_names=tool_names,
+                loader=_loader,
+            ),
+        )
+
+    return groups, shared_citations
