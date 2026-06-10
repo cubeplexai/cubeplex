@@ -25,5 +25,9 @@ data:
         bucket: {{ .Values.minio.defaultBucket | quote }}
         region: "us-east-1"
       sandbox:
-        enabled: {{ .Values.opensandbox.enabled }}
-        use_server_proxy: false
+        # Decoupled from the opensandbox subchart toggle so operators can
+        # point at an external sandbox endpoint (set backend.sandbox.enabled
+        # explicitly) without deploying the alibaba umbrella chart.
+        # Defaults to .Values.opensandbox.enabled for the common case.
+        enabled: {{ dig "sandbox" "enabled" .Values.opensandbox.enabled .Values.backend }}
+        use_server_proxy: {{ dig "sandbox" "use_server_proxy" false .Values.backend }}

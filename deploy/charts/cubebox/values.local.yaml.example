@@ -40,6 +40,13 @@ backend:
       image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260531"
       api_key: "REPLACE_ME"
 
+# Flip backend.sandbox.enabled if you're using an external sandbox endpoint
+# (backend.secrets.sandbox.domain) WITHOUT deploying the OpenSandbox subchart.
+# backend:
+#   sandbox:
+#     enabled: true
+#     use_server_proxy: false
+
 postgres:
   auth:
     password: "REPLACE_ME"
