@@ -25,6 +25,38 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        # Wait for postgres + run alembic migrations before the API boots.
+        # Done in-pod (not as a helm pre-upgrade hook) so postgres is
+        # already reachable when this fires — a hook would race against
+        # the postgres StatefulSet on a fresh install.
+        - name: migrate
+          image: {{ include "cubebox.backend.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "waiting for postgres..."
+              until python -c "import socket, sys; s=socket.socket(); s.settimeout(2); s.connect(('{{ include "cubebox.postgresql.host" . }}', 5432)); s.close()" 2>/dev/null; do
+                sleep 2
+              done
+              echo "postgres reachable; running alembic upgrade head"
+              alembic upgrade head
+          env:
+            {{- range $k, $v := .Values.backend.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.production.local.yaml
+              subPath: config.production.local.yaml
+            - name: secrets
+              mountPath: /app/config.production.secrets.yaml
+              subPath: config.production.secrets.yaml
+              readOnly: true
       containers:
         - name: backend
           image: {{ include "cubebox.backend.image" . }}
