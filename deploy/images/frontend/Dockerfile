@@ -43,8 +43,8 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-RUN addgroup --system --gid 1000 cubebox \
-    && adduser --system --uid 1000 --ingroup cubebox cubebox
+RUN addgroup --system --gid 1001 cubebox \
+    && adduser --system --uid 1001 --ingroup cubebox cubebox
 
 COPY --from=builder --chown=cubebox:cubebox /app/packages/web/.next/standalone ./
 COPY --from=builder --chown=cubebox:cubebox /app/packages/web/.next/static ./packages/web/.next/static
