@@ -847,6 +847,24 @@
       "cancel": "取消",
       "upload": "上传",
       "uploading": "上传中…"
+    },
+    "dangerZone": {
+      "title": "危险操作",
+      "archiveButton": "归档工作区",
+      "archiveDescription": "归档此工作区。它将不再出现在工作区列表中，但数据会被保留。",
+      "archiveSuccess": "工作区已归档",
+      "archiveConfirmTitle": "归档工作区？",
+      "archiveConfirmMessage": "此工作区将从工作区列表中隐藏，之后可以取消归档。",
+      "unarchiveButton": "取消归档",
+      "unarchiveSuccess": "工作区已取消归档",
+      "deleteButton": "删除工作区",
+      "deleteDescription": "永久删除此工作区及其所有数据，此操作不可撤销。",
+      "deleteSuccess": "工作区已删除",
+      "deleteConfirmTitle": "删除工作区？",
+      "deleteConfirmMessage": "此操作不可撤销。请输入工作区名称以确认。",
+      "deleteNamePlaceholder": "输入工作区名称",
+      "deleteConfirmButton": "永久删除",
+      "cancel": "取消"
     }
   },
   "wsMembers": {

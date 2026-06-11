@@ -847,6 +847,24 @@
       "cancel": "Cancel",
       "upload": "Upload",
       "uploading": "Uploading…"
+    },
+    "dangerZone": {
+      "title": "Danger Zone",
+      "archiveButton": "Archive workspace",
+      "archiveDescription": "Archive this workspace. It will no longer appear in your workspace list but its data is preserved.",
+      "archiveSuccess": "Workspace archived",
+      "archiveConfirmTitle": "Archive workspace?",
+      "archiveConfirmMessage": "This workspace will be hidden from the workspace list. You can unarchive it later.",
+      "unarchiveButton": "Unarchive workspace",
+      "unarchiveSuccess": "Workspace unarchived",
+      "deleteButton": "Delete workspace",
+      "deleteDescription": "Permanently delete this workspace and all its data. This cannot be undone.",
+      "deleteSuccess": "Workspace deleted",
+      "deleteConfirmTitle": "Delete workspace?",
+      "deleteConfirmMessage": "This action is permanent and cannot be undone. Type the workspace name to confirm.",
+      "deleteNamePlaceholder": "Type workspace name",
+      "deleteConfirmButton": "Delete permanently",
+      "cancel": "Cancel"
     }
   },
   "wsMembers": {
