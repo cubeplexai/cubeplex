@@ -32,16 +32,13 @@ async def test_worker_end_to_end(
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test")
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
-        await EmbeddingJobRepository(s).enqueue(
-            org_id=org_id,
-            workspace_id=ws_id,
-            creator_user_id=user_id,
-            conversation_id=conv_id,
-        )
+        repo = EmbeddingJobRepository(s, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        await repo.enqueue(conversation_id=conv_id)
     worker = EmbeddingWorker(_Det())
     await worker._claim_one()
     async with async_session_maker() as s:
-        n = await ConversationChunkRepository(s).count_for_conversation(conv_id)
+        repo = ConversationChunkRepository(s, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        n = await repo.count_for_conversation(conv_id)
     assert n > 0
 
 
@@ -77,12 +74,8 @@ async def test_search_returns_seeded_conversation(
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
-        await EmbeddingJobRepository(s).enqueue(
-            org_id=org_id,
-            workspace_id=ws_id,
-            creator_user_id=user_id,
-            conversation_id=conv_id,
-        )
+        repo = EmbeddingJobRepository(s, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        await repo.enqueue(conversation_id=conv_id)
     await EmbeddingWorker(_KeywordEmbedder())._claim_one()
     async with async_session_maker() as s:
         svc = ConversationSearchService(s, _KeywordEmbedder())
@@ -114,12 +107,8 @@ async def test_search_excludes_soft_deleted_conversation(
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
-        await EmbeddingJobRepository(s).enqueue(
-            org_id=org_id,
-            workspace_id=ws_id,
-            creator_user_id=user_id,
-            conversation_id=conv_id,
-        )
+        repo = EmbeddingJobRepository(s, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        await repo.enqueue(conversation_id=conv_id)
     await EmbeddingWorker(_KeywordEmbedder())._claim_one()
     # Soft-delete the conversation after indexing.
     async with async_session_maker() as s:

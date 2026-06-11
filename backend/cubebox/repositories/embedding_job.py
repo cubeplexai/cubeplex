@@ -1,4 +1,12 @@
-"""Repository for the async embedding queue."""
+"""Repository for the async embedding queue.
+
+Mixes scoped (`enqueue`) and process-global (`claim_batch`, `mark_done`,
+`mark_failed`, `reap_stuck`) operations on the same model. The worker is a
+single background daemon — it has no request context — so the consume-side
+methods deliberately do not filter by (org_id, workspace_id, user_id) and
+operate on already-claimed rows by id. `enqueue` is the only request-side
+entry point and uses scope from the constructor.
+"""
 
 from datetime import UTC, datetime, timedelta
 
@@ -6,26 +14,38 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState
+from cubebox.repositories.base import ScopedRepository
 
 
-class EmbeddingJobRepository:
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
+class EmbeddingJobRepository(ScopedRepository[EmbeddingJob]):
+    model = EmbeddingJob
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        org_id: str = "",
+        workspace_id: str = "",
+        user_id: str = "",
+    ) -> None:
+        # org/workspace/user default to empty strings so the worker (which
+        # only calls claim_batch / mark_done / mark_failed / reap_stuck) can
+        # construct without supplying scope. enqueue raises via the FK /
+        # NOT NULL constraints if scope is missing.
+        super().__init__(session, org_id=org_id, workspace_id=workspace_id)
+        self.user_id = user_id
 
     async def enqueue(
         self,
         *,
-        org_id: str,
-        workspace_id: str,
-        creator_user_id: str,
         conversation_id: str,
         seq_lo: int = 0,
         seq_hi: int = 2**62,
     ) -> EmbeddingJob:
         job = EmbeddingJob(
-            org_id=org_id,
-            workspace_id=workspace_id,
-            creator_user_id=creator_user_id,
+            org_id=self.org_id,
+            workspace_id=self.workspace_id,
+            creator_user_id=self.user_id,
             conversation_id=conversation_id,
             seq_lo=seq_lo,
             seq_hi=seq_hi,
@@ -37,7 +57,11 @@ class EmbeddingJobRepository:
         return job
 
     async def claim_batch(self, limit: int) -> list[EmbeddingJob]:
-        """Claim up to `limit` pending jobs whose scheduled_at <= now()."""
+        """Claim up to `limit` pending jobs whose scheduled_at <= now().
+
+        Process-global: the worker runs as a single background daemon, not
+        per-request, so no scope filter is applied.
+        """
         sql = text(
             """
             UPDATE embedding_jobs
@@ -66,9 +90,9 @@ class EmbeddingJobRepository:
     async def reap_stuck(self, *, threshold_seconds: int) -> int:
         """Return jobs stuck in 'running' beyond threshold to 'pending'.
 
-        Bumps attempts so a permanently broken job (e.g. one that crashes the
-        worker on every claim) still drops to 'dead' once max_attempts is
-        reached via mark_failed's path.
+        Process-global: see claim_batch. Bumps attempts so a permanently
+        broken job (e.g. one that crashes the worker on every claim) still
+        drops to 'dead' via mark_failed.
         """
         sql = text(
             """

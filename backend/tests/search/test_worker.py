@@ -30,17 +30,18 @@ async def test_worker_processes_job_for_seeded_conversation(
 ) -> None:
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as session:
-        await EmbeddingJobRepository(session).enqueue(
-            org_id=org_id,
-            workspace_id=ws_id,
-            creator_user_id=user_id,
-            conversation_id=conv_id,
+        ejob_repo = EmbeddingJobRepository(
+            session, org_id=org_id, workspace_id=ws_id, user_id=user_id
         )
+        await ejob_repo.enqueue(conversation_id=conv_id)
     worker = EmbeddingWorker(_FakeProvider())
     job = await worker._claim_one()
     assert job is not None
     async with async_session_maker() as session:
-        n = await ConversationChunkRepository(session).count_for_conversation(conv_id)
+        chunk_repo = ConversationChunkRepository(
+            session, org_id=org_id, workspace_id=ws_id, user_id=user_id
+        )
+        n = await chunk_repo.count_for_conversation(conv_id)
     assert n > 0
 
 
@@ -57,12 +58,8 @@ async def test_reap_stuck_returns_running_to_pending(
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as session:
-        job = await EmbeddingJobRepository(session).enqueue(
-            org_id=org_id,
-            workspace_id=ws_id,
-            creator_user_id=user_id,
-            conversation_id=conv_id,
-        )
+        repo = EmbeddingJobRepository(session, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        job = await repo.enqueue(conversation_id=conv_id)
     # Pretend the worker claimed it an hour ago and then crashed.
     one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
     async with async_session_maker() as session:
