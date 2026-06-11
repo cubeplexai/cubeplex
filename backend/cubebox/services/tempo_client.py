@@ -7,14 +7,18 @@ in lockstep when cubepi semantic conventions change.
 
 from __future__ import annotations
 
+import json as _json
 from datetime import UTC, datetime
 from typing import Any
 
 from cubebox.api.schemas.trace import (
+    ChatMessage,
     LlmCallPayload,
     SpanKind,
     SpanNode,
+    TokenUsage,
     ToolCallPayload,
+    ToolDefinition,
     TraceDetail,
     TraceSummary,
     TurnPayload,
@@ -180,14 +184,94 @@ def _extract_turn(attrs: dict[str, Any]) -> TurnPayload:
     )
 
 
+def _safe_int(v: Any) -> int | None:
+    try:
+        return int(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_float(v: Any) -> float | None:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _decode_messages(raw: Any) -> list[ChatMessage]:
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            data = _json.loads(raw)
+        except _json.JSONDecodeError:
+            return []
+    else:
+        data = raw
+    if not isinstance(data, list):
+        return []
+    out: list[ChatMessage] = []
+    for item in data:
+        if isinstance(item, dict) and "role" in item:
+            out.append(ChatMessage(role=str(item["role"]), parts=item.get("parts", []) or []))
+    return out
+
+
+def _decode_tools(raw: Any) -> list[ToolDefinition]:
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        try:
+            data = _json.loads(raw)
+        except _json.JSONDecodeError:
+            return []
+    else:
+        data = raw
+    if not isinstance(data, list):
+        return []
+    out: list[ToolDefinition] = []
+    for item in data:
+        if isinstance(item, dict) and "name" in item:
+            out.append(
+                ToolDefinition(
+                    name=str(item["name"]),
+                    description=item.get("description"),
+                    parameters=item.get("parameters") or item.get("input_schema"),
+                )
+            )
+    return out
+
+
 def _extract_llm(attrs: dict[str, Any]) -> LlmCallPayload:
-    # Task 5 fills out the full payload. This stub returns enough for the
-    # tree-shape tests in this task; full LLM detail asserted in Task 5.
+    finish = attrs.get("gen_ai.response.finish_reasons")
+    finish_list = finish if isinstance(finish, list) else ([finish] if finish else [])
     return LlmCallPayload(
         model=str(
             attrs.get("gen_ai.request.model") or attrs.get("gen_ai.response.model") or "unknown"
         ),
         provider=attrs.get("gen_ai.provider.name"),
+        request_max_tokens=_safe_int(attrs.get("gen_ai.request.max_tokens")),
+        request_temperature=_safe_float(attrs.get("gen_ai.request.temperature")),
+        request_stream=attrs.get("gen_ai.request.stream"),
+        tokens=TokenUsage(
+            input=_safe_int(attrs.get("gen_ai.usage.input_tokens")) or 0,
+            output=_safe_int(attrs.get("gen_ai.usage.output_tokens")) or 0,
+            cache_read=_safe_int(attrs.get("gen_ai.usage.cache_read.input_tokens")) or 0,
+            cache_write=_safe_int(attrs.get("gen_ai.usage.cache_creation.input_tokens")) or 0,
+        ),
+        finish_reasons=[str(f) for f in finish_list if f],
+        time_to_first_chunk_seconds=_safe_float(attrs.get("gen_ai.response.time_to_first_chunk")),
+        response_id=attrs.get("gen_ai.response.id"),
+        system_instructions=_decode_messages(attrs.get("gen_ai.system_instructions")),
+        messages=_decode_messages(attrs.get("gen_ai.input.messages")),
+        output_messages=_decode_messages(attrs.get("gen_ai.output.messages")),
+        tools=_decode_tools(
+            attrs.get("gen_ai.tool.definitions")
+            or attrs.get("gen_ai.request.tools")
+            or attrs.get("cubepi.agent.tools")
+        ),
+        raw_request=attrs.get("cubepi.llm.raw_request"),
+        raw_response=attrs.get("cubepi.llm.raw_response"),
     )
 
 

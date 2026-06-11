@@ -80,6 +80,19 @@ def test_parser_rejects_self_cycle() -> None:
     assert detail.root.children == []
 
 
+def test_chat_span_llm_payload(multi_turn_json: dict) -> None:
+    detail = parse_trace_detail(multi_turn_json)
+    chats = [n for n in _leaves(detail.root) if n.kind == SpanKind.CHAT]
+    assert chats, "fixture must contain at least one chat span"
+    llm = chats[0].llm
+    assert llm is not None
+    assert llm.model.startswith(("deepseek", "claude", "gpt", "kimi", "qwen"))
+    assert llm.tokens.input > 0
+    assert llm.raw_request and llm.raw_request.startswith("{")
+    assert llm.raw_response and llm.raw_response.startswith("{")
+    assert isinstance(llm.messages, list)
+
+
 def _count(node) -> int:
     return 1 + sum(_count(c) for c in node.children)
 
