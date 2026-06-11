@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import ClassVar
 
-from sqlalchemy import Column, DateTime, Index
+from sqlalchemy import BigInteger, Column, DateTime, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -33,8 +33,14 @@ class EmbeddingJob(CubeboxBase, OrgScopedMixin, table=True):
     )
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20)
     creator_user_id: str = Field(foreign_key="users.id", max_length=20)
-    seq_lo: int = Field(default=0)
-    seq_hi: int = Field(default=2**62)
+    seq_lo: int = Field(
+        default=0,
+        sa_column=Column(BigInteger, nullable=False, server_default="0"),
+    )
+    seq_hi: int = Field(
+        default=2**62,
+        sa_column=Column(BigInteger, nullable=False, server_default=str(2**62)),
+    )
     state: EmbeddingJobState = Field(default=EmbeddingJobState.pending, max_length=10)
     attempts: int = Field(default=0)
     last_error: str | None = Field(default=None)

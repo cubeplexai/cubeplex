@@ -3,7 +3,7 @@
 from typing import Any, ClassVar
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Index
+from sqlalchemy import BigInteger, Column, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -28,8 +28,8 @@ class ConversationChunk(CubeboxBase, OrgScopedMixin, table=True):
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20)
     creator_user_id: str = Field(foreign_key="users.id", max_length=20)
     chunk_seq: int = Field(ge=0)
-    seq_lo: int
-    seq_hi: int
+    seq_lo: int = Field(sa_column=Column(BigInteger, nullable=False))
+    seq_hi: int = Field(sa_column=Column(BigInteger, nullable=False))
     text: str
     embedding: Any = Field(
         sa_column=Column(Vector(VECTOR_DIM), nullable=False),
