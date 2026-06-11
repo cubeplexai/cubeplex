@@ -80,13 +80,18 @@ export function PanelHeader({ source, actions, fullscreen, onClose }: PanelHeade
   return (
     <header className="h-11 border-b border-border flex items-center gap-2 px-4 shrink-0 bg-card">
       {icon}
-      <span className="text-sm font-medium text-foreground min-w-0 truncate" title={title}>
+      <span
+        className="text-sm font-medium text-foreground min-w-[6ch] flex-1 truncate"
+        title={title}
+      >
         {title}
       </span>
       {subtitle && (
-        <span className="font-mono text-xs text-muted-foreground truncate">{subtitle}</span>
+        <span className="font-mono text-xs text-muted-foreground truncate shrink min-w-0">
+          {subtitle}
+        </span>
       )}
-      <span className="ml-auto flex items-center gap-1">
+      <span className="flex items-center gap-1 shrink-0">
         {actions}
         {copyText !== undefined && (
           <button

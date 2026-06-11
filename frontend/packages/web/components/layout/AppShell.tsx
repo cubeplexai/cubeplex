@@ -1,7 +1,7 @@
 'use client'
 
 import { ReactNode, useEffect, useRef, useState } from 'react'
-import { Monitor, X } from 'lucide-react'
+import { Menu, Monitor, X } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
@@ -12,6 +12,7 @@ import { SkillCandidatePanel } from '@/components/panel/SkillCandidatePanel'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
+import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { usePanelStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 
@@ -28,10 +29,16 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
   // (sandbox support enabled); otherwise the button opens a panel that 404s.
   const { sandboxEnabled } = useDeploymentMode()
   const panelOpen = view.type !== 'closed'
-  const isDesktop = useMediaQuery('(min-width: 768px)')
+  // Desktop-first SSR fallback: most users are on desktop, so the mobile
+  // overlay branch should not be the first paint on a 1440px session.
+  const isDesktop = useMediaQuery('(min-width: 768px)', true)
   const close = usePanelStore((s) => s.close)
-  // DOM-level drag detection on the resize handle; CSS disables the
-  // width transition while .panel-dragging is set so resize stays 1:1.
+  const openMobileMenu = useMobileMenu((s) => s.open)
+  // DOM-level drag detection on the resize handle using pointer capture, so
+  // pointerup landing inside the right panel's sandboxed iframe (Browser /
+  // Widget / Artifact) is still routed back to the handle. window-level
+  // listeners alone would leak the dragging state if the iframe captures
+  // the pointer.
   const groupRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
   useEffect(() => {
@@ -39,13 +46,26 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
     if (!root) return
     const handle = root.querySelector<HTMLElement>('[data-slot="resizable-handle"]')
     if (!handle) return
-    const onDown = () => setDragging(true)
+    const onDown = (e: PointerEvent) => {
+      try {
+        handle.setPointerCapture(e.pointerId)
+      } catch {
+        /* capture failure is non-fatal; window fallback still runs */
+      }
+      setDragging(true)
+    }
     const onUp = () => setDragging(false)
     handle.addEventListener('pointerdown', onDown)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('lostpointercapture', onUp)
+    // Belt-and-suspenders: also catch pointerup at the window in case
+    // setPointerCapture is unsupported.
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onUp)
     return () => {
       handle.removeEventListener('pointerdown', onDown)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('lostpointercapture', onUp)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
     }
@@ -70,7 +90,15 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
 
   const main = (
     <div className="flex flex-col h-full overflow-hidden">
-      <header className="h-11 border-b border-border flex items-center px-4 shrink-0">
+      <header className="h-11 border-b border-border flex items-center px-3 md:px-4 shrink-0 gap-1">
+        <button
+          type="button"
+          onClick={openMobileMenu}
+          className="md:hidden grid size-7 place-items-center rounded text-muted-foreground hover:bg-accent transition-colors duration-fast"
+          aria-label="Open menu"
+        >
+          <Menu className="size-4" />
+        </button>
         <span className="text-sm text-muted-foreground truncate flex-1">{headerTitle || ''}</span>
         {workspaceId && sandboxEnabled && (
           <button

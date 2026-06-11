@@ -11,11 +11,19 @@ interface AdminTopBarProps {
 
 function handleBackToApp() {
   if (typeof window === 'undefined') return
+  // Try to close popups opened by script; fall back to in-app navigation
+  // when window.close() is silently denied (same-origin Link navigation
+  // leaves window.opener populated, but the browser refuses close()).
+  let closed = false
   if (window.opener) {
-    window.close()
-  } else {
-    window.location.href = '/'
+    try {
+      window.close()
+    } catch {
+      /* ignored, falls through to nav */
+    }
+    closed = window.closed
   }
+  if (!closed) window.location.href = '/'
 }
 
 export function AdminTopBar({ orgName }: AdminTopBarProps) {
