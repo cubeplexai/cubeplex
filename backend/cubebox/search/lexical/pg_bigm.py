@@ -12,12 +12,13 @@ class PgBigmBackend:
 
     def search_sql(self, limit: int) -> LexicalSqlBundle:
         sql = f"""
-            SELECT id, bigm_similarity(text, :q) AS score
-            FROM conversation_chunks
-            WHERE org_id = :org_id
-              AND workspace_id = :ws_id
-              AND creator_user_id = :user_id
-              AND text LIKE '%' || :q || '%' ESCAPE '\\'
+            SELECT cc.id, bigm_similarity(cc.text, :q) AS score
+            FROM conversation_chunks cc
+            JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
+            WHERE cc.org_id = :org_id
+              AND cc.workspace_id = :ws_id
+              AND cc.creator_user_id = :user_id
+              AND cc.text LIKE '%' || :q || '%' ESCAPE '\\'
             ORDER BY score DESC
             LIMIT {int(limit)}
         """

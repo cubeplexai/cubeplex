@@ -98,3 +98,44 @@ async def test_search_returns_seeded_conversation(
     assert hit.matched_message_seq is not None
     assert hit.matched_at is not None and "+00:00" in hit.matched_at
     assert hit.title == "seed"
+
+
+@pytest.mark.asyncio
+async def test_search_excludes_soft_deleted_conversation(
+    seeded_conversation: tuple[str, str, str, str],
+) -> None:
+    """Soft-deleted conversations must not appear in search results."""
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    from cubebox.models.conversation import Conversation
+    from cubebox.search.service import ConversationSearchService
+
+    org_id, ws_id, user_id, conv_id = seeded_conversation
+    async with async_session_maker() as s:
+        await EmbeddingJobRepository(s).enqueue(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            conversation_id=conv_id,
+        )
+    await EmbeddingWorker(_KeywordEmbedder())._claim_one()
+    # Soft-delete the conversation after indexing.
+    async with async_session_maker() as s:
+        await s.execute(
+            update(Conversation)
+            .where(Conversation.id == conv_id)
+            .values(deleted_at=datetime.now(UTC))
+        )
+        await s.commit()
+    async with async_session_maker() as s:
+        svc = ConversationSearchService(s, _KeywordEmbedder())
+        resp = await svc.search(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            q="docling",
+            limit=8,
+        )
+    assert not any(r.conversation_id == conv_id for r in resp.results)
