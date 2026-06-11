@@ -10,6 +10,7 @@ from cubebox.models.conversation_chunk import ConversationChunk
 from cubebox.models.conversation_share import ConversationShare, ShareScope
 from cubebox.models.credential import Credential
 from cubebox.models.egress_ref import EgressRef  # noqa: F401
+from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState
 from cubebox.models.invite_token import InviteToken
 from cubebox.models.mcp import (
     MCPConnectorInstall,
@@ -57,6 +58,8 @@ __all__ = [
     "ConversationChunk",
     "ConversationShare",
     "Credential",
+    "EmbeddingJob",
+    "EmbeddingJobState",
     "InviteToken",
     "LlmBillingEvent",
     "MCPConnectorInstall",
