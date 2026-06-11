@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.trace import (
     TagValuesResponse,
+    TraceDetail,
     TraceListResponse,
 )
 from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
@@ -115,3 +116,26 @@ async def get_tag_values(
     except TempoQueryError as exc:
         raise _bad_upstream(exc) from exc
     return TagValuesResponse(values=values)
+
+
+@router.get("/{trace_id}", response_model=TraceDetail)
+async def get_trace_detail(
+    trace_id: str,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> TraceDetail:
+    client = await _client_or_503()
+    org_id = await resolve_current_org_id(user, session)
+    try:
+        detail = await client.get_trace(trace_id)
+    except TempoQueryError as exc:
+        if "not found" in str(exc).lower():
+            raise HTTPException(status_code=404, detail="Trace not found") from exc
+        raise _bad_upstream(exc) from exc
+
+    # Defence in depth: TraceQL is the primary gate, but a stray trace
+    # without an org_id, or one belonging to another org, must never reach
+    # the caller.
+    if detail.summary.org_id is None or detail.summary.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    return detail
