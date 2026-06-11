@@ -90,9 +90,13 @@ class ConversationSearchService:
             if conv_id in seen and seen[conv_id][0] >= score:
                 continue
             seen[conv_id] = (score, ch)
-        # Resolve titles + build snippets, truncate to limit.
-        ordered = sorted(seen.items(), key=lambda kv: kv[1][0], reverse=True)[:limit]
-        titles = await self._titles([cid for cid, _ in ordered])
+        # Resolve titles first; _titles only returns live (non-soft-deleted)
+        # conversations, so it's the single point where soft-deletion is
+        # enforced when emitting results. Filter ordered against titles.keys()
+        # so deleted convs never appear as 'Untitled'.
+        ordered_all = sorted(seen.items(), key=lambda kv: kv[1][0], reverse=True)
+        titles = await self._titles([cid for cid, _ in ordered_all])
+        ordered = [(cid, val) for cid, val in ordered_all if cid in titles][:limit]
         results: list[SearchResult] = []
         for conv_id, (score, ch) in ordered:
             snip: Snippet = extract_snippet(ch["text"], q=q, window=160)
@@ -102,7 +106,7 @@ class ConversationSearchService:
             results.append(
                 SearchResult(
                     conversation_id=conv_id,
-                    title=titles.get(conv_id, ""),
+                    title=titles[conv_id],
                     snippet=snip.text,
                     match_offsets=list(snip.match_offsets),
                     matched_message_seq=int(ch["seq_lo"]),
@@ -138,10 +142,13 @@ class ConversationSearchService:
             return []
         sql = text(
             """
-            SELECT id, 1.0 - (embedding <=> :v) AS score
-            FROM conversation_chunks
-            WHERE org_id = :org_id AND workspace_id = :ws_id AND creator_user_id = :user_id
-            ORDER BY embedding <=> :v
+            SELECT cc.id, 1.0 - (cc.embedding <=> :v) AS score
+            FROM conversation_chunks cc
+            JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
+            WHERE cc.org_id = :org_id
+              AND cc.workspace_id = :ws_id
+              AND cc.creator_user_id = :user_id
+            ORDER BY cc.embedding <=> :v
             LIMIT :lim
             """
         ).bindparams(bindparam("v", type_=Vector(self._provider.dimensions)))
