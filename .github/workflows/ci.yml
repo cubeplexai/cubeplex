@@ -143,6 +143,10 @@ jobs:
       CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
       CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
       CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      # Optional: gates the conversation-search E2E test. The test skips
+      # cleanly when this secret isn't set in the repo, so PRs from forks
+      # without the secret stay green; the real-network path runs in main.
+      DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       # Test-only Fernet key for CI startup and vault E2E. Production must set its own key.
       CUBEBOX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
     services:
