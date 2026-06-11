@@ -276,11 +276,16 @@ def _op(name: str) -> AgentOperation:
 
 
 def test_each_operation_description_contains_example_payload() -> None:
-    # Every non-trivial op should show a JSON-shaped example the model can copy.
-    for op_name in ("list", "create", "update", "pause", "resume", "delete", "get", "list_runs"):
+    # Every op (except list, which is no-arg) should show a JSON-shaped
+    # example payload the model can copy as direct tool input.
+    for op_name in ("create", "update", "pause", "resume", "delete", "get", "list_runs"):
         desc = _op(op_name).description
         assert "Example" in desc or "example" in desc, f"{op_name} description has no example"
-        assert '"operation"' in desc, f"{op_name} description omits the operation discriminator"
+        # The umbrella "operation" discriminator is gone — examples are the
+        # bare input payload now.
+        assert '"operation"' not in desc, (
+            f"{op_name} description still mentions the old operation discriminator"
+        )
 
 
 def test_create_description_documents_all_three_schedule_kinds() -> None:
@@ -299,12 +304,12 @@ def test_create_description_documents_target_sentinel() -> None:
     ), "create description must tell the model it doesn't need to pass a conversation ID"
 
 
-def test_capability_description_is_short_and_points_to_operations() -> None:
+def test_capability_description_is_short() -> None:
+    # The capability description is the DeferredToolGroup catalog blurb —
+    # one-line summary, no per-op detail.
     cap_desc = SCHEDULED_TASKS_CAPABILITY.description
-    # Capability-level description shouldn't duplicate per-op examples (token cost).
-    assert len(cap_desc) < 600
-    # But it should mention that each operation has its own example.
-    assert "operation" in cap_desc.lower()
+    assert len(cap_desc) < 400
+    assert "scheduled" in cap_desc.lower()
 
 
 def test_list_description_states_no_arguments() -> None:

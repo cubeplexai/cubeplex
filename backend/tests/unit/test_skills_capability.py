@@ -270,7 +270,7 @@ async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatc
 from collections.abc import AsyncIterator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
-from cubebox.agents.actions.builder import build_capability_tool  # noqa: E402
+from cubebox.agents.actions.builder import build_capability_tools  # noqa: E402
 from cubebox.agents.actions.capabilities.skills import build_skills_capability  # noqa: E402
 
 
@@ -282,30 +282,32 @@ async def _fake_ctx_factory() -> AsyncIterator[tuple[ScopeContext, Any]]:
 def test_skills_capability_mutation_gate() -> None:
     deps = _make_deps()
     cap = build_skills_capability(deps)
-    # Sanity: 4 operations declared
+    # Sanity: 4 operations declared, capability is renamed to platform_skills
+    # (disambiguates from load_skill's prompt-content disclosure system).
+    assert cap.name == "platform_skills"
     assert {op.name for op in cap.operations} == {"find", "preview", "install", "publish_skill"}
     assert next(op for op in cap.operations if op.name == "install").mutates is True
     assert next(op for op in cap.operations if op.name == "find").mutates is False
     assert next(op for op in cap.operations if op.name == "preview").mutates is False
     assert next(op for op in cap.operations if op.name == "publish_skill").mutates is False
 
-    # With mutations allowed, the schema should mention all four ops.
-    tool_full = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=True)
-    assert tool_full is not None
-    schema_full = str(tool_full.parameters.model_json_schema())
-    assert "Op_find" in schema_full
-    assert "Op_preview" in schema_full
-    assert "Op_install" in schema_full
-    assert "Op_publish_skill" in schema_full
+    # With mutations allowed, every op becomes its own AgentTool named
+    # platform_skills_<op>.
+    tools_full = build_capability_tools(cap, _fake_ctx_factory, allow_mutations=True)
+    assert {t.name for t in tools_full} == {
+        "platform_skills_find",
+        "platform_skills_preview",
+        "platform_skills_install",
+        "platform_skills_publish_skill",
+    }
 
-    # Without mutations, install is dropped but publish_artifact (non-mutating) remains.
-    tool_ro = build_capability_tool(cap, _fake_ctx_factory, allow_mutations=False)
-    assert tool_ro is not None
-    schema_ro = str(tool_ro.parameters.model_json_schema())
-    assert "Op_install" not in schema_ro
-    assert "Op_find" in schema_ro
-    assert "Op_preview" in schema_ro
-    assert "Op_publish_skill" in schema_ro
+    # Without mutations, install is dropped; the rest survive.
+    tools_ro = build_capability_tools(cap, _fake_ctx_factory, allow_mutations=False)
+    assert {t.name for t in tools_ro} == {
+        "platform_skills_find",
+        "platform_skills_preview",
+        "platform_skills_publish_skill",
+    }
 
 
 # --- publish_artifact tests ---
