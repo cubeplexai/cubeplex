@@ -49,6 +49,7 @@ export function ConversationSearch({ wsId }: Props): React.ReactElement {
   }, [open])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActive(0)
   }, [results])
 
