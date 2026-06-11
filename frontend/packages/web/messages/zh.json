@@ -563,7 +563,18 @@
     "saving": "保存中…",
     "saved": "已保存",
     "saveFailed": "保存失败：{message}",
-    "discard": "放弃修改"
+    "discard": "放弃修改",
+    "orgInfo": {
+      "title": "组织信息",
+      "nameLabel": "组织名称",
+      "slugLabel": "组织标识符",
+      "slugHelp": "仅支持小写字母、数字和连字符。",
+      "save": "保存",
+      "saving": "保存中…",
+      "saved": "组织信息已更新",
+      "slugTaken": "该标识符已被使用",
+      "saveError": "保存失败"
+    }
   },
   "mcp": {
     "installed": "已启用",
