@@ -58,6 +58,11 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
           onChange={(e) => setPassword(e.target.value)}
         />
       </label>
+      <div className="text-right">
+        <Link href="/forgot-password" className="text-xs text-muted-foreground underline">
+          {t('forgotPassword')}
+        </Link>
+      </div>
       {error && <div className="text-sm text-destructive">{error}</div>}
       <button
         type="submit"
