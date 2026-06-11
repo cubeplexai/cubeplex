@@ -185,6 +185,48 @@ async def patch_me(
     }
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
+@router.post("/change-password")
+async def change_password(
+    body: Annotated[ChangePasswordRequest, Body()],
+    user: Annotated[User, Depends(current_active_user)],
+    user_manager: Annotated[UserManager, Depends(get_user_manager)],
+    request: Request,
+) -> dict[str, bool]:
+    verified, _ = user_manager.password_helper.verify_and_update(
+        body.current_password, user.hashed_password
+    )
+    if not verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="incorrect_password",
+        )
+    try:
+        await user_manager.validate_password(body.new_password, user)
+    except InvalidPasswordException:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid_password",
+        ) from None
+    user.hashed_password = user_manager.password_helper.hash(body.new_password)
+    session = user_manager.user_db.session  # type: ignore[attr-defined]
+    session.add(user)
+    await session.commit()
+
+    from cubebox.plugins.audit import audit_log
+
+    await audit_log(
+        action="auth.password_changed",
+        user_id=user.id,
+        ip=request.client.host if request.client else None,
+    )
+    return {"ok": True}
+
+
 # Include fastapi-users built-in auth routes for /logout. Must stay BELOW our
 # custom /login above — FastAPI matches the first-registered route, so our
 # rate-limited /login takes precedence and fastapi-users' /login is shadowed.
