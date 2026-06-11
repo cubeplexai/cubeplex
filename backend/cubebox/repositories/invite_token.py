@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,3 +36,19 @@ class InviteTokenRepository:
         await self.session.commit()
         await self.session.refresh(tok)
         return tok
+
+    async def list_for_workspace(self, workspace_id: str) -> list[InviteToken]:
+        tbl = InviteToken.__table__  # type: ignore[attr-defined]
+        stmt = (
+            select(InviteToken)
+            .where(InviteToken.workspace_id == workspace_id)  # type: ignore[arg-type]
+            .order_by(tbl.c.expires_at.desc())
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return list(rows)
+
+    async def delete(self, token: str) -> None:
+        await self.session.execute(
+            sa_delete(InviteToken).where(InviteToken.token == token)  # type: ignore[arg-type]
+        )
+        await self.session.commit()

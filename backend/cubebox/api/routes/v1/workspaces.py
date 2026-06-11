@@ -1,21 +1,24 @@
 """Workspace routes: list / create / invite / accept-invite."""
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import current_active_user, require_admin
+from cubebox.config import config
 from cubebox.db import get_session
 from cubebox.models import Conversation, Role, User, Workspace
 from cubebox.models.agent_config import AgentConfig
 from cubebox.repositories import (
     InviteTokenRepository,
     MembershipRepository,
+    OrganizationMembershipRepository,
     WorkspaceRepository,
 )
 from cubebox.utils.time import utc_isoformat
@@ -33,7 +36,8 @@ class WorkspaceUpdate(BaseModel):
 
 
 class InviteCreate(BaseModel):
-    role: str  # 'admin' or 'member'
+    role: Literal["admin", "member"]
+    email: str | None = None
 
 
 class AcceptInvite(BaseModel):
@@ -158,11 +162,7 @@ async def create_invite(
     ctx: Annotated[RequestContext, Depends(require_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
-) -> dict[str, str]:
-    if body.role not in ("admin", "member"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="role must be admin or member"
-        )
+) -> dict[str, str | bool]:
     inv_repo = InviteTokenRepository(session)
     tok = await inv_repo.issue(workspace_id=workspace_id, role=body.role, created_by=ctx.user.id)
 
@@ -178,7 +178,62 @@ async def create_invite(
         ip=request.client.host if request.client else None,
         metadata={"role": body.role},
     )
-    return {"token": tok.token, "expires_at": utc_isoformat(tok.expires_at)}
+
+    email_sent = False
+    if body.email is not None:
+        from cubebox.services.email import get_email_service
+
+        base_url = config.get("app.base_url", "http://localhost:3000")
+        invite_url = f"{base_url}/invite/accept?token={tok.token}"
+        ws = await WorkspaceRepository(session).get(workspace_id)
+        ws_name = ws.name if ws else workspace_id
+        try:
+            await get_email_service().send(
+                to=body.email,
+                subject=f"You're invited to {ws_name} on cubebox",
+                template="workspace_invite",
+                context={"invite_url": invite_url, "workspace_name": ws_name},
+            )
+            email_sent = True
+        except Exception:
+            logger.warning("Failed to send invite email to {}", body.email)
+
+    return {
+        "token": tok.token,
+        "expires_at": utc_isoformat(tok.expires_at),
+        "email_sent": email_sent,
+    }
+
+
+@router.get("/{workspace_id}/invites")
+async def list_invites(
+    workspace_id: str,
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> list[dict[str, str | None]]:
+    inv_repo = InviteTokenRepository(session)
+    tokens = await inv_repo.list_for_workspace(workspace_id)
+    return [
+        {
+            "token": t.token,
+            "role": t.role,
+            "created_by": t.created_by,
+            "expires_at": utc_isoformat(t.expires_at),
+            "used_at": utc_isoformat(t.used_at) if t.used_at else None,
+        }
+        for t in tokens
+    ]
+
+
+@router.delete("/{workspace_id}/invites/{token}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_invite(
+    workspace_id: str,
+    token: str,
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    inv_repo = InviteTokenRepository(session)
+    await inv_repo.delete(token)
 
 
 @router.post("/invites/accept")
@@ -187,6 +242,8 @@ async def accept_invite(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
+    from cubebox.models import OrgRole
+
     inv_repo = InviteTokenRepository(session)
     tok = await inv_repo.consume(body.token)
     if tok is None:
@@ -194,8 +251,25 @@ async def accept_invite(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invite token invalid, expired, or already used",
         )
+
+    ws = await WorkspaceRepository(session).get(tok.workspace_id)
+    ws_name = ws.name if ws else ""
+    org_id = ws.org_id if ws else ""
+
+    if ws is not None:
+        om_repo = OrganizationMembershipRepository(session)
+        existing_org_role = await om_repo.get_role(user_id=user.id, org_id=ws.org_id)
+        if existing_org_role is None:
+            await om_repo.grant(user_id=user.id, org_id=ws.org_id, role=OrgRole.MEMBER)
+
     mem_repo = MembershipRepository(session)
     existing = await mem_repo.get_role(user_id=user.id, workspace_id=tok.workspace_id)
     if existing is None:
         await mem_repo.grant(user_id=user.id, workspace_id=tok.workspace_id, role=Role(tok.role))
-    return {"workspace_id": tok.workspace_id, "role": tok.role}
+
+    return {
+        "workspace_id": tok.workspace_id,
+        "workspace_name": ws_name,
+        "org_id": org_id,
+        "role": tok.role,
+    }
