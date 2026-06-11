@@ -34,6 +34,7 @@ from cubebox.models.provider import Model, Provider
 from cubebox.models.sandbox_env import SandboxEnvVar  # noqa: F401
 from cubebox.models.sandbox_policy import SandboxPolicy  # noqa: F401
 from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubebox.models.search_backfill_progress import SearchBackfillProgress
 from cubebox.models.skill import (
     OrgPreinstalledTombstone,
     OrgSkillInstall,
@@ -87,6 +88,7 @@ __all__ = [
     "SandboxPolicy",
     "ScheduledTask",
     "ScheduledTaskRun",
+    "SearchBackfillProgress",
     "Skill",
     "SkillRegistry",
     "SkillVersion",
