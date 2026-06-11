@@ -8,6 +8,7 @@ in lockstep when cubepi semantic conventions change.
 from __future__ import annotations
 
 import json as _json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -303,6 +304,7 @@ class TempoQueryValueError(ValueError):
 
 
 _TRACEQL_FORBIDDEN = ('"', "\\", "\n", "\r", "\x00")
+_TRACE_ID_RE = re.compile(r"^[a-fA-F0-9]{1,64}$")
 
 
 def _quote_traceql(value: str) -> str:
@@ -363,9 +365,9 @@ class TempoClient:
             clauses.append(f"span.cubepi.run_id={_quote_traceql(run_id)}")
         if model:
             clauses.append(f"span.gen_ai.request.model={_quote_traceql(model)}")
-        if min_duration_ms:
+        if min_duration_ms is not None:
             clauses.append(f"trace:duration > {int(min_duration_ms)}ms")
-        if max_duration_ms:
+        if max_duration_ms is not None:
             clauses.append(f"trace:duration < {int(max_duration_ms)}ms")
         q = "{ " + " && ".join(clauses) + " }"
 
@@ -380,9 +382,11 @@ class TempoClient:
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo /api/search returned {resp.status_code}")
         payload = resp.json()
-        return [_search_hit_to_summary(t) for t in payload.get("traces", [])]
+        return [_search_hit_to_summary(t) for t in (payload.get("traces") or [])]
 
     async def get_trace(self, trace_id: str) -> TraceDetail:
+        if not _TRACE_ID_RE.match(trace_id):
+            raise TempoQueryValueError(f"Invalid trace id: {trace_id!r}")
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             resp = await http.get(f"{self._endpoint}/api/traces/{trace_id}")
         if resp.status_code == 404:
@@ -407,7 +411,7 @@ class TempoClient:
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo tag values returned {resp.status_code}")
         payload = resp.json()
-        return [str(v) for v in payload.get("tagValues", [])]
+        return [str(v) for v in (payload.get("tagValues") or [])]
 
 
 def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:

@@ -128,6 +128,8 @@ async def get_trace_detail(
     org_id = await resolve_current_org_id(user, session)
     try:
         detail = await client.get_trace(trace_id)
+    except TempoQueryValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except TempoQueryError as exc:
         if "not found" in str(exc).lower():
             raise HTTPException(status_code=404, detail="Trace not found") from exc
