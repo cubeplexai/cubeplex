@@ -276,5 +276,12 @@ def _extract_llm(attrs: dict[str, Any]) -> LlmCallPayload:
 
 
 def _extract_tool(attrs: dict[str, Any]) -> ToolCallPayload:
-    # Task 6 fills out the full payload.
-    return ToolCallPayload(name=str(attrs.get("gen_ai.tool.name") or "?"))
+    return ToolCallPayload(
+        name=str(attrs.get("gen_ai.tool.name") or "?"),
+        description=attrs.get("gen_ai.tool.description"),
+        arguments=attrs.get("gen_ai.tool.call.arguments"),
+        result=attrs.get("gen_ai.tool.call.result"),
+        is_error=bool(attrs.get("cubepi.tool.is_error", False)),
+        execution_mode=attrs.get("cubepi.tool.execution_mode"),
+        tool_call_id=attrs.get("gen_ai.tool.call.id"),
+    )
