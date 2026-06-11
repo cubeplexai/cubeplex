@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,10 +10,12 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.exceptions import InvalidInputError
 from cubebox.config import config
 from cubebox.models.conversation import Conversation
 from cubebox.search.embedding import EmbeddingProvider
 from cubebox.search.lexical import build_lexical_backend
+from cubebox.search.lexical.base import LexicalSearchBackend
 from cubebox.search.rrf import rrf_fuse
 from cubebox.search.snippet import Snippet, extract_snippet
 from cubebox.utils.time import utc_isoformat
@@ -40,10 +43,19 @@ class SearchResponse:
 
 
 class ConversationSearchService:
-    def __init__(self, session: AsyncSession, provider: EmbeddingProvider) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        provider: EmbeddingProvider,
+        *,
+        lexical_backend: LexicalSearchBackend | None = None,
+    ) -> None:
         self._session = session
         self._provider = provider
-        self._lexical = build_lexical_backend()
+        # In production the lexical backend is built once at lifespan startup
+        # and passed in; tests construct the service directly and may rely on
+        # the fallback for convenience.
+        self._lexical = lexical_backend if lexical_backend is not None else build_lexical_backend()
         self._k = int(config.get("search.rrf.k", 60))
         self._prefetch = int(config.get("search.rrf.prefetch_per_leg", 20))
 
@@ -59,6 +71,14 @@ class ConversationSearchService:
         q = q.strip()
         if not q:
             return SearchResponse([], 0, 0, 0)
+        # Reject control characters (other than common whitespace) — they
+        # serve no search purpose and slip through PGroonga / pg_bigm
+        # normalization unchanged.
+        if any(ord(c) < 32 and c not in "\t\n\r" for c in q):
+            raise InvalidInputError("query contains control characters")
+        # NFC-normalize so the same visible string indexes the same way the
+        # snippet extractor casefolds it later.
+        q = unicodedata.normalize("NFC", q)
         lex_hits, vec_hits = await asyncio.gather(
             self._lexical_leg(org_id, workspace_id, creator_user_id, q),
             self._vector_leg(org_id, workspace_id, creator_user_id, q),

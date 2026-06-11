@@ -128,3 +128,24 @@ async def test_search_excludes_soft_deleted_conversation(
             limit=8,
         )
     assert not any(r.conversation_id == conv_id for r in resp.results)
+
+
+@pytest.mark.asyncio
+async def test_search_rejects_control_characters(
+    seeded_conversation: tuple[str, str, str, str],
+) -> None:
+    """Query with embedded control characters raises InvalidInputError."""
+    from cubebox.api.exceptions import InvalidInputError
+    from cubebox.search.service import ConversationSearchService
+
+    org_id, ws_id, user_id, _conv_id = seeded_conversation
+    async with async_session_maker() as s:
+        svc = ConversationSearchService(s, _KeywordEmbedder())
+        with pytest.raises(InvalidInputError):
+            await svc.search(
+                org_id=org_id,
+                workspace_id=ws_id,
+                creator_user_id=user_id,
+                q="doc\x00ling",
+                limit=8,
+            )

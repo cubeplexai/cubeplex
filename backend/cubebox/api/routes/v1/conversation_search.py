@@ -37,7 +37,8 @@ async def search_conversations(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="search is disabled",
         )
-    svc = ConversationSearchService(session, provider)
+    lexical_backend = getattr(raw_request.app.state, "lexical_backend", None)
+    svc = ConversationSearchService(session, provider, lexical_backend=lexical_backend)
     resp = await svc.search(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
