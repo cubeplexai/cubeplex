@@ -1348,5 +1348,18 @@
     "weekdayThu": "Thu",
     "weekdayFri": "Fri",
     "weekdaySat": "Sat"
+  },
+  "sharePanel": {
+    "share": "Share",
+    "createShare": "Create snapshot link",
+    "creating": "Creating...",
+    "noShares": "No shares yet",
+    "copyLink": "Copy link",
+    "copied": "Copied!",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke this share? The link will stop working.",
+    "active": "Active",
+    "revoked": "Revoked",
+    "sharedAt": "Shared {date}"
   }
 }

@@ -1348,5 +1348,18 @@
     "weekdayThu": "四",
     "weekdayFri": "五",
     "weekdaySat": "六"
+  },
+  "sharePanel": {
+    "share": "分享",
+    "createShare": "创建快照链接",
+    "creating": "创建中...",
+    "noShares": "暂无分享",
+    "copyLink": "复制链接",
+    "copied": "已复制！",
+    "revoke": "撤销",
+    "revokeConfirm": "撤销此分享？链接将失效。",
+    "active": "有效",
+    "revoked": "已撤销",
+    "sharedAt": "分享于 {date}"
   }
 }
