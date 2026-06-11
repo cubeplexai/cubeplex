@@ -275,7 +275,13 @@ async def test_worker_leaves_row_for_reclaim_on_start_run_failure(
                 )
             )
         ).scalar_one()
-        # Failure path: queue row flips to 'failed' (no longer re-claimable
-        # via the lease branch), receipt stays 'pending' (since no run started).
-        assert item.status == "failed"
+        # Failure path on FIRST attempt: rewind to 'pending' so the next
+        # poll re-claims (transient errors must not become permanent
+        # silent drops); the receipt stays 'pending' too because no run
+        # actually started. After max_attempts the row would park as
+        # 'failed' — covered by a separate assertion below if we ever add
+        # that scenario to this suite.
+        assert item.status == "pending"
+        assert item.claim_lease_expires_at is None
+        assert item.attempts == 1
         assert rcpt.status == "pending"

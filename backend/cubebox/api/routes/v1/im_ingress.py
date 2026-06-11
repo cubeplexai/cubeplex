@@ -128,6 +128,17 @@ async def feishu_events(
     # Parse + ingest the message event. bot_open_id was hydrated at
     # connect_feishu time (Task 15) and lives on the credential.
     bot_open_id = str(secrets.get("bot_open_id") or "") or None
+    if bot_open_id is None:
+        # Without bot_open_id we cannot run the bot-echo guard, so the
+        # bot's own outbound replies could be re-ingested as inbound and
+        # loop the agent on itself. The long-connection startup refuses
+        # to bind in this state — webhook delivery must do the same.
+        # Operator needs to re-run connect_feishu to hydrate.
+        logger.warning(
+            "[Feishu ingress] dropping event — bot_open_id not hydrated on account {}",
+            account.id,
+        )
+        return Response(status_code=status.HTTP_200_OK)
     connector = FeishuConnector(bot_open_id=bot_open_id)
     event = connector.parse_inbound(payload)
     if event is None:
