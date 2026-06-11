@@ -34,7 +34,12 @@ export function AvatarPopover() {
     setMounted(true)
   }, [])
 
-  const initials = user?.email ? user.email[0]?.toUpperCase() : '?'
+  const displayName = user?.display_name ?? null
+  const initials = displayName
+    ? displayName[0]?.toUpperCase()
+    : user?.email
+      ? user.email[0]?.toUpperCase()
+      : '?'
 
   const onLogout = async () => {
     const client = createApiClient('')
@@ -71,7 +76,7 @@ export function AvatarPopover() {
           {initials}
         </div>
         <span className="text-xs truncate flex-1 text-left text-foreground">
-          {user?.email ?? '...'}
+          {displayName ?? user?.email ?? '...'}
         </span>
       </PopoverTrigger>
       <PopoverContent
@@ -80,8 +85,11 @@ export function AvatarPopover() {
         sideOffset={8}
         className="w-56 p-1 shadow-lg border-border-strong"
       >
-        <div className="px-2 py-2 text-2xs text-muted-foreground border-b border-border mb-1 truncate">
-          {user?.email}
+        <div className="px-2 py-2 border-b border-border mb-1">
+          {displayName && (
+            <div className="text-xs font-medium text-foreground truncate">{displayName}</div>
+          )}
+          <div className="text-2xs text-muted-foreground truncate">{user?.email}</div>
         </div>
 
         {isAdmin && !inAdminScope && (

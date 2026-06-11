@@ -3,6 +3,7 @@ import { toApiError, type ApiClient } from './client'
 export interface OrgMember {
   user_id: string
   email: string
+  display_name: string | null
   role: 'owner' | 'admin' | 'member'
   created_at: string
 }
@@ -10,6 +11,7 @@ export interface OrgMember {
 export interface WsMember {
   user_id: string
   email: string
+  display_name: string | null
   role: 'admin' | 'member'
   created_at: string
 }
