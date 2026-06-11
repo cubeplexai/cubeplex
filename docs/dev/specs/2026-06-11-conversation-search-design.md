@@ -183,8 +183,11 @@ Concrete implementations live under `cubebox/search/lexical/`:
 * `PgroongaBackend` (default in self-hosted)
   * DDL: `CREATE INDEX … USING pgroonga (text)`
   * Where: `text &@~ $q`, score from `pgroonga_score(tableoid, ctid)`
-  * `normalize_query`: pgroonga-specific reserved-char escape; supports
-    boolean / phrase syntax passthrough.
+  * `normalize_query`: v1 strips PGroonga reserved chars (`"`, `(`, `)`,
+    `\`) and treats the rest as a bag-of-words query. Phrase / boolean
+    syntax passthrough is explicitly out of scope for v1; future work
+    will add an opt-in `q_syntax=advanced` query param plus a vetted
+    escape table.
 * `PgBigmBackend` (deploy target: AWS RDS / Aurora)
   * DDL: `CREATE INDEX … USING gin (text gin_bigm_ops)`
   * Where: `text LIKE '%' || $q || '%'`; score from
@@ -192,10 +195,14 @@ Concrete implementations live under `cubebox/search/lexical/`:
   * `normalize_query`: SQL LIKE wildcard / underscore escape only.
 
 Selection: `search.lexical.backend` config key, default `pgroonga`.
-Alembic migration reads the same config and chooses which `CREATE INDEX` to
-emit. **Only one lexical index exists per deployment**; switching backends
-requires a manual reindex migration (acceptable — backend changes coincide
-with deployment-target changes, which are rare and planned).
+The alembic migration that creates `conversation_chunks` **freezes the
+backend choice as a literal in the revision file** (`USING pgroonga` or
+`USING gin (text gin_bigm_ops)`); the migration does **not** read the
+runtime config. Migrations are immutable assets — letting one revision
+emit different DDL across deployments is a footgun. Switching backends
+post-deploy requires a new revision (drop old index, create new), which
+matches the rarity of the event. **Only one lexical index exists per
+deployment.**
 
 The abstraction touches:
 
@@ -351,9 +358,12 @@ Response:
      emit `[start, end]` offsets relative to the snippet.
    * If no literal match (semantic-only hit), use the first ~160 chars of
      the chunk and return an empty `match_offsets`.
-6. Resolve `matched_message_seq`: pick the `cubepi_messages.seq` containing
-   the first matched character offset within the chunk's range — this needs
-   a lightweight scan of the chunk's source rows; do it once per result.
+6. Resolve `matched_message_seq`: **v1 returns the chunk's first message
+   seq (`seq_lo`)**, which lands the deep-link on the chunk's opening
+   message — usually within a few turns of the actual match because
+   chunks are ~600 tokens. Precise per-match resolution would require
+   tracking per-message text offsets inside each chunk; deferred until
+   user feedback shows the approximation is too coarse.
 7. Truncate to `limit`, return.
 
 Total wall-clock budget: < 500 ms on the 99th percentile. ANN + lexical

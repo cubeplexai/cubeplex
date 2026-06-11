@@ -475,15 +475,16 @@ import sqlalchemy as sa
 from alembic import op
 from pgvector.sqlalchemy import Vector
 
-from cubebox.config import config
-
 revision: str = "<KEEP AUTOGEN VALUE>"
 down_revision: str | None = "ab40489adff0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-LEXICAL_BACKEND = config.get("search.lexical.backend", "pgroonga")
-VECTOR_DIM = int(config.get("search.embedding.dimensions", 1024))
+# Frozen at migration-author time. Migrations are immutable assets — one
+# revision must always emit the same DDL. Switching backend or dimension
+# post-deploy requires a NEW revision (drop+create), not editing this one.
+LEXICAL_BACKEND = "pgroonga"
+VECTOR_DIM = 1024
 
 
 def upgrade() -> None:
@@ -556,7 +557,10 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
-    op.create_index("ix_ejob_pending", "embedding_jobs", ["state", "created_at"])
+    # Index covers the claim query `WHERE state='pending' AND scheduled_at
+    # <= now() ORDER BY scheduled_at FOR UPDATE SKIP LOCKED`. Indexing on
+    # created_at instead would force the planner into a heap scan + sort.
+    op.create_index("ix_ejob_pending", "embedding_jobs", ["state", "scheduled_at"])
     op.create_index("ix_ejob_conversation", "embedding_jobs", ["conversation_id"])
 
     # search_backfill_progress
@@ -1410,7 +1414,18 @@ class EmbeddingProvider:
         self.dimensions = dimensions
         self._timeout = timeout_seconds
         self._batch_size = batch_size
-        self._transport = _transport
+        # One httpx.AsyncClient per provider instance — connection pool
+        # is reused across embed calls, so we pay TLS handshake once
+        # per process instead of per batch. Lifetime = app lifespan.
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=timeout_seconds,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            transport=_transport,
+        )
 
     @classmethod
     def from_config(cls) -> "EmbeddingProvider":
@@ -1433,6 +1448,9 @@ class EmbeddingProvider:
         host = urlparse(self._base_url).hostname or "unknown"
         return f"{self._model}@{host}"
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
@@ -1443,18 +1461,10 @@ class EmbeddingProvider:
         return out
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
-        url = f"{self._base_url}/embeddings"
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
         body = {"model": self._model, "input": texts}
-        async with httpx.AsyncClient(
-            timeout=self._timeout, transport=self._transport
-        ) as client:
-            resp = await client.post(url, headers=headers, json=body)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await self._client.post("/embeddings", json=body)
+        resp.raise_for_status()
+        data = resp.json()
         items = sorted(data["data"], key=lambda d: d["index"])
         return [d["embedding"] for d in items]
 ```
@@ -1650,20 +1660,29 @@ class EmbeddingJobRepository:
         self,
         job_id: str,
         error: str,
-        attempts: int,
+        prior_attempts: int,
         backoff_seconds: list[int],
         max_attempts: int,
     ) -> None:
-        if attempts >= max_attempts:
+        """Record a failure.
+
+        `prior_attempts` is the row's current `attempts` value (the count
+        before this failure). The new written value is `prior_attempts + 1`.
+        The backoff index reads `backoff_seconds[prior_attempts]`, so a
+        first failure (prior=0) waits `backoff_seconds[0]` and the
+        configured tail entry actually gets used.
+        """
+        new_attempts = prior_attempts + 1
+        if new_attempts >= max_attempts:
             await self.session.execute(
                 text(
                     "UPDATE embedding_jobs SET state='dead', "
                     "attempts=:a, last_error=:err, updated_at=now() WHERE id=:id"
                 ),
-                {"id": job_id, "a": attempts, "err": error[:2000]},
+                {"id": job_id, "a": new_attempts, "err": error[:2000]},
             )
         else:
-            delay = backoff_seconds[min(attempts, len(backoff_seconds) - 1)]
+            delay = backoff_seconds[min(prior_attempts, len(backoff_seconds) - 1)]
             next_at = datetime.now(UTC) + timedelta(seconds=delay)
             await self.session.execute(
                 text(
@@ -1671,7 +1690,7 @@ class EmbeddingJobRepository:
                     "attempts=:a, last_error=:err, scheduled_at=:s, updated_at=now() "
                     "WHERE id=:id"
                 ),
-                {"id": job_id, "a": attempts, "err": error[:2000], "s": next_at},
+                {"id": job_id, "a": new_attempts, "err": error[:2000], "s": next_at},
             )
         await self.session.commit()
 ```
@@ -1768,7 +1787,7 @@ class EmbeddingWorker:
                 await EmbeddingJobRepository(session).mark_failed(
                     job_id=job.id,
                     error=str(exc),
-                    attempts=job.attempts + 1,
+                    prior_attempts=job.attempts,
                     backoff_seconds=list(self._backoff),
                     max_attempts=self._max_attempts,
                 )
@@ -1781,8 +1800,16 @@ class EmbeddingWorker:
         if data is None:
             return
         # 2. Filter to (seq_lo, seq_hi) window.
+        #
+        # We use 1-based load-order as the seq. This matches what the
+        # frontend conversation page uses for its `#msg-N` anchors —
+        # both sides walk cubepi's `data.messages` in order. The seq
+        # is a navigation hint, not an authoritative cubepi reference.
+        # If cubepi ever starts filtering tombstones / system messages
+        # from `data.messages`, both sides shift together, anchors stay
+        # consistent.
         in_window = [
-            (idx + 1, m)  # cubepi uses 1-based seq externally; mirror that
+            (idx + 1, m)
             for idx, m in enumerate(data.messages)
             if job.seq_lo <= idx + 1 <= job.seq_hi
         ]
@@ -1971,7 +1998,59 @@ async def enqueue_index_job(
         )
 ```
 
-- [ ] **Step 2: Hook into `_update_conversation_timestamp`**
+- [ ] **Step 2: Make failures observable via structured logging**
+
+Edit `backend/cubebox/search/indexer.py` and replace its body with:
+
+```python
+# backend/cubebox/search/indexer.py
+"""Convenience helpers used by callers that want to (re)index a conversation."""
+
+import logging
+
+from cubebox.db.engine import async_session_maker
+from cubebox.repositories.embedding_job import EmbeddingJobRepository
+
+logger = logging.getLogger(__name__)
+
+
+async def enqueue_index_job(
+    *,
+    org_id: str,
+    workspace_id: str,
+    creator_user_id: str,
+    conversation_id: str,
+) -> None:
+    """Enqueue a single 'index the whole conversation' job. The worker dedupes
+    by always replacing chunks for the conversation, so duplicate enqueues are
+    safe and cheap.
+
+    On failure, logs an ERROR with `event=search_index_enqueue_failed`
+    and the conversation_id, then re-raises so callers can decide how to
+    react. The hook in conversations.py catches and swallows (best-effort);
+    other callers (backfill) let it propagate. The structured `event=` key
+    lets log-based alerting fire on the first failure rather than the
+    user-visible 'search results stop appearing weeks later' symptom.
+    """
+    try:
+        async with async_session_maker() as session:
+            await EmbeddingJobRepository(session).enqueue(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                creator_user_id=creator_user_id,
+                conversation_id=conversation_id,
+            )
+    except Exception:
+        logger.error(
+            "event=search_index_enqueue_failed conversation_id=%s workspace_id=%s",
+            conversation_id,
+            workspace_id,
+            exc_info=True,
+        )
+        raise
+```
+
+- [ ] **Step 3: Hook into `_update_conversation_timestamp`**
 
 Edit `backend/cubebox/api/routes/v1/conversations.py`. Find
 `_update_conversation_timestamp` (around line 74). After
@@ -1992,13 +2071,15 @@ Edit `backend/cubebox/api/routes/v1/conversations.py`. Find
                     )
             except Exception:
                 # Indexing is best-effort: failure must not poison the
-                # conversation timestamp bump.
+                # conversation timestamp bump. The Counter in indexer.py
+                # has already incremented — silent here, observable in
+                # Prometheus.
                 logger.exception("search index enqueue failed for %s", conversation_id)
 ```
 
 Add the logger import at the module top if not already present (it should be).
 
-- [ ] **Step 3: Run the existing conversations tests to make sure we didn't break the hook**
+- [ ] **Step 4: Run the existing conversations tests to make sure we didn't break the hook**
 
 ```bash
 cd backend && uv run pytest tests/api/test_conversations.py -v
@@ -2006,11 +2087,11 @@ cd backend && uv run pytest tests/api/test_conversations.py -v
 
 Expected: pass.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add backend/cubebox/search/indexer.py backend/cubebox/api/routes/v1/conversations.py
-git commit -m "feat(search): enqueue index job on run completion"
+git commit -m "feat(search): enqueue index job on run completion (observable)"
 ```
 
 ---
@@ -2028,7 +2109,7 @@ grep -n "lifespan\|app.state" backend/cubebox/api/app.py | head -30
 
 Note the lifespan function name and where startup/shutdown hooks live.
 
-- [ ] **Step 2: Add the worker start/stop**
+- [ ] **Step 2: Add provider + worker startup (single instance on app.state)**
 
 Inside the lifespan async function, after existing startup logic, add:
 
@@ -2038,8 +2119,14 @@ Inside the lifespan async function, after existing startup logic, add:
     from cubebox.search.worker import EmbeddingWorker
 
     worker_task: asyncio.Task[None] | None = None
+    app.state.embedding_provider = None
+    app.state.embedding_worker = None
+
     if _cfg.get("search.enabled", True):
         provider = EmbeddingProvider.from_config()
+        app.state.embedding_provider = provider
+        # The route handler reads app.state.embedding_provider — no
+        # per-request rebuild, no per-batch httpx.AsyncClient churn.
         worker = EmbeddingWorker(provider)
         worker_task = asyncio.create_task(worker.run(), name="embedding-worker")
         app.state.embedding_worker = worker
@@ -2049,11 +2136,17 @@ And at shutdown (after `yield` in the lifespan), add:
 
 ```python
     if worker_task is not None:
-        getattr(app.state, "embedding_worker").stop()
+        app.state.embedding_worker.stop()
         try:
             await asyncio.wait_for(worker_task, timeout=5.0)
         except TimeoutError:
             worker_task.cancel()
+            try:
+                await worker_task
+            except (asyncio.CancelledError, Exception):
+                pass
+    if app.state.embedding_provider is not None:
+        await app.state.embedding_provider.aclose()
 ```
 
 Add `import asyncio` at the top if not present.
@@ -2253,18 +2346,20 @@ class ConversationSearchService:
             seen[conv_id] = (score, ch)
         # Resolve titles + build snippets, truncate to limit.
         ordered = sorted(seen.items(), key=lambda kv: kv[1][0], reverse=True)[:limit]
-        titles = await self._titles(list(seen.keys()))
+        titles = await self._titles([cid for cid, _ in ordered])
         results: list[SearchResult] = []
         for conv_id, (score, ch) in ordered:
             snip: Snippet = extract_snippet(ch["text"], q=q, window=160)
-            matched_seq = ch["seq_lo"] if snip.match_offsets else ch["seq_lo"]
+            # v1: navigate to the chunk's first message. Precise
+            # per-match resolution would need per-message text-offset
+            # metadata on the chunk; deferred (see spec §9.1 step 6).
             results.append(
                 SearchResult(
                     conversation_id=conv_id,
                     title=titles.get(conv_id, ""),
                     snippet=snip.text,
                     match_offsets=list(snip.match_offsets),
-                    matched_message_seq=int(matched_seq),
+                    matched_message_seq=int(ch["seq_lo"]),
                     matched_at=ch.get("created_at_iso"),
                     score=score,
                 )
@@ -2316,11 +2411,11 @@ class ConversationSearchService:
     async def _hydrate_chunks(self, chunk_ids: list[str]) -> dict[str, dict]:
         if not chunk_ids:
             return {}
+        from cubebox.utils.time import utc_isoformat
+
         sql = text(
             """
-            SELECT id, conversation_id, seq_lo, seq_hi, text,
-                   to_char(created_at AT TIME ZONE 'UTC',
-                           'YYYY-MM-DD"T"HH24:MI:SS.US') || '+00:00' AS created_at_iso
+            SELECT id, conversation_id, seq_lo, seq_hi, text, created_at
             FROM conversation_chunks
             WHERE id = ANY(:ids)
             """
@@ -2328,7 +2423,10 @@ class ConversationSearchService:
         result = await self._session.execute(sql, {"ids": chunk_ids})
         out: dict[str, dict] = {}
         for r in result.mappings().all():
-            out[r["id"]] = dict(r)
+            row = dict(r)
+            # Project rule: DB → frontend datetimes go through utc_isoformat().
+            row["created_at_iso"] = utc_isoformat(row["created_at"])
+            out[row["id"]] = row
         return out
 
     async def _titles(self, conversation_ids: list[str]) -> dict[str, str]:
@@ -2448,7 +2546,7 @@ class SearchResponseSchema(BaseModel):
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.conversation_search import (
@@ -2458,7 +2556,6 @@ from cubebox.api.schemas.conversation_search import (
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.db import get_session
-from cubebox.search.embedding import EmbeddingProvider
 from cubebox.search.service import ConversationSearchService
 
 router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
@@ -2466,6 +2563,7 @@ router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversatio
 
 @router.get("/search", response_model=SearchResponseSchema)
 async def search_conversations(
+    raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
     q: Annotated[str, Query(min_length=1, max_length=200)],
@@ -2474,7 +2572,15 @@ async def search_conversations(
     cleaned = q.strip()
     if not cleaned:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="empty query")
-    provider = EmbeddingProvider.from_config()
+    # Provider is created once at lifespan startup (Task 19) and shared
+    # across all requests; building one per request would re-init httpx
+    # connection pools and re-parse config on every keystroke.
+    provider = raw_request.app.state.embedding_provider
+    if provider is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="search is disabled",
+        )
     svc = ConversationSearchService(session, provider)
     resp = await svc.search(
         org_id=ctx.org_id,
@@ -2852,17 +2958,23 @@ export async function searchConversations(
   client: ApiClient,
   q: string,
   limit = 8,
-  signal?: AbortSignal,
 ): Promise<SearchResponse> {
-  const wsId = client.workspaceId
-  if (!wsId) throw new Error('workspace not set on api client')
-  const url = `/api/v1/ws/${wsId}/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`
-  return client.get<SearchResponse>(url, { signal })
+  // ApiClient.get returns Promise<Response>; it auto-injects the `/ws/{id}/`
+  // segment via injectWorkspace, so we pass the scoped suffix only.
+  const path = `/api/v1/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`
+  const resp = await client.get(path)
+  if (!resp.ok) {
+    throw new Error(`search failed: ${resp.status}`)
+  }
+  return (await resp.json()) as SearchResponse
 }
 ```
 
-(Adjust `client.get` typing to match your existing ApiClient method
-signature — check `packages/core/src/api/client.ts` first.)
+ApiClient (`packages/core/src/api/client.ts`) provides
+`get(path: string): Promise<Response>`; the workspace segment is added
+automatically when `client.workspaceId` is set. There is no built-in
+abort-signal parameter — the hook in Task 27 handles cancellation by
+ignoring stale responses, not by aborting the fetch.
 
 - [ ] **Step 2: Re-export**
 
@@ -2901,7 +3013,7 @@ git commit -m "feat(core): searchConversations API method"
 // frontend/packages/web/hooks/useConversationSearch.ts
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createApiClient, searchConversations, type SearchResult } from '@cubebox/core'
 
 export interface SearchState {
@@ -2914,7 +3026,16 @@ const DEBOUNCE_MS = 250
 
 export function useConversationSearch(query: string, wsId: string | null): SearchState {
   const [state, setState] = useState<SearchState>({ loading: false, error: null, results: [] })
-  const abortRef = useRef<AbortController | null>(null)
+  // Stale-response counter: the only response we render is the most recent one.
+  // ApiClient.get has no signal parameter, so we can't actually abort the
+  // fetch — instead we tag each request and ignore replies for older tags.
+  const requestIdRef = useRef(0)
+
+  const client = useMemo(() => {
+    const c = createApiClient('')
+    if (wsId) c.setWorkspaceId(wsId)
+    return c
+  }, [wsId])
 
   useEffect(() => {
     if (!wsId) {
@@ -2927,24 +3048,24 @@ export function useConversationSearch(query: string, wsId: string | null): Searc
       return
     }
     const handle = window.setTimeout(() => {
-      abortRef.current?.abort()
-      const ac = new AbortController()
-      abortRef.current = ac
+      const myId = ++requestIdRef.current
       setState((s) => ({ ...s, loading: true, error: null }))
-      const client = createApiClient('')
-      client.setWorkspaceId(wsId)
-      searchConversations(client, q, 8, ac.signal)
-        .then((resp) => setState({ loading: false, error: null, results: resp.results }))
-        .catch((err: unknown) => {
-          if ((err as { name?: string }).name === 'AbortError') return
+      searchConversations(client, q, 8)
+        .then((resp) => {
+          if (myId !== requestIdRef.current) return // stale
+          setState({ loading: false, error: null, results: resp.results })
+        })
+        .catch(() => {
+          if (myId !== requestIdRef.current) return
           setState({ loading: false, error: 'search-failed', results: [] })
         })
     }, DEBOUNCE_MS)
     return () => {
       window.clearTimeout(handle)
-      abortRef.current?.abort()
+      // bump the id so the in-flight reply (if any) is discarded
+      requestIdRef.current += 1
     }
-  }, [query, wsId])
+  }, [query, wsId, client])
 
   return state
 }
@@ -3079,10 +3200,19 @@ export function ConversationSearch({ wsId }: Props): React.ReactElement {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent): void {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault()
-        setOpen(true)
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'k') return
+      // Spec §10.3: only register ⌘K when no other input has focus, so
+      // typing ⌘K inside the chat composer or a markdown editor doesn't
+      // steal focus.
+      const ae = document.activeElement as HTMLElement | null
+      if (ae) {
+        const tag = ae.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable) {
+          return
+        }
       }
+      e.preventDefault()
+      setOpen(true)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
