@@ -60,3 +60,28 @@ async def test_search_rejects_injection_attempts() -> None:
         await client.search(
             org_id='ws-x" || true || span.foo="',
         )
+
+
+@respx.mock
+async def test_get_trace_returns_detail() -> None:
+    payload = json.loads((FIXTURES / "sample_trace_multi_turn.json").read_text())
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/traces/abc123").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    detail = await client.get_trace("abc123")
+    assert detail.summary.trace_id == payload["batches"][0]["scopeSpans"][0]["spans"][0]["traceId"]
+    assert detail.root.children
+
+
+@respx.mock
+async def test_tag_values_passes_through() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search/tag/cubepi.metadata.workspace_id/values").mock(
+        return_value=httpx.Response(200, json={"tagValues": ["ws-a", "ws-b"]})
+    )
+    values = await client.tag_values(
+        tag="cubepi.metadata.workspace_id",
+        org_id="org-1",
+    )
+    assert values == ["ws-a", "ws-b"]

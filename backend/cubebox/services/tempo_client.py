@@ -382,6 +382,33 @@ class TempoClient:
         payload = resp.json()
         return [_search_hit_to_summary(t) for t in payload.get("traces", [])]
 
+    async def get_trace(self, trace_id: str) -> TraceDetail:
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            resp = await http.get(f"{self._endpoint}/api/traces/{trace_id}")
+        if resp.status_code == 404:
+            raise TempoQueryError(f"Trace {trace_id} not found")
+        if resp.status_code >= 400:
+            raise TempoQueryError(f"Tempo /api/traces/{trace_id} returned {resp.status_code}")
+        return parse_trace_detail(resp.json())
+
+    async def tag_values(self, *, tag: str, org_id: str) -> list[str]:
+        # Tempo's v1 `/api/search/tag/{name}/values` returns the complete
+        # value list for the tag scoped by the `q=` TraceQL. There is no
+        # server-side prefix filter; typeahead narrows client-side.
+        params: dict[str, Any] = {
+            "q": '{ resource.service.name="cubebox" '
+            f"&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }}",
+        }
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            resp = await http.get(
+                f"{self._endpoint}/api/search/tag/{tag}/values",
+                params=params,
+            )
+        if resp.status_code >= 400:
+            raise TempoQueryError(f"Tempo tag values returned {resp.status_code}")
+        payload = resp.json()
+        return [str(v) for v in payload.get("tagValues", [])]
+
 
 def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
     return TraceSummary(
