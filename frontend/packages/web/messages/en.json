@@ -75,7 +75,8 @@
     "darkTheme": "Dark theme",
     "signOut": "Sign out",
     "language": "Language",
-    "backToApp": "Back to app"
+    "backToApp": "Back to app",
+    "profileSettings": "Profile settings"
   },
   "admin": {
     "title": "Admin",
@@ -1398,6 +1399,7 @@
     "weekdayFri": "Fri",
     "weekdaySat": "Sat"
   },
+<<<<<<< HEAD
   "sharePanel": {
     "share": "Share",
     "createShare": "Create snapshot link",
@@ -1436,5 +1438,25 @@
     "notFound": "Share not found",
     "notFoundBody": "This share link may have been revoked or does not exist.",
     "poweredBy": "Powered by cubebox"
+  },
+  "profile": {
+    "title": "Profile",
+    "subtitle": "Manage your personal info and password",
+    "personalInfo": "Personal info",
+    "displayNameLabel": "Display name",
+    "emailLabel": "Email",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Profile updated",
+    "saveError": "Failed to save",
+    "changePassword": "Change password",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "passwordMismatch": "Passwords don't match",
+    "incorrectPassword": "Current password is incorrect",
+    "passwordChangeError": "Failed to change password",
+    "passwordChanged": "Password updated",
+    "updatePassword": "Update password"
   }
 }
