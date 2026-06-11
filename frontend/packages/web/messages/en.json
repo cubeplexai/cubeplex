@@ -870,7 +870,34 @@
       "cancel": "Cancel"
     },
     "empty": "No members yet.",
-    "accessDenied": "Only workspace admins can manage members."
+    "accessDenied": "Only workspace admins can manage members.",
+    "invite": {
+      "sectionTitle": "Invite links",
+      "createLink": "Create invite link",
+      "role": "Role",
+      "createdBy": "Created by",
+      "expires": "Expires",
+      "status": "Status",
+      "title": "Create invite link",
+      "roleLabel": "Role for invited user",
+      "admin": "Admin",
+      "member": "Member",
+      "cancel": "Cancel",
+      "create": "Create",
+      "creating": "Creating…",
+      "createError": "Failed to create invite",
+      "linkReady": "Share this link with the person you'd like to invite:",
+      "done": "Done"
+    }
+  },
+  "invite": {
+    "accepting": "Accepting invite…",
+    "invalidLink": "Invalid invite link.",
+    "expiredOrUsed": "This invite link has expired or has already been used.",
+    "goHome": "Go to homepage",
+    "joined": "You're in!",
+    "joinedDescription": "You've joined the workspace \"{workspace}\".",
+    "openWorkspace": "Open workspace"
   },
   "panel": {
     "header": {
