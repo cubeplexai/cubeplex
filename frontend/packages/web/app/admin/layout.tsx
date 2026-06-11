@@ -15,7 +15,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { isAdmin, orgName, loading, error } = useAdminAccess()
   const router = useRouter()
 
-  // Load current user into authStore so AdminAvatarMenu can render the email.
+  // Load current user into authStore so AvatarPopover can render the email.
   useEffect(() => {
     useAuthStore.getState().loadMe(client)
   }, [client])

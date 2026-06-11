@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Separator } from '@/components/ui/separator'
+import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { useAdminExtensions } from '@/hooks/useAdminExtensions'
 import { cn } from '@/lib/utils'
 
@@ -79,9 +80,9 @@ export function AdminSubNav() {
   return (
     <nav
       aria-label={tLayout('subNavAria')}
-      className="w-56 border-r border-border bg-card flex flex-col p-2 overflow-y-auto"
+      className="w-56 border-r border-border bg-card flex flex-col shrink-0"
     >
-      <ul className="space-y-0.5">
+      <ul className="space-y-0.5 flex-1 overflow-y-auto p-2">
         {NATIVE_ITEMS.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + '/')
           return (
@@ -112,6 +113,9 @@ export function AdminSubNav() {
           </>
         )}
       </ul>
+      <div className="border-t border-border p-2 shrink-0">
+        <AvatarPopover />
+      </div>
     </nav>
   )
 }
