@@ -82,12 +82,17 @@ class ConversationShareRepository:
         self,
         user_id: str,
         *,
+        workspace_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[ConversationShare], int]:
         base = select(ConversationShare).where(
             ConversationShare.creator_user_id == user_id,  # type: ignore[arg-type]
         )
+        if workspace_id is not None:
+            base = base.where(
+                ConversationShare.workspace_id == workspace_id,  # type: ignore[arg-type]
+            )
         stmt = (
             base.order_by(desc(ConversationShare.created_at))  # type: ignore[arg-type]
             .limit(limit)
@@ -95,14 +100,18 @@ class ConversationShareRepository:
         )
         items = list((await self.session.execute(stmt)).scalars().all())
 
-        count_stmt = (
+        count_base = (
             select(func.count())
             .select_from(ConversationShare)
             .where(
                 ConversationShare.creator_user_id == user_id,  # type: ignore[arg-type]
             )
         )
-        total: int = (await self.session.execute(count_stmt)).scalar_one()
+        if workspace_id is not None:
+            count_base = count_base.where(
+                ConversationShare.workspace_id == workspace_id,  # type: ignore[arg-type]
+            )
+        total: int = (await self.session.execute(count_base)).scalar_one()
         return items, total
 
     async def list_by_conversation(

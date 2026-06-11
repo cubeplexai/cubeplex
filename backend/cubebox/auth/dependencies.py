@@ -32,7 +32,10 @@ async def current_active_user(request: Request) -> User:
 
 async def optional_current_user(request: Request) -> User | None:
     """Like current_active_user but returns None instead of 401."""
-    user = await get_registry().get_auth_provider().authenticate(request)  # type: ignore[attr-defined]
+    try:
+        user = await get_registry().get_auth_provider().authenticate(request)  # type: ignore[attr-defined]
+    except Exception:
+        return None
     if user is None or not getattr(user, "is_active", True):
         return None
     return user  # type: ignore[no-any-return]
