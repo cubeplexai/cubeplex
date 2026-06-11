@@ -447,9 +447,10 @@ Notes:
   start without secret injection (placeholders stay literal) — alert on
   webhook health separately.
 - Source code for the webhook + addon lives under
-  `deploy/kubernetes/egress-bundle/`. Edit `addon/inject.py` then run
-  `deploy/kubernetes/scripts/sync-egress-files.sh` to refresh the chart-
-  vendored copy.
+  `deploy/kubernetes/egress-bundle/`. The canonical `inject.py` is at
+  `deploy/kubernetes/charts/cubebox/files/egress/inject.py` (so the
+  chart can read it via `Files.Get`);
+  `deploy/kubernetes/egress-bundle/addon/inject.py` is a symlink to it.
 
 ---
 
