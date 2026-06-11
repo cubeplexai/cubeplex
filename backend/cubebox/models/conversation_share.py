@@ -4,6 +4,7 @@ from typing import Any, ClassVar
 
 from sqlalchemy import Column, Index
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.types import JSON
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -24,10 +25,10 @@ class ConversationShare(CubeboxBase, OrgScopedMixin, table=True):
     title: str = Field(max_length=255)
     snapshot: dict[str, Any] = Field(
         default_factory=dict,
-        sa_column=Column(JSONB, nullable=False),
+        sa_column=Column(JSON().with_variant(JSONB(), "postgresql"), nullable=False),
     )
     artifacts_snapshot: list[dict[str, Any]] = Field(
         default_factory=list,
-        sa_column=Column(JSONB, nullable=False),
+        sa_column=Column(JSON().with_variant(JSONB(), "postgresql"), nullable=False),
     )
     is_active: bool = Field(default=True)
