@@ -15,13 +15,15 @@ import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { usePanelStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
+import { SharePanel } from '@/components/chat/SharePanel'
 
 interface AppShellProps {
   children: ReactNode
   headerTitle?: string
+  conversationId?: string
 }
 
-export function AppShell({ children, headerTitle }: AppShellProps) {
+export function AppShell({ children, headerTitle, conversationId }: AppShellProps) {
   const view = usePanelStore((s) => s.view)
   const openBrowser = usePanelStore((s) => s.openBrowser)
   const { workspaceId } = useWorkspaceContext()
@@ -100,6 +102,7 @@ export function AppShell({ children, headerTitle }: AppShellProps) {
           <Menu className="size-4" />
         </button>
         <span className="text-sm text-muted-foreground truncate flex-1">{headerTitle || ''}</span>
+        {conversationId && <SharePanel conversationId={conversationId} />}
         {workspaceId && sandboxEnabled && (
           <button
             type="button"

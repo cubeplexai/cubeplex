@@ -66,7 +66,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   const currentConvo = conversations.find((c) => c.id === conversationId)
 
   return (
-    <AppShell headerTitle={currentConvo?.title}>
+    <AppShell headerTitle={currentConvo?.title} conversationId={conversationId}>
       <ArtifactGallery conversationId={conversationId} />
       <MessageList conversationId={conversationId} />
       <div className="border-t border-border px-4 py-3 bg-background">
