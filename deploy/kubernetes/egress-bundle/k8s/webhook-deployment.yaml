@@ -20,7 +20,7 @@ spec:
       serviceAccountName: egress-webhook
       containers:
         - name: webhook
-          # Replace with the actual image built from deploy/egress-bundle/webhook/Dockerfile.
+          # Replace with the actual image built from deploy/kubernetes/egress-bundle/webhook/Dockerfile.
           image: REGISTRY_PLACEHOLDER/cubebox-egress-webhook:latest
           imagePullPolicy: Always
           ports:

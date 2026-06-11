@@ -1,4 +1,4 @@
-# deploy/egress-bundle/webhook/cert_minter.py
+# deploy/kubernetes/egress-bundle/webhook/cert_minter.py
 """Mint short-lived per-sandbox client certs (CN=sandbox_id) signed by a fixed CA."""
 
 from __future__ import annotations

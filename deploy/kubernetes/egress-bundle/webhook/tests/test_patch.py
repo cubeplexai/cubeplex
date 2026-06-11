@@ -1,4 +1,4 @@
-# deploy/egress-bundle/webhook/tests/test_patch.py
+# deploy/kubernetes/egress-bundle/webhook/tests/test_patch.py
 import pytest
 
 from webhook.patch import build_pod_patch, is_sandbox_pod

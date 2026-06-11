@@ -70,6 +70,11 @@ spec:
             - name: http
               containerPort: 8000
               protocol: TCP
+            {{- if .Values.egress.enabled }}
+            - name: mtls
+              containerPort: 8443
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health/live
@@ -96,6 +101,11 @@ spec:
               mountPath: /app/config.production.secrets.yaml
               subPath: config.production.secrets.yaml
               readOnly: true
+            {{- if .Values.egress.enabled }}
+            - name: egress-mtls
+              mountPath: /etc/egress-mtls
+              readOnly: true
+            {{- end }}
       volumes:
         - name: config
           configMap:
@@ -103,3 +113,8 @@ spec:
         - name: secrets
           secret:
             secretName: {{ include "cubebox.backend.fullname" . }}-secrets
+        {{- if .Values.egress.enabled }}
+        - name: egress-mtls
+          secret:
+            secretName: {{ printf "%s-mtls" (include "cubebox.backend.fullname" .) | quote }}
+        {{- end }}

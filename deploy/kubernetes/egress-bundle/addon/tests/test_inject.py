@@ -1,4 +1,4 @@
-# deploy/egress-bundle/addon/tests/test_inject.py
+# deploy/kubernetes/egress-bundle/addon/tests/test_inject.py
 # The addon module exposes pure helpers so it is testable without a live mitmproxy.
 import inject
 from inject import should_substitute_header, scan_placeholders

@@ -37,6 +37,15 @@ REGISTRY="${REGISTRY:-192.168.1.101:8050}"
 REPO="${REPO:-library}"
 TAG="${1:-$(git rev-parse --short HEAD)}"
 TARGETS="${TARGET:-backend frontend}"
+# Add "egress-webhook" to TARGET when deploying with egress.enabled.
+
+# Map target → Dockerfile path. backend/frontend are under deploy/images,
+# egress-webhook lives next to its source under egress-bundle.
+declare -A DOCKERFILES=(
+  [backend]="deploy/images/backend/Dockerfile"
+  [frontend]="deploy/images/frontend/Dockerfile"
+  [egress-webhook]="deploy/kubernetes/egress-bundle/webhook/Dockerfile"
+)
 
 # Mirror knobs (empty → use upstream defaults)
 APT_MIRROR_HOST="${APT_MIRROR_HOST:-}"
@@ -77,11 +86,16 @@ BUILD_ARGS=(
 )
 
 for target in $TARGETS; do
+  dockerfile="${DOCKERFILES[$target]:-}"
+  if [[ -z "$dockerfile" ]]; then
+    echo "ERROR: unknown TARGET=$target (allowed: backend frontend egress-webhook)" >&2
+    exit 1
+  fi
   image="$REGISTRY/$REPO/cubebox-$target:$TAG"
   echo
-  echo "==> docker build $image"
+  echo "==> docker build $image  (using $dockerfile)"
   docker build \
-    --file "deploy/images/$target/Dockerfile" \
+    --file "$dockerfile" \
     --tag "$image" \
     --tag "$REGISTRY/$REPO/cubebox-$target:latest" \
     "${BUILD_ARGS[@]}" \

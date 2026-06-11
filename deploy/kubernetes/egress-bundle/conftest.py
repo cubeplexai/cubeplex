@@ -1,4 +1,4 @@
-"""Root conftest: put deploy/egress-bundle and deploy/egress-bundle/addon on sys.path.
+"""Root conftest: put deploy/kubernetes/egress-bundle and deploy/kubernetes/egress-bundle/addon on sys.path.
 
 - `import webhook.*` resolves via the egress-bundle root (webhook is a package).
 - `import inject` resolves via the addon/ dir (inject.py is a top-level module there,

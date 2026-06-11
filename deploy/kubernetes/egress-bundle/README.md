@@ -14,7 +14,7 @@ OpenSandbox server and egress image stay **100% stock**.  This bundle adds:
 ## Directory layout
 
 ```
-deploy/egress-bundle/
+deploy/kubernetes/egress-bundle/
 ├── addon/
 │   └── inject.py               mitmproxy addon (source of truth)
 ├── webhook/

@@ -1,4 +1,4 @@
-# deploy/egress-bundle/webhook/tests/test_cert_minter.py
+# deploy/kubernetes/egress-bundle/webhook/tests/test_cert_minter.py
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
