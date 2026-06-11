@@ -361,12 +361,16 @@ async def lifespan(_app: FastAPI):  # type: ignore
     from cubebox.config import config as _search_cfg
     from cubebox.models.conversation_chunk import VECTOR_DIM
     from cubebox.search.embedding import EmbeddingProvider
+    from cubebox.search.lexical import build_lexical_backend
     from cubebox.search.worker import EmbeddingWorker
 
     embedding_worker_task: asyncio.Task[None] | None = None
     _app.state.embedding_provider = None
     _app.state.embedding_worker = None
     _app.state.embedding_worker_task = None
+    # Lexical backend has no per-request state; build it once at startup so
+    # the search route doesn't reconstruct it on every keystroke.
+    _app.state.lexical_backend = build_lexical_backend()
     if _search_cfg.get("search.enabled", True):
         embedding_provider: EmbeddingProvider | None
         try:
