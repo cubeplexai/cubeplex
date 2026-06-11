@@ -23,8 +23,10 @@
   }
 }
 
-/* Use .dark class (not prefers-color-scheme) so dark: variants work with the theme toggle */
-@custom-variant dark (&:where(.dark, .dark *));
+/* Use class hooks (not prefers-color-scheme) so dark: variants work with
+   the theme toggle. Both .dark (default) and .operator-dark trigger the
+   dark variant. */
+@custom-variant dark (&:where(.dark, .dark *, .operator-dark, .operator-dark *));
 
 /* Token layer — "Vercel Mono" direction.
    Source of truth: this file (spec docs/dev/specs/2026-06-10-ui-redesign-design.md §1).
@@ -172,6 +174,145 @@
 
     --color-destructive: #e5484d;
     --color-destructive-foreground: #ffffff;
+  }
+
+  /* ============================================================
+     OPERATOR — alt theme family inspired by cubepi docs + e2b.
+     Two variants: .operator-light and .operator-dark; user picks
+     light/dark independently from picking the Operator flavor.
+     Shared traits:
+     - Inter Tight headlines, JetBrains Mono chrome
+     - Inverse elevation: page is the softer surface, panels are
+       deeper (light: panel=#fff over page=#fafafa;
+              dark : panel=#0a0a0b under page=#18181b)
+     - High-contrast NEUTRAL CTA (ink-on-page-ink): never a brand fill
+     - Indigo reserved for tiny accent moments (focus ring, info-fg)
+     - Sharper 1px borders, tighter radius (3/5/6), no shadows
+     - .uppercase auto-promotes to JetBrains Mono + 0.12em tracking
+     ============================================================ */
+  .operator-light {
+    --font-sans: var(--font-inter-tight), system-ui, -apple-system, sans-serif;
+    --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SFMono-Regular', monospace;
+
+    --color-background: #fafafa; /* zinc-50 — the page */
+    --color-foreground: #0a0a0b; /* zinc-950 — body ink */
+    --color-card: #ffffff; /* surface (panels/sidebar) is the stark white */
+    --color-card-foreground: #0a0a0b;
+    --color-raised: #f4f4f5; /* input bar, user bubble, hover fills */
+    --color-sunken: #f4f4f5;
+
+    --color-primary: #0a0a0b; /* high-contrast neutral CTA — cubepi voice */
+    --color-primary-foreground: #fafafa;
+
+    --color-secondary: #f4f4f5;
+    --color-secondary-foreground: #0a0a0b;
+    --color-muted: #f4f4f5;
+    --color-muted-foreground: #52525b; /* zinc-600 */
+    --color-faint: #a1a1aa; /* zinc-400, eyebrows */
+    --color-accent: #f4f4f5;
+    --color-accent-foreground: #0a0a0b;
+    --color-popover: #ffffff;
+    --color-popover-foreground: #0a0a0b;
+    --color-border: #e4e4e7; /* zinc-200 */
+    --color-border-strong: #d4d4d8; /* zinc-300 */
+    --color-input: #e4e4e7;
+    --color-ring: #3b5bd9; /* cubepi indigo */
+
+    --color-success-surface: rgba(22, 163, 74, 0.08);
+    --color-success-border: rgba(22, 163, 74, 0.3);
+    --color-success-fg: #15803d;
+    --color-success-solid: #16a34a;
+    --color-warning-surface: rgba(217, 119, 6, 0.08);
+    --color-warning-border: rgba(217, 119, 6, 0.3);
+    --color-warning-fg: #b45309;
+    --color-warning-solid: #d97706;
+    --color-danger-surface: rgba(220, 38, 38, 0.08);
+    --color-danger-border: rgba(220, 38, 38, 0.3);
+    --color-danger-fg: #b91c1c;
+    --color-danger-solid: #dc2626;
+    --color-info-surface: rgba(59, 91, 217, 0.08);
+    --color-info-border: rgba(59, 91, 217, 0.3);
+    --color-info-fg: #3b5bd9;
+    --color-info-solid: #3b5bd9;
+
+    --color-destructive: #dc2626;
+    --color-destructive-foreground: #ffffff;
+  }
+
+  .operator-dark {
+    --font-sans: var(--font-inter-tight), system-ui, -apple-system, sans-serif;
+    --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SFMono-Regular', monospace;
+
+    --color-background: #18181b; /* zinc-900 — the canvas */
+    --color-foreground: #f4f4f5; /* zinc-50 */
+    --color-card: #0a0a0b; /* zinc-950 — panels go DEEPER than canvas */
+    --color-card-foreground: #f4f4f5;
+    --color-raised: #27272a; /* zinc-800 — input bar, bubbles, hover fills */
+    --color-sunken: #050506; /* code blocks, terminal */
+
+    /* CTA = high-contrast NEUTRAL (zinc-100), not a colored fill.
+       'pip install cubepi' style — the action IS the page voice. */
+    --color-primary: #fafafa;
+    --color-primary-foreground: #18181b;
+
+    --color-secondary: #27272a;
+    --color-secondary-foreground: #f4f4f5;
+    --color-muted: #27272a;
+    --color-muted-foreground: #a1a1aa; /* zinc-400 */
+    --color-faint: #71717a; /* zinc-500, eyebrows + meta */
+    --color-accent: #27272a; /* hover slot */
+    --color-accent-foreground: #f4f4f5;
+    --color-popover: #0a0a0b;
+    --color-popover-foreground: #f4f4f5;
+    --color-border: #3f3f46; /* zinc-700 — sharper, single tone */
+    --color-border-strong: #52525b; /* zinc-600 */
+    --color-input: #3f3f46;
+    /* Focus ring uses the accent indigo so it pops on the neutral CTA */
+    --color-ring: #6a83e3;
+
+    /* Status palette stays muted (same as dark theme); these are state
+       indicators, not brand. */
+    --color-success-surface: rgba(45, 145, 90, 0.1);
+    --color-success-border: rgba(45, 145, 90, 0.3);
+    --color-success-fg: #6db58a;
+    --color-success-solid: #3f8c63;
+    --color-warning-surface: rgba(200, 145, 50, 0.1);
+    --color-warning-border: rgba(200, 145, 50, 0.3);
+    --color-warning-fg: #d1a164;
+    --color-warning-solid: #b07e3a;
+    --color-danger-surface: rgba(195, 75, 80, 0.1);
+    --color-danger-border: rgba(195, 75, 80, 0.3);
+    --color-danger-fg: #d97478;
+    --color-danger-solid: #b54146;
+    /* info repurposed to the indigo accent so links/active reads share
+       the operator voice */
+    --color-info-surface: rgba(106, 131, 227, 0.1);
+    --color-info-border: rgba(106, 131, 227, 0.35);
+    --color-info-fg: #6a83e3;
+    --color-info-solid: #6a83e3;
+
+    --color-destructive: #d97478;
+    --color-destructive-foreground: #18181b;
+  }
+
+  /* Operator-only chrome tweaks: tighter radius for that 5px feel; all
+     `.uppercase` labels are auto-mono with cubepi-style letterspacing.
+     Applies to both light + dark variants of the Operator family. */
+  :where(.operator-light, .operator-dark) *,
+  :where(.operator-light, .operator-dark) *::before,
+  :where(.operator-light, .operator-dark) *::after {
+    --radius-xs: 3px;
+    --radius: 5px;
+    --radius-lg: 6px;
+  }
+  :where(.operator-light, .operator-dark) :where(.uppercase) {
+    font-family: var(--font-mono);
+    letter-spacing: 0.12em;
+    font-weight: 500;
+  }
+  /* Numerals in mono contexts use tabular figures (cubepi rule) */
+  :where(.operator-light, .operator-dark) :where(code, pre, .font-mono, .tabular-nums) {
+    font-variant-numeric: tabular-nums;
   }
 }
 
