@@ -123,7 +123,21 @@
     },
     "empty": "No traces match these filters.",
     "disabled": "Trace viewer is not configured for this deployment.",
-    "loading": "Loading traces…"
+    "loading": "Loading traces…",
+    "sections": {
+      "model": "Model",
+      "tokens": "Token usage",
+      "messages": "Messages",
+      "system": "System instructions",
+      "output": "Output messages",
+      "tools": "Tools defined",
+      "rawRequest": "Raw request",
+      "rawResponse": "Raw response",
+      "performance": "Performance",
+      "toolInfo": "Tool",
+      "arguments": "Arguments",
+      "result": "Result"
+    }
   },
   "chat": {
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry.",
