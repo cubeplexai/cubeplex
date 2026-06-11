@@ -1,9 +1,11 @@
 """Fixtures for tests/search/ — DB-backed integration helpers."""
 
 import secrets
+from collections.abc import AsyncIterator
 
 import pytest_asyncio
 from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+from sqlalchemy import text
 
 from cubebox.agents.checkpointer import init_checkpointer
 from cubebox.db.engine import async_session_maker
@@ -11,6 +13,21 @@ from cubebox.models.conversation import Conversation
 from cubebox.models.organization import Organization
 from cubebox.models.user import User
 from cubebox.models.workspace import Workspace
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_search_tables() -> AsyncIterator[None]:
+    """Clear search-derived tables before each test.
+
+    Without this, orphan rows from prior failed runs (`embedding_jobs.state =
+    pending` referencing now-vanished conversations) get claimed first by the
+    worker under test, starving the test's own enqueue.
+    """
+    async with async_session_maker() as session:
+        await session.execute(text("TRUNCATE TABLE embedding_jobs RESTART IDENTITY"))
+        await session.execute(text("TRUNCATE TABLE conversation_chunks RESTART IDENTITY"))
+        await session.commit()
+    yield
 
 
 @pytest_asyncio.fixture
