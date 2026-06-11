@@ -5,10 +5,22 @@
 #   the Next.js standalone output (gated by NEXT_OUTPUT=standalone in
 #   next.config.ts).
 # Stage 2 (runtime): node-alpine + standalone bundle. No pnpm or sources.
+#
+# Build-time mirror knobs (default to upstream sources; override at build
+# time when behind a slow / partitioned network):
+#
+#   --build-arg NPM_REGISTRY=https://registry.npmmirror.com
+#
+# (`build-and-push.sh` reads this from the operator's environment and
+# passes it through.)
 
 ARG NODE_VERSION=20
+ARG NPM_REGISTRY=""
+
 
 FROM node:${NODE_VERSION}-alpine AS builder
+
+ARG NPM_REGISTRY
 
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
@@ -18,8 +30,10 @@ ENV PNPM_HOME=/pnpm \
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate \
-    && npm config set registry https://registry.npmmirror.com \
-    && pnpm config set registry https://registry.npmmirror.com
+    && if [ -n "${NPM_REGISTRY}" ]; then \
+        npm config set registry "${NPM_REGISTRY}"; \
+        pnpm config set registry "${NPM_REGISTRY}"; \
+       fi
 
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 COPY frontend/packages/core/package.json ./packages/core/

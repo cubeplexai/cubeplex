@@ -77,17 +77,17 @@ Namespace: cubebox
 
 ## 3. 构建并推送镜像
 
-`deploy/scripts/build-and-push.sh` 接管：
+`deploy/kubernetes/scripts/build-and-push.sh` 接管：
 
 ```bash
 # 在仓库根目录运行
-deploy/scripts/build-and-push.sh
+deploy/kubernetes/scripts/build-and-push.sh
 
 # 等价于：
 REGISTRY=192.168.1.101:8050 REPO=library \
 TAG=$(git rev-parse --short HEAD) \
 GITHUB_MIRROR=https://githubfast.com/ \
-  deploy/scripts/build-and-push.sh
+  deploy/kubernetes/scripts/build-and-push.sh
 ```
 
 ### 脚本干了什么
@@ -112,7 +112,7 @@ GITHUB_MIRROR=https://githubfast.com/ \
 直接用 github 即可：
 
 ```bash
-GITHUB_MIRROR= deploy/scripts/build-and-push.sh
+GITHUB_MIRROR= deploy/kubernetes/scripts/build-and-push.sh
 ```
 
 并按需调整 Dockerfile 里清华源 / npmmirror 为官方源（编辑
@@ -125,9 +125,9 @@ GITHUB_MIRROR= deploy/scripts/build-and-push.sh
 `values.local.yaml` 是 operator 唯一需要写的文件。从模板复制：
 
 ```bash
-cp deploy/charts/cubebox/values.local.yaml.example \
-   deploy/charts/cubebox/values.local.yaml
-$EDITOR deploy/charts/cubebox/values.local.yaml
+cp deploy/kubernetes/charts/cubebox/values.local.yaml.example \
+   deploy/kubernetes/charts/cubebox/values.local.yaml
+$EDITOR deploy/kubernetes/charts/cubebox/values.local.yaml
 ```
 
 下面按节解释**每个**字段。
@@ -408,14 +408,14 @@ opensandbox:
 
 ```bash
 # 第一次安装 / 升级
-deploy/scripts/helm-install.sh
+deploy/kubernetes/scripts/helm-install.sh
 
 # 等价于
-helm dependency update deploy/charts/cubebox
-helm upgrade --install cubebox deploy/charts/cubebox \
+helm dependency update deploy/kubernetes/charts/cubebox
+helm upgrade --install cubebox deploy/kubernetes/charts/cubebox \
   --namespace cubebox --create-namespace \
-  -f deploy/charts/cubebox/values.yaml \
-  -f deploy/charts/cubebox/values.local.yaml \
+  -f deploy/kubernetes/charts/cubebox/values.yaml \
+  -f deploy/kubernetes/charts/cubebox/values.local.yaml \
   --wait --timeout 10m
 ```
 
@@ -449,7 +449,7 @@ kubectl -n cubebox get pods
 ### 6.2 Smoke test（部署正确性）
 
 ```bash
-INGRESS_IP=<节点 IP> deploy/scripts/smoke-test.sh
+INGRESS_IP=<节点 IP> deploy/kubernetes/scripts/smoke-test.sh
 ```
 
 验证：rollout 完成 / health 通 / ingress 路由 / 前端能渲染 HTML。
@@ -460,7 +460,7 @@ INGRESS_IP=<节点 IP> deploy/scripts/smoke-test.sh
 ```bash
 HOST=cubebox.local IP=<节点 IP> PORT=30019 \
 PROMPT="Say the word hello and nothing else." \
-  deploy/scripts/e2e.sh
+  deploy/kubernetes/scripts/e2e.sh
 ```
 
 验证：register → 单租户 auto-setup → 创建会话 → 发消息 → SSE 流出现
@@ -470,7 +470,7 @@ PROMPT="Say the word hello and nothing else." \
 
 ```bash
 PROMPT='List the contents of /workspace (run `ls -la /workspace` in the sandbox).' \
-  deploy/scripts/e2e.sh
+  deploy/kubernetes/scripts/e2e.sh
 # 期望 SSE 出现 tool_call / tool_result 事件
 ```
 
@@ -681,4 +681,4 @@ opensandbox:
   enabled: false                    # 不部署内置 OpenSandbox
 ```
 
-完整可执行的示例可参考 `deploy/charts/cubebox/values.local.yaml.example`。
+完整可执行的示例可参考 `deploy/kubernetes/charts/cubebox/values.local.yaml.example`。
