@@ -118,11 +118,12 @@
     --color-card-foreground: #d4d4d7;
     --color-raised: #1c1c1c; /* input bar, user bubble, hover fills */
     --color-sunken: #050505; /* code blocks, terminal */
-    /* Vercel blue lowered one notch for dark canvas — pure #0070f3 reads
-       as a beacon next to soft black; dim chroma keeps the meaning
-       (action) without being a spotlight. */
-    --color-primary: #2a73c7;
-    --color-primary-foreground: #f4f4f5;
+    /* Brand color is the SAME in light and dark — Vercel and Linear both
+       do this; a single accent strengthens identity. The earlier
+       softened background + foreground take the heat off it so it no
+       longer reads as a "beacon". */
+    --color-primary: #0070f3;
+    --color-primary-foreground: #ffffff;
     --color-secondary: #1c1c1c;
     --color-secondary-foreground: #d4d4d7;
     --color-muted: #1c1c1c;
