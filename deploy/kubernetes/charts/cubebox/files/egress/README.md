@@ -1,11 +1,12 @@
-# Chart-vendored egress artefacts
+# Egress addon — canonical source
 
-Files Helm needs at template time (chart `.Files.Get` cannot read outside the
-chart directory). Canonical sources live next door under
-`deploy/kubernetes/egress-bundle/`.
+`inject.py` here is the **canonical** mitmproxy addon. The chart embeds it
+into the `egress-inject-addon` ConfigMap at render time via `.Files.Get`,
+which is restricted to files under the chart directory.
 
-Re-sync after editing the canonical copies:
+`deploy/kubernetes/egress-bundle/addon/inject.py` is a symlink to this
+file, so the rest of the egress-bundle layout (pytest tests, ad-hoc
+edits, the historical `kubectl apply -f k8s/` flow) keeps working
+without a sync step.
 
-```bash
-deploy/kubernetes/scripts/sync-egress-files.sh
-```
+Edit this file directly — the symlink will follow.
