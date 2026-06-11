@@ -95,6 +95,23 @@ async def _update_conversation_timestamp(
                 user_id=user_id,
             )
             await save_conv_repo.mark_active(conversation_id)
+        try:
+            from cubebox.config import config as _cfg
+            from cubebox.search.indexer import enqueue_index_job
+
+            if _cfg.get("search.enabled", True):
+                await enqueue_index_job(
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    creator_user_id=user_id,
+                    conversation_id=conversation_id,
+                )
+        except Exception:
+            # Indexing is best-effort: failure must not poison the
+            # conversation timestamp bump. The indexer already logged a
+            # structured event=search_index_enqueue_failed line, so the
+            # failure is observable via log-based alerting.
+            logger.exception("search index enqueue failed for %s", conversation_id)
     finally:
         await save_engine.dispose()
 
