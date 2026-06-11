@@ -2,6 +2,7 @@ import { use } from 'react'
 import { MembersPanel } from '@/components/workspace-settings/MembersPanel'
 import { PersonaEditor } from '@/components/workspace-settings/PersonaEditor'
 import { SettingsTabs } from '@/components/workspace-settings/SettingsTabs'
+import { SharesPanel } from '@/components/workspace-settings/SharesPanel'
 import { SkillsPanel } from '@/components/workspace-settings/SkillsPanel'
 import { McpPanel } from '@/components/workspace-settings/McpPanel'
 
@@ -25,6 +26,7 @@ export default function WorkspaceSettingsPage({
         {tab === 'skills' && <SkillsPanel wsId={wsId} />}
         {tab === 'mcp' && <McpPanel wsId={wsId} />}
         {tab === 'members' && <MembersPanel wsId={wsId} />}
+        {tab === 'shares' && <SharesPanel wsId={wsId} />}
       </div>
     </div>
   )
