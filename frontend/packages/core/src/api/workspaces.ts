@@ -38,3 +38,18 @@ export async function leaveWorkspace(client: ApiClient, wsId: string): Promise<v
   const res = await client.post(`/api/v1/workspaces/${wsId}/leave`, {})
   if (!res.ok) throw await toApiError(res)
 }
+
+export async function archiveWorkspace(client: ApiClient, wsId: string): Promise<void> {
+  const res = await client.post(`/api/v1/workspaces/${wsId}/archive`, {})
+  if (!res.ok) throw await toApiError(res)
+}
+
+export async function unarchiveWorkspace(client: ApiClient, wsId: string): Promise<void> {
+  const res = await client.post(`/api/v1/workspaces/${wsId}/unarchive`, {})
+  if (!res.ok) throw await toApiError(res)
+}
+
+export async function deleteWorkspace(client: ApiClient, wsId: string): Promise<void> {
+  const res = await client.del(`/api/v1/workspaces/${wsId}`)
+  if (!res.ok) throw await toApiError(res)
+}

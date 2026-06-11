@@ -5,6 +5,9 @@ import {
   createWorkspace,
   renameWorkspace,
   leaveWorkspace,
+  archiveWorkspace,
+  unarchiveWorkspace,
+  deleteWorkspace,
   type Workspace,
 } from '../api/workspaces'
 
@@ -16,6 +19,9 @@ export interface WorkspaceStore {
   create(client: ApiClient, name: string): Promise<Workspace>
   rename(client: ApiClient, wsId: string, name: string): Promise<void>
   leave(client: ApiClient, wsId: string): Promise<void>
+  archive(client: ApiClient, wsId: string): Promise<void>
+  unarchive(client: ApiClient, wsId: string): Promise<void>
+  deleteWs(client: ApiClient, wsId: string): Promise<void>
   reset(): void
 }
 
@@ -59,6 +65,22 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   async leave(client, wsId) {
     await leaveWorkspace(client, wsId)
+    set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== wsId) }))
+  },
+
+  async archive(client, wsId) {
+    await archiveWorkspace(client, wsId)
+    set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== wsId) }))
+  },
+
+  async unarchive(client, wsId) {
+    await unarchiveWorkspace(client, wsId)
+    // Archived workspaces are not in the local list; re-fetch to restore.
+    await get().fetchList(client)
+  },
+
+  async deleteWs(client, wsId) {
+    await deleteWorkspace(client, wsId)
     set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== wsId) }))
   },
 

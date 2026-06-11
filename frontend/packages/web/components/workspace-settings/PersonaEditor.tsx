@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { WorkspaceDangerZone } from './WorkspaceDangerZone'
 
 interface PersonaEditorProps {
   wsId: string
@@ -137,6 +138,8 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
               </div>
             </>
           )}
+
+          <WorkspaceDangerZone wsId={wsId} />
         </div>
       </div>
     </div>
