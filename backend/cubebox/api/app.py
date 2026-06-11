@@ -355,10 +355,39 @@ async def lifespan(_app: FastAPI):  # type: ignore
             await _egress_listener.start()
     _app.state._egress_listener = _egress_listener
 
+    # Conversation-search embedding worker. Single instance on app.state so
+    # route handlers (search endpoint) can reuse the provider's connection
+    # pool, and the worker keeps draining embedding_jobs in the background.
+    from cubebox.config import config as _search_cfg
+    from cubebox.search.embedding import EmbeddingProvider
+    from cubebox.search.worker import EmbeddingWorker
+
+    embedding_worker_task: asyncio.Task[None] | None = None
+    _app.state.embedding_provider = None
+    _app.state.embedding_worker = None
+    if _search_cfg.get("search.enabled", True):
+        embedding_provider = EmbeddingProvider.from_config()
+        _app.state.embedding_provider = embedding_provider
+        embedding_worker = EmbeddingWorker(embedding_provider)
+        embedding_worker_task = asyncio.create_task(embedding_worker.run(), name="embedding-worker")
+        _app.state.embedding_worker = embedding_worker
+
     yield
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
+    if embedding_worker_task is not None:
+        _app.state.embedding_worker.stop()
+        try:
+            await asyncio.wait_for(embedding_worker_task, timeout=5.0)
+        except TimeoutError:
+            embedding_worker_task.cancel()
+            try:
+                await embedding_worker_task
+            except (asyncio.CancelledError, Exception):
+                pass
+    if _app.state.embedding_provider is not None:
+        await _app.state.embedding_provider.aclose()
     _egress_listener = getattr(_app.state, "_egress_listener", None)
     if _egress_listener is not None:
         await _egress_listener.stop()
