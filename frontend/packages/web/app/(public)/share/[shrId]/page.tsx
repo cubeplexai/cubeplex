@@ -61,7 +61,7 @@ function SharedMessage({ message }: { message: Message }) {
 function SharedArtifact({ artifact, shareId }: { artifact: PublicShareArtifact; shareId: string }) {
   const filename = artifact.entry_file ?? artifact.path.split('/').pop()
   const href = filename
-    ? `/api/v1/public/shares/${shareId}/artifacts/${artifact.id}/v${artifact.version}/${filename}`
+    ? `/api/v1/shares/${shareId}/artifacts/${artifact.id}/v${artifact.version}/${filename}`
     : null
 
   const Tag = href ? 'a' : 'div'

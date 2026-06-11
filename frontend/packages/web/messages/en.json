@@ -1361,7 +1361,12 @@
     "revokeConfirm": "Revoke this share? The link will stop working.",
     "active": "Active",
     "revoked": "Revoked",
-    "sharedAt": "Shared {date}"
+    "sharedAt": "Shared {date}",
+    "scope": {
+      "public": "Public",
+      "org": "Organization",
+      "workspace": "Workspace"
+    }
   },
   "wsShares": {
     "title": "Shared Conversations",
@@ -1370,6 +1375,7 @@
     "conversation": "Conversation",
     "sharedDate": "Shared",
     "link": "Link",
+    "scope": "Scope",
     "status": "Status",
     "active": "Active",
     "revoked": "Revoked",

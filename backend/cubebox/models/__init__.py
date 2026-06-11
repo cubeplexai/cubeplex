@@ -6,7 +6,7 @@ from cubebox.models.artifact_version import ArtifactVersion
 from cubebox.models.attachment import Attachment
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_share import ConversationShare
+from cubebox.models.conversation_share import ConversationShare, ShareScope
 from cubebox.models.credential import Credential
 from cubebox.models.egress_ref import EgressRef  # noqa: F401
 from cubebox.models.invite_token import InviteToken

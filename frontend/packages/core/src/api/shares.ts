@@ -1,12 +1,16 @@
 import type { ApiClient } from './client'
 import { toApiError } from './client'
-import type { ConversationShare, PublicShare } from '../types/share'
+import type { ConversationShare, PublicShare, ShareScope } from '../types/share'
 
 export async function createShare(
   client: ApiClient,
   conversationId: string,
+  scope: ShareScope = 'public',
 ): Promise<ConversationShare> {
-  const res = await client.post(`/api/v1/conversations/${conversationId}/shares`, null)
+  const res = await client.post('/api/v1/shares', {
+    conversation_id: conversationId,
+    scope,
+  })
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<ConversationShare>
 }
@@ -15,7 +19,7 @@ export async function listConversationShares(
   client: ApiClient,
   conversationId: string,
 ): Promise<ConversationShare[]> {
-  const res = await client.get(`/api/v1/conversations/${conversationId}/shares`)
+  const res = await client.get(`/api/v1/shares/conversation/${conversationId}`)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<ConversationShare[]>
 }
@@ -37,7 +41,7 @@ export async function revokeShare(client: ApiClient, shareId: string): Promise<C
 }
 
 export async function getPublicShare(shareId: string): Promise<PublicShare> {
-  const res = await fetch(`/api/v1/public/shares/${shareId}`)
+  const res = await fetch(`/api/v1/shares/${shareId}`)
   if (!res.ok) {
     throw new Error(res.status === 404 ? 'Share not found' : 'Failed to load share')
   }

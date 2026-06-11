@@ -9,10 +9,13 @@ import {
   listConversationShares,
   revokeShare,
   type ConversationShare,
+  type ShareScope,
 } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
+
+const SCOPE_OPTIONS: ShareScope[] = ['public', 'org', 'workspace']
 
 interface SharePanelProps {
   conversationId: string
@@ -27,6 +30,7 @@ export function SharePanel({ conversationId }: SharePanelProps) {
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [scope, setScope] = useState<ShareScope>('public')
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -51,7 +55,7 @@ export function SharePanel({ conversationId }: SharePanelProps) {
   const handleCreate = useCallback(async () => {
     setCreating(true)
     try {
-      const share = await createShare(client, conversationId)
+      const share = await createShare(client, conversationId, scope)
       setShares((prev) => [share, ...prev])
       await navigator.clipboard.writeText(window.location.origin + share.url)
       setCopiedId(share.id)
@@ -59,7 +63,7 @@ export function SharePanel({ conversationId }: SharePanelProps) {
     } finally {
       setCreating(false)
     }
-  }, [client, conversationId])
+  }, [client, conversationId, scope])
 
   const handleRevoke = useCallback(
     async (shareId: string) => {
@@ -118,6 +122,7 @@ export function SharePanel({ conversationId }: SharePanelProps) {
                           }),
                         })}
                       </span>
+                      <span className="text-[10px] text-muted-foreground/60">{s.scope}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 ml-2 shrink-0">
@@ -152,18 +157,36 @@ export function SharePanel({ conversationId }: SharePanelProps) {
               ))}
             </ul>
           )}
-          <button
-            onClick={() => void handleCreate()}
-            disabled={creating}
-            className={cn(
-              'w-full rounded-lg border border-dashed border-border px-3 py-2',
-              'text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30',
-              'transition-colors disabled:opacity-50',
-            )}
-            type="button"
-          >
-            {creating ? t('creating') : t('createShare')}
-          </button>
+
+          {/* Scope selector + create button */}
+          <div className="flex items-center gap-2">
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value as ShareScope)}
+              className={cn(
+                'h-8 rounded-md border border-border bg-background px-2 text-xs',
+                'text-foreground focus:outline-none focus:ring-1 focus:ring-ring',
+              )}
+            >
+              {SCOPE_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {t(`scope.${s}`)}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => void handleCreate()}
+              disabled={creating}
+              className={cn(
+                'flex-1 rounded-lg border border-dashed border-border px-3 py-1.5',
+                'text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30',
+                'transition-colors disabled:opacity-50',
+              )}
+              type="button"
+            >
+              {creating ? t('creating') : t('createShare')}
+            </button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>

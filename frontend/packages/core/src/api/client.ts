@@ -40,7 +40,12 @@ export interface ApiClient {
   notifyUnauthorized(): void
 }
 
-const WS_NEUTRAL_PREFIXES = ['/api/v1/auth/', '/api/v1/workspaces', '/api/v1/admin']
+const WS_NEUTRAL_PREFIXES = [
+  '/api/v1/auth/',
+  '/api/v1/workspaces',
+  '/api/v1/admin',
+  '/api/v1/shares',
+]
 const SCOPED_ROOT = '/api/v1/'
 
 function isWorkspaceNeutral(path: string): boolean {
