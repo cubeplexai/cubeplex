@@ -111,7 +111,7 @@ def parse_trace_detail(payload: dict[str, Any]) -> TraceDetail:
             raw_attributes=attrs,
         )
         nodes[node.span_id] = node
-        if node.parent_span_id:
+        if node.parent_span_id and node.parent_span_id != node.span_id:
             children_map.setdefault(node.parent_span_id, []).append(node.span_id)
 
     for sid, child_ids in children_map.items():
@@ -121,7 +121,13 @@ def parse_trace_detail(payload: dict[str, Any]) -> TraceDetail:
                 key=lambda n: n.start_time,
             )
 
-    roots = [n for n in nodes.values() if not n.parent_span_id or n.parent_span_id not in nodes]
+    roots = [
+        n
+        for n in nodes.values()
+        if not n.parent_span_id
+        or n.parent_span_id == n.span_id  # self-cycle: treat as root
+        or n.parent_span_id not in nodes
+    ]
     if not roots:
         raise ValueError("Trace has no root span")
     root = next((r for r in roots if r.kind == SpanKind.AGENT), roots[0])
@@ -157,11 +163,11 @@ def _summary_metadata(all_attrs: list[dict[str, Any]]) -> dict[str, str]:
         for k in keys:
             if k not in out:
                 v = attrs.get(f"cubepi.metadata.{k}")
-                if v:
+                if v not in (None, ""):
                     out[k] = str(v)
         if "run_id" not in out:
             v = attrs.get("cubepi.run_id")
-            if v:
+            if v not in (None, ""):
                 out["run_id"] = str(v)
     return out
 
