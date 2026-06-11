@@ -563,7 +563,18 @@
     "saving": "Saving…",
     "saved": "Saved",
     "saveFailed": "Save failed: {message}",
-    "discard": "Discard"
+    "discard": "Discard",
+    "orgInfo": {
+      "title": "Organization",
+      "nameLabel": "Organization name",
+      "slugLabel": "Organization slug",
+      "slugHelp": "Lowercase letters, numbers, and hyphens only.",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Organization updated",
+      "slugTaken": "That slug is already in use",
+      "saveError": "Failed to save"
+    }
   },
   "mcp": {
     "installed": "Installed",
