@@ -1,32 +1,52 @@
 # syntax=docker/dockerfile:1.7
 # Multi-stage build for the cubebox FastAPI backend.
 #
-# Stage 1 (builder): generate a flat requirements file from uv.lock, rewrite
-#   the cubepi github URL to a CN-friendly mirror, then pip-install all deps
-#   into /app/.venv using the Tsinghua PyPI mirror. We do NOT use
-#   `uv sync --frozen` because its locked URLs point at files.pythonhosted.org
-#   (Fastly), which is unreliable from CN networks.
-# Stage 2 (runtime): slim image with the venv + app code.
+# Stage 1 (builder): pip-install all deps from a pre-resolved requirements
+#   file into /app/.venv. The requirements file is generated on the host
+#   by deploy/kubernetes/scripts/build-and-push.sh (`uv export` against
+#   uv.lock), so the container build itself does not need uv's network
+#   access and a single PyPI index is sufficient.
+# Stage 2 (runtime): slim image with the venv + app code, non-root user.
+#
+# Build-time mirror knobs (all default to upstream sources; override at
+# build time when behind a slow / partitioned network):
+#
+#   --build-arg APT_MIRROR_HOST=mirrors.tuna.tsinghua.edu.cn
+#   --build-arg PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+#   --build-arg UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# (`build-and-push.sh` reads these from the operator's environment and
+# passes them through.)
 
 ARG PYTHON_VERSION=3.12
+ARG APT_MIRROR_HOST=""
+ARG PIP_INDEX_URL=""
+ARG UV_INDEX_URL=""
+
 
 FROM python:${PYTHON_VERSION}-slim AS builder
+
+ARG APT_MIRROR_HOST
+ARG PIP_INDEX_URL
+ARG UV_INDEX_URL
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     UV_LINK_MODE=copy \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
-    PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
-    UV_HTTP_TIMEOUT=60
+    UV_HTTP_TIMEOUT=60 \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
+    UV_INDEX_URL=${UV_INDEX_URL}
 
 WORKDIR /app
 
 RUN set -eux; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-      sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
+    if [ -n "${APT_MIRROR_HOST}" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR_HOST}|g" /etc/apt/sources.list.d/debian.sources; \
+      fi; \
+      sed -i "s|deb.debian.org|${APT_MIRROR_HOST}|g" /etc/apt/sources.list 2>/dev/null || true; \
     fi; \
-    sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true; \
     apt-get update && apt-get install -y --no-install-recommends \
         git \
         curl \
@@ -35,13 +55,6 @@ RUN set -eux; \
 
 RUN pip install uv
 
-# CN-friendly mirror for the cubepi git dep (direct github.com fetch from
-# inside CN networks gets TLS-terminated by middleboxes).
-RUN git config --global url."https://githubfast.com/".insteadOf "https://github.com/"
-
-# Resolve all deps to a flat requirements file, rewrite cubepi URL, then
-# `uv pip install` from the Tsinghua mirror. This forces blob URLs onto
-# Tsinghua's CDN instead of using the lockfile's Fastly URLs.
 RUN python -m venv /app/.venv
 ENV PATH=/app/.venv/bin:$PATH
 
@@ -65,6 +78,8 @@ COPY backend/config.yaml backend/config.development.yaml backend/config.producti
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
+ARG APT_MIRROR_HOST
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH=/app/.venv/bin:$PATH \
@@ -73,10 +88,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN set -eux; \
-    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-      sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources; \
+    if [ -n "${APT_MIRROR_HOST}" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s|deb.debian.org|${APT_MIRROR_HOST}|g" /etc/apt/sources.list.d/debian.sources; \
+      fi; \
+      sed -i "s|deb.debian.org|${APT_MIRROR_HOST}|g" /etc/apt/sources.list 2>/dev/null || true; \
     fi; \
-    sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list 2>/dev/null || true; \
     apt-get update && apt-get install -y --no-install-recommends \
         libmagic1 \
         ca-certificates \
@@ -87,10 +104,9 @@ RUN set -eux; \
 
 COPY --from=builder --chown=cubebox:cubebox /app /app
 
-# Ensure /app/logs exists and is writable — loguru creates one file sink per
-# hostname under {backend_dir}/logs/. K8s could instead mount an emptyDir,
-# but a pre-created dir with the right owner is simpler and the volume
-# would be cleared anyway.
+# Pre-create writable dirs for non-root container — loguru file sink,
+# cubepi traces, skill artefact cache. K8s could mount an emptyDir, but
+# this is simpler and survives `--read-only-root-filesystem` callers.
 RUN mkdir -p /app/logs /app/cubepi-traces /app/skills_cache \
     && chown -R cubebox:cubebox /app/logs /app/cubepi-traces /app/skills_cache
 

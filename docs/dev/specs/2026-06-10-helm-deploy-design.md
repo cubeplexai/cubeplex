@@ -70,7 +70,7 @@ deploy/
     └── smoke-test.sh                     # see Smoke Test section
 ```
 
-`deploy/charts/cubebox/charts/opensandbox` is vendored from
+`deploy/kubernetes/charts/cubebox/charts/opensandbox` is vendored from
 `~/work/OpenSandbox/kubernetes/charts/opensandbox` at install time (it's not
 on a public Helm repository).
 
@@ -187,7 +187,7 @@ SSE-friendly annotations: `nginx.ingress.kubernetes.io/proxy-buffering: "off"`,
 
 ## Smoke Test
 
-`deploy/scripts/smoke-test.sh` runs from operator workstation against the
+`deploy/kubernetes/scripts/smoke-test.sh` runs from operator workstation against the
 installed release. **No** LLM call, **no** sandbox spawn — verify the
 deployment, not the agent runtime. Checks:
 
@@ -221,7 +221,7 @@ Exit non-zero on any failure with the failing step's logs.
 
 1. Add Dockerfiles + chart skeleton + scripts
 2. Build images locally, push to `192.168.1.101:8050`
-3. Vendor OpenSandbox chart into `deploy/charts/cubebox/charts/`
+3. Vendor OpenSandbox chart into `deploy/kubernetes/charts/cubebox/charts/`
 4. Author `values.local.yaml` from the operator's existing
    `backend/config.development.local.yaml`
 5. `helm upgrade --install`

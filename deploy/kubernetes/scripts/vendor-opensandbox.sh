@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Copy alibaba OpenSandbox helm charts into deploy/charts/cubebox/vendor/.
-# OpenSandbox isn't published to a Helm repository, so we vendor it from
-# a local clone of github.com/alibaba/OpenSandbox.
+# Copy alibaba OpenSandbox helm charts into
+# deploy/kubernetes/charts/cubebox/vendor/. OpenSandbox isn't published to
+# a Helm repository, so we vendor it from a local clone of
+# github.com/alibaba/OpenSandbox.
 set -euo pipefail
 
 SRC="${SRC:-$HOME/work/OpenSandbox/kubernetes/charts}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DST="$ROOT/deploy/charts/cubebox/vendor"
+ROOT="$(git rev-parse --show-toplevel)"
+DST="$ROOT/deploy/kubernetes/charts/cubebox/vendor"
 
 if [[ ! -d "$SRC/opensandbox" ]]; then
   echo "ERROR: $SRC/opensandbox not found." >&2

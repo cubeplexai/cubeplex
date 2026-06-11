@@ -19,7 +19,7 @@ repos:
         # Helm chart templates use go-template syntax that is not valid YAML
         # on its own (e.g. `{{- if ... }}`). Skip them — `helm lint` is the
         # right check, and the helm-install.sh script runs it.
-        exclude: ^deploy/charts/.*/templates/.*\.yaml$|^deploy/charts/.*/vendor/.*
+        exclude: ^deploy/kubernetes/charts/.*/templates/.*\.yaml$|^deploy/kubernetes/charts/.*/vendor/.*
       - id: check-json
       - id: check-toml
       - id: check-merge-conflict
