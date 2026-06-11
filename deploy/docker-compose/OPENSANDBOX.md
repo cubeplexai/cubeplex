@@ -80,36 +80,26 @@ Operator-managed values (no template):
 
 Source of truth for the limitations: `~/OpenSandbox/server/opensandbox_server/services/docker.py` and `api/pool.py`. This was verified empirically against `opensandbox-server v0.1.14` by issuing the requests cubebox would make and reading the responses.
 
-### 🚫 Blocked: secure-access endpoints
+### ✅ Resolved: secure-access toggle
 
-```
-HTTP 400 SANDBOX::INVALID_PARAMETER
-  "secureAccess is not supported when runtime.type='docker'.
-   Use the Kubernetes runtime to create secured sandboxes."
-```
+The docker runtime rejects `secureAccess=True` with HTTP 400 — that's
+an OpenSandbox design choice (secured endpoints are an ingress-gateway
+feature). cubebox exposes a config knob `sandbox.secure_access` which
+defaults to `true` (preserves the Kubernetes-deployment behaviour);
+the compose mode's `config.production.local.yaml.example` sets it to
+`false`. With that flag flipped, cubebox sends `secureAccess: false`
+on every create and the docker runtime accepts the request.
 
-cubebox passes `secure_access=True` unconditionally on every sandbox
-create (`backend/cubebox/sandbox/manager.py:569`). The docker backend
-rejects this with HTTP 400 before any container is spawned — **so out
-of the box, cubebox cannot create a sandbox against a docker-runtime
-OpenSandbox.**
-
-To make cubebox work with docker-mode OpenSandbox, either:
-
-1. **(recommended)** Patch `manager.py` to make `secure_access`
-   conditional on the runtime mode, OR
-2. **(future)** Wait for upstream OpenSandbox to add an equivalent
-   secured-endpoint mechanism for the docker runtime.
-
-Until then, treat docker-mode OpenSandbox as **for non-cubebox use
-cases only** (direct SDK consumers, evaluation, etc.).
+Verified end-to-end on this stack: chat → sandbox tool call →
+`tool_result` returned containing real `ls -la /workspace` output.
 
 ### ⚠ Subject to constraints
 
 | Feature | What works | What doesn't |
 |---|---|---|
 | `networkPolicy` (egress firewall) | Yes — but ONLY when `[docker].network_mode = "bridge"` | Rejected when `network_mode=host` or when bridge is a user-defined network |
-| signed endpoint URLs (`expires=…`) | – | Not implemented for docker (`docker.py:2087` "Signed routes are not supported when …"); cubebox doesn't use this today |
+| signed endpoint URLs (`expires=…`) | – | Not implemented for docker; cubebox doesn't use this today |
+| server-proxy mode (`use_server_proxy: true`) | – | OpenSandbox v0.1.x has a known issue where the proxied endpoint URL drops the port. The example config sets `use_server_proxy: false` instead; the overlay wires `host.docker.internal` via `extra_hosts` so the backend can reach the host-mapped bridge ports of sandbox containers. |
 | `pvc.claimName` volumes | Yes — but treated as docker named volumes | No CSI features, no ReadWriteMany |
 | Pause / resume (`POST /sandboxes/{id}/pause` etc.) | Calls docker `pause/unpause` (cgroup freezer) | No checkpoint to disk — paused state is lost on host docker restart. cubebox already defaults `pause_on_idle: false` because of this |
 
@@ -148,9 +138,12 @@ print(urllib.request.urlopen(req, timeout=5).read().decode())
 # expect: {"items":[], ...}
 ```
 
-End-to-end (cubebox chat → sandbox tool call) is **blocked** by the
-secure_access issue documented above; use the kubernetes deploy for a
-real end-to-end test.
+End-to-end (cubebox chat → sandbox tool call) works once
+`config.production.local.yaml` has `sandbox.enabled: true` AND
+`sandbox.secure_access: false` AND `sandbox.use_server_proxy: false`.
+Verified on this stack against opensandbox-server v0.1.14 — a
+`ls -la /workspace` prompt produced a real `tool_result` containing
+the sandbox filesystem contents.
 
 ---
 

@@ -50,3 +50,10 @@ services:
     depends_on:
       opensandbox-server:
         condition: service_healthy
+    # OpenSandbox server resolves docker-runtime sandbox endpoint URLs
+    # through the host_ip / eip set in opensandbox.toml. Default is
+    # `host.docker.internal`, which Linux engines do NOT resolve by
+    # default — wire it to the docker bridge gateway so cubebox can
+    # actually reach the sandbox containers.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
