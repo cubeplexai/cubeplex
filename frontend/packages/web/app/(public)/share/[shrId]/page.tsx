@@ -165,7 +165,10 @@ function SharedMessage({
 }
 
 function SharedArtifact({ artifact, shareId }: { artifact: PublicShareArtifact; shareId: string }) {
-  const [previewing, setPreviewing] = useState(false)
+  const isHtmlCheck =
+    artifact.mime_type?.startsWith('text/html') ||
+    (artifact.entry_file ?? artifact.path.split('/').pop())?.endsWith('.html')
+  const [previewing, setPreviewing] = useState(!!isHtmlCheck)
   const filename = artifact.entry_file ?? artifact.path.split('/').pop()
   const href = filename
     ? `/api/v1/shares/${shareId}/artifacts/${artifact.id}/v${artifact.version}/${filename}`
@@ -363,16 +366,11 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
 
         {/* Artifacts */}
         {share.artifacts.length > 0 && (
-          <section className="mt-8 pt-6 border-t border-border">
-            <h2 className="text-sm font-semibold text-foreground mb-3">
-              Artifacts ({share.artifacts.length})
-            </h2>
-            <div className="space-y-2">
-              {share.artifacts.map((artifact) => (
-                <SharedArtifact key={artifact.id} artifact={artifact} shareId={share.id} />
-              ))}
-            </div>
-          </section>
+          <div className="mt-6 space-y-3">
+            {share.artifacts.map((artifact) => (
+              <SharedArtifact key={artifact.id} artifact={artifact} shareId={share.id} />
+            ))}
+          </div>
         )}
       </main>
 
