@@ -7,11 +7,54 @@ import {
   type PublicShare,
   type PublicShareArtifact,
   type Message,
+  type ContentBlock,
 } from '@cubebox/core'
+import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
+import { WidgetView } from '@/components/chat/widget/WidgetView'
+import { proseClasses } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+type ToolCallBlock = Extract<ContentBlock, { type: 'tool_call' }>
+
+function AssistantBlocks({ blocks }: { blocks: ContentBlock[] }) {
+  return (
+    <div className="space-y-2 mb-3">
+      {blocks.map((block, i) => {
+        if (block.type === 'text' && block.text.trim()) {
+          return (
+            <div
+              key={i}
+              className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-muted text-foreground text-sm leading-relaxed"
+            >
+              <MarkdownWithCitations className={proseClasses} conversationId="">
+                {block.text}
+              </MarkdownWithCitations>
+            </div>
+          )
+        }
+        if (block.type === 'tool_call' && block.name === 'show_widget') {
+          const a = (block as ToolCallBlock).arguments ?? {}
+          return (
+            <WidgetView
+              key={(block as ToolCallBlock).id}
+              widgetId={(block as ToolCallBlock).id}
+              widgetCode={typeof a.widget_code === 'string' ? a.widget_code : ''}
+              status="complete"
+              title={typeof a.title === 'string' ? a.title : undefined}
+              width={typeof a.width === 'number' ? a.width : undefined}
+              height={typeof a.height === 'number' ? a.height : undefined}
+            />
+          )
+        }
+        if (block.type === 'tool_call') return null
+        return null
+      })}
+    </div>
+  )
+}
 
 function SharedMessage({ message }: { message: Message }) {
   const role = message.role
@@ -31,76 +74,96 @@ function SharedMessage({ message }: { message: Message }) {
     )
   }
 
-  if (role === 'tool_result') {
-    const toolMsg = message as Extract<Message, { role: 'tool_result' }>
-    return (
-      <div className="flex justify-start mb-3">
-        <div className="max-w-[75%] rounded-xl px-3 py-2 bg-muted text-muted-foreground text-xs font-mono leading-snug">
-          <span className="text-xs font-semibold text-foreground/60 mr-2">
-            [{toolMsg.tool_name}]
-          </span>
-          <span className="truncate">
-            {textContent.slice(0, 200)}
-            {textContent.length > 200 ? '…' : ''}
-          </span>
-        </div>
-      </div>
-    )
-  }
-
-  // assistant
-  return (
-    <div className="flex justify-start mb-3">
-      <div className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-muted text-foreground text-sm leading-relaxed whitespace-pre-wrap">
-        {textContent}
-      </div>
-    </div>
-  )
+  // assistant — render per-block with markdown + widget support
+  return <AssistantBlocks blocks={message.content} />
 }
 
 function SharedArtifact({ artifact, shareId }: { artifact: PublicShareArtifact; shareId: string }) {
+  const [previewing, setPreviewing] = useState(false)
   const filename = artifact.entry_file ?? artifact.path.split('/').pop()
   const href = filename
     ? `/api/v1/shares/${shareId}/artifacts/${artifact.id}/v${artifact.version}/${filename}`
     : null
-
-  const Tag = href ? 'a' : 'div'
-  const linkProps = href ? { href, target: '_blank' as const, rel: 'noopener noreferrer' } : {}
+  const isHtml = artifact.mime_type?.startsWith('text/html') || filename?.endsWith('.html')
 
   return (
-    <Tag
-      {...linkProps}
-      className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:bg-muted/50 transition-colors group"
-    >
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground truncate group-hover:text-primary transition-colors">
-          {artifact.name}
-        </p>
-        {artifact.description && (
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">{artifact.description}</p>
-        )}
-        <p className="text-xs text-muted-foreground/60 mt-0.5">
-          {artifact.mime_type ?? artifact.artifact_type} · v{artifact.version}
-        </p>
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex items-center gap-3 px-4 py-3 group">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground truncate">{artifact.name}</p>
+          {artifact.description && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{artifact.description}</p>
+          )}
+          <p className="text-xs text-muted-foreground/60 mt-0.5">
+            {artifact.mime_type ?? artifact.artifact_type} · v{artifact.version}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {isHtml && (
+            <button
+              onClick={() => setPreviewing((p) => !p)}
+              className="rounded-md p-1.5 text-muted-foreground hover:text-primary
+                hover:bg-muted transition-colors"
+              title={previewing ? 'Hide preview' : 'Preview'}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          )}
+          {href && (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md p-1.5 text-muted-foreground hover:text-primary
+                hover:bg-muted transition-colors"
+              title="Open in new tab"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                <polyline points="15 3 21 3 21 9" />
+                <line x1="10" y1="14" x2="21" y2="3" />
+              </svg>
+            </a>
+          )}
+        </div>
       </div>
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="16"
-        height="16"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="shrink-0 text-muted-foreground group-hover:text-primary transition-colors"
-        aria-hidden="true"
-      >
-        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-        <polyline points="15 3 21 3 21 9" />
-        <line x1="10" y1="14" x2="21" y2="3" />
-      </svg>
-    </Tag>
+      {previewing && href && (
+        <div className="border-t border-border">
+          <iframe
+            src={href}
+            className="w-full border-0"
+            style={{ height: 480 }}
+            sandbox="allow-scripts"
+            title={artifact.name}
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -174,7 +237,11 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
   }
 
   const messages = share.messages as Message[]
-  const visibleMessages = messages.filter((m) => !(m.metadata?.synthetic === true))
+  const visibleMessages = messages.filter((m) => {
+    if (m.metadata?.synthetic === true) return false
+    if (m.role === 'tool_result') return false
+    return true
+  })
 
   return (
     <div className="flex flex-col min-h-screen">
