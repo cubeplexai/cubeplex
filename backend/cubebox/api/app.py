@@ -492,6 +492,7 @@ def create_app(
         memory_router,
         model_presets,
         public_artifacts,
+        public_shares,
         system,
         trigger_ingest,
         user_events_router,
@@ -513,6 +514,7 @@ def create_app(
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
+    app.include_router(public_shares.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")
