@@ -107,26 +107,31 @@
 
 @layer base {
   .dark {
-    --color-background: #000000;
-    --color-foreground: #ededed;
-    --color-card: #0a0a0a;
-    --color-card-foreground: #ededed;
-    --color-raised: #111111;
-    --color-sunken: #050505;
+    /* Calibrated against Vercel Geist (https://vercel.com) and Linear
+       (https://linear.app) — neither uses pure #000 + #ededed; that
+       combo over-amps contrast (~17:1) and reads as fatiguing.
+       Background steps softer-black up; foreground steps brighter-white
+       down so the body contrast lands around 12:1 (still WCAG AAA). */
+    --color-background: #0a0a0a; /* Linear-ish soft black */
+    --color-foreground: #e4e4e7; /* not the brightest white; body text */
+    --color-card: #141414; /* one notch above bg for panels/sidebar */
+    --color-card-foreground: #e4e4e7;
+    --color-raised: #1c1c1c; /* input bar, user bubble, hover fills */
+    --color-sunken: #050505; /* code blocks, terminal */
     --color-primary: #0070f3;
     --color-primary-foreground: #ffffff;
-    --color-secondary: #111111;
-    --color-secondary-foreground: #ededed;
-    --color-muted: #111111;
-    --color-muted-foreground: #a1a1a1;
-    --color-faint: #666666;
-    --color-accent: #161616;
-    --color-accent-foreground: #ededed;
-    --color-popover: #0a0a0a;
-    --color-popover-foreground: #ededed;
-    --color-border: #1f1f1f;
-    --color-border-strong: #333333;
-    --color-input: #1f1f1f;
+    --color-secondary: #1c1c1c;
+    --color-secondary-foreground: #e4e4e7;
+    --color-muted: #1c1c1c;
+    --color-muted-foreground: #8e8e93; /* body secondary; Apple SF gray */
+    --color-faint: #595960; /* labels, hints, captions */
+    --color-accent: #1f1f1f; /* hover slot */
+    --color-accent-foreground: #e4e4e7;
+    --color-popover: #141414;
+    --color-popover-foreground: #e4e4e7;
+    --color-border: #262626; /* softer than #1f1f1f, less harsh edge */
+    --color-border-strong: #3a3a3a;
+    --color-input: #262626;
     --color-ring: #0070f3;
 
     --color-success-surface: rgba(23, 163, 90, 0.12);
