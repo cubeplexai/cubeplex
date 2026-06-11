@@ -246,26 +246,50 @@ This is the same dedup seam the triggers work (#152) needs for its own webhook s
 if #152's "event → run" entry lands first, the receipt check belongs *in that shared seam*
 rather than duplicated per connector (see "Relationship to triggers").
 
-### Thread ↔ conversation mapping
+### Session boundary: connector-owned `scope_key`
 
-A new `IMThreadLink` table is the durable map. Key insight from OpenClaw: derive a stable
-IM thread key and pin it to one conversation.
+A new `IMThreadLink` table is the durable map. The uniqueness key is
+`(account_id, channel_id, scope_key)`. **`scope_key` is a non-null opaque
+string the connector owns** — cubebox guarantees uniqueness on it but does
+not interpret it. Each platform encodes its natural session boundary into
+the string. A separate `scope_kind` column records what the connector chose
+(`'dm' | 'participant' | 'thread' | 'thread_participant' | ...`); it is for
+observability + admin filtering only, **not part of the unique index**, so
+new kinds add freely.
 
-- Thread key = `(account_id, channel_id, thread_root_id)`. For a channel mention, the
-  thread root is the mentioned message ts (Slack) / root message id (Feishu). For a DM
-  with no platform thread, `thread_root_id` is **normalized to a non-null sentinel** (the
-  channel/DM id, or a reserved literal like `__dm__`) — never stored as `NULL`. This
-  matters because the uniqueness guarantee below is a Postgres unique index, and Postgres
-  treats `NULL` as distinct: two `(account_id, channel_id, NULL)` rows would both be
-  allowed, so repeated DMs would spawn separate conversations instead of reusing one. A
-  non-null sentinel makes the DM thread key collide as intended, giving one rolling
-  conversation per DM (or per-day — see Open Questions).
-- First message for a thread key → create a `Conversation` (title seeded from the first
-  line) and insert an `IMThreadLink` row binding the thread key to `conversation_id`.
-- Subsequent messages on that thread key → reuse the existing conversation, so the agent
-  has full context. This mirrors the web "same conversation = same checkpointer state".
-- One active run per conversation is already enforced by `start_run`; a second IM message
-  while a run is live is surfaced as either a queued follow-up or a steer (Open Question).
+This avoids re-migrating the schema each time a new platform with a
+different session model is wired in. Per-platform mapping:
+
+| Platform / scenario              | `scope_key`                       | `scope_kind`         | `reply_to_id`          |
+|----------------------------------|-----------------------------------|----------------------|------------------------|
+| Feishu DM                        | `"dm"`                            | `dm`                 | None                   |
+| Feishu group @mention            | `"u:<sender_union_id>"`           | `participant`        | inbound `message_id`   |
+| Feishu group + 话题 (future)     | `"u:<union_id>|t:<thread_id>"`    | `thread_participant` | inbound `message_id`   |
+| Slack DM                         | `"dm"`                            | `dm`                 | None                   |
+| Slack channel @ → starts thread  | `"t:<thread_ts>"`                 | `thread`             | `thread_ts`            |
+| Slack thread reply               | `"t:<thread_ts>"`                 | `thread`             | `thread_ts`            |
+
+Rules:
+
+- **First inbound for a `(account, channel, scope_key)`** triple → create
+  a `Conversation` (title seeded from the first line) and insert an
+  `IMThreadLink` binding the scope to `conversation_id`.
+- **Subsequent inbounds with the same scope** → reuse the existing
+  conversation; the agent has full context. Mirrors the web "same
+  conversation = same checkpointer state".
+- **DMs use a literal sentinel `"dm"`** (channel_id distinguishes which
+  DM), never NULL — Postgres treats NULL as distinct in unique indexes,
+  so two DM rows would collide-by-accident if NULL were allowed.
+- **One active run per conversation** is already enforced by `start_run`;
+  a second IM message while a run is live is queued as a follow-up turn
+  (steering is out of v1 scope).
+
+**Feishu chat × user is the chosen group default.** Treating every group
+@-mention as a new "thread root" misroutes badly in Feishu's real usage —
+话题/topic is rare, so each fresh @ would otherwise spawn a new
+conversation with no memory of the previous one in the same group. v1
+keys group conversations on `(group, sender_union_id)` instead, matching
+hermes-agent's validated UX.
 
 ### Identity mapping (IM user/channel → workspace/user)
 
@@ -281,6 +305,25 @@ IM thread key and pin it to one conversation.
   multi-tenant isolation holds regardless of identity resolution: a Slack user with no
   link still cannot reach another tenant's data, because the *account* is what selects the
   workspace.
+- **`sender_ref` for `scope_key` is a separate facet from RunContext attribution.**
+  The cubebox `RunContext.user_id` is the binding's acting user (above); the inbound
+  message's `sender_ref` (Feishu: union_id) is independently used to compose the
+  group scope_key. These two must not be conflated — a per-user IMIdentityLink would
+  upgrade attribution without changing scope, and vice versa.
+
+#### Feishu three-tier identity model
+
+Feishu (per <https://open.feishu.cn/document/home/user-identity-introduction/introduction>)
+exposes three ids per user:
+
+- `open_id` (`ou_xxx`) — app-scoped; available without extra scope.
+- `union_id` (`on_xxx`) — developer-scoped; available without extra scope, stable
+  across DMs and groups for the same person.
+- `user_id` (`u_xxx`) — tenant-scoped; requires `contact:user.employee_id:readonly`.
+
+cubebox prefers `union_id` for `IMIdentityLink.im_user_id` AND as the `sender_ref`
+that composes `scope_key` (groups), with `open_id` as a fallback. `open_id` is used
+exclusively for the group mention gate (mentioned_open_id == bot_open_id).
 
 ### Credential storage
 
@@ -295,8 +338,9 @@ IM thread key and pin it to one conversation.
 
 ### Data model (new tables)
 
-Public ID prefixes (add to `backend/cubebox/models/public_id.py`): `imac` (account),
-`imtl` (thread link), `imil` (identity link), `imwr` (webhook receipt).
+Public ID prefixes follow the per-model `_PREFIX` convention (no edit to
+`backend/cubebox/models/public_id.py` needed): `imac` (account), `imtl` (thread
+link), `imil` (identity link), `imwr` (webhook receipt), `imrq` (run queue item).
 
 - **`IMConnectorAccount`** (`OrgScopedMixin`): `platform` (`slack`|`feishu`),
   `external_account_id` (Slack team/app id, Feishu app id), `workspace_id` (the bound
@@ -305,10 +349,12 @@ Public ID prefixes (add to `backend/cubebox/models/public_id.py`): `imac` (accou
   `(platform, external_account_id)` so an external IM account binds to at most one cubebox
   account row.
 - **`IMThreadLink`** (`OrgScopedMixin`): `account_id` (FK), `channel_id`,
-  `thread_root_id` (**non-null**; DMs with no platform thread are normalized to a sentinel
-  such as the channel id or `__dm__`), `conversation_id` (FK). Unique on
-  `(account_id, channel_id, thread_root_id)` — relying on uniqueness requires the column be
-  non-null, since Postgres would otherwise allow duplicate `(…, NULL)` rows.
+  **`scope_key`** (non-null, opaque connector-owned string), **`scope_kind`** (label
+  for observability — NOT part of the uniqueness key), `conversation_id` (FK). Unique
+  on `(account_id, channel_id, scope_key)`. NULL is forbidden because Postgres would
+  otherwise allow duplicate `(…, NULL)` rows. The plan adds `imrq` (run queue) with
+  the same `scope_key`/`scope_kind` columns + a distinct `reply_to_id` for the real
+  platform reply target.
 - **`IMIdentityLink`** (`OrgScopedMixin`): `account_id` (FK), `im_user_id`, `user_id`
   (FK). Unique on `(account_id, im_user_id)`.
 - **`IMWebhookReceipt`** (`OrgScopedMixin`): `account_id` (FK), `platform_event_id`,
@@ -402,14 +448,31 @@ webhooks, etc.). IM connectors are a *specialized, bidirectional* trigger:
 
 ## v1 scope
 
-- **Slack first.** Richer docs, native LLM streaming APIs, the strongest reference
-  (OpenClaw), and HTTP webhook mode maps cleanly onto the existing FastAPI ingress.
-- **HTTP webhook delivery only** in v1 (Socket Mode / long connection documented as a dev
-  aid, not a supported production mode).
-- **Binding-level acting user** for attribution; verified per-user linking deferred.
-- **Edit-based streaming** (debounced) for the assistant answer; coalesced tool activity.
-- Feishu follows as v1.1 reusing the same core + data model; only the connector adapter
-  and ingress verification differ.
+- **Feishu first.** lark_oapi's long-connection mode needs no public ingress,
+  so the loop "@-mention → run → reply" can be validated inside a worktree
+  without setting up a tunnel. Slack ships as a follow-up plan
+  (`docs/dev/plans/2026-05-27-im-connectors.md`, frozen) that reuses the same
+  neutral data model + connector protocol — only the platform-specific
+  adapter differs.
+- **Two delivery modes**: long connection (recommended for self-host) +
+  HTTP webhook (cloud deploys behind a public LB). Both feed the same
+  `ingest_inbound_event` core; only the inbound transport differs.
+- **Session boundary in groups is `(chat × sender)`**, not `thread × thread`.
+  Feishu's 话题/thread feature is rare in practice; treating every @-mention
+  as a new thread misroutes the common "A keeps talking to bot in the same
+  group" case. v1 keys group conversations on `(group, sender_union_id)`;
+  话题 overlay is reserved for future work.
+- **Binding-level acting user** for attribution; verified per-user linking
+  deferred.
+- **Edit-based streaming** (debounced 0.8s with adaptive backoff) for the
+  assistant answer; coalesced tool activity.
+- **Processing reactions are required v1 UX**: ⏱️ on start, removed on
+  success, ❌ on failure. Wired through connector-level `on_processing_start`
+  / `_complete` / `_failed` hooks so the tailer stays platform-agnostic
+  (Slack will implement these via `assistant.threads.setStatus`).
+- **Artifact share-links are required v1**: image artifacts upload inline
+  as native Feishu image messages; other types post a `📎 view →` link
+  that opens a public preview page nonce-scoped to the artifact (7d TTL).
 
 ## Testing strategy
 
