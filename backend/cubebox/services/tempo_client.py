@@ -418,3 +418,14 @@ def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
         duration_ms=int(t.get("durationMs", 0)),
         span_count=t.get("spanSet", {}).get("matched", 0),
     )
+
+
+def get_tempo_client() -> TempoClient | None:
+    """FastAPI dependency. Returns None when the admin trace viewer is disabled."""
+    from cubebox.config import config
+
+    endpoint = config.get("tracing.tempo.query_endpoint", None)
+    if not endpoint:
+        return None
+    timeout = int(config.get("tracing.tempo.timeout_seconds", 10) or 10)
+    return TempoClient(endpoint=str(endpoint), timeout_seconds=timeout)
