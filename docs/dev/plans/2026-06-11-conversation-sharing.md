@@ -214,6 +214,7 @@ class ConversationShareRepository(ScopedRepository[ConversationShare]):
         title: str,
         snapshot: dict[str, Any],
         artifacts_snapshot: list[dict[str, Any]],
+        is_active: bool = True,
     ) -> ConversationShare:
         share = ConversationShare(
             conversation_id=conversation_id,
@@ -222,8 +223,18 @@ class ConversationShareRepository(ScopedRepository[ConversationShare]):
             title=title,
             snapshot=snapshot,
             artifacts_snapshot=artifacts_snapshot,
+            is_active=is_active,
         )
         return await self.add(share)
+
+    async def activate(self, share_id: str) -> ConversationShare:
+        share = await self.get(share_id)
+        if share is None:
+            raise ValueError(f"Share {share_id} not found")
+        share.is_active = True
+        await self.session.commit()
+        await self.session.refresh(share)
+        return share
 
     async def get_by_id(self, share_id: str) -> ConversationShare | None:
         return await self.get(share_id)
@@ -385,6 +396,15 @@ class TestFilterMessages:
         assert "url" not in att
         assert "content" not in att
 
+    def test_excludes_system_messages(self) -> None:
+        msgs = [
+            {"role": "system", "content": [{"type": "text", "text": "You are..."}]},
+            _user_msg("hello"),
+        ]
+        result = filter_messages_for_snapshot(msgs)
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+
     def test_empty_list(self) -> None:
         assert filter_messages_for_snapshot([]) == []
 ```
@@ -429,6 +449,8 @@ def filter_messages_for_snapshot(
     """
     result: list[dict[str, Any]] = []
     for msg in messages:
+        if msg.get("role") == "system":
+            continue
         metadata = msg.get("metadata") or {}
         if metadata.get("synthetic"):
             continue
@@ -536,7 +558,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.db import get_session
-from cubebox.models.artifact import Artifact
 from cubebox.repositories import ArtifactRepository, ConversationRepository
 from cubebox.repositories.conversation_share import ConversationShareRepository
 from cubebox.services.conversation_sharing import build_snapshot, copy_artifacts_to_share
@@ -562,21 +583,6 @@ def _serialize_share_with_url(s: Any) -> dict[str, object]:
     return d
 
 
-def _artifact_to_dict(a: Artifact) -> dict[str, Any]:
-    return {
-        "id": a.id,
-        "name": a.name,
-        "artifact_type": a.artifact_type,
-        "path": a.path,
-        "entry_file": a.entry_file,
-        "mime_type": a.mime_type,
-        "description": a.description,
-        "version": a.version,
-        "created_at": utc_isoformat(a.created_at),
-        "updated_at": utc_isoformat(a.updated_at),
-    }
-
-
 @router.post(
     "/ws/{workspace_id}/conversations/{conversation_id}/shares",
     status_code=status.HTTP_201_CREATED,
@@ -600,22 +606,29 @@ async def create_share(
         session, org_id=ctx.org_id, workspace_id=workspace_id,
     )
     artifacts = await art_repo.list_by_conversation(conversation_id)
-    artifacts_data = [_artifact_to_dict(a) for a in artifacts]
+    artifacts_data = [a.to_dict() for a in artifacts]
 
     display_name = ctx.user.email.split("@")[0] if ctx.user.email else "Anonymous"
 
     share_repo = ConversationShareRepository(
         session, org_id=ctx.org_id, workspace_id=workspace_id, user_id=ctx.user.id,
     )
+    # Create share row as inactive first
     share = await share_repo.create(
         conversation_id=conversation_id,
         creator_display_name=display_name,
         title=conv.title,
         snapshot={"messages": messages},
         artifacts_snapshot=artifacts_data,
+        is_active=False,
     )
 
+    # Copy artifacts to share-scoped storage (S3 failure won't leave
+    # an accessible share — the row stays inactive)
     await copy_artifacts_to_share(share.id, conversation_id, artifacts_data)
+
+    # Activate only after artifact copy succeeds
+    share = await share_repo.activate(share.id)
 
     return _serialize_share_with_url(share)
 
@@ -997,7 +1010,7 @@ export async function createShare(
   client: ApiClient,
   conversationId: string,
 ): Promise<ConversationShare> {
-  const res = await client.post(`/api/v1/conversations/${conversationId}/shares`)
+  const res = await client.post(`/api/v1/conversations/${conversationId}/shares`, null)
   if (!res.ok) throw await toApiError(res)
   return res.json()
 }
@@ -1672,6 +1685,20 @@ export default function PublicSharePage({
           {messages.map((msg, i) => (
             <SharedMessage key={i} message={msg} shareId={shrId} />
           ))}
+
+          {/* Artifacts */}
+          {share.artifacts.length > 0 && (
+            <div className="border-t border-border pt-4 mt-6">
+              <h2 className="text-xs font-medium text-muted-foreground mb-3">
+                Artifacts
+              </h2>
+              <div className="grid gap-2">
+                {share.artifacts.map((art) => (
+                  <SharedArtifact key={art.id} artifact={art} shareId={shrId} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
@@ -1732,6 +1759,44 @@ function SharedMessage({
   }
 
   return null
+}
+
+function SharedArtifact({
+  artifact,
+  shareId,
+}: {
+  artifact: PublicShareArtifact
+  shareId: string
+}) {
+  const previewUrl = `/api/v1/public/shares/${shareId}/artifacts/${artifact.id}/v${artifact.version}/${artifact.entry_file ?? artifact.name}`
+  const isPreviewable =
+    artifact.mime_type?.startsWith('image/') ||
+    artifact.mime_type?.startsWith('text/') ||
+    artifact.artifact_type === 'html'
+
+  return (
+    <a
+      href={previewUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-3 rounded-lg border border-border/70 bg-card/50 px-3 py-2.5 hover:bg-muted/50 transition-colors"
+    >
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-[10px] font-medium text-muted-foreground uppercase">
+        {artifact.artifact_type.slice(0, 3)}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium truncate">{artifact.name}</p>
+        {artifact.description && (
+          <p className="text-xs text-muted-foreground truncate">
+            {artifact.description}
+          </p>
+        )}
+      </div>
+      {isPreviewable && (
+        <span className="text-[10px] text-muted-foreground shrink-0">Preview →</span>
+      )}
+    </a>
+  )
 }
 ```
 
