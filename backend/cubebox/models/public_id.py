@@ -39,6 +39,7 @@ PREFIX_TRIGGER: str = "trig"
 PREFIX_TRIGGER_EVENT: str = "trev"
 PREFIX_USER_EVENT: str = "uev"
 PREFIX_ORG_SETTING: str = "oset"
+PREFIX_SHR: str = "shr"
 
 
 @dataclass
