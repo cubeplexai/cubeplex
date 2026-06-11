@@ -57,7 +57,7 @@ Namespace: cubebox
 │  frontend Deployment (1 replica)                              │
 │    Next.js standalone runtime (node server.js)                │
 ├──────────────┬─────────────┬───────────────┬──────────────────┤
-│ postgres SS  │ redis SS    │ minio SS      │ opensandbox      │
+│ postgres SS  │ redis SS    │ rustfs SS     │ opensandbox      │
 │  + PVC       │  + PVC      │  + PVC + Job  │ (optional        │
 │              │             │  (bucket init)│  subchart)       │
 └──────────────┴─────────────┴───────────────┴──────────────────┘
@@ -299,12 +299,12 @@ redis:
   auth:
     password: "..."     # openssl rand -hex 16
 
-minio:
+rustfs:
   auth:
-    rootPassword: "..." # openssl rand -hex 16 — note: rootPassword, not password
+    secretKey: "..."   # openssl rand -hex 16
 ```
 
-To use **external** Postgres / Redis / MinIO instead, disable the bundled
+To use **external** Postgres / Redis / RustFS instead, disable the bundled
 ones and point the backend at the external endpoints:
 
 ```yaml
@@ -322,7 +322,7 @@ backend:
       password: "..."
 ```
 
-(same pattern for redis / minio).
+(same pattern for redis / rustfs).
 
 ### 4.7 Ingress
 
@@ -373,7 +373,7 @@ postgres:
 redis:
   persistence:
     storageClass: "fast-ssd"
-minio:
+rustfs:
   persistence:
     storageClass: "fast-ssd"
 ```
@@ -660,11 +660,11 @@ redis:
   persistence: { storageClass, size }
   resources: { ... }
 
-minio:
+rustfs:
   enabled: true
-  image: "minio/minio:..."
+  image: "rustfs/rustfs:1.0.0-beta.4"
   mcImage: "minio/mc:..."
-  auth: { rootUser, rootPassword }
+  auth: { accessKey, secretKey }
   defaultBucket: "cubebox"
   persistence: { storageClass, size }
   resources: { ... }
@@ -704,7 +704,7 @@ backend:
 
 postgres: { auth: { password: "<openssl rand -hex 16>" } }
 redis:    { auth: { password: "<openssl rand -hex 16>" } }
-minio:    { auth: { rootPassword: "<openssl rand -hex 16>" } }
+rustfs:   { auth: { secretKey: "<openssl rand -hex 16>" } }
 
 opensandbox:
   enabled: false
