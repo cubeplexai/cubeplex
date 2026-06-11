@@ -11,6 +11,8 @@ import json as _json
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
+
 from cubebox.api.schemas.trace import (
     ChatMessage,
     LlmCallPayload,
@@ -284,4 +286,108 @@ def _extract_tool(attrs: dict[str, Any]) -> ToolCallPayload:
         is_error=bool(attrs.get("cubepi.tool.is_error", False)),
         execution_mode=attrs.get("cubepi.tool.execution_mode"),
         tool_call_id=attrs.get("gen_ai.tool.call.id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tempo HTTP client
+# ---------------------------------------------------------------------------
+
+
+class TempoQueryError(RuntimeError):
+    """Raised when Tempo returns a non-2xx response."""
+
+
+class TempoQueryValueError(ValueError):
+    """Raised when a filter value would break TraceQL string escaping."""
+
+
+_TRACEQL_FORBIDDEN = ('"', "\\", "\n", "\r", "\x00")
+
+
+def _quote_traceql(value: str) -> str:
+    """Wrap a value in `"..."` for inclusion in a TraceQL clause.
+
+    Rejects values containing characters that could break out of the
+    surrounding double-quote pair. We reject rather than backslash-escape
+    because cubebox business identifiers (workspace_id, user_id, conv_id,
+    run_id, model) are well-formed slugs; any value outside that shape is
+    either user error or an injection attempt.
+    """
+    for c in _TRACEQL_FORBIDDEN:
+        if c in value:
+            raise TempoQueryValueError(f"Filter value contains disallowed character {c!r}")
+    return f'"{value}"'
+
+
+class TempoClient:
+    """Thin async wrapper around Tempo's HTTP query API.
+
+    All search() calls inject the caller's org_id into the TraceQL so a
+    misconstructed UI never sees another org's traces. Every interpolated
+    value is escape-checked via _quote_traceql.
+    """
+
+    def __init__(self, endpoint: str, timeout_seconds: int = 10) -> None:
+        self._endpoint = endpoint.rstrip("/")
+        self._timeout = timeout_seconds
+
+    async def search(
+        self,
+        *,
+        org_id: str,
+        workspace_id: str | None = None,
+        user_id: str | None = None,
+        conversation_id: str | None = None,
+        run_id: str | None = None,
+        model: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        min_duration_ms: int | None = None,
+        max_duration_ms: int | None = None,
+        limit: int = 20,
+    ) -> list[TraceSummary]:
+        clauses = [
+            'resource.service.name="cubebox"',
+            f"span.cubepi.metadata.org_id={_quote_traceql(org_id)}",
+        ]
+        if workspace_id:
+            clauses.append(f"span.cubepi.metadata.workspace_id={_quote_traceql(workspace_id)}")
+        if user_id:
+            clauses.append(f"span.cubepi.metadata.user_id={_quote_traceql(user_id)}")
+        if conversation_id:
+            clauses.append(
+                f"span.cubepi.metadata.conversation_id={_quote_traceql(conversation_id)}"
+            )
+        if run_id:
+            clauses.append(f"span.cubepi.run_id={_quote_traceql(run_id)}")
+        if model:
+            clauses.append(f"span.gen_ai.request.model={_quote_traceql(model)}")
+        if min_duration_ms:
+            clauses.append(f"trace:duration > {int(min_duration_ms)}ms")
+        if max_duration_ms:
+            clauses.append(f"trace:duration < {int(max_duration_ms)}ms")
+        q = "{ " + " && ".join(clauses) + " }"
+
+        params: dict[str, Any] = {"q": q, "limit": str(limit)}
+        if start:
+            params["start"] = str(int(start.timestamp()))
+        if end:
+            params["end"] = str(int(end.timestamp()))
+
+        async with httpx.AsyncClient(timeout=self._timeout) as http:
+            resp = await http.get(f"{self._endpoint}/api/search", params=params)
+        if resp.status_code >= 400:
+            raise TempoQueryError(f"Tempo /api/search returned {resp.status_code}")
+        payload = resp.json()
+        return [_search_hit_to_summary(t) for t in payload.get("traces", [])]
+
+
+def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
+    return TraceSummary(
+        trace_id=t["traceID"],
+        root_name=t.get("rootTraceName", ""),
+        start_time=_ns_to_dt(t.get("startTimeUnixNano", "0")),
+        duration_ms=int(t.get("durationMs", 0)),
+        span_count=t.get("spanSet", {}).get("matched", 0),
     )
