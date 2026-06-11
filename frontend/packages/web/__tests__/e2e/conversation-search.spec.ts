@@ -28,13 +28,20 @@ async function probeSearch(request: APIRequestContext, wsId: string, q: string):
 }
 
 test.describe('conversation search', () => {
+  // Skip the whole real-indexing test on environments without an embedding
+  // key. When the key IS present and fused_count stays 0, that's a real
+  // regression and the test must FAIL — that's the signal we wired up here.
+  test.skip(
+    !process.env.DASHSCOPE_API_KEY,
+    'DASHSCOPE_API_KEY not set; embedding worker cannot index in this run',
+  )
+
   test('typing a keyword shows a matching result', async ({ page, request }) => {
     const wsId = await registerAndLand(page)
 
     // Seed a conversation by sending a real chat message. The backend's
     // run-completion hook enqueues an embedding job, which the worker
-    // drains — but only when DASHSCOPE_API_KEY is set in the backend
-    // env. Without a key, fused_count stays 0 and we skip below.
+    // drains.
     const KEYWORD = 'docling'
     const input = page.getByPlaceholder('Describe a task…')
     await input.fill(`tell me about ${KEYWORD} for table extraction`)
@@ -42,9 +49,9 @@ test.describe('conversation search', () => {
     await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })
     await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 60_000 })
 
-    // Poll the API until indexing lands, with a generous budget. Skip the
-    // test when search stays empty — this means the backend has no
-    // embedding key configured (CI without DASHSCOPE_API_KEY).
+    // Poll the API until indexing lands, with a generous budget. A 0 here
+    // means the backend's embedding worker is broken — let the assertion
+    // below fail loudly rather than masking the regression with skip().
     let fused = 0
     const deadline = Date.now() + 15_000
     while (Date.now() < deadline) {
@@ -52,10 +59,10 @@ test.describe('conversation search', () => {
       if (fused > 0) break
       await page.waitForTimeout(1000)
     }
-    test.skip(
-      fused === 0,
-      'search index empty — backend embedding worker not configured (DASHSCOPE_API_KEY missing)',
-    )
+    expect(
+      fused,
+      'search index never produced a result for the seeded conversation',
+    ).toBeGreaterThan(0)
 
     // Pop the search panel and check results render.
     await page.getByRole('button', { name: /search conversations/i }).click()
