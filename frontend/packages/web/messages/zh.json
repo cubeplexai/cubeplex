@@ -97,7 +97,33 @@
     "sandboxEnv": "沙盒环境变量",
     "insights": "洞察",
     "members": "成员",
-    "extensions": "扩展"
+    "extensions": "扩展",
+    "traces": "Trace"
+  },
+  "adminTraces": {
+    "title": "Traces",
+    "subtitle": "本组织 Agent 运行的 Tempo 追踪记录。",
+    "filters": {
+      "workspace": "工作区",
+      "user": "用户",
+      "conversation": "对话",
+      "model": "模型",
+      "runId": "运行 ID",
+      "from": "开始时间",
+      "to": "结束时间"
+    },
+    "columns": {
+      "startTime": "开始",
+      "duration": "耗时",
+      "model": "模型",
+      "spans": "Span 数",
+      "workspace": "工作区",
+      "user": "用户",
+      "conversation": "对话"
+    },
+    "empty": "没有符合条件的 Trace。",
+    "disabled": "当前部署未配置 Trace 查看器。",
+    "loading": "加载中…"
   },
   "chat": {
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。",
