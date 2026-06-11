@@ -228,9 +228,10 @@ class TestMiddlewareIntegration:
             extra_ref=lambda: extra,
         )
 
-        # Middleware contributes load_tools to agent tools
-        assert len(mw.tools) == 1
-        assert mw.tools[0].name == "load_tools"
+        # Middleware contributes load_tools + deferred_tool_call dispatcher
+        # (dispatch mode is the default in cubepi >= 0.11).
+        tool_names = {t.name for t in mw.tools}
+        assert tool_names == {"load_tools", "deferred_tool_call"}
 
         # System prompt includes catalog with group IDs
         ctx = AsyncMock()
@@ -441,6 +442,9 @@ class TestCachePrefixStability:
         ctx = AsyncMock()
         ctx.tools = list(mw.tools)
 
+        # Baseline system prompt before any expansion.
+        prompt_turn0 = await mw.transform_system_prompt("Base.", ctx=ctx, signal=None)
+
         # Turn 1: expand GitHub
         await mw._expand(group_id="mcp:GitHub", tool_names=None, context=ctx)
         prompt_turn1 = await mw.transform_system_prompt("Base.", ctx=ctx, signal=None)
@@ -449,15 +453,9 @@ class TestCachePrefixStability:
         await mw._expand(group_id="mcp:Slack", tool_names=None, context=ctx)
         prompt_turn2 = await mw.transform_system_prompt("Base.", ctx=ctx, signal=None)
 
-        # Extract the expanded-schemas section from both prompts.
-        marker = "# Expanded tool groups"
-        assert marker in prompt_turn1
-        assert marker in prompt_turn2
-        schemas_turn1 = prompt_turn1[prompt_turn1.index(marker) :]
-        schemas_turn2 = prompt_turn2[prompt_turn2.index(marker) :]
-
-        # Turn-2's expanded section starts with turn-1's expanded section.
-        assert schemas_turn2.startswith(schemas_turn1)
-        # The Slack schema block is the appended portion.
-        appended = schemas_turn2[len(schemas_turn1) :]
-        assert "Slack__send_message" in appended
+        # Dispatch mode: schemas live in load_tools tool_results, never in the
+        # system prompt. The catalog text (tool names + descriptions) is
+        # byte-stable across expansions so the prompt-cache prefix never
+        # invalidates.
+        assert prompt_turn0 == prompt_turn1 == prompt_turn2
+        assert "# Expanded tool groups" not in prompt_turn2
