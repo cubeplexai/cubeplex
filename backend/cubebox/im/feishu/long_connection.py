@@ -96,8 +96,23 @@ def build_event_handler(
             except Exception:
                 logger.exception("[Feishu LC] ingest failed for {}", event.platform_event_id)
 
-        # Cross the thread boundary against the captured loop.
-        asyncio.run_coroutine_threadsafe(_do_ingest(), loop)
+        # Cross the thread boundary against the captured loop. Attach a
+        # done_callback so failures BEFORE the coroutine starts running
+        # (loop closed during shutdown, scheduling error) are logged loudly
+        # — otherwise they're stored on the Future and silently swallowed.
+        def _log_future(fut: Any) -> None:
+            try:
+                exc = fut.exception()
+            except Exception:
+                return
+            if exc is not None:
+                logger.warning(
+                    "[Feishu LC] dispatch coroutine failed before completion: {}",
+                    exc,
+                )
+
+        future = asyncio.run_coroutine_threadsafe(_do_ingest(), loop)
+        future.add_done_callback(_log_future)
 
     return (
         lark.EventDispatcherHandler.builder("", "")

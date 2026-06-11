@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from cubebox.models.im_connector import IMConnectorAccount, IMRunQueueItem
 from cubebox.repositories.im_connector import (
     claim_pending_queue_item,
+    mark_queue_item_completed,
+    mark_queue_item_failed,
     mark_receipt_completed,
 )
 from cubebox.streams.run_manager import RunContext
@@ -95,10 +97,19 @@ async def process_one_queue_item(
             captured_item.id,
             exc_info=True,
         )
+        async with session_maker() as session:
+            await mark_queue_item_failed(session, item_id=captured_item.id)
+            await session.commit()
         return True
 
+    # Mark BOTH the receipt AND the queue row terminal. Without flipping the
+    # queue row's status off 'started', claim_pending_queue_item would re-claim
+    # it via the lease-expiry branch and re-fire start_run up to max_attempts
+    # times — every accepted IM message would become 5 duplicate runs ~5 min
+    # apart, billed N times.
     async with session_maker() as session:
         await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
+        await mark_queue_item_completed(session, item_id=captured_item.id)
         await session.commit()
 
     if on_run_started is not None:

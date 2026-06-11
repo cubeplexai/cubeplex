@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from redis.asyncio import Redis
@@ -29,7 +29,7 @@ _MAX_FLOOD_STRIKES = 3
 class OutboundOp:
     """One emitted action for the connector."""
 
-    kind: str  # "post" | "edit" | "artifact" | "no_op"
+    kind: Literal["post", "edit", "artifact", "no_op"]
     text: str = ""
     final: bool = False
     artifact: dict[str, Any] | None = None
@@ -93,13 +93,13 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return OutboundOp(kind="artifact", artifact=artifact)
 
     if etype == "done":
-        kind = "post" if state.message_id is None else "edit"
+        kind: Literal["post", "edit"] = "post" if state.message_id is None else "edit"
         return OutboundOp(kind=kind, text=_composite_text(state), final=True)
 
     if etype == "error":
         msg = data.get("message", "the run failed")
-        kind = "post" if state.message_id is None else "edit"
-        return OutboundOp(kind=kind, text=f"⚠️ error: {msg}", final=True)
+        err_kind: Literal["post", "edit"] = "post" if state.message_id is None else "edit"
+        return OutboundOp(kind=err_kind, text=f"⚠️ error: {msg}", final=True)
 
     return None
 

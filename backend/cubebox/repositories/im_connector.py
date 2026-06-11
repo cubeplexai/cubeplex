@@ -138,3 +138,45 @@ async def mark_receipt_completed(
     ).scalar_one()
     receipt.status = "completed"
     session.add(receipt)
+
+
+async def mark_queue_item_completed(
+    session: AsyncSession,
+    *,
+    item_id: str,
+) -> None:
+    """Flip a queue row to ``completed`` after start_run succeeds.
+
+    Without this, the row would stay in 'started' status with a finite
+    ``claim_lease_expires_at`` set; once the lease expires the row would be
+    re-claimed by the next poll and start_run would fire again — producing
+    duplicate runs every ``lease_seconds`` until ``max_attempts`` parks the
+    item. The receipt is a separate row with separate semantics; both must
+    be flipped.
+    """
+    item = (
+        await session.execute(
+            select(IMRunQueueItem).where(IMRunQueueItem.id == item_id)  # type: ignore[arg-type]
+        )
+    ).scalar_one()
+    item.status = "completed"
+    item.claim_lease_expires_at = None
+    session.add(item)
+
+
+async def mark_queue_item_failed(
+    session: AsyncSession,
+    *,
+    item_id: str,
+) -> None:
+    """Park a queue row when start_run raised. The lease stays set so the
+    janitor view sees the failure timestamp, but status='failed' makes the
+    row invisible to ``claim_pending_queue_item`` (which only looks at
+    ``pending`` / ``started`` rows)."""
+    item = (
+        await session.execute(
+            select(IMRunQueueItem).where(IMRunQueueItem.id == item_id)  # type: ignore[arg-type]
+        )
+    ).scalar_one()
+    item.status = "failed"
+    session.add(item)

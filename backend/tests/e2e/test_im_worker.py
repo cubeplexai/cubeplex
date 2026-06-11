@@ -203,7 +203,12 @@ async def test_worker_processes_one_item_and_completes_receipt(
             )
         ).scalar_one()
         assert rcpt.status == "completed"
-        assert item.status == "started"
+        # Both receipt AND queue row must flip to a terminal state. If the
+        # queue row stayed in 'started', claim_pending_queue_item would
+        # re-fire start_run every lease_seconds (default 300s) up to
+        # max_attempts=5 times — duplicate runs per inbound message.
+        assert item.status == "completed"
+        assert item.claim_lease_expires_at is None
         assert item.attempts == 1
 
 
@@ -270,6 +275,7 @@ async def test_worker_leaves_row_for_reclaim_on_start_run_failure(
                 )
             )
         ).scalar_one()
-        assert item.status == "started"
-        assert item.claim_lease_expires_at is not None
+        # Failure path: queue row flips to 'failed' (no longer re-claimable
+        # via the lease branch), receipt stays 'pending' (since no run started).
+        assert item.status == "failed"
         assert rcpt.status == "pending"

@@ -11,6 +11,7 @@ from __future__ import annotations
 import html
 import mimetypes
 from typing import Annotated
+from urllib.parse import quote
 
 from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -106,14 +107,23 @@ def _render_body(
     entry_file: str,
     version: int,
 ) -> str:
-    """Pick the best inline renderer for the artifact type."""
-    file_url = f"/api/v1/public/artifacts/share/{nonce}/file/{html.escape(entry_file)}"
+    """Pick the best inline renderer for the artifact type.
+
+    ``entry_file`` is percent-encoded for URL path use (``urllib.parse.quote``
+    with ``safe='/'``) — NOT html-escaped. ``html.escape`` would turn ``&``
+    into ``&amp;`` and leave ``?``/``#``/whitespace intact, producing
+    URL-significant characters that the iframe browser would mis-parse
+    (querystring/fragment truncation, mis-routed requests, blank previews).
+    """
+    safe_entry = quote(entry_file, safe="/")
+    file_url = f"/api/v1/public/artifacts/share/{nonce}/file/{safe_entry}"
     if artifact_type == "image":
         return f'<img src="{file_url}" alt="">'
     if artifact_type == "website":
         return f'<iframe src="{file_url}" sandbox="allow-scripts allow-same-origin"></iframe>'
     if artifact_type in {"code", "document", "data", "skill"}:
         return f'<iframe src="{file_url}" sandbox></iframe>'
+    # Visible link text IS user-facing HTML — keep html.escape there.
     return f'<div class="empty"><a href="{file_url}">Download {html.escape(entry_file)}</a></div>'
 
 
