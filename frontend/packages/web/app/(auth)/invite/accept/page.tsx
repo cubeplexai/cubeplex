@@ -4,7 +4,7 @@ import { use, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, acceptInvite, useAuthStore, type AcceptInviteResult } from '@cubebox/core'
+import { createApiClient, acceptInvite, type AcceptInviteResult } from '@cubebox/core'
 
 export default function AcceptInvitePage({
   searchParams,
@@ -14,7 +14,6 @@ export default function AcceptInvitePage({
   const { token } = use(searchParams)
   const t = useTranslations('invite')
   const router = useRouter()
-  const user = useAuthStore((s) => s.user)
   const [result, setResult] = useState<AcceptInviteResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -26,17 +25,24 @@ export default function AcceptInvitePage({
       setLoading(false)
       return
     }
-    if (!user) {
-      router.replace(`/login?next=${encodeURIComponent(`/invite/accept?token=${token}`)}`)
-      return
-    }
     const client = createApiClient('')
     acceptInvite(client, token)
-      .then((r) => setResult(r))
-      .catch(() => setError(t('expiredOrUsed')))
-      .finally(() => setLoading(false))
+      .then((r) => {
+        setResult(r)
+        setLoading(false)
+      })
+      .catch((err: unknown) => {
+        const status = (err as { status?: number })?.status
+        if (status === 401) {
+          const next = encodeURIComponent(`/invite/accept?token=${token}`)
+          router.replace(`/login?next=${next}`)
+          return
+        }
+        setError(t('expiredOrUsed'))
+        setLoading(false)
+      })
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [token, user, router, t])
+  }, [token, router, t])
 
   if (loading) {
     return <p className="text-center text-sm text-muted-foreground">{t('accepting')}</p>

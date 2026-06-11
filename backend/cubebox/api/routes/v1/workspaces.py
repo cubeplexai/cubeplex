@@ -48,6 +48,7 @@ class AcceptInvite(BaseModel):
 async def list_my_workspaces(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    include_archived: bool = False,
 ) -> list[dict[str, str | None]]:
     mem_repo = MembershipRepository(session)
     ws_repo = WorkspaceRepository(session)
@@ -55,8 +56,11 @@ async def list_my_workspaces(
     pairs: list[tuple[str, Workspace]] = []
     for m in memberships:
         ws = await ws_repo.get(m.workspace_id)
-        if ws is not None and ws.archived_at is None:
-            pairs.append((m.role, ws))
+        if ws is None:
+            continue
+        if not include_archived and ws.archived_at is not None:
+            continue
+        pairs.append((m.role, ws))
 
     # Aggregate max(Conversation.updated_at) per workspace — cubebox has no
     # Message table (history lives in cubepi PostgresCheckpointer), but
@@ -233,6 +237,20 @@ async def revoke_invite(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     inv_repo = InviteTokenRepository(session)
+    from sqlalchemy import select as sa_select
+
+    from cubebox.models import InviteToken
+
+    tok = (
+        await session.execute(
+            sa_select(InviteToken).where(
+                InviteToken.token == token,  # type: ignore[arg-type]
+                InviteToken.workspace_id == workspace_id,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if tok is None:
+        raise HTTPException(status_code=404, detail="invite not found")
     await inv_repo.delete(token)
 
 
@@ -323,6 +341,7 @@ async def delete_workspace(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
     from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select as sa_select
 
     from cubebox.models import (
         AgentConfig,
@@ -340,8 +359,10 @@ async def delete_workspace(
         ScheduledTask,
         WorkspaceSkillBinding,
     )
+    from cubebox.models.billing import BillingEvent, LlmBillingEvent
     from cubebox.models.egress_ref import EgressRef
     from cubebox.models.sandbox_env import SandboxEnvVar
+    from cubebox.models.scheduled_task import ScheduledTaskRun
     from cubebox.models.trigger import Trigger
     from cubebox.models.user_sandbox import UserSandbox
 
@@ -350,6 +371,15 @@ async def delete_workspace(
     if len(user_workspaces) <= 1:
         raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
 
+    # LlmBillingEvent has no workspace_id — delete via BillingEvent parent.
+    billing_tbl = BillingEvent.__table__  # type: ignore[attr-defined]
+    ws_billing_ids = sa_select(billing_tbl.c.id).where(billing_tbl.c.workspace_id == workspace_id)
+    await session.execute(
+        sa_delete(LlmBillingEvent).where(
+            LlmBillingEvent.billing_event_id.in_(ws_billing_ids)  # type: ignore[attr-defined]
+        )
+    )
+
     # Delete child rows deepest-first to avoid FK violations.
     ws_child_tables = [
         EgressRef,
@@ -357,6 +387,7 @@ async def delete_workspace(
         WorkspaceSkillBinding,
         OrgSkillInstall,
         Trigger,
+        ScheduledTaskRun,
         ScheduledTask,
         MCPCredentialGrant,
         MCPWorkspaceConnectorState,
@@ -366,6 +397,7 @@ async def delete_workspace(
         ArtifactVersion,
         Artifact,
         Attachment,
+        BillingEvent,
         Conversation,
         InviteToken,
         AgentConfig,

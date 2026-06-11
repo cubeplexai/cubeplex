@@ -230,7 +230,9 @@ class MCPConnectorInstall(CubeboxBase, table=True):
     auto_enroll_new_workspaces: bool = Field(
         default=True, sa_column_kwargs={"server_default": text("true")}
     )
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
 
 
 class MCPWorkspaceConnectorState(CubeboxBase, table=True):
@@ -252,7 +254,9 @@ class MCPWorkspaceConnectorState(CubeboxBase, table=True):
     enabled: bool = Field(default=True, sa_column_kwargs={"server_default": text("true")})
     credential_policy: str = Field(max_length=16)
     enablement_source: str = Field(max_length=32)
-    updated_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    updated_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
 
 
 class MCPCredentialGrant(CubeboxBase, table=True):
@@ -330,7 +334,9 @@ class MCPCredentialGrant(CubeboxBase, table=True):
         max_length=16,
         sa_column_kwargs={"server_default": text("'valid'")},
     )
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
 
 
 # ---------------------------------------------------------------------------
