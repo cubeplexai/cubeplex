@@ -50,6 +50,10 @@ class EmbeddingProvider:
     def from_config(cls) -> "EmbeddingProvider":
         api_key_env = config.get("search.embedding.api_key_env", "DASHSCOPE_API_KEY")
         api_key = os.environ.get(api_key_env, "")
+        if not api_key:
+            raise RuntimeError(
+                f"embedding api key not set; export ${api_key_env} or disable search.enabled"
+            )
         return cls(
             base_url=config.get(
                 "search.embedding.base_url",
