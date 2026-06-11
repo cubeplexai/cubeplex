@@ -1489,7 +1489,22 @@
     "incorrectPassword": "Current password is incorrect",
     "passwordChangeError": "Failed to change password",
     "passwordChanged": "Password updated",
-    "updatePassword": "Update password"
+    "updatePassword": "Update password",
+    "dangerZone": "Danger zone",
+    "deleteAccountTitle": "Delete account",
+    "deleteAccountDesc": "Permanently delete your account and all your data.",
+    "deleteAccountButton": "Delete account",
+    "deleteAccount": {
+      "title": "Delete your account",
+      "warning": "This action cannot be undone. All your data will be permanently deleted.",
+      "passwordPlaceholder": "Enter your password to confirm",
+      "cancel": "Cancel",
+      "confirm": "Delete my account",
+      "deleting": "Deleting…",
+      "wrongPassword": "Incorrect password",
+      "transferFirst": "Transfer org ownership before deleting your account",
+      "error": "Failed to delete account"
+    }
   },
   "verifyEmail": {
     "verifying": "Verifying your email...",

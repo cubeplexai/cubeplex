@@ -1489,7 +1489,22 @@
     "incorrectPassword": "当前密码不正确",
     "passwordChangeError": "修改密码失败",
     "passwordChanged": "密码已更新",
-    "updatePassword": "更新密码"
+    "updatePassword": "更新密码",
+    "dangerZone": "危险操作",
+    "deleteAccountTitle": "删除账户",
+    "deleteAccountDesc": "永久删除您的账户及所有数据。",
+    "deleteAccountButton": "删除账户",
+    "deleteAccount": {
+      "title": "删除您的账户",
+      "warning": "此操作无法撤销。您的所有数据将被永久删除。",
+      "passwordPlaceholder": "输入密码以确认",
+      "cancel": "取消",
+      "confirm": "删除我的账户",
+      "deleting": "删除中…",
+      "wrongPassword": "密码不正确",
+      "transferFirst": "请先转让组织所有权，再删除账户",
+      "error": "删除账户失败"
+    }
   },
   "verifyEmail": {
     "verifying": "正在验证邮箱...",
