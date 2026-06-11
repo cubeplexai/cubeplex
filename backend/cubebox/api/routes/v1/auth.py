@@ -191,3 +191,4 @@ async def patch_me(
 # If you ever move this include_router above the custom routes, rate limiting
 # on login silently disappears.
 router.include_router(fastapi_users.get_auth_router(auth_backend))
+router.include_router(fastapi_users.get_reset_password_router(), prefix="")

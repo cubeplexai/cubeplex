@@ -315,6 +315,23 @@ class UserManager(BaseUserManager[User, str]):
             user_agent=request.headers.get("user-agent") if request else None,
         )
 
+    async def on_after_forgot_password(
+        self, user: User, token: str, request: Request | None = None
+    ) -> None:
+        from cubebox.services.email import get_email_service
+
+        base_url = config.get("app.base_url", "http://localhost:3000")
+        reset_url = f"{base_url}/reset-password?token={token}"
+        try:
+            await get_email_service().send(
+                to=user.email,
+                subject="Reset your cubebox password",
+                template="password_reset",
+                context={"reset_url": reset_url, "email": user.email},
+            )
+        except Exception:
+            logger.warning("Failed to send password reset email to {}", user.email)
+
 
 async def get_user_manager(
     user_db: Annotated[SQLAlchemyUserDatabase[User, str], Depends(get_user_db)],
