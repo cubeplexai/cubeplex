@@ -71,10 +71,13 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
     from cubebox.models.im_connector import IMConnectorAccount
 
     # Per-account decrypted-secret cache so we don't pay KDF + Feishu client
-    # construction per turn. Keyed by (account_id, credential_id) so a
-    # credential rotation (via ``connect_feishu`` re-bind, which writes a new
-    # credentials row and updates account.credential_id) automatically
-    # invalidates the entry without an explicit bust API.
+    # construction per turn. Keyed by (account_id, credential_id) — today
+    # the only supported rotation path is delete-and-re-create the account
+    # (CredentialService.create raises on the (org_id, kind, name) unique
+    # index), which produces a new account_id; the credential_id leg of
+    # the cache key is forward-looking for when ``upsert_by_kind_name`` is
+    # wired through to ``connect_feishu``. Until then, restart the API to
+    # flush a rotated credential.
     secret_cache: dict[tuple[str, str], dict[str, Any]] = {}
     client_cache: dict[tuple[str, str], Any] = {}
 

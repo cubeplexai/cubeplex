@@ -164,19 +164,35 @@ async def mark_queue_item_completed(
     session.add(item)
 
 
-async def mark_queue_item_failed(
+async def mark_queue_item_for_retry_or_fail(
     session: AsyncSession,
     *,
     item_id: str,
+    max_attempts: int = 5,
 ) -> None:
-    """Park a queue row when start_run raised. The lease stays set so the
-    janitor view sees the failure timestamp, but status='failed' makes the
-    row invisible to ``claim_pending_queue_item`` (which only looks at
-    ``pending`` / ``started`` rows)."""
+    """Handle a queue row whose ``start_run`` raised.
+
+    The retry policy designed into ``claim_pending_queue_item`` expects:
+    - Transient failure (DB blip, LLM provider down, network hiccup) →
+      let the next poll re-claim after the lease expires, up to
+      ``max_attempts`` times.
+    - Persistent failure (broken event, code bug) → after
+      ``attempts >= max_attempts`` the row is parked as ``failed``.
+
+    Parking on the FIRST exception (the previous behaviour after the
+    round-1 fix) would defeat ``max_attempts`` entirely: any transient
+    error becomes a permanent silent drop. So this helper only flips to
+    ``failed`` once the cap is reached; otherwise it rewinds to ``pending``
+    + clears the lease so the next poll re-claims immediately.
+    """
     item = (
         await session.execute(
             select(IMRunQueueItem).where(IMRunQueueItem.id == item_id)  # type: ignore[arg-type]
         )
     ).scalar_one()
-    item.status = "failed"
+    if item.attempts >= max_attempts:
+        item.status = "failed"
+    else:
+        item.status = "pending"
+        item.claim_lease_expires_at = None
     session.add(item)

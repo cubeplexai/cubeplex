@@ -29,7 +29,7 @@ from cubebox.models.im_connector import IMConnectorAccount, IMRunQueueItem
 from cubebox.repositories.im_connector import (
     claim_pending_queue_item,
     mark_queue_item_completed,
-    mark_queue_item_failed,
+    mark_queue_item_for_retry_or_fail,
     mark_receipt_completed,
 )
 from cubebox.streams.run_manager import RunContext
@@ -97,8 +97,10 @@ async def process_one_queue_item(
             captured_item.id,
             exc_info=True,
         )
+        # Honor max_attempts: rewind to 'pending' for transient errors,
+        # park as 'failed' only when the attempt cap is reached.
         async with session_maker() as session:
-            await mark_queue_item_failed(session, item_id=captured_item.id)
+            await mark_queue_item_for_retry_or_fail(session, item_id=captured_item.id)
             await session.commit()
         return True
 

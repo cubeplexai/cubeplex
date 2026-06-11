@@ -31,9 +31,21 @@ from cubebox.repositories.im_connector import get_or_create_thread_link
 
 @dataclass(slots=True)
 class IngestResult:
-    """Outcome of one ``ingest_inbound_event`` call."""
+    """Outcome of one ``ingest_inbound_event`` call.
 
-    outcome: str  # "enqueued" | "duplicate"
+    Possible ``outcome`` values:
+
+    - ``"enqueued"``: receipt + conversation + queue row committed.
+    - ``"duplicate"``: a previous call's receipt already covered this
+      ``platform_event_id`` (Feishu retry / our own re-delivery).
+    - ``"invalid"``: the inbound event was structurally unusable
+      (e.g. empty ``platform_event_id``) and was deliberately dropped.
+    - ``"retry_exhausted"``: the thread-link race retry cap was hit;
+      the event was NOT enqueued but should be visible in observability
+      so a stuck shard does not masquerade as healthy dedupe.
+    """
+
+    outcome: str
     conversation_id: str | None
 
 
@@ -79,7 +91,7 @@ async def ingest_inbound_event(
             "[IM ingest] dropping event with empty platform_event_id (account={})",
             account.id,
         )
-        return IngestResult(outcome="duplicate", conversation_id=None)
+        return IngestResult(outcome="invalid", conversation_id=None)
     # Cap retry recursion on the thread-link race path. A persistent
     # IntegrityError or a future constraint-name substring collision must
     # not unbounded-recurse the stack.
@@ -89,7 +101,7 @@ async def ingest_inbound_event(
             account.id,
             event.platform_event_id,
         )
-        return IngestResult(outcome="duplicate", conversation_id=None)
+        return IngestResult(outcome="retry_exhausted", conversation_id=None)
     async with session_maker() as session:
         receipt = IMWebhookReceipt(
             org_id=account.org_id,
