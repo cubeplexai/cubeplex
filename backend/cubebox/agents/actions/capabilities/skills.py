@@ -291,11 +291,10 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
         return await _handle_publish_skill_impl(deps, ctx, session, inp)
 
     return AgentCapability(
-        name="skills",
+        name="platform_skills",
         description=(
-            "Search, preview, and install skills available to this workspace. "
-            "Typical flow: find → preview → install. Each operation requires the "
-            "`operation` field. See per-operation examples."
+            "Search, preview, install, and publish skills available to this "
+            "workspace. Typical flow: find → preview → install."
         ),
         operations=[
             AgentOperation(
@@ -303,7 +302,7 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 description=(
                     "Search available skills by plain-language need. Returns candidates "
                     "with install_state and candidate_id. Read-only; never installs. "
-                    'Example: {"operation":"find","query":"web search"}'
+                    'Example: {"query":"web search"}'
                 ),
                 input_model=FindInput,
                 handler=find_handler,
@@ -314,7 +313,7 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 description=(
                     "Fetch the full SKILL.md for a candidate so you can describe it "
                     "to the user before suggesting installation. Use after find. "
-                    'Example: {"operation":"preview","candidate_id":"<candidate_id from find>"}'
+                    'Example: {"candidate_id":"<candidate_id from find>"}'
                 ),
                 input_model=PreviewInput,
                 handler=preview_handler,
@@ -325,7 +324,7 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                 description=(
                     "Install a skill candidate into the current workspace. "
                     "Only call when the user has explicitly asked to install. "
-                    'Example: {"operation":"install","candidate_id":"<candidate_id from find>"}'
+                    'Example: {"candidate_id":"<candidate_id from find>"}'
                 ),
                 input_model=InstallInput,
                 handler=install_handler,
@@ -337,7 +336,7 @@ def build_skills_capability(deps: SkillDeps) -> AgentCapability:
                     "Publish a skill artifact to the current workspace so it becomes "
                     "available via load_skill. Use after save_artifact produces an artifact "
                     "with artifact_type='skill'. "
-                    'Example: {"operation":"publish_skill","artifact_id":"art-1abc..."}'
+                    'Example: {"artifact_id":"art-1abc..."}'
                 ),
                 input_model=PublishSkillInput,
                 handler=publish_skill_handler,

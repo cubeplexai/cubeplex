@@ -1,4 +1,8 @@
-"""Tests for the generic capability tool builder."""
+"""Tests for the per-operation capability tool builder.
+
+Each operation in an AgentCapability becomes a standalone AgentTool named
+``<cap_name>_<op_name>``; the umbrella+discriminator pattern is gone.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ from unittest.mock import AsyncMock
 
 from pydantic import BaseModel
 
-from cubebox.agents.actions.builder import build_capability_tool
+from cubebox.agents.actions.builder import build_capability_tools
 from cubebox.agents.actions.context import ScopeContext
 from cubebox.agents.actions.types import (
     ActionInvalidInput,
@@ -19,10 +23,6 @@ from cubebox.agents.actions.types import (
     AgentOperation,
 )
 from cubebox.models.membership import Role
-
-# ---------------------------------------------------------------------------
-# Fixtures / helpers
-# ---------------------------------------------------------------------------
 
 FAKE_CTX = ScopeContext(
     org_id="org_1",
@@ -50,11 +50,6 @@ class DeleteInput(BaseModel):
     item_id: str
 
 
-# ---------------------------------------------------------------------------
-# Mutation gate
-# ---------------------------------------------------------------------------
-
-
 class TestMutationGate:
     def test_allow_mutations_includes_all(self) -> None:
         list_op = AgentOperation(
@@ -76,13 +71,8 @@ class TestMutationGate:
             description="Item management",
             operations=[list_op, create_op],
         )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
-        # The union model should contain both operations.
-        schema = tool.parameters.model_json_schema()
-        # Both sub-models should appear under $defs.
-        assert "Op_list" in str(schema)
-        assert "Op_create" in str(schema)
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
+        assert [t.name for t in tools] == ["items_list", "items_create"]
 
     def test_deny_mutations_drops_mutating(self) -> None:
         list_op = AgentOperation(
@@ -104,12 +94,10 @@ class TestMutationGate:
             description="Item management",
             operations=[list_op, create_op],
         )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=False)
-        assert tool is not None
-        # Single surviving op → no union wrapper, model is ListInput.
-        assert tool.parameters is ListInput
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=False)
+        assert [t.name for t in tools] == ["items_list"]
 
-    def test_deny_mutations_all_mutating_returns_none(self) -> None:
+    def test_deny_mutations_all_mutating_returns_empty(self) -> None:
         create_op = AgentOperation(
             name="create",
             description="Create item",
@@ -129,55 +117,24 @@ class TestMutationGate:
             description="Item management",
             operations=[create_op, delete_op],
         )
-        result = build_capability_tool(cap, fake_context_factory, allow_mutations=False)
-        assert result is None
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=False)
+        assert tools == []
 
 
-# ---------------------------------------------------------------------------
-# Dispatch
-# ---------------------------------------------------------------------------
-
-
-class TestDispatch:
-    async def test_single_op_dispatches_correctly(self) -> None:
-        handler = AsyncMock(return_value={"status": "ok"})
+class TestSchema:
+    def test_per_op_parameters_is_the_op_input_model(self) -> None:
         list_op = AgentOperation(
             name="list",
             description="List items",
             input_model=ListInput,
-            handler=handler,
-            mutates=False,
-        )
-        cap = AgentCapability(
-            name="items",
-            description="Item management",
-            operations=[list_op],
-        )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
-
-        # Build input matching the single-op model (ListInput directly).
-        args = ListInput(page=3)
-        result = await tool.execute("call_1", args)
-
-        assert result.is_error is None
-        handler.assert_awaited_once_with(FAKE_CTX, "fake-session", args)
-
-    async def test_multi_op_dispatches_to_correct_handler(self) -> None:
-        list_handler = AsyncMock(return_value={"items": []})
-        create_handler = AsyncMock(return_value={"id": "new_1"})
-        list_op = AgentOperation(
-            name="list",
-            description="List items",
-            input_model=ListInput,
-            handler=list_handler,
+            handler=AsyncMock(),
             mutates=False,
         )
         create_op = AgentOperation(
             name="create",
             description="Create item",
             input_model=CreateInput,
-            handler=create_handler,
+            handler=AsyncMock(),
             mutates=True,
         )
         cap = AgentCapability(
@@ -185,24 +142,50 @@ class TestDispatch:
             description="Item management",
             operations=[list_op, create_op],
         )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
+        by_name = {t.name: t for t in tools}
+        # The model sees the operation's own input model directly — no
+        # discriminator wrapper, no Op_<name> sub-model.
+        assert by_name["items_list"].parameters is ListInput
+        assert by_name["items_create"].parameters is CreateInput
 
-        # Call the "create" operation via the union model.
-        args = tool.parameters.model_validate({"operation": "create", "title": "My Item"})
-        result = await tool.execute("call_2", args)
+    def test_per_op_description_lands_on_the_tool(self) -> None:
+        list_op = AgentOperation(
+            name="list",
+            description="List items. Example: {}",
+            input_model=ListInput,
+            handler=AsyncMock(),
+            mutates=False,
+        )
+        cap = AgentCapability(
+            name="items",
+            description="Item management",
+            operations=[list_op],
+        )
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
+        assert tools[0].description == "List items. Example: {}"
+
+
+class TestDispatch:
+    async def test_call_routes_to_op_handler(self) -> None:
+        handler = AsyncMock(return_value={"status": "ok"})
+        op = AgentOperation(
+            name="list",
+            description="List items",
+            input_model=ListInput,
+            handler=handler,
+            mutates=False,
+        )
+        cap = AgentCapability(name="items", description="Items", operations=[op])
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
+
+        args = ListInput(page=3)
+        result = await tools[0].execute("call_1", args)
 
         assert result.is_error is None
-        create_handler.assert_awaited_once()
-        # Verify the handler received (ctx, session, parsed_input).
-        call_args = create_handler.call_args
-        assert call_args[0][0] is FAKE_CTX
-        assert call_args[0][1] == "fake-session"
-        inner = call_args[0][2]
-        assert inner.title == "My Item"
+        handler.assert_awaited_once_with(FAKE_CTX, "fake-session", args)
 
-    async def test_handler_receives_correct_arguments(self) -> None:
-        """Verify the handler receives (ctx, session, parsed_input)."""
+    async def test_handler_receives_ctx_session_input(self) -> None:
         handler = AsyncMock(return_value={"ok": True})
         op = AgentOperation(
             name="create",
@@ -211,27 +194,16 @@ class TestDispatch:
             handler=handler,
             mutates=True,
         )
-        cap = AgentCapability(
-            name="things",
-            description="Things",
-            operations=[op],
-        )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
+        cap = AgentCapability(name="things", description="Things", operations=[op])
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
 
-        args = CreateInput(title="Test")
-        await tool.execute("call_3", args)
+        await tools[0].execute("call_3", CreateInput(title="Test"))
 
         ctx_arg, session_arg, input_arg = handler.call_args[0]
         assert ctx_arg is FAKE_CTX
         assert session_arg == "fake-session"
         assert isinstance(input_arg, CreateInput)
         assert input_arg.title == "Test"
-
-
-# ---------------------------------------------------------------------------
-# Error mapping
-# ---------------------------------------------------------------------------
 
 
 class TestErrorMapping:
@@ -243,15 +215,10 @@ class TestErrorMapping:
             input_model=ListInput,
             handler=handler,
         )
-        cap = AgentCapability(
-            name="items",
-            description="Items",
-            operations=[op],
-        )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
+        cap = AgentCapability(name="items", description="Items", operations=[op])
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
 
-        result = await tool.execute("call_err1", ListInput())
+        result = await tools[0].execute("call_err1", ListInput())
         assert result.is_error is True
         text = result.content[0].text  # type: ignore[union-attr]
         assert "ActionNotFound" in text
@@ -266,15 +233,10 @@ class TestErrorMapping:
             handler=handler,
             mutates=True,
         )
-        cap = AgentCapability(
-            name="items",
-            description="Items",
-            operations=[op],
-        )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
+        cap = AgentCapability(name="items", description="Items", operations=[op])
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
 
-        result = await tool.execute("call_err2", DeleteInput(item_id="x"))
+        result = await tools[0].execute("call_err2", DeleteInput(item_id="x"))
         assert result.is_error is True
         text = result.content[0].text  # type: ignore[union-attr]
         assert "ActionPermissionDenied" in text
@@ -289,55 +251,11 @@ class TestErrorMapping:
             handler=handler,
             mutates=True,
         )
-        cap = AgentCapability(
-            name="items",
-            description="Items",
-            operations=[op],
-        )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
+        cap = AgentCapability(name="items", description="Items", operations=[op])
+        tools = build_capability_tools(cap, fake_context_factory, allow_mutations=True)
 
-        result = await tool.execute("call_err3", CreateInput(title="bad"))
+        result = await tools[0].execute("call_err3", CreateInput(title="bad"))
         assert result.is_error is True
         text = result.content[0].text  # type: ignore[union-attr]
         assert "ActionInvalidInput" in text
         assert "bad cron expression" in text
-
-
-class TestSchemaDescriptions:
-    """Each operation's description must reach the generated JSON Schema.
-
-    The LLM only sees `tool.description` (capability-level) plus
-    `tool.parameters` (JSON Schema). If `AgentOperation.description` is not
-    serialized into a per-variant `description` field on the Op_* sub-model,
-    the per-op example payloads we author never reach the model.
-    """
-
-    def test_each_op_description_lands_in_schema(self) -> None:
-        list_op = AgentOperation(
-            name="list",
-            description="List items. Example: {'operation':'list'}",
-            input_model=ListInput,
-            handler=AsyncMock(),
-            mutates=False,
-        )
-        create_op = AgentOperation(
-            name="create",
-            description="Create item. Example: {'operation':'create','title':'x'}",
-            input_model=CreateInput,
-            handler=AsyncMock(),
-            mutates=True,
-        )
-        cap = AgentCapability(
-            name="items",
-            description="Item management",
-            operations=[list_op, create_op],
-        )
-        tool = build_capability_tool(cap, fake_context_factory, allow_mutations=True)
-        assert tool is not None
-        schema = tool.parameters.model_json_schema()
-
-        op_list = schema["$defs"]["Op_list"]
-        op_create = schema["$defs"]["Op_create"]
-        assert op_list.get("description") == list_op.description
-        assert op_create.get("description") == create_op.description

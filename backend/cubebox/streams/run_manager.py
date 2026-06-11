@@ -2416,7 +2416,7 @@ class RunManager:
                             _skill_exc,
                         )
 
-                _builtin_tools.extend(
+                _deferred_groups.extend(
                     _action_tools_for_run(
                         _action_ctx_factory,
                         allow_mutations=(trigger == "interactive"),
