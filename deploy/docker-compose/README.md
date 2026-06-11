@@ -4,6 +4,11 @@ Single-host deployment of cubebox (backend, frontend, Postgres, Redis,
 rustfs object store) with `docker compose up -d`.
 
 - **Install guide:** [INSTALL.md](INSTALL.md)
+- **Optional OpenSandbox overlay:** [OPENSANDBOX.md](OPENSANDBOX.md) — how
+  to add alibaba/OpenSandbox in docker runtime mode, and what cubebox
+  features the docker runtime cannot serve (TL;DR: `secureAccess` is
+  rejected, so the current `manager.py` setting blocks sandbox creation
+  until that's made conditional).
 - Uses the **same backend / frontend images** as the kubernetes mode;
   build them once with `deploy/kubernetes/scripts/build-and-push.sh`.
 

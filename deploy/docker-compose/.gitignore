@@ -2,3 +2,4 @@
 .env
 config/config.production.local.yaml
 config/config.production.secrets.yaml
+config/opensandbox.toml
