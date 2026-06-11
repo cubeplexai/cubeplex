@@ -720,6 +720,7 @@
     "navSkills": "Skills",
     "navMembers": "Members",
     "navMcp": "MCP Connectors",
+    "navShares": "Shares",
     "soonBadge": "soon",
     "persona": {
       "title": "Persona",
@@ -1361,5 +1362,19 @@
     "active": "Active",
     "revoked": "Revoked",
     "sharedAt": "Shared {date}"
+  },
+  "wsShares": {
+    "title": "Shared Conversations",
+    "subtitle": "All conversations you've shared in this workspace",
+    "empty": "No shared conversations yet",
+    "conversation": "Conversation",
+    "sharedDate": "Shared",
+    "link": "Link",
+    "status": "Status",
+    "active": "Active",
+    "revoked": "Revoked",
+    "revoke": "Revoke",
+    "copyLink": "Copy link",
+    "copied": "Copied!"
   }
 }

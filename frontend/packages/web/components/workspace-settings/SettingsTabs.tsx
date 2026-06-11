@@ -14,6 +14,7 @@ const TABS = [
   { tab: 'skills', labelKey: 'navSkills' },
   { tab: 'mcp', labelKey: 'navMcp' },
   { tab: 'members', labelKey: 'navMembers' },
+  { tab: 'shares', labelKey: 'navShares' },
 ] as const
 
 /**
