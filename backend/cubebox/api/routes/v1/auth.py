@@ -37,7 +37,6 @@ async def register(
     body: Annotated[UserCreate, Body()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
     locale: Annotated[str, Depends(get_locale)],
-    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
     _t = get_translator(locale)
     try:
@@ -52,11 +51,6 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_t("register_invalid_password"),
         ) from None
-    if body.display_name is not None:
-        await session.refresh(user)
-        user.display_name = body.display_name
-        session.add(user)
-        await session.commit()
     default_ws = getattr(user, "_default_workspace_id", None)
     return {
         "id": user.id,
@@ -284,6 +278,7 @@ async def delete_account(
     from cubebox.models.egress_ref import EgressRef
     from cubebox.models.invite_token import InviteToken
     from cubebox.models.memory import MemoryItem
+    from cubebox.models.sandbox_env import SandboxEnvVar
     from cubebox.models.scheduled_task import ScheduledTask
     from cubebox.models.skill import OrgPreinstalledTombstone, OrgSkillInstall
     from cubebox.models.trigger import Trigger
@@ -306,6 +301,7 @@ async def delete_account(
     for model, col in [
         (EgressRef, EgressRef.user_id),
         (MemoryItem, MemoryItem.owner_user_id),
+        (SandboxEnvVar, SandboxEnvVar.user_id),
         (UserSandbox, UserSandbox.user_id),
         (Attachment, Attachment.uploader_user_id),
         (BillingEvent, BillingEvent.user_id),

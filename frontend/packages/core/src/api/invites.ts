@@ -20,12 +20,12 @@ export async function createInvite(
   wsId: string,
   role: string,
   email?: string,
-): Promise<{ token: string; expires_at: string }> {
+): Promise<{ token: string; expires_at: string; email_sent: boolean }> {
   const body: Record<string, string> = { role }
   if (email) body.email = email
   const res = await client.post(`/api/v1/workspaces/${wsId}/invites`, body)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as { token: string; expires_at: string }
+  return (await res.json()) as { token: string; expires_at: string; email_sent: boolean }
 }
 
 export async function listInvites(client: ApiClient, wsId: string): Promise<InviteToken[]> {
