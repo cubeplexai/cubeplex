@@ -11,6 +11,7 @@ import { Menu } from 'lucide-react'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { Sidebar } from '@/components/layout/Sidebar'
+import { VerificationBanner } from '@/components/layout/VerificationBanner'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 
 /** Detect routes that mount AppShell — those render their own h-11 header
@@ -77,7 +78,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             mobile strip doesn't push h-full pages off the bottom of the
             viewport. flex-1 min-h-0 ensures overflow-hidden parents clip
             correctly and inner scroll regions still work. */}
-        <div className="flex-1 min-h-0 flex flex-col">{children}</div>
+        <div className="flex-1 min-h-0 flex flex-col">
+          <VerificationBanner />
+          {children}
+        </div>
       </div>
       <Sheet open={drawerOpen} onOpenChange={(open) => setDrawerOpen(open)}>
         <SheetContent side="left" className="w-56 max-w-[80vw] p-0">
