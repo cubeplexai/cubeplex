@@ -365,25 +365,34 @@ async def lifespan(_app: FastAPI):  # type: ignore
     embedding_worker_task: asyncio.Task[None] | None = None
     _app.state.embedding_provider = None
     _app.state.embedding_worker = None
+    _app.state.embedding_worker_task = None
     if _search_cfg.get("search.enabled", True):
         embedding_provider = EmbeddingProvider.from_config()
         _app.state.embedding_provider = embedding_provider
         embedding_worker = EmbeddingWorker(embedding_provider)
         embedding_worker_task = asyncio.create_task(embedding_worker.run(), name="embedding-worker")
         _app.state.embedding_worker = embedding_worker
+        # Expose the task so tests can cancel it cleanly before driving the
+        # worker themselves with a deterministic provider.
+        _app.state.embedding_worker_task = embedding_worker_task
 
     yield
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
-    if embedding_worker_task is not None:
-        _app.state.embedding_worker.stop()
+    # Tests may have cancelled the lifespan worker and cleared the state
+    # references (see test_conversation_search_route.py). Re-read from
+    # app.state so we don't blow up on the None.
+    _live_worker = getattr(_app.state, "embedding_worker", None)
+    _live_task: asyncio.Task[None] | None = getattr(_app.state, "embedding_worker_task", None)
+    if _live_task is not None and _live_worker is not None:
+        _live_worker.stop()
         try:
-            await asyncio.wait_for(embedding_worker_task, timeout=5.0)
+            await asyncio.wait_for(_live_task, timeout=5.0)
         except TimeoutError:
-            embedding_worker_task.cancel()
+            _live_task.cancel()
             try:
-                await embedding_worker_task
+                await _live_task
             except (asyncio.CancelledError, Exception):
                 pass
     if _app.state.embedding_provider is not None:
