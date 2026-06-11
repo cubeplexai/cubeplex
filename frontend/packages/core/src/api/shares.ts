@@ -26,10 +26,13 @@ export async function listConversationShares(
 
 export async function listShares(
   client: ApiClient,
-  limit = 50,
-  offset = 0,
+  opts: { workspaceId?: string; limit?: number; offset?: number } = {},
 ): Promise<{ items: ConversationShare[]; total: number }> {
-  const res = await client.get(`/api/v1/shares?limit=${limit}&offset=${offset}`)
+  const params = new URLSearchParams()
+  if (opts.workspaceId) params.set('workspace_id', opts.workspaceId)
+  params.set('limit', String(opts.limit ?? 50))
+  params.set('offset', String(opts.offset ?? 0))
+  const res = await client.get(`/api/v1/shares?${params.toString()}`)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<{ items: ConversationShare[]; total: number }>
 }

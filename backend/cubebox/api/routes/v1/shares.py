@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.dependencies import current_active_user, optional_current_user
 from cubebox.db import get_session
-from cubebox.models import Conversation, Membership, OrganizationMembership, User, Workspace
+from cubebox.models import Conversation, Membership, OrganizationMembership, User
 from cubebox.models.conversation_share import ConversationShare, ShareScope
 from cubebox.objectstore.client import get_objectstore_client
 from cubebox.repositories import ArtifactRepository
@@ -84,7 +84,8 @@ async def create_share(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     conv_stmt = select(Conversation).where(
-        Conversation.id == body.conversation_id  # type: ignore[arg-type]
+        Conversation.id == body.conversation_id,  # type: ignore[arg-type]
+        Conversation.deleted_at.is_(None),  # type: ignore[union-attr]
     )
     conv = (await session.execute(conv_stmt)).scalar_one_or_none()
     if conv is None:
@@ -97,14 +98,17 @@ async def create_share(
     if (await session.execute(mem_stmt)).scalar_one_or_none() is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
 
-    ws_stmt = select(Workspace).where(
-        Workspace.id == conv.workspace_id  # type: ignore[arg-type]
-    )
-    workspace = (await session.execute(ws_stmt)).scalar_one()
+    if body.scope == ShareScope.org:
+        org_check = select(OrganizationMembership).where(
+            OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+            OrganizationMembership.org_id == conv.org_id,  # type: ignore[arg-type]
+        )
+        if (await session.execute(org_check)).scalar_one_or_none() is None:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Org membership required for org scope")
 
     messages = await build_snapshot(body.conversation_id)
 
-    art_repo = ArtifactRepository(session, org_id=workspace.org_id, workspace_id=workspace.id)
+    art_repo = ArtifactRepository(session, org_id=conv.org_id, workspace_id=conv.workspace_id)
     artifacts = await art_repo.list_by_conversation(body.conversation_id)
     artifacts_data = [a.to_dict() for a in artifacts]
 
@@ -112,8 +116,8 @@ async def create_share(
 
     share_repo = ConversationShareRepository(session)
     share = await share_repo.create(
-        org_id=workspace.org_id,
-        workspace_id=workspace.id,
+        org_id=conv.org_id,
+        workspace_id=conv.workspace_id,
         conversation_id=body.conversation_id,
         creator_user_id=user.id,
         creator_display_name=display_name,
@@ -134,11 +138,14 @@ async def create_share(
 async def list_shares(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    workspace_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, object]:
     repo = ConversationShareRepository(session)
-    items, total = await repo.list_by_creator(user.id, limit=limit, offset=offset)
+    items, total = await repo.list_by_creator(
+        user.id, workspace_id=workspace_id, limit=limit, offset=offset
+    )
     return {
         "items": [_serialize(s) for s in items],
         "total": total,
@@ -204,7 +211,7 @@ async def get_share_artifact(
     user: Annotated[User | None, Depends(optional_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
-    if ".." in file_path or file_path.startswith("/"):
+    if "/.." in f"/{file_path}" or file_path.startswith("/"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid path")
 
     repo = ConversationShareRepository(session)

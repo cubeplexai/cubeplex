@@ -39,8 +39,8 @@ async def test_share_lifecycle(authenticated_client) -> None:  # type: ignore[no
     assert len(shares) == 1
     assert shares[0]["id"] == share_id
 
-    # List all my shares
-    resp = await client.get("/api/v1/shares")
+    # List all my shares (workspace-scoped)
+    resp = await client.get(f"/api/v1/shares?workspace_id={workspace_id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] >= 1
@@ -65,6 +65,38 @@ async def test_share_lifecycle(authenticated_client) -> None:  # type: ignore[no
     # Read after revoke → 404
     resp = await client.get(f"/api/v1/shares/{share_id}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_workspace_scope_blocks_unauthenticated(authenticated_client) -> None:  # type: ignore[no-untyped-def]
+    """Workspace-scoped share → 404 for unauthenticated viewer."""
+    client, workspace_id = authenticated_client
+
+    resp = await client.post(
+        f"/api/v1/ws/{workspace_id}/conversations",
+        params={"title": "Scope test"},
+    )
+    assert resp.status_code == 201
+    conv_id = resp.json()["id"]
+
+    resp = await client.post(
+        "/api/v1/shares",
+        json={"conversation_id": conv_id, "scope": "workspace"},
+    )
+    assert resp.status_code == 201
+    share_id = resp.json()["id"]
+
+    # Same authenticated user can read
+    resp = await client.get(f"/api/v1/shares/{share_id}")
+    assert resp.status_code == 200
+
+    # Unauthenticated request → 404 (not 200)
+    import httpx
+
+    transport = client._transport  # reuse the same ASGI transport
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as anon:
+        resp = await anon.get(f"/api/v1/shares/{share_id}")
+        assert resp.status_code == 404
 
 
 @pytest.mark.asyncio

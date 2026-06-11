@@ -38,7 +38,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await listShares(client)
+      const result = await listShares(client, { workspaceId: wsId })
       setShares(result.items)
       setTotal(result.total)
     } finally {

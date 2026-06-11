@@ -59,4 +59,5 @@ def downgrade() -> None:
     op.drop_index('ix_conversation_shares_creator', table_name='conversation_shares')
     op.drop_index('ix_conversation_shares_conversation', table_name='conversation_shares')
     op.drop_table('conversation_shares')
+    sa.Enum(name='sharescope').drop(op.get_bind())
     # ### end Alembic commands ###
