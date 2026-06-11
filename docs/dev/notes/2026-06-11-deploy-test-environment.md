@@ -126,7 +126,8 @@ bash /tmp/sb-e2e.sh   # the script the manual e2e ran from; see the
 | `host.docker.internal` unreachable from cubebox-backend container | Linux Docker engines don't auto-resolve it. The compose.opensandbox.yaml overlay sets `extra_hosts: host.docker.internal:host-gateway` on backend. |
 | `secureAccess is not supported when runtime.type=docker` (HTTP 400) | docker runtime rejects secureAccess. Set `sandbox.secure_access: false` (new in commit `509ebe91`). k8s-mode keeps the default `true`. |
 | `init-pvc` pod on the cluster ErrImagePull-ing `openebs/linux-utils:3.5.0` | preload once: `docker pull openebs/linux-utils:3.5.0` then `kubectl -n openebs rollout restart deploy/openebs-localpv-provisioner` |
-| `helm dependency update` failing on bitnami subcharts | the chart does NOT depend on bitnami — postgres/redis/minio are self-rendered. If you see this error you're on a branch from before that refactor. |
+| `helm dependency update` failing on bitnami subcharts | the chart does NOT depend on bitnami — postgres/redis/rustfs are self-rendered. If you see this error you're on a branch from before that refactor. |
+| rustfs pod stuck `0/1` with readiness probe 403 on `/minio/health/ready` | older chart version used `/minio/health/ready`; rustfs exposes `/health` only. Fixed in `feat/rustfs-k8s`: probe path changed to `/health`. |
 
 ## How to re-run the docker-runtime OpenSandbox e2e from scratch
 

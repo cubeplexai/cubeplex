@@ -132,13 +132,13 @@ redis:
       cpu: "500m"
       memory: "512Mi"
 
-minio:
+rustfs:
   enabled: true
-  image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+  image: rustfs/rustfs:latest
   mcImage: minio/mc:RELEASE.2025-04-08T15-39-49Z
   auth:
-    rootUser: cubebox
-    rootPassword: ""  # required in values.local.yaml
+    accessKey: cubebox
+    secretKey: ""  # required in values.local.yaml
   defaultBucket: cubebox
   persistence:
     storageClass: cubebox-work-hostpath

@@ -56,6 +56,6 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- printf "%s-redis-master" .Release.Name -}}
 {{- end -}}
 
-{{- define "cubebox.minio.host" -}}
-{{- printf "%s-minio" .Release.Name -}}
+{{- define "cubebox.rustfs.host" -}}
+{{- printf "%s-rustfs" .Release.Name -}}
 {{- end -}}

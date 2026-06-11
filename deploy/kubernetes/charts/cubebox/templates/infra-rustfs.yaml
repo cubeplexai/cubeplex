@@ -1,24 +1,24 @@
-{{- if .Values.minio.enabled -}}
-{{- $minioPass := required "minio.auth.rootPassword must be set in values.local.yaml" .Values.minio.auth.rootPassword -}}
+{{- if .Values.rustfs.enabled -}}
+{{- $secretKey := required "rustfs.auth.secretKey must be set in values.local.yaml" .Values.rustfs.auth.secretKey -}}
 apiVersion: v1
 kind: Secret
 metadata:
-  name: {{ .Release.Name }}-minio
+  name: {{ .Release.Name }}-rustfs
   labels:
     {{- include "cubebox.labels" . | nindent 4 }}
-    app.kubernetes.io/component: minio
+    app.kubernetes.io/component: rustfs
 type: Opaque
 stringData:
-  MINIO_ROOT_USER: {{ .Values.minio.auth.rootUser | quote }}
-  MINIO_ROOT_PASSWORD: {{ $minioPass | quote }}
+  RUSTFS_ACCESS_KEY: {{ .Values.rustfs.auth.accessKey | quote }}
+  RUSTFS_SECRET_KEY: {{ $secretKey | quote }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-minio
+  name: {{ .Release.Name }}-rustfs
   labels:
     {{- include "cubebox.labels" . | nindent 4 }}
-    app.kubernetes.io/component: minio
+    app.kubernetes.io/component: rustfs
 spec:
   type: ClusterIP
   ports:
@@ -31,37 +31,45 @@ spec:
   selector:
     app.kubernetes.io/name: {{ include "cubebox.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: minio
+    app.kubernetes.io/component: rustfs
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ .Release.Name }}-minio
+  name: {{ .Release.Name }}-rustfs
   labels:
     {{- include "cubebox.labels" . | nindent 4 }}
-    app.kubernetes.io/component: minio
+    app.kubernetes.io/component: rustfs
 spec:
   replicas: 1
-  serviceName: {{ .Release.Name }}-minio
+  serviceName: {{ .Release.Name }}-rustfs
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "cubebox.name" . }}
       app.kubernetes.io/instance: {{ .Release.Name }}
-      app.kubernetes.io/component: minio
+      app.kubernetes.io/component: rustfs
   template:
     metadata:
       labels:
         {{- include "cubebox.labels" . | nindent 8 }}
-        app.kubernetes.io/component: minio
+        app.kubernetes.io/component: rustfs
     spec:
       containers:
-        - name: minio
-          image: {{ .Values.minio.image }}
+        - name: rustfs
+          image: {{ .Values.rustfs.image }}
           imagePullPolicy: IfNotPresent
-          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: RUSTFS_ADDRESS
+              value: ":9000"
+            - name: RUSTFS_CONSOLE_ENABLE
+              value: "true"
+            - name: RUSTFS_CONSOLE_ADDRESS
+              value: ":9001"
+            - name: RUSTFS_VOLUMES
+              value: /data
           envFrom:
             - secretRef:
-                name: {{ .Release.Name }}-minio
+                name: {{ .Release.Name }}-rustfs
           ports:
             - name: s3
               containerPort: 9000
@@ -69,18 +77,18 @@ spec:
               containerPort: 9001
           readinessProbe:
             httpGet:
-              path: /minio/health/ready
+              path: /health
               port: s3
             initialDelaySeconds: 10
             periodSeconds: 5
           livenessProbe:
             httpGet:
-              path: /minio/health/live
+              path: /health
               port: s3
             initialDelaySeconds: 30
             periodSeconds: 15
           resources:
-            {{- toYaml .Values.minio.resources | nindent 12 }}
+            {{- toYaml .Values.rustfs.resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /data
@@ -89,19 +97,20 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: {{ .Values.minio.persistence.storageClass }}
+        storageClassName: {{ .Values.rustfs.persistence.storageClass }}
         resources:
           requests:
-            storage: {{ .Values.minio.persistence.size }}
+            storage: {{ .Values.rustfs.persistence.size }}
 ---
 # One-shot Job that creates the default bucket using mc client.
+# mc speaks S3 so it works against rustfs's S3-compatible API.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ .Release.Name }}-minio-bucket
+  name: {{ .Release.Name }}-rustfs-bucket
   labels:
     {{- include "cubebox.labels" . | nindent 4 }}
-    app.kubernetes.io/component: minio-bucket
+    app.kubernetes.io/component: rustfs-bucket
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "0"
@@ -113,33 +122,33 @@ spec:
     metadata:
       labels:
         {{- include "cubebox.labels" . | nindent 8 }}
-        app.kubernetes.io/component: minio-bucket
+        app.kubernetes.io/component: rustfs-bucket
     spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: {{ .Values.minio.mcImage }}
+          image: {{ .Values.rustfs.mcImage }}
           imagePullPolicy: IfNotPresent
           env:
-            - name: MINIO_ROOT_USER
+            - name: RUSTFS_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-minio
-                  key: MINIO_ROOT_USER
-            - name: MINIO_ROOT_PASSWORD
+                  name: {{ .Release.Name }}-rustfs
+                  key: RUSTFS_ACCESS_KEY
+            - name: RUSTFS_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-minio
-                  key: MINIO_ROOT_PASSWORD
+                  name: {{ .Release.Name }}-rustfs
+                  key: RUSTFS_SECRET_KEY
             - name: BUCKET
-              value: {{ .Values.minio.defaultBucket | quote }}
+              value: {{ .Values.rustfs.defaultBucket | quote }}
           command:
             - /bin/sh
             - -c
             - |
               set -e
-              until mc alias set local http://{{ .Release.Name }}-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
-                echo "waiting for minio..."; sleep 3
+              until mc alias set local http://{{ .Release.Name }}-rustfs:9000 "$RUSTFS_ACCESS_KEY" "$RUSTFS_SECRET_KEY"; do
+                echo "waiting for rustfs..."; sleep 3
               done
               mc mb --ignore-existing local/"$BUCKET"
               echo "bucket $BUCKET ready"
