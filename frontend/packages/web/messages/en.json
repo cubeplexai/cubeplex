@@ -938,7 +938,8 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "deleted": "Deleted",
-    "undo": "Undo"
+    "undo": "Undo",
+    "deleteFailed": "Delete failed"
   },
   "chatExtras": {
     "imageClose": "Close",

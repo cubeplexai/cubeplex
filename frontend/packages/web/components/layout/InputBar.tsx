@@ -74,21 +74,23 @@ export function InputBar({
   }, [conversationId, workspaceId, hydrate])
 
   // Composer-draft bridge: PromptCards (or other callers) push a string
-  // into useComposerDraft; we consume it once into local content.
-  const draft = useComposerDraft((s) => s.draft)
+  // into useComposerDraft; we consume it once into local content. We
+  // subscribe to the nonce so re-clicking the same card re-injects the
+  // text even when its value is unchanged.
+  const pendingDraft = useComposerDraft((s) => s.pending)
   useEffect(() => {
-    if (draft === null) return
-    setContent(draft)
+    if (pendingDraft === null) return
     const consumed = useComposerDraft.getState().consume()
-    if (consumed !== null && textareaRef.current) {
+    if (consumed === null) return
+    setContent(consumed)
+    if (textareaRef.current) {
       // sync textarea height to the injected text
       const ta = textareaRef.current
       ta.style.height = 'auto'
       ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'
       ta.focus()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft])
+  }, [pendingDraft])
 
   const uploadInFlight = stagingItems.some((u) => u.status === 'uploading')
   // Streaming no longer locks the textarea — the user can type to steer.
@@ -304,55 +306,21 @@ export function InputBar({
           >
             <Paperclip className="size-3.5" />
           </button>
-          {workspaceId && (
-            <div className="ml-auto flex items-center gap-1">
-              <PresetPicker wsId={workspaceId} />
-              <ThinkingControl wsId={workspaceId} />
-              <ThinkingBadge wsId={workspaceId} />
-              {showStop ? (
-                <button
-                  data-testid="stop-button"
-                  type="button"
-                  onClick={() => void handleCancel()}
-                  aria-label={tShell('inputBarStop')}
-                  className="group relative flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80"
-                >
-                  <Loader2 className="absolute inset-0 m-auto size-5 animate-spin opacity-90" />
-                  <span className="relative size-2 rounded-xs bg-primary-foreground transition-transform group-hover:scale-110" />
-                </button>
-              ) : (
-                <button
-                  data-testid="send-button"
-                  onClick={() => void (messageIsStreaming ? handleSteer() : handleSubmit())}
-                  disabled={
-                    (!content.trim() && stagedFileCount === 0) ||
-                    (isSubmitting && !messageIsStreaming) ||
-                    uploadInFlight ||
-                    hasPendingHitl
-                  }
-                  title={hasPendingHitl ? t('pendingHitlLock') : undefined}
-                  className={cn(
-                    'flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80',
-                    'disabled:cursor-not-allowed disabled:opacity-25',
-                  )}
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <ArrowUp className="size-3.5" />
-                  )}
-                </button>
-              )}
-            </div>
-          )}
-          {!workspaceId &&
-            (showStop ? (
+          <div className="ml-auto flex items-center gap-1">
+            {workspaceId && (
+              <>
+                <PresetPicker wsId={workspaceId} />
+                <ThinkingControl wsId={workspaceId} />
+                <ThinkingBadge wsId={workspaceId} />
+              </>
+            )}
+            {showStop ? (
               <button
                 data-testid="stop-button"
                 type="button"
                 onClick={() => void handleCancel()}
                 aria-label={tShell('inputBarStop')}
-                className="group relative ml-auto flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80"
+                className="group relative flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80"
               >
                 <Loader2 className="absolute inset-0 m-auto size-5 animate-spin opacity-90" />
                 <span className="relative size-2 rounded-xs bg-primary-foreground transition-transform group-hover:scale-110" />
@@ -369,7 +337,7 @@ export function InputBar({
                 }
                 title={hasPendingHitl ? t('pendingHitlLock') : undefined}
                 className={cn(
-                  'ml-auto flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80',
+                  'flex size-7 shrink-0 items-center justify-center rounded bg-primary text-primary-foreground transition-all duration-fast hover:bg-primary/80',
                   'disabled:cursor-not-allowed disabled:opacity-25',
                 )}
               >
@@ -379,7 +347,8 @@ export function InputBar({
                   <ArrowUp className="size-3.5" />
                 )}
               </button>
-            ))}
+            )}
+          </div>
         </div>
       </div>
       <p className="text-center mt-1 text-2xs text-faint">{t('hint')}</p>
