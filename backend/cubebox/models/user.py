@@ -26,3 +26,4 @@ class User(CubeboxBase, table=True):
     is_superuser: bool = Field(default=False)
     is_verified: bool = Field(default=False)
     language: str = Field(default="en", max_length=10)
+    display_name: str | None = Field(default=None, max_length=100)

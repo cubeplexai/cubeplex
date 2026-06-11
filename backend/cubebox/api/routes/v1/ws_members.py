@@ -31,6 +31,7 @@ class ChangeWsRoleRequest(BaseModel):
 class WsMemberOut(BaseModel):
     user_id: str
     email: str
+    display_name: str | None = None
     role: str
     created_at: str
 
@@ -44,6 +45,7 @@ class AvailableOrgMemberOut(BaseModel):
 class AddWsMemberResponse(BaseModel):
     user_id: str
     email: str
+    display_name: str | None = None
     role: str
 
 
@@ -70,6 +72,7 @@ async def list_workspace_members(
         WsMemberOut(
             user_id=m.user_id,
             email=users[m.user_id].email if m.user_id in users else "",
+            display_name=users[m.user_id].display_name if m.user_id in users else None,
             role=m.role,
             created_at=utc_isoformat(m.created_at),
         )
@@ -133,7 +136,10 @@ async def add_workspace_member(
 
     target = await session.get(User, body.user_id)
     email = target.email if target else ""
-    return AddWsMemberResponse(user_id=body.user_id, email=email, role=body.role)
+    display_name = target.display_name if target else None
+    return AddWsMemberResponse(
+        user_id=body.user_id, email=email, display_name=display_name, role=body.role
+    )
 
 
 @router.patch("/{user_id}/role", response_model=ChangeWsRoleResponse)

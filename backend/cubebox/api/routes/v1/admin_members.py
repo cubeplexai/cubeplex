@@ -30,6 +30,7 @@ class ChangeOrgRoleRequest(BaseModel):
 class OrgMemberOut(BaseModel):
     user_id: str
     email: str
+    display_name: str | None = None
     role: str
     created_at: str
 
@@ -37,6 +38,7 @@ class OrgMemberOut(BaseModel):
 class AddOrgMemberResponse(BaseModel):
     user_id: str
     email: str
+    display_name: str | None = None
     role: str
 
 
@@ -64,6 +66,7 @@ async def list_org_members(
         OrgMemberOut(
             user_id=m.user_id,
             email=users[m.user_id].email if m.user_id in users else "",
+            display_name=users[m.user_id].display_name if m.user_id in users else None,
             role=m.role,
             created_at=utc_isoformat(m.created_at),
         )
@@ -93,7 +96,9 @@ async def add_org_member(
         raise HTTPException(status.HTTP_409_CONFLICT, detail="Already a member")
 
     await om_repo.grant(user_id=target.id, org_id=org_id, role=OrgRole(body.role))
-    return AddOrgMemberResponse(user_id=target.id, email=target.email, role=body.role)
+    return AddOrgMemberResponse(
+        user_id=target.id, email=target.email, display_name=target.display_name, role=body.role
+    )
 
 
 @router.patch("/{user_id}/role", response_model=ChangeOrgRoleResponse)
