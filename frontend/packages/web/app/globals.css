@@ -98,7 +98,17 @@
   --text-2xl: 24px;
   --text-2xl--line-height: 1.25;
 
-  /* motion — duration utilities come from --transition-duration-* */
+  /* motion — Tailwind 4 generates the duration-* utilities from the
+     --duration-* namespace, NOT from --transition-duration-*. The earlier
+     comment was wrong; codex (PR #226) caught it: every duration-fast/
+     base/slow class in the codebase was compiling to nothing, so hover
+     transitions had 0ms duration (instant) site-wide. The pair below
+     covers both: --duration-* powers the utilities; --transition-
+     duration-* mirrors them for any handwritten transition:foo var()
+     references (panel-resize transition + animate-rise-in @utility). */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
   --transition-duration-fast: 120ms;
   --transition-duration-base: 200ms;
   --transition-duration-slow: 300ms;
