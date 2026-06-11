@@ -57,7 +57,8 @@
     "lightTheme": "Light theme",
     "darkTheme": "Dark theme",
     "signOut": "Sign out",
-    "language": "Language"
+    "language": "Language",
+    "backToApp": "Back to app"
   },
   "admin": {
     "title": "Admin",

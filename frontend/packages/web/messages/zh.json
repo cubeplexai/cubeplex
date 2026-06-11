@@ -57,7 +57,8 @@
     "lightTheme": "浅色主题",
     "darkTheme": "深色主题",
     "signOut": "退出",
-    "language": "语言"
+    "language": "语言",
+    "backToApp": "回到应用"
   },
   "admin": {
     "title": "管理后台",
