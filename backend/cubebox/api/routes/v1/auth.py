@@ -136,6 +136,7 @@ async def me(
         "email": user.email,
         "display_name": user.display_name,
         "language": user.language,
+        "is_verified": user.is_verified,
         "needs_org_setup": needs_setup,
         "org_memberships": org_memberships,
     }
@@ -234,3 +235,4 @@ async def change_password(
 # on login silently disappears.
 router.include_router(fastapi_users.get_auth_router(auth_backend))
 router.include_router(fastapi_users.get_reset_password_router(), prefix="")
+router.include_router(fastapi_users.get_verify_router(UserRead), prefix="")
