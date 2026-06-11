@@ -93,6 +93,18 @@ def test_chat_span_llm_payload(multi_turn_json: dict) -> None:
     assert isinstance(llm.messages, list)
 
 
+def test_tool_span_tool_payload(multi_turn_json: dict) -> None:
+    detail = parse_trace_detail(multi_turn_json)
+    tools = [n for n in _leaves(detail.root) if n.kind == SpanKind.TOOL]
+    if not tools:
+        pytest.skip("fixture has no tool spans")
+    t = tools[0].tool
+    assert t is not None
+    assert t.name and t.name != "?"
+    assert t.arguments is not None
+    assert t.result is not None
+
+
 def _count(node) -> int:
     return 1 + sum(_count(c) for c in node.children)
 
