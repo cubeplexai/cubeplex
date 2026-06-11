@@ -15,7 +15,7 @@ import {
 } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
-import { ArrowLeft, Languages, LogOut, Moon, Shield, Sun } from 'lucide-react'
+import { ArrowLeft, Languages, LogOut, Moon, Shield, Sparkles, Sun, Terminal } from 'lucide-react'
 import { clearAllPresetSelectionStores } from '@/lib/stores/preset-selection'
 
 export function AvatarPopover() {
@@ -26,7 +26,7 @@ export function AvatarPopover() {
   const inAdminScope = pathname?.startsWith('/admin') ?? false
   const user = useAuthStore((s) => s.user)
   const { isAdmin } = useAdminAccess()
-  const { resolvedTheme, setTheme } = useTheme()
+  const { theme, resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -104,20 +104,56 @@ export function AvatarPopover() {
           </Link>
         )}
 
-        {mounted && (
-          <button
-            type="button"
-            onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
-          >
-            {resolvedTheme === 'dark' ? (
-              <Sun className="size-3.5 text-muted-foreground" />
-            ) : (
-              <Moon className="size-3.5 text-muted-foreground" />
-            )}
-            <span>{resolvedTheme === 'dark' ? t('lightTheme') : t('darkTheme')}</span>
-          </button>
-        )}
+        {mounted &&
+          (() => {
+            // Two orthogonal axes: flavor (default / operator) × mode (light / dark).
+            // Compose to a concrete next-themes value: light, dark,
+            // operator-light, operator-dark. resolvedTheme handles 'system'.
+            const isOperator = theme === 'operator-light' || theme === 'operator-dark'
+            const currentMode =
+              theme === 'operator-light' || theme === 'light'
+                ? 'light'
+                : theme === 'operator-dark' || theme === 'dark'
+                  ? 'dark'
+                  : (resolvedTheme ?? 'light')
+            const toggleMode = () => {
+              const nextMode = currentMode === 'dark' ? 'light' : 'dark'
+              setTheme(isOperator ? `operator-${nextMode}` : nextMode)
+            }
+            const toggleFlavor = () => {
+              setTheme(isOperator ? currentMode : `operator-${currentMode}`)
+            }
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={toggleMode}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
+                >
+                  {currentMode === 'dark' ? (
+                    <Sun className="size-3.5 text-muted-foreground" />
+                  ) : (
+                    <Moon className="size-3.5 text-muted-foreground" />
+                  )}
+                  <span>{currentMode === 'dark' ? t('lightTheme') : t('darkTheme')}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleFlavor}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
+                >
+                  {isOperator ? (
+                    <Sparkles className="size-3.5 text-muted-foreground" />
+                  ) : (
+                    <Terminal className="size-3.5 text-muted-foreground" />
+                  )}
+                  <span className="font-mono uppercase tracking-wider text-[11px]">
+                    {isOperator ? 'Default theme' : 'Operator theme'}
+                  </span>
+                </button>
+              </>
+            )
+          })()}
 
         <div className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px]">
           <Languages className="size-3.5 text-muted-foreground shrink-0" />
