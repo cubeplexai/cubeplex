@@ -115,6 +115,14 @@ class EmbeddingWorker:
             return
         # 5. Embed.
         vectors = await self._provider.embed([c.text for c in chunks])
+        # zip(..., strict=True) raises a ValueError whose message ('zip()
+        # argument 2 is shorter/longer than argument 1') is opaque in logs.
+        # An explicit check gives operators a greppable root cause and the
+        # same retry path via _claim_one's except.
+        if len(vectors) != len(chunks):
+            raise RuntimeError(
+                f"embedding provider returned {len(vectors)} vectors for {len(chunks)} inputs"
+            )
         # 6. Persist.
         rows = [
             ConversationChunk(
@@ -125,7 +133,7 @@ class EmbeddingWorker:
                 embedding=v,
                 embed_model=self._provider.model_id,
             )
-            for c, v in zip(chunks, vectors, strict=True)
+            for c, v in zip(chunks, vectors, strict=False)
         ]
         async with async_session_maker() as session:
             repo = ConversationChunkRepository(
