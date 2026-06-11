@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import {
+  Activity,
   BarChart3,
   Box,
   Cpu,
@@ -67,6 +68,7 @@ export function AdminSubNav() {
     { href: '/admin/sandbox', label: t('sandbox'), icon: Box },
     { href: '/admin/sandbox-env', label: t('sandboxEnv'), icon: KeyRound },
     { href: '/admin/insights', label: t('insights'), icon: BarChart3 },
+    { href: '/admin/traces', label: t('traces'), icon: Activity },
   ]
 
   const extItems: NavDef[] = extensions.flatMap((ext) =>
