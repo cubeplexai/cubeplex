@@ -198,17 +198,23 @@ function subagentSummaryToStream(summary: SubagentSummary): AgentStream {
   }
 }
 
-/** True when a tool_call invokes the `skills` capability with operation='find'.
+/** True when a tool_call invokes the platform-skills "find" operation.
  *
- * The legacy `find_skills` tool was renamed to `skills(operation='find', ...)`
- * after the agent platform actions migration. The skill discovery card
- * renderer keys off this predicate so users still see install/preview cards
- * for the new tool name. */
+ * History: `find_skills` → `skills(operation='find', ...)` → `platform_skills_find`.
+ * The capability was migrated to per-operation deferred tools in the cubepi
+ * dispatch upgrade, so the tool name now carries the operation directly and
+ * the umbrella `operation` argument is gone. We still match the legacy
+ * shape so streamed messages persisted from older runs keep rendering the
+ * candidate-card UI. */
 function isSkillsFindCall(block: ContentBlock): boolean {
   if (block.type !== 'tool_call') return false
-  if (block.name !== 'skills') return false
-  const args = (block.arguments ?? {}) as { operation?: unknown }
-  return args.operation === 'find'
+  if (block.name === 'platform_skills_find') return true
+  // Legacy umbrella shape — kept for historical messages.
+  if (block.name === 'skills') {
+    const args = (block.arguments ?? {}) as { operation?: unknown }
+    return args.operation === 'find'
+  }
+  return false
 }
 
 function ContentBlockRenderer({
