@@ -75,14 +75,11 @@ export function ConversationSearch({ wsId }: Props): React.ReactElement {
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={t('open')}
-          className="ml-auto p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Search className="size-3.5" />
-        </button>
+      <PopoverTrigger
+        aria-label={t('open')}
+        className="ml-auto p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Search className="size-3.5" />
       </PopoverTrigger>
       <PopoverContent
         side="right"
