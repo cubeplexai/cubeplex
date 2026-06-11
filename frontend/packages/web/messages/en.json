@@ -79,7 +79,33 @@
     "sandboxEnv": "Sandbox env",
     "insights": "Insights",
     "members": "Members",
-    "extensions": "Extensions"
+    "extensions": "Extensions",
+    "traces": "Traces"
+  },
+  "adminTraces": {
+    "title": "Traces",
+    "subtitle": "Agent runs traced to Tempo for this org.",
+    "filters": {
+      "workspace": "Workspace",
+      "user": "User",
+      "conversation": "Conversation",
+      "model": "Model",
+      "runId": "Run ID",
+      "from": "From",
+      "to": "To"
+    },
+    "columns": {
+      "startTime": "Start",
+      "duration": "Duration",
+      "model": "Model",
+      "spans": "Spans",
+      "workspace": "Workspace",
+      "user": "User",
+      "conversation": "Conversation"
+    },
+    "empty": "No traces match these filters.",
+    "disabled": "Trace viewer is not configured for this deployment.",
+    "loading": "Loading traces…"
   },
   "chat": {
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry.",
