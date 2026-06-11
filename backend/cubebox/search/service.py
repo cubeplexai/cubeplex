@@ -121,6 +121,12 @@ class ConversationSearchService:
             fused_count=len(fused),
         )
 
+    # _lexical_leg / _vector_leg / _hydrate_chunks embed (org_id, ws_id,
+    # user_id) directly in textual SQL templates rather than going through
+    # ConversationChunkRepository._scoped_select. They have to: the templates
+    # are typed text() with named binds (single-tenant, single-DB), and the
+    # operator they need (vector <=>, pgroonga &@~, bigm_similarity) requires
+    # raw SQL anyway. Scope still comes from the route's RequestContext.
     async def _lexical_leg(
         self, org_id: str, ws_id: str, user_id: str, q: str
     ) -> list[tuple[str, float]]:

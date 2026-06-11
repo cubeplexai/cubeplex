@@ -77,14 +77,14 @@ async def test_e2e_search_finds_seeded_conversations(client: TestClient) -> None
     zh_conv = await _seed_conv(client, "解析工具", "docling 是一款用于智能体的文档解析工具")
 
     async with async_session_maker() as s:
-        repo = EmbeddingJobRepository(s)
+        repo = EmbeddingJobRepository(
+            s,
+            org_id=DEFAULT_ORG_ID,
+            workspace_id=DEFAULT_WS_ID,
+            user_id=user_id,
+        )
         for conv_id in (en_conv, zh_conv):
-            await repo.enqueue(
-                org_id=DEFAULT_ORG_ID,
-                workspace_id=DEFAULT_WS_ID,
-                creator_user_id=user_id,
-                conversation_id=conv_id,
-            )
+            await repo.enqueue(conversation_id=conv_id)
 
     # Drive the worker until the queue drains. The lifespan-managed worker
     # would also drain it; doing it inline keeps the test deterministic.

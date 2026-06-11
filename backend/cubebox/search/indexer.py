@@ -28,12 +28,13 @@ async def enqueue_index_job(
     """
     try:
         async with async_session_maker() as session:
-            await EmbeddingJobRepository(session).enqueue(
+            repo = EmbeddingJobRepository(
+                session,
                 org_id=org_id,
                 workspace_id=workspace_id,
-                creator_user_id=creator_user_id,
-                conversation_id=conversation_id,
+                user_id=creator_user_id,
             )
+            await repo.enqueue(conversation_id=conversation_id)
     except Exception:
         logger.error(
             "event=search_index_enqueue_failed conversation_id=%s workspace_id=%s",

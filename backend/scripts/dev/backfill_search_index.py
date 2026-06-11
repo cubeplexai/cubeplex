@@ -81,12 +81,13 @@ async def main(rate: float) -> None:
                 break
             for c in convs:
                 async with async_session_maker() as session:
-                    await EmbeddingJobRepository(session).enqueue(
+                    repo = EmbeddingJobRepository(
+                        session,
                         org_id=c.org_id,
                         workspace_id=c.workspace_id,
-                        creator_user_id=c.creator_user_id,
-                        conversation_id=c.id,
+                        user_id=c.creator_user_id,
                     )
+                    await repo.enqueue(conversation_id=c.id)
                 async with async_session_maker() as session:
                     p = await _progress(session, ws)
                     p.last_conversation_id = c.id

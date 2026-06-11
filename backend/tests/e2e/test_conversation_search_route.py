@@ -74,12 +74,13 @@ async def _seed_indexed_conversation(client: TestClient) -> str:
 
     user_id = _default_user_id(client)
     async with async_session_maker() as s:
-        await EmbeddingJobRepository(s).enqueue(
+        repo = EmbeddingJobRepository(
+            s,
             org_id=DEFAULT_ORG_ID,
             workspace_id=DEFAULT_WS_ID,
-            creator_user_id=user_id,
-            conversation_id=conv_id,
+            user_id=user_id,
         )
+        await repo.enqueue(conversation_id=conv_id)
     await EmbeddingWorker(_KeywordEmbedder())._claim_one()
     return conv_id
 

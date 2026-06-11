@@ -128,10 +128,13 @@ class EmbeddingWorker:
             for c, v in zip(chunks, vectors, strict=True)
         ]
         async with async_session_maker() as session:
-            await ConversationChunkRepository(session).replace_for_conversation(
+            repo = ConversationChunkRepository(
+                session,
                 org_id=job.org_id,
                 workspace_id=job.workspace_id,
-                creator_user_id=job.creator_user_id,
+                user_id=job.creator_user_id,
+            )
+            await repo.replace_for_conversation(
                 conversation_id=job.conversation_id,
                 chunks=rows,
             )
