@@ -114,6 +114,11 @@ class SandboxManager:
         self._touch_interval: int = config.get("sandbox.touch_interval", 60)
         self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
         self._use_server_proxy: bool = config.get("sandbox.use_server_proxy", False)
+        # OpenSandbox `secureAccess`: Kubernetes runtime supports it (the
+        # secured-endpoint ingress gateway); the Docker runtime rejects
+        # the flag with HTTP 400. Default true preserves prior behaviour
+        # for k8s installs.
+        self._secure_access: bool = config.get("sandbox.secure_access", True)
 
         # In-process cache of (sandbox_id -> last_touch_at) used to throttle
         # mid-turn activity bumps so chatty tool loops don't hammer the DB.
@@ -566,7 +571,7 @@ class SandboxManager:
                     ready_timeout=timedelta(seconds=self._ready_timeout),
                     volumes=volumes,
                     resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
-                    secure_access=True,
+                    secure_access=self._secure_access,
                     network_policy=network_policy,
                 )
                 sandbox_id = raw_sandbox.id

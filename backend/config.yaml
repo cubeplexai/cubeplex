@@ -130,6 +130,13 @@ default:
     #   Set to true when SDK cannot directly reach sandbox network/ports
     #   (e.g., Docker bridge deployments, network isolation)
     use_server_proxy: true
+    # secure_access: Whether to request OpenSandbox's signed-URL secured
+    #   endpoint mode on create. Required for production-grade Kubernetes
+    #   deployments behind the ingress gateway. Must be set to false when
+    #   using docker-runtime OpenSandbox (the docker backend rejects
+    #   secureAccess=True with HTTP 400 INVALID_PARAMETER). See
+    #   deploy/docker-compose/OPENSANDBOX.md for context.
+    secure_access: true
     # ready_timeout: Maximum time to wait for sandbox to become ready after creation
     #   Used only during sandbox initialization. If the sandbox doesn't respond to
     #   health checks within this time, creation fails.

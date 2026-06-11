@@ -36,7 +36,16 @@ production:
 
   sandbox:
     # Disabled by default — running OpenSandbox under compose is heavy.
-    # Operators wanting tool calls should point at an external OpenSandbox
-    # and flip this to true.
+    # Operators wanting tool calls should bring up the OpenSandbox
+    # overlay (see deploy/docker-compose/OPENSANDBOX.md) and flip
+    # enabled to true. The two settings below MUST stay as shown for
+    # docker-runtime OpenSandbox to work.
     enabled: false
+    # secureAccess is rejected by the docker runtime — set false.
+    secure_access: false
+    # Use direct mode (not server-proxy). OpenSandbox v0.1.x has a known
+    # issue where proxied endpoint URLs drop the port. Direct mode
+    # appends the host-mapped bridge port correctly; cubebox-backend
+    # needs `host.docker.internal` resolvable (the overlay's extra_hosts
+    # entry handles that).
     use_server_proxy: false
