@@ -59,3 +59,70 @@ async def test_tag_values_whitelist(admin_client, fake_tempo) -> None:
     assert ok.status_code == 200
     bad = await client.get("/api/v1/admin/traces/tag-values?tag=secret.bearer")
     assert bad.status_code == 400
+
+
+@pytest.fixture
+def fake_resolve_org(monkeypatch):
+    """Pin resolve_current_org_id to a known org id, auto-restored after the test."""
+    from cubebox.api.routes.v1 import admin_traces as mod
+
+    async def _fake(*_a, **_kw):
+        return "org-MATCH"
+
+    monkeypatch.setattr(mod, "resolve_current_org_id", _fake)
+    return "org-MATCH"
+
+
+async def test_detail_returns_trace(admin_client, fake_tempo, fake_resolve_org) -> None:
+    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+
+    fake_tempo.get_trace.return_value = TraceDetail(
+        summary=TraceSummary(
+            trace_id="t1",
+            root_name="invoke_agent",
+            start_time=datetime(2026, 6, 11, tzinfo=UTC),
+            duration_ms=1000,
+            span_count=1,
+            org_id="org-MATCH",
+        ),
+        root=SpanNode(
+            span_id="s1",
+            parent_span_id=None,
+            name="invoke_agent",
+            kind=SpanKind.AGENT,
+            start_time=datetime(2026, 6, 11, tzinfo=UTC),
+            duration_ms=1000,
+            children=[],
+        ),
+    )
+    client, _ws = admin_client
+    resp = await client.get("/api/v1/admin/traces/t1")
+    assert resp.status_code == 200
+    assert resp.json()["summary"]["trace_id"] == "t1"
+
+
+async def test_detail_404_on_org_mismatch(admin_client, fake_tempo, fake_resolve_org) -> None:
+    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+
+    fake_tempo.get_trace.return_value = TraceDetail(
+        summary=TraceSummary(
+            trace_id="t1",
+            root_name="invoke_agent",
+            start_time=datetime(2026, 6, 11, tzinfo=UTC),
+            duration_ms=1000,
+            span_count=1,
+            org_id="org-OTHER",
+        ),
+        root=SpanNode(
+            span_id="s1",
+            parent_span_id=None,
+            name="invoke_agent",
+            kind=SpanKind.AGENT,
+            start_time=datetime(2026, 6, 11, tzinfo=UTC),
+            duration_ms=1000,
+            children=[],
+        ),
+    )
+    client, _ws = admin_client
+    resp = await client.get("/api/v1/admin/traces/t1")
+    assert resp.status_code == 404
