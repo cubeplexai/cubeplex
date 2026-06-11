@@ -80,7 +80,9 @@ class OrgSkillInstall(CubeboxBase, table=True):
         default=None, foreign_key="workspaces.id", max_length=20, nullable=True, index=True
     )
     installed_version: str = Field(max_length=32)
-    installed_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    installed_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
     installed_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -131,7 +133,9 @@ class OrgPreinstalledTombstone(SQLModel, TimestampMixin, table=True):
 
     org_id: str = Field(primary_key=True, foreign_key="organizations.id", max_length=20, index=True)
     skill_id: str = Field(primary_key=True, foreign_key="skills.id", max_length=20, index=True)
-    hidden_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    hidden_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
     hidden_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),

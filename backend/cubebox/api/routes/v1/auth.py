@@ -306,14 +306,23 @@ async def delete_account(
         (MCPConnectorInstall, "created_by_user_id"),
         (MCPWorkspaceConnectorState, "updated_by_user_id"),
         (MCPCredentialGrant, "created_by_user_id"),
-        (MCPCredentialGrant, "user_id"),
         (SandboxEnvVar, "created_by_user_id"),
+        (OrgSkillInstall, "installed_by_user_id"),
+        (OrgPreinstalledTombstone, "hidden_by_user_id"),
     ]:
         await session.execute(
             sa_update(null_model)
             .where(getattr(null_model, null_col) == user.id)
             .values(**{null_col: None})
         )
+
+    # User-scoped credential grants have a check constraint requiring user_id NOT NULL,
+    # so we delete them rather than nulling user_id.
+    await session.execute(
+        sa_delete(MCPCredentialGrant).where(
+            MCPCredentialGrant.user_id == user.id  # type: ignore[arg-type]
+        )
+    )
 
     # Invite tokens created by the user are no longer redeemable — delete them.
     await session.execute(
@@ -370,8 +379,6 @@ async def delete_account(
         (UserEvent, UserEvent.user_id),
         (ScheduledTask, ScheduledTask.owner_user_id),
         (Trigger, Trigger.run_as_user_id),
-        (OrgPreinstalledTombstone, OrgPreinstalledTombstone.hidden_by_user_id),
-        (OrgSkillInstall, OrgSkillInstall.installed_by_user_id),
         (Conversation, Conversation.creator_user_id),
         (Membership, Membership.user_id),
         (OrganizationMembership, OrganizationMembership.user_id),

@@ -39,13 +39,16 @@ class SmtpEmailBackend(EmailBackend):
         msg.attach(MIMEText(text, "plain"))
         msg.attach(MIMEText(html, "html"))
 
+        port = config.get("email.smtp_port", 587)
+        use_tls = config.get("email.smtp_tls", port == 465)
         await aiosmtplib.send(
             msg,
             hostname=config.get("email.smtp_host", "localhost"),
-            port=config.get("email.smtp_port", 587),
+            port=port,
             username=config.get("email.smtp_user", None),
             password=config.get("email.smtp_password", None),
-            use_tls=config.get("email.smtp_tls", True),
+            use_tls=use_tls,
+            start_tls=not use_tls,
         )
 
 
