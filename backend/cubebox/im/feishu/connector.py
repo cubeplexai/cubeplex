@@ -1,13 +1,69 @@
-"""Feishu connector: inbound parse + outbound send/edit/react (lark_oapi)."""
+"""Feishu connector: inbound parse + outbound send/edit/react (lark_oapi).
 
+All synchronous lark_oapi SDK calls are wrapped in ``asyncio.to_thread`` so
+they don't block the event loop the run-queue worker and other tailers
+share. Hermes' prior art at ``~/hermes-agent/gateway/platforms/feishu.py``
+established this discipline.
+
+Outbound surface area:
+- ``post_placeholder(text)`` -> message_id
+- ``edit(message_id, text)``
+- ``send_text_message(text)`` (non-edit send for auxiliary bubbles)
+- ``upload_image(local_path)`` -> image_key
+- ``send_image_message(image_key)``
+- ``add_reaction(message_id, reaction_type)`` -> reaction_id
+- ``remove_reaction(message_id, reaction_id)``
+
+Plus the processing-status hooks (Task 10):
+- ``on_processing_start(state)``
+- ``on_processing_complete(state)``
+- ``on_processing_failed(state)``
+
+The tailer only ever calls the hooks — it never sees a Feishu emoji name
+or API endpoint.
+"""
+
+import asyncio
 import json
 import re
 from typing import Any
 
-from cubebox.im.types import DM_SCOPE_KEY, InboundEvent, make_participant_scope
+from loguru import logger
+
+from cubebox.im.outbound import _FloodSignal
+from cubebox.im.types import DM_SCOPE_KEY, InboundEvent, RenderState, make_participant_scope
 
 # Matches Feishu inline mention markup: <at user_id="ou_xxx">name</at>
 _AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>", re.DOTALL)
+
+# Feishu reaction_type literals (no enum in the SDK).
+_REACTION_PROCESSING = "ThumbsUp"  # Feishu's "thinking" emoji is locale-dependent;
+# ThumbsUp ships universally and avoids surprising lookups. The hermes adapter
+# uses similar "in-progress" semantics; we choose a reliable emoji_type here
+# because Feishu rejects unknown literals with 1061002.
+_REACTION_FAILURE = "OK"  # Actual cross-mark variants are not in the universal
+# Feishu emoji_type set — "OK" intentionally signals "the run finished" with a
+# neutral marker so the user knows something ended even on failure; the inline
+# error message in the bot's reply text carries the actual error detail.
+
+# lark_oapi response codes that mean "rate limited / flood control".
+# These come from the official SDK docs / hermes prior art (1061045 = quota
+# exceeded, 1061046 = qps exceeded). Any of them maps to FeishuRateLimitError
+# at the call site so the tailer can adapt-backoff.
+_FLOOD_CONTROL_CODES = frozenset({1061045, 1061046, 99991400, 99991401, 230020})
+
+
+class FeishuRateLimitError(_FloodSignal):
+    """Raised by FeishuConnector when a Feishu API responds with a flood code.
+
+    Subclasses ``_FloodSignal`` so the tailer's adaptive-backoff branch catches
+    it generically; the tailer never imports a Feishu-specific exception.
+    """
+
+
+# Markdown-table detection (very rough — must NOT false-positive on prose).
+_MARKDOWN_TABLE_RE = re.compile(r"^\s*\|[^|\n]+\|.*\n\s*\|[-:\s|]+\|", re.MULTILINE)
+_MARKDOWN_HINT_RE = re.compile(r"(?m)^\s*(#|\*|-|\d+\.)\s|`{1,3}|\*\*|__")
 
 
 class FeishuConnector:
@@ -138,3 +194,310 @@ class FeishuConnector:
         self._client = client
         self._channel_id = channel_id
         self._reply_to_id = reply_to_id
+
+    # ------------------------------------------------------------------
+    # Outbound primitives (lark_oapi)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_payload(content: str) -> tuple[str, str]:
+        """Choose msg_type + payload for outbound text.
+
+        Markdown tables don't render inside Feishu ``post`` type, so we
+        fall back to plain text when one is detected. Otherwise prefer
+        plain text (most reliable across clients); ``post`` is reserved
+        for richer content the connector doesn't currently emit.
+        """
+        if _MARKDOWN_TABLE_RE.search(content):
+            return "text", json.dumps({"text": content}, ensure_ascii=False)
+        return "text", json.dumps({"text": content}, ensure_ascii=False)
+
+    @staticmethod
+    def _response_code(response: Any) -> int | None:
+        code = getattr(response, "code", None)
+        if code is None:
+            return None
+        try:
+            return int(code)
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _raise_for_flood(cls, response: Any, op: str) -> None:
+        code = cls._response_code(response)
+        if code in _FLOOD_CONTROL_CODES:
+            raise FeishuRateLimitError(f"{op}: flood control (code={code})")
+
+    async def post_placeholder(self, text: str) -> str | None:
+        """Post the streaming reply's first message.
+
+        - Group / threaded send → ``im.v1.message.reply`` against
+          ``self._reply_to_id``.
+        - DM (or unthreaded) send → ``im.v1.message.create`` with
+          ``receive_id=self._channel_id``.
+
+        Returns the new message id, or None if Feishu rejected the call
+        (logged; the tailer will treat None as "no placeholder yet" and
+        the next text_delta will retry as a post).
+        """
+        if self._client is None:
+            logger.warning("[Feishu] post_placeholder called without a bound client")
+            return None
+        msg_type, payload = self._build_payload(text)
+
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+            ReplyMessageRequest,
+            ReplyMessageRequestBody,
+        )
+
+        if self._reply_to_id is not None:
+            body = (
+                ReplyMessageRequestBody.builder()
+                .content(payload)
+                .msg_type(msg_type)
+                .reply_in_thread(False)
+                .build()
+            )
+            req = (
+                ReplyMessageRequest.builder()
+                .message_id(self._reply_to_id)
+                .request_body(body)
+                .build()
+            )
+            response = await asyncio.to_thread(self._client.im.v1.message.reply, req)
+        else:
+            body = (
+                CreateMessageRequestBody.builder()
+                .receive_id(self._channel_id or "")
+                .msg_type(msg_type)
+                .content(payload)
+                .build()
+            )
+            req = (
+                CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
+            )
+            response = await asyncio.to_thread(self._client.im.v1.message.create, req)
+
+        self._raise_for_flood(response, "post_placeholder")
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] post_placeholder failed: code=%s msg=%s",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        message_id = getattr(data, "message_id", None) if data is not None else None
+        return str(message_id) if message_id else None
+
+    async def edit(self, message_id: str | None, text: str) -> None:
+        """Update an already-posted message's content."""
+        if self._client is None or not message_id:
+            return
+        from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
+
+        msg_type, payload = self._build_payload(text)
+        body = UpdateMessageRequestBody.builder().msg_type(msg_type).content(payload).build()
+        req = UpdateMessageRequest.builder().message_id(message_id).request_body(body).build()
+        response = await asyncio.to_thread(self._client.im.v1.message.update, req)
+        self._raise_for_flood(response, "edit")
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] edit failed: code=%s msg=%s",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+
+    async def send_text_message(self, text: str) -> str | None:
+        """Post a new (non-edit) bubble — used for share-link / artifact
+        captions that should be a separate message from the streaming reply."""
+        if self._client is None:
+            return None
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+
+        msg_type, payload = self._build_payload(text)
+        body = (
+            CreateMessageRequestBody.builder()
+            .receive_id(self._channel_id or "")
+            .msg_type(msg_type)
+            .content(payload)
+            .build()
+        )
+        req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
+        response = await asyncio.to_thread(self._client.im.v1.message.create, req)
+        self._raise_for_flood(response, "send_text_message")
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] send_text_message failed: code=%s msg=%s",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        message_id = getattr(data, "message_id", None) if data is not None else None
+        return str(message_id) if message_id else None
+
+    async def upload_image(self, local_path: str) -> str | None:
+        """Upload an image to Feishu; return the resulting ``image_key``."""
+        if self._client is None:
+            return None
+        from pathlib import Path
+
+        from lark_oapi.api.im.v1 import CreateImageRequest, CreateImageRequestBody
+
+        def _do_upload() -> Any:
+            with Path(local_path).open("rb") as fh:
+                body = CreateImageRequestBody.builder().image_type("message").image(fh).build()
+                req = CreateImageRequest.builder().request_body(body).build()
+                return self._client.im.v1.image.create(req)
+
+        response = await asyncio.to_thread(_do_upload)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] upload_image failed: code=%s msg=%s",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        image_key = getattr(data, "image_key", None) if data is not None else None
+        return str(image_key) if image_key else None
+
+    async def send_image_message(self, image_key: str) -> str | None:
+        """Send an image message in the bound channel."""
+        if self._client is None:
+            return None
+        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+
+        payload = json.dumps({"image_key": image_key}, ensure_ascii=False)
+        body = (
+            CreateMessageRequestBody.builder()
+            .receive_id(self._channel_id or "")
+            .msg_type("image")
+            .content(payload)
+            .build()
+        )
+        req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
+        response = await asyncio.to_thread(self._client.im.v1.message.create, req)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] send_image_message failed: code=%s msg=%s",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        message_id = getattr(data, "message_id", None) if data is not None else None
+        return str(message_id) if message_id else None
+
+    # ------------------------------------------------------------------
+    # Reactions (Task 10)
+    # ------------------------------------------------------------------
+
+    async def add_reaction(self, message_id: str, reaction_type: str) -> str | None:
+        """Add a reaction; return the resulting reaction_id (or None on failure).
+
+        Failures are logged and swallowed — a missing reaction is a UX
+        regression, not a run-breaking error.
+        """
+        if self._client is None or not message_id:
+            return None
+        from lark_oapi.api.im.v1 import (
+            CreateMessageReactionRequest,
+            CreateMessageReactionRequestBody,
+            Emoji,
+        )
+
+        body = (
+            CreateMessageReactionRequestBody.builder()
+            .reaction_type(Emoji.builder().emoji_type(reaction_type).build())
+            .build()
+        )
+        req = (
+            CreateMessageReactionRequest.builder().message_id(message_id).request_body(body).build()
+        )
+        response = await asyncio.to_thread(self._client.im.v1.message_reaction.create, req)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] add_reaction failed: code=%s msg=%s",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        reaction_id = getattr(data, "reaction_id", None) if data is not None else None
+        return str(reaction_id) if reaction_id else None
+
+    async def remove_reaction(self, message_id: str, reaction_id: str | None) -> None:
+        """Remove a previously-added reaction.
+
+        No-ops when ``reaction_id`` is None — covers the case where the
+        ``add_reaction`` for processing-start failed and the tailer is now
+        completing/failing the run; without this guard the call would raise
+        with a meaningless None argument and mask the real run outcome.
+        """
+        if self._client is None or not message_id or not reaction_id:
+            return
+        from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+
+        req = (
+            DeleteMessageReactionRequest.builder()
+            .message_id(message_id)
+            .reaction_id(reaction_id)
+            .build()
+        )
+        response = await asyncio.to_thread(self._client.im.v1.message_reaction.delete, req)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] remove_reaction failed: code=%s msg=%s",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+
+    # ------------------------------------------------------------------
+    # Processing-status hooks (Task 10) — tailer-facing platform-agnostic API
+    # ------------------------------------------------------------------
+
+    async def on_processing_start(self, state: RenderState) -> None:
+        """Mark the run as processing on the user's inbound message."""
+        target = state.inbound_message_id
+        if not target:
+            return
+        reaction_id = await self.add_reaction(target, _REACTION_PROCESSING)
+        state.reaction_in_progress_id = reaction_id
+
+    async def on_processing_complete(self, state: RenderState) -> None:
+        """Clear the processing reaction on success."""
+        target = state.inbound_message_id
+        if not target:
+            return
+        try:
+            await self.remove_reaction(target, state.reaction_in_progress_id)
+        finally:
+            state.reaction_in_progress_id = None
+
+    async def on_processing_failed(self, state: RenderState) -> None:
+        """Clear the processing reaction and stamp a failure marker."""
+        target = state.inbound_message_id
+        if not target:
+            return
+        try:
+            try:
+                await self.remove_reaction(target, state.reaction_in_progress_id)
+            finally:
+                state.reaction_in_progress_id = None
+            try:
+                await self.add_reaction(target, _REACTION_FAILURE)
+            except Exception:
+                logger.warning("[Feishu] add failure reaction raised", exc_info=True)
+        except Exception:
+            logger.warning("[Feishu] on_processing_failed hook raised", exc_info=True)
+
+
+__all__ = [
+    "FeishuConnector",
+    "FeishuRateLimitError",
+    "_FloodSignal",
+]
