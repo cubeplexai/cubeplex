@@ -1,8 +1,9 @@
 """Workspace model — collaboration unit inside an Organization."""
 
+from datetime import datetime
 from typing import ClassVar
 
-from sqlalchemy import Index
+from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
@@ -17,3 +18,7 @@ class Workspace(CubeboxBase, table=True):
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20)
     name: str = Field(max_length=255)
+    archived_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

@@ -58,6 +58,8 @@ async def list_my_workspaces(
         if ws is not None:
             pairs.append((m.role, ws))
 
+    pairs = [(role, ws) for role, ws in pairs if ws.archived_at is None]
+
     # Aggregate max(Conversation.updated_at) per workspace — cubebox has no
     # Message table (history lives in cubepi PostgresCheckpointer), but
     # ConversationRepository.update_timestamp() bumps updated_at on every
@@ -281,6 +283,106 @@ async def leave_workspace(
         ip=request.client.host if request.client else None,
     )
     return {"left": True}
+
+
+@router.post("/{workspace_id}/archive")
+async def archive_workspace(
+    workspace_id: str,
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str | None]:
+    from datetime import UTC
+
+    ws = await WorkspaceRepository(session).get(workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="not found")
+    ws.archived_at = datetime.now(UTC)
+    session.add(ws)
+    await session.commit()
+    await session.refresh(ws)
+    return {"id": ws.id, "name": ws.name, "archived_at": utc_isoformat(ws.archived_at)}
+
+
+@router.post("/{workspace_id}/unarchive")
+async def unarchive_workspace(
+    workspace_id: str,
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str | None]:
+    ws = await WorkspaceRepository(session).get(workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="not found")
+    ws.archived_at = None
+    session.add(ws)
+    await session.commit()
+    return {"id": ws.id, "name": ws.name, "archived_at": None}
+
+
+@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace(
+    workspace_id: str,
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    from sqlalchemy import delete as sa_delete
+
+    from cubebox.models import (
+        AgentConfig,
+        Artifact,
+        ArtifactVersion,
+        Attachment,
+        Conversation,
+        InviteToken,
+        MCPConnectorInstall,
+        MCPCredentialGrant,
+        MCPWorkspaceConnectorState,
+        Membership,
+        MemoryItem,
+        OrgSkillInstall,
+        ScheduledTask,
+        WorkspaceSkillBinding,
+    )
+    from cubebox.models.egress_ref import EgressRef
+    from cubebox.models.sandbox_env import SandboxEnvVar
+    from cubebox.models.trigger import Trigger
+
+    mem_repo = MembershipRepository(session)
+    user_workspaces = await mem_repo.list_user_workspaces(ctx.user.id)
+    if len(user_workspaces) <= 1:
+        raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
+
+    # Delete child rows deepest-first to avoid FK violations.
+    # Models with nullable workspace_id use IS NOT DISTINCT FROM to match NULLs safely,
+    # but here we target a specific workspace_id (non-null), so == is correct.
+    # Delete child rows deepest-first to avoid FK violations.
+    # Each of these models has a workspace_id column (via OrgScopedMixin or direct field).
+    ws_child_tables = [
+        EgressRef,
+        MemoryItem,
+        WorkspaceSkillBinding,
+        OrgSkillInstall,
+        Trigger,
+        ScheduledTask,
+        MCPCredentialGrant,
+        MCPWorkspaceConnectorState,
+        MCPConnectorInstall,
+        SandboxEnvVar,
+        ArtifactVersion,
+        Artifact,
+        Attachment,
+        Conversation,
+        InviteToken,
+        AgentConfig,
+        Membership,
+    ]
+    for model in ws_child_tables:
+        col = model.workspace_id  # type: ignore[attr-defined]
+        await session.execute(sa_delete(model).where(col == workspace_id))
+
+    await session.execute(
+        sa_delete(Workspace).where(Workspace.id == workspace_id)  # type: ignore[arg-type]
+    )
+    await session.commit()
 
 
 @router.post("/invites/accept")
