@@ -124,7 +124,9 @@ class UserManager(BaseUserManager[User, str]):
         try:
             await self.request_verify(user, request)
         except Exception:
-            logger.warning("Failed to send initial verification email to {}", user.email)
+            logger.opt(exception=True).warning(
+                "Failed to send initial verification email to {}", user.email
+            )
 
     async def _on_register_multi_tenant(self, *, user: User, session: AsyncSession) -> None:
         """Per-user org bootstrap + OrganizationMembership(role=owner)."""

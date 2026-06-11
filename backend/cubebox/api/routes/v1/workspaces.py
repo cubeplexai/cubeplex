@@ -55,10 +55,8 @@ async def list_my_workspaces(
     pairs: list[tuple[str, Workspace]] = []
     for m in memberships:
         ws = await ws_repo.get(m.workspace_id)
-        if ws is not None:
+        if ws is not None and ws.archived_at is None:
             pairs.append((m.role, ws))
-
-    pairs = [(role, ws) for role, ws in pairs if ws.archived_at is None]
 
     # Aggregate max(Conversation.updated_at) per workspace — cubebox has no
     # Message table (history lives in cubepi PostgresCheckpointer), but
@@ -345,6 +343,7 @@ async def delete_workspace(
     from cubebox.models.egress_ref import EgressRef
     from cubebox.models.sandbox_env import SandboxEnvVar
     from cubebox.models.trigger import Trigger
+    from cubebox.models.user_sandbox import UserSandbox
 
     mem_repo = MembershipRepository(session)
     user_workspaces = await mem_repo.list_user_workspaces(ctx.user.id)
@@ -352,10 +351,6 @@ async def delete_workspace(
         raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
 
     # Delete child rows deepest-first to avoid FK violations.
-    # Models with nullable workspace_id use IS NOT DISTINCT FROM to match NULLs safely,
-    # but here we target a specific workspace_id (non-null), so == is correct.
-    # Delete child rows deepest-first to avoid FK violations.
-    # Each of these models has a workspace_id column (via OrgScopedMixin or direct field).
     ws_child_tables = [
         EgressRef,
         MemoryItem,
@@ -367,6 +362,7 @@ async def delete_workspace(
         MCPWorkspaceConnectorState,
         MCPConnectorInstall,
         SandboxEnvVar,
+        UserSandbox,
         ArtifactVersion,
         Artifact,
         Attachment,
