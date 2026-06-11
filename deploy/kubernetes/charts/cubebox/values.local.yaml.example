@@ -58,3 +58,19 @@ redis:
 minio:
   auth:
     rootPassword: "REPLACE_ME"
+
+# ── Egress secret-injection (opt-in) ─────────────────────────────────────
+# Enables the MITM webhook + backend mTLS exchange. Requires building one
+# more image (egress-webhook) — append `egress-webhook` to TARGET when
+# running build-and-push.sh:
+#   TARGET="backend frontend egress-webhook" \
+#     deploy/kubernetes/scripts/build-and-push.sh
+#
+# egress:
+#   enabled: true
+#   sandboxNamespace: "opensandbox-system"
+#   webhook:
+#     image:
+#       tag: "<git-sha-short>"             # same tag the script just pushed
+#     # MUST match opensandbox-server's configured egress.image exactly:
+#     egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"

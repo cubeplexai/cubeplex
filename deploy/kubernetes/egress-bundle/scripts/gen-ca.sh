@@ -16,7 +16,7 @@
 #   NAMESPACE=opensandbox ./scripts/gen-ca.sh
 #
 # Outputs:
-#   deploy/egress-bundle/k8s/egress-mitm-ca-secret.yaml  (applied by the operator)
+#   deploy/kubernetes/egress-bundle/k8s/egress-mitm-ca-secret.yaml  (applied by the operator)
 #
 # Requirements:
 #   - Python 3.11+ with the `cryptography` package (uv run --with cryptography works)

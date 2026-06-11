@@ -391,6 +391,66 @@ opensandbox:
                                 # when using an external sandbox
 ```
 
+### 4.10 Egress secret-injection (optional)
+
+When enabled, the chart deploys cubebox's secret-injection feature: a
+mitmproxy addon inside each sandbox container intercepts outbound HTTP,
+swaps `cbxref_<id>` placeholders for real secret values fetched from the
+backend over mTLS. End result: agent tool calls can reference
+**credentials by name** (e.g. `Authorization: Bearer cbxref_slack_xyz`)
+and the real token never enters the sandbox memory, the LLM prompt, or
+the conversation history.
+
+Moving pieces the chart wires up:
+
+| Component | Location |
+|---|---|
+| Mutating admission webhook (Deployment + Service + SA + RBAC) | cubebox namespace |
+| `MutatingWebhookConfiguration` matching sandbox pods | cluster |
+| Long-lived MITM CA Secret (`helm.sh/resource-policy: keep`) | cubebox ns + mirrored into sandbox ns |
+| `inject.py` mitmproxy addon ConfigMap | sandbox ns (hardcoded name `egress-inject-addon`) |
+| Backend mTLS server cert + mTLS listener on `:8443` | cubebox ns |
+| Updated backend Service exposing `:8443` | cubebox ns |
+
+Build the extra image:
+
+```bash
+TARGET="backend frontend egress-webhook" \
+  deploy/kubernetes/scripts/build-and-push.sh
+```
+
+Then turn on in `values.local.yaml`:
+
+```yaml
+egress:
+  enabled: true
+  # Namespace where sandbox pods actually run.
+  # When using the bundled opensandbox subchart, "opensandbox-system".
+  sandboxNamespace: "opensandbox-system"
+  webhook:
+    image:
+      tag: "<git-sha>"          # same tag build-and-push.sh just produced
+    # MUST exactly match opensandbox-server's configured egress.image.
+    egressImage: "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
+```
+
+Notes:
+
+- The chart auto-generates the MITM CA (`genCA`) on first install and
+  marks the Secret `helm.sh/resource-policy: keep`, so upgrades and
+  `helm uninstall` do not rotate the CA. Re-installs into an existing
+  cluster pick up the same CA via `lookup`.
+- The webhook serving cert and the backend mTLS server cert are signed
+  by the same CA and follow the same lookup-or-mint rule.
+- The webhook's `MutatingWebhookConfiguration` has `failurePolicy: Ignore`:
+  a webhook outage never blocks sandbox pod creation. Affected sandboxes
+  start without secret injection (placeholders stay literal) — alert on
+  webhook health separately.
+- Source code for the webhook + addon lives under
+  `deploy/kubernetes/egress-bundle/`. Edit `addon/inject.py` then run
+  `deploy/kubernetes/scripts/sync-egress-files.sh` to refresh the chart-
+  vendored copy.
+
 ---
 
 ## 5. Install

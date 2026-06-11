@@ -1,4 +1,4 @@
-# deploy/egress-bundle/webhook/patch.py
+# deploy/kubernetes/egress-bundle/webhook/patch.py
 """Build the JSON Patch applied to a sandbox pod at admission.
 
 Narrow match (spec §6.1): ownerReference to an OpenSandbox CR (BatchSandbox or
