@@ -6,6 +6,7 @@ from cubebox.models.artifact_version import ArtifactVersion
 from cubebox.models.attachment import Attachment
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 from cubebox.models.conversation import Conversation
+from cubebox.models.conversation_chunk import ConversationChunk
 from cubebox.models.conversation_share import ConversationShare, ShareScope
 from cubebox.models.credential import Credential
 from cubebox.models.egress_ref import EgressRef  # noqa: F401
@@ -53,6 +54,7 @@ __all__ = [
     "Attachment",
     "BillingEvent",
     "Conversation",
+    "ConversationChunk",
     "ConversationShare",
     "Credential",
     "InviteToken",
