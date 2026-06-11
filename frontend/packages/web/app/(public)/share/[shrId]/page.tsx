@@ -11,23 +11,94 @@ import {
 } from '@cubebox/core'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
+import { ToolCallGroup } from '@/components/chat/ToolCallGroup'
 import { proseClasses } from '@/lib/utils'
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+type ToolCallBlock = Extract<ContentBlock, { type: 'tool_call' }>
+type ToolResultMap = Record<string, { content: string; receivedAt: number }>
+
+const HIDDEN_TOOLS = new Set(['show_widget', 'write_todos'])
+
+function buildToolResultMap(messages: Message[]): ToolResultMap {
+  const map: ToolResultMap = {}
+  for (const m of messages) {
+    if (m.role !== 'tool_result') continue
+    const trMsg = m as Extract<Message, { role: 'tool_result' }>
+    const text = m.content
+      .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+      .map((b) => (b as { type: 'text'; text: string }).text)
+      .join('')
+    map[trMsg.tool_call_id] = {
+      content: text,
+      receivedAt: trMsg.timestamp ? trMsg.timestamp * 1000 : Date.now(),
+    }
+  }
+  return map
+}
+
+/** Group consecutive non-special tool_call blocks for compact rendering. */
+function groupBlocks(
+  blocks: ContentBlock[],
+): Array<ContentBlock | { _group: true; blocks: ToolCallBlock[] }> {
+  const result: Array<ContentBlock | { _group: true; blocks: ToolCallBlock[] }> = []
+  for (const block of blocks) {
+    if (
+      block.type === 'tool_call' &&
+      !HIDDEN_TOOLS.has(block.name) &&
+      block.name !== 'save_artifact'
+    ) {
+      const last = result[result.length - 1]
+      if (last && '_group' in last) {
+        last.blocks.push(block as ToolCallBlock)
+      } else {
+        result.push({ _group: true, blocks: [block as ToolCallBlock] })
+      }
+    } else {
+      result.push(block)
+    }
+  }
+  return result
+}
 
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
-type ToolCallBlock = Extract<ContentBlock, { type: 'tool_call' }>
-
-function AssistantBlocks({ blocks }: { blocks: ContentBlock[] }) {
+function AssistantBlocks({
+  blocks,
+  toolResultMap,
+  messageCreatedAt,
+}: {
+  blocks: ContentBlock[]
+  toolResultMap: ToolResultMap
+  messageCreatedAt?: string
+}) {
+  const grouped = groupBlocks(blocks)
   return (
     <div className="space-y-2 mb-3">
-      {blocks.map((block, i) => {
+      {grouped.map((item, i) => {
+        if ('_group' in item) {
+          return (
+            <ToolCallGroup
+              key={item.blocks[0].id ?? i}
+              blocks={item.blocks}
+              toolResultMap={toolResultMap}
+              isStreaming={false}
+              messageCreatedAt={messageCreatedAt}
+            />
+          )
+        }
+        const block = item
         if (block.type === 'text' && block.text.trim()) {
           return (
             <div
               key={i}
-              className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-muted text-foreground text-sm leading-relaxed"
+              className="max-w-[80%] rounded-2xl px-4 py-2.5 bg-muted text-foreground
+                text-sm leading-relaxed"
             >
               <MarkdownWithCitations className={proseClasses} conversationId="">
                 {block.text}
@@ -49,14 +120,19 @@ function AssistantBlocks({ blocks }: { blocks: ContentBlock[] }) {
             />
           )
         }
-        if (block.type === 'tool_call') return null
         return null
       })}
     </div>
   )
 }
 
-function SharedMessage({ message }: { message: Message }) {
+function SharedMessage({
+  message,
+  toolResultMap,
+}: {
+  message: Message
+  toolResultMap: ToolResultMap
+}) {
   const role = message.role
 
   const textContent = message.content
@@ -67,15 +143,25 @@ function SharedMessage({ message }: { message: Message }) {
   if (role === 'user') {
     return (
       <div className="flex justify-end mb-3">
-        <div className="max-w-[75%] rounded-2xl px-4 py-2.5 bg-primary/10 text-foreground text-sm leading-relaxed whitespace-pre-wrap">
+        <div
+          className="max-w-[75%] rounded-2xl px-4 py-2.5 bg-primary/10 text-foreground
+          text-sm leading-relaxed whitespace-pre-wrap"
+        >
           {textContent}
         </div>
       </div>
     )
   }
 
-  // assistant — render per-block with markdown + widget support
-  return <AssistantBlocks blocks={message.content} />
+  const createdAt = message.timestamp ? new Date(message.timestamp * 1000).toISOString() : undefined
+
+  return (
+    <AssistantBlocks
+      blocks={message.content}
+      toolResultMap={toolResultMap}
+      messageCreatedAt={createdAt}
+    />
+  )
 }
 
 function SharedArtifact({ artifact, shareId }: { artifact: PublicShareArtifact; shareId: string }) {
@@ -237,6 +323,7 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
   }
 
   const messages = share.messages as Message[]
+  const toolResultMap = buildToolResultMap(messages)
   const visibleMessages = messages.filter((m) => {
     if (m.metadata?.synthetic === true) return false
     if (m.role === 'tool_result') return false
@@ -270,7 +357,7 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
       <main className="flex-1 max-w-3xl w-full mx-auto px-4 py-6">
         <div className="space-y-1">
           {visibleMessages.map((msg, idx) => (
-            <SharedMessage key={msg.id ?? idx} message={msg} />
+            <SharedMessage key={msg.id ?? idx} message={msg} toolResultMap={toolResultMap} />
           ))}
         </div>
 
