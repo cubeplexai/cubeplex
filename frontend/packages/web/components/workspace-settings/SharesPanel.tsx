@@ -89,6 +89,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
               <TableRow>
                 <TableHead>{t('conversation')}</TableHead>
                 <TableHead>{t('sharedDate')}</TableHead>
+                <TableHead>{t('scope')}</TableHead>
                 <TableHead>{t('status')}</TableHead>
                 <TableHead className="w-[120px]" />
               </TableRow>
@@ -106,6 +107,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
                       day: 'numeric',
                     })}
                   </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{share.scope}</TableCell>
                   <TableCell>
                     <span
                       className={cn(

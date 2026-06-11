@@ -12,7 +12,7 @@ from cubebox.api.routes.v1 import (
     admin_skills,
     mcp_oauth,
     public_artifacts,
-    public_shares,
+    shares,
     trigger_ingest,
     ws_browser,
     ws_mcp,
@@ -21,7 +21,6 @@ from cubebox.api.routes.v1 import (
     ws_sandbox_env,
     ws_scheduled_tasks,
     ws_settings,
-    ws_shares,
     ws_skills,
     ws_triggers,
 )
@@ -50,7 +49,7 @@ __all__ = [
     "memory_router",
     "user_events_router",
     "public_artifacts",
-    "public_shares",
+    "shares",
     "trigger_ingest",
     "workspaces_router",
     "ws_browser",
@@ -60,7 +59,6 @@ __all__ = [
     "ws_sandbox_env",
     "ws_scheduled_tasks",
     "ws_settings",
-    "ws_shares",
     "ws_skills",
     "ws_triggers",
 ]

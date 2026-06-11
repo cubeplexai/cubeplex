@@ -492,7 +492,7 @@ def create_app(
         memory_router,
         model_presets,
         public_artifacts,
-        public_shares,
+        shares,
         system,
         trigger_ingest,
         user_events_router,
@@ -504,7 +504,6 @@ def create_app(
         ws_sandbox_env,
         ws_scheduled_tasks,
         ws_settings,
-        ws_shares,
         ws_skills,
         ws_triggers,
     )
@@ -514,7 +513,7 @@ def create_app(
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
-    app.include_router(public_shares.router, prefix="/api/v1")
+    app.include_router(shares.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")
@@ -540,7 +539,6 @@ def create_app(
     app.include_router(admin_model_presets.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
     app.include_router(ws_triggers.router, prefix="/api/v1")
-    app.include_router(ws_shares.router, prefix="/api/v1")
     app.include_router(model_presets.router, prefix="/api/v1")
     app.include_router(trigger_ingest.router, prefix="/api/v1")
     # Browser live-view/keepalive handlers require the SandboxManager, which is

@@ -1361,7 +1361,12 @@
     "revokeConfirm": "撤销此分享？链接将失效。",
     "active": "有效",
     "revoked": "已撤销",
-    "sharedAt": "分享于 {date}"
+    "sharedAt": "分享于 {date}",
+    "scope": {
+      "public": "公开",
+      "org": "组织内",
+      "workspace": "工作区内"
+    }
   },
   "wsShares": {
     "title": "已分享的对话",
@@ -1370,6 +1375,7 @@
     "conversation": "对话",
     "sharedDate": "分享时间",
     "link": "链接",
+    "scope": "范围",
     "status": "状态",
     "active": "有效",
     "revoked": "已撤销",

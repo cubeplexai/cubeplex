@@ -1,5 +1,6 @@
 """Conversation share — immutable snapshot of a conversation."""
 
+from enum import StrEnum
 from typing import Any, ClassVar
 
 from sqlalchemy import Column, Index
@@ -10,12 +11,18 @@ from sqlmodel import Field
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
 
 
+class ShareScope(StrEnum):
+    workspace = "workspace"
+    org = "org"
+    public = "public"
+
+
 class ConversationShare(CubeboxBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = "shr"
     __tablename__ = "conversation_shares"
     __table_args__ = (
         Index("ix_conversation_shares_org_ws", "org_id", "workspace_id"),
-        Index("ix_conversation_shares_creator", "creator_user_id", "workspace_id"),
+        Index("ix_conversation_shares_creator", "creator_user_id"),
         Index("ix_conversation_shares_conversation", "conversation_id"),
     )
 
@@ -23,6 +30,7 @@ class ConversationShare(CubeboxBase, OrgScopedMixin, table=True):
     creator_user_id: str = Field(foreign_key="users.id", max_length=20)
     creator_display_name: str = Field(max_length=255)
     title: str = Field(max_length=255)
+    scope: ShareScope = Field(default=ShareScope.public, max_length=20)
     snapshot: dict[str, Any] = Field(
         default_factory=dict,
         sa_column=Column(JSON().with_variant(JSONB(), "postgresql"), nullable=False),

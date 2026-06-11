@@ -1,8 +1,8 @@
-"""add conversation_shares table
+"""add conversation_shares table with scope
 
-Revision ID: 13ca78afb7f0
+Revision ID: ab40489adff0
 Revises: 3e8d2018cdb9
-Create Date: 2026-06-11 12:13:55.230956
+Create Date: 2026-06-11 17:32:42.372754
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '13ca78afb7f0'
+revision: str = 'ab40489adff0'
 down_revision: Union[str, Sequence[str], None] = '3e8d2018cdb9'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -32,8 +32,9 @@ def upgrade() -> None:
     sa.Column('creator_user_id', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=False),
     sa.Column('creator_display_name', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
     sa.Column('title', sqlmodel.sql.sqltypes.AutoString(length=255), nullable=False),
-    sa.Column('snapshot', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-    sa.Column('artifacts_snapshot', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('scope', sa.Enum('workspace', 'org', 'public', name='sharescope'), nullable=False),
+    sa.Column('snapshot', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
+    sa.Column('artifacts_snapshot', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.ForeignKeyConstraint(['conversation_id'], ['conversations.id'], ),
     sa.ForeignKeyConstraint(['creator_user_id'], ['users.id'], ),
@@ -42,7 +43,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index('ix_conversation_shares_conversation', 'conversation_shares', ['conversation_id'], unique=False)
-    op.create_index('ix_conversation_shares_creator', 'conversation_shares', ['creator_user_id', 'workspace_id'], unique=False)
+    op.create_index('ix_conversation_shares_creator', 'conversation_shares', ['creator_user_id'], unique=False)
     op.create_index(op.f('ix_conversation_shares_org_id'), 'conversation_shares', ['org_id'], unique=False)
     op.create_index('ix_conversation_shares_org_ws', 'conversation_shares', ['org_id', 'workspace_id'], unique=False)
     op.create_index(op.f('ix_conversation_shares_workspace_id'), 'conversation_shares', ['workspace_id'], unique=False)

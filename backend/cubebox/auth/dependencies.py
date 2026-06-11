@@ -30,6 +30,14 @@ async def current_active_user(request: Request) -> User:
     return user  # type: ignore[no-any-return]
 
 
+async def optional_current_user(request: Request) -> User | None:
+    """Like current_active_user but returns None instead of 401."""
+    user = await get_registry().get_auth_provider().authenticate(request)  # type: ignore[attr-defined]
+    if user is None or not getattr(user, "is_active", True):
+        return None
+    return user  # type: ignore[no-any-return]
+
+
 async def request_context(
     workspace_id: Annotated[str, Path()],
     user: Annotated[User, Depends(current_active_user)],
