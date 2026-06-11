@@ -225,7 +225,7 @@ export function WorkspaceDangerZone({ wsId }: WorkspaceDangerZoneProps) {
                 size="sm"
                 variant="destructive"
                 onClick={() => void handleDelete()}
-                disabled={deleting || deleteNameInput !== workspaceName}
+                disabled={deleting || !workspaceName || deleteNameInput !== workspaceName}
               >
                 {t('deleteConfirmButton')}
               </Button>

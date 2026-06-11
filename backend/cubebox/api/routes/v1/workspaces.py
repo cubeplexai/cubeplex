@@ -312,6 +312,18 @@ async def archive_workspace(
     ws = await WorkspaceRepository(session).get(workspace_id)
     if ws is None:
         raise HTTPException(status_code=404, detail="not found")
+
+    mem_repo = MembershipRepository(session)
+    ws_repo = WorkspaceRepository(session)
+    memberships = await mem_repo.list_user_workspaces(ctx.user.id)
+    active_count = 0
+    for m in memberships:
+        other = await ws_repo.get(m.workspace_id)
+        if other is not None and other.archived_at is None and other.id != workspace_id:
+            active_count += 1
+    if active_count == 0:
+        raise HTTPException(status_code=400, detail="cannot_archive_last_workspace")
+
     ws.archived_at = datetime.now(UTC)
     session.add(ws)
     await session.commit()
@@ -363,7 +375,7 @@ async def delete_workspace(
     from cubebox.models.egress_ref import EgressRef
     from cubebox.models.sandbox_env import SandboxEnvVar
     from cubebox.models.scheduled_task import ScheduledTaskRun
-    from cubebox.models.trigger import Trigger
+    from cubebox.models.trigger import Trigger, TriggerEvent
     from cubebox.models.user_sandbox import UserSandbox
 
     mem_repo = MembershipRepository(session)
@@ -386,6 +398,7 @@ async def delete_workspace(
         MemoryItem,
         WorkspaceSkillBinding,
         OrgSkillInstall,
+        TriggerEvent,
         Trigger,
         ScheduledTaskRun,
         ScheduledTask,

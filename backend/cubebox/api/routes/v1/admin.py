@@ -14,7 +14,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.routes.v1.cost import router as cost_router
-from cubebox.auth.dependencies import current_active_user, require_org_admin, resolve_current_org_id
+from cubebox.auth.dependencies import (
+    current_active_user,
+    require_org_admin,
+    resolve_current_org_id,
+    resolve_unambiguous_admin_org_id,
+)
 from cubebox.db import get_session
 from cubebox.models import User
 from cubebox.repositories import OrganizationMembershipRepository, OrganizationRepository
@@ -57,7 +62,7 @@ async def get_org(
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
-    org_id = await resolve_current_org_id(user, session)
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
     org = await OrganizationRepository(session).get(org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="org not found")
@@ -76,7 +81,7 @@ async def update_org(
     if body.slug is not None and not _SLUG_RE.match(body.slug):
         raise HTTPException(status_code=400, detail="slug_invalid_format")
 
-    org_id = await resolve_current_org_id(user, session)
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
     org = await OrganizationRepository(session).get(org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="org not found")
