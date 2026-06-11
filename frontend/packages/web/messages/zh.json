@@ -882,6 +882,9 @@
       "cancel": "取消"
     },
     "empty": "暂无成员。",
+    "leave": "退出工作区",
+    "leaveConfirm": "退出 {workspace}？你将失去所有对话和文件的访问权限。",
+    "leaveConfirmButton": "退出",
     "accessDenied": "仅工作区管理员可管理成员。",
     "invite": {
       "sectionTitle": "邀请链接",

@@ -882,6 +882,9 @@
       "cancel": "Cancel"
     },
     "empty": "No members yet.",
+    "leave": "Leave workspace",
+    "leaveConfirm": "Leave {workspace}? You'll lose access to all conversations and files.",
+    "leaveConfirmButton": "Leave",
     "accessDenied": "Only workspace admins can manage members.",
     "invite": {
       "sectionTitle": "Invite links",

@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import type { ApiClient } from '../api/client'
-import { listWorkspaces, createWorkspace, renameWorkspace, type Workspace } from '../api/workspaces'
+import {
+  listWorkspaces,
+  createWorkspace,
+  renameWorkspace,
+  leaveWorkspace,
+  type Workspace,
+} from '../api/workspaces'
 
 export interface WorkspaceStore {
   workspaces: Workspace[]
@@ -9,6 +15,7 @@ export interface WorkspaceStore {
   fetchList(client: ApiClient): Promise<void>
   create(client: ApiClient, name: string): Promise<Workspace>
   rename(client: ApiClient, wsId: string, name: string): Promise<void>
+  leave(client: ApiClient, wsId: string): Promise<void>
   reset(): void
 }
 
@@ -48,6 +55,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set((s) => ({
       workspaces: s.workspaces.map((w) => (w.id === wsId ? { ...w, name: updated.name } : w)),
     }))
+  },
+
+  async leave(client, wsId) {
+    await leaveWorkspace(client, wsId)
+    set((s) => ({ workspaces: s.workspaces.filter((w) => w.id !== wsId) }))
   },
 
   reset() {

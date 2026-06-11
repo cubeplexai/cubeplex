@@ -236,6 +236,53 @@ async def revoke_invite(
     await inv_repo.delete(token)
 
 
+@router.post("/{workspace_id}/leave")
+async def leave_workspace(
+    workspace_id: str,
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+) -> dict[str, bool]:
+    from sqlalchemy import delete as sa_delete
+
+    from cubebox.models import Membership
+    from cubebox.plugins.audit import audit_log
+
+    mem_repo = MembershipRepository(session)
+    role = await mem_repo.get_role(user_id=user.id, workspace_id=workspace_id)
+    if role is None:
+        raise HTTPException(status_code=404, detail="not a member")
+
+    if role == Role.ADMIN:
+        members = await mem_repo.list_workspace_members(workspace_id)
+        admin_count = sum(1 for m in members if m.role == Role.ADMIN.value)
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="cannot_leave_as_last_admin",
+            )
+
+    ws = await WorkspaceRepository(session).get(workspace_id)
+    org_id = ws.org_id if ws else None
+
+    await session.execute(
+        sa_delete(Membership).where(
+            Membership.user_id == user.id,  # type: ignore[arg-type]
+            Membership.workspace_id == workspace_id,  # type: ignore[arg-type]
+        )
+    )
+    await session.commit()
+
+    await audit_log(
+        action="workspace.member_left",
+        user_id=user.id,
+        org_id=org_id,
+        workspace_id=workspace_id,
+        ip=request.client.host if request.client else None,
+    )
+    return {"left": True}
+
+
 @router.post("/invites/accept")
 async def accept_invite(
     body: Annotated[AcceptInvite, Body()],
