@@ -75,7 +75,8 @@
     "darkTheme": "深色主题",
     "signOut": "退出",
     "language": "语言",
-    "backToApp": "回到应用"
+    "backToApp": "回到应用",
+    "profileSettings": "个人设置"
   },
   "admin": {
     "title": "管理后台",
@@ -1398,6 +1399,7 @@
     "weekdayFri": "五",
     "weekdaySat": "六"
   },
+<<<<<<< HEAD
   "sharePanel": {
     "share": "分享",
     "createShare": "创建快照链接",
@@ -1436,5 +1438,25 @@
     "notFound": "分享未找到",
     "notFoundBody": "此分享链接可能已被撤销或不存在。",
     "poweredBy": "由 cubebox 提供"
+  },
+  "profile": {
+    "title": "个人资料",
+    "subtitle": "管理您的个人信息和密码",
+    "personalInfo": "个人信息",
+    "displayNameLabel": "显示名称",
+    "emailLabel": "邮箱",
+    "save": "保存",
+    "saving": "保存中…",
+    "saved": "个人资料已更新",
+    "saveError": "保存失败",
+    "changePassword": "修改密码",
+    "currentPassword": "当前密码",
+    "newPassword": "新密码",
+    "confirmPassword": "确认密码",
+    "passwordMismatch": "两次输入的密码不一致",
+    "incorrectPassword": "当前密码不正确",
+    "passwordChangeError": "修改密码失败",
+    "passwordChanged": "密码已更新",
+    "updatePassword": "更新密码"
   }
 }

@@ -15,7 +15,17 @@ import {
 } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
-import { ArrowLeft, Languages, LogOut, Moon, Shield, Sparkles, Sun, Terminal } from 'lucide-react'
+import {
+  ArrowLeft,
+  Languages,
+  LogOut,
+  Moon,
+  Shield,
+  Sparkles,
+  Sun,
+  Terminal,
+  User as UserIcon,
+} from 'lucide-react'
 import { clearAllPresetSelectionStores } from '@/lib/stores/preset-selection'
 
 export function AvatarPopover() {
@@ -111,6 +121,14 @@ export function AvatarPopover() {
             <span>{t('backToApp')}</span>
           </Link>
         )}
+
+        <Link
+          href="/settings/profile"
+          className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
+        >
+          <UserIcon className="size-3.5 text-muted-foreground" />
+          <span>{t('profileSettings')}</span>
+        </Link>
 
         {mounted &&
           (() => {
