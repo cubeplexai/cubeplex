@@ -33,3 +33,8 @@ export async function renameWorkspace(
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as Workspace
 }
+
+export async function leaveWorkspace(client: ApiClient, wsId: string): Promise<void> {
+  const res = await client.post(`/api/v1/workspaces/${wsId}/leave`, {})
+  if (!res.ok) throw await toApiError(res)
+}

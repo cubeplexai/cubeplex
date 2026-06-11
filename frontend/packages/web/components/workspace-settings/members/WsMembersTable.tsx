@@ -1,9 +1,16 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useFormatter, useTranslations } from 'next-intl'
-import { Plus, Trash2 } from 'lucide-react'
-import { createApiClient, useAuthStore, useMemberStore, type WsMember } from '@cubebox/core'
+import { LogOut, Plus, Trash2 } from 'lucide-react'
+import {
+  createApiClient,
+  useAuthStore,
+  useMemberStore,
+  useWorkspaceStore,
+  type WsMember,
+} from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -29,8 +36,11 @@ interface WsMembersTableProps {
 export function WsMembersTable({ wsId }: WsMembersTableProps) {
   const t = useTranslations('wsMembers')
   const format = useFormatter()
+  const router = useRouter()
   const client = useMemo(() => createApiClient(''), [])
   const currentUser = useAuthStore((s) => s.user)
+  const wsName = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.name ?? wsId)
+  const leaveFromStore = useWorkspaceStore((s) => s.leave)
   const {
     wsMembers,
     wsLoading,
@@ -44,6 +54,7 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
 
   const [addOpen, setAddOpen] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [leaving, setLeaving] = useState(false)
 
   useEffect(() => {
     void loadWsMembers(client, wsId)
@@ -75,6 +86,11 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
     },
     [client, wsId, removeWsMember],
   )
+
+  const handleLeave = useCallback(async () => {
+    await leaveFromStore(client, wsId)
+    router.push('/')
+  }, [client, wsId, leaveFromStore, router])
 
   function formatDate(iso: string): string {
     try {
@@ -127,10 +143,15 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
                   member={m}
                   currentUserId={currentUser?.id ?? null}
                   removing={removing}
+                  leaving={leaving}
+                  wsName={wsName}
                   onRoleChange={handleRoleChange}
                   onRemoveClick={setRemoving}
                   onRemoveConfirm={handleRemove}
                   onRemoveCancel={() => setRemoving(null)}
+                  onLeaveClick={() => setLeaving(true)}
+                  onLeaveConfirm={() => void handleLeave()}
+                  onLeaveCancel={() => setLeaving(false)}
                   formatDate={formatDate}
                   t={t}
                 />
@@ -154,10 +175,15 @@ interface WsMemberRowProps {
   member: WsMember
   currentUserId: string | null
   removing: string | null
+  leaving: boolean
+  wsName: string
   onRoleChange: (userId: string, role: string) => Promise<void>
   onRemoveClick: (userId: string) => void
   onRemoveConfirm: (userId: string) => Promise<void>
   onRemoveCancel: () => void
+  onLeaveClick: () => void
+  onLeaveConfirm: () => void
+  onLeaveCancel: () => void
   formatDate: (iso: string) => string
   t: ReturnType<typeof useTranslations<'wsMembers'>>
 }
@@ -166,15 +192,21 @@ function WsMemberRow({
   member,
   currentUserId,
   removing,
+  leaving,
+  wsName,
   onRoleChange,
   onRemoveClick,
   onRemoveConfirm,
   onRemoveCancel,
+  onLeaveClick,
+  onLeaveConfirm,
+  onLeaveCancel,
   formatDate,
   t,
 }: WsMemberRowProps) {
   const isSelf = member.user_id === currentUserId
   const isRemoving = removing === member.user_id
+  const isLeaving = isSelf && leaving
 
   return (
     <TableRow className="relative">
@@ -208,7 +240,17 @@ function WsMemberRow({
         {formatDate(member.created_at)}
       </TableCell>
       <TableCell>
-        {!isSelf && (
+        {isSelf ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 text-xs text-muted-foreground"
+            onClick={onLeaveClick}
+          >
+            <LogOut className="size-3" />
+            {t('leave')}
+          </Button>
+        ) : (
           <Button
             variant="ghost"
             size="sm"
@@ -248,6 +290,33 @@ function WsMemberRow({
                 }}
               >
                 {t('removeConfirm.confirm')}
+              </Button>
+            </div>
+          </div>
+        </td>
+      )}
+
+      {isLeaving && (
+        <td>
+          <div
+            className={
+              'absolute inset-0 z-10 flex items-center ' +
+              'justify-between gap-2 ' +
+              'bg-background/95 px-4 backdrop-blur-sm'
+            }
+          >
+            <span className="text-xs">{t('leaveConfirm', { workspace: wsName })}</span>
+            <div className="flex gap-1.5">
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={onLeaveCancel}>
+                {t('removeConfirm.cancel')}
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="h-6 text-xs"
+                onClick={onLeaveConfirm}
+              >
+                {t('leaveConfirmButton')}
               </Button>
             </div>
           </div>
