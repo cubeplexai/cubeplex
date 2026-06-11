@@ -1,0 +1,52 @@
+# Optional overlay: adds the alibaba OpenSandbox lifecycle server in docker
+# runtime mode. cubebox's backend talks to it for sandbox tool calls.
+#
+# Activate with:
+#   docker compose \
+#     -f compose.yaml \
+#     -f compose.opensandbox.yaml \
+#     up -d
+#
+# Pre-requisites:
+#   * `.env` has OPENSANDBOX_*_TAG / image / api_key filled (see .env.example).
+#   * `config/opensandbox.toml` exists (cp from opensandbox.toml.example).
+#   * config/config.production.local.yaml has `sandbox.enabled: true` and
+#     `sandbox.use_server_proxy: true`.
+#   * config/config.production.secrets.yaml has `sandbox.domain`,
+#     `sandbox.image`, `sandbox.api_key` matching the server below.
+#
+# Important: OpenSandbox spawns sandbox containers by mounting the host
+# docker socket. Anyone with access to this container effectively has
+# root on the host. Keep this overlay behind your reverse proxy / private
+# network only.
+
+services:
+  opensandbox-server:
+    image: ${OPENSANDBOX_IMAGE:-opensandbox/server:latest}
+    restart: unless-stopped
+    environment:
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
+    volumes:
+      # Docker socket — REQUIRED for the docker runtime. Sandbox containers
+      # are spawned via the host docker daemon, NOT inside this service.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/opensandbox.toml:/etc/opensandbox/config.toml:ro
+    ports:
+      # API port. Backend reaches it as `opensandbox-server:8090` over the
+      # docker network; the host mapping is for direct curl debugging.
+      - "${OPENSANDBOX_PORT:-8090}:8090"
+    healthcheck:
+      # image ships only python; no wget/curl
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8090/health', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Make backend wait for opensandbox-server to be healthy when this
+  # overlay is active. Outside the overlay, backend's own depends_on
+  # list runs unchanged.
+  backend:
+    depends_on:
+      opensandbox-server:
+        condition: service_healthy

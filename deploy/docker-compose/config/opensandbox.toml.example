@@ -1,0 +1,59 @@
+# OpenSandbox lifecycle server config — docker runtime mode.
+# Mounted into opensandbox-server at /etc/opensandbox/config.toml.
+# Schema: https://github.com/alibaba/OpenSandbox/blob/main/server/configuration.md
+
+[server]
+host = "0.0.0.0"
+port = 8090
+# API key matches `sandbox.api_key` in cubebox's
+# config.production.secrets.yaml. The cubebox SDK sends it as
+# OPEN-SANDBOX-API-KEY header.
+api_key = "REPLACE_ME"
+# `eip` is the host/IP the server includes in sandbox endpoint URLs.
+# When cubebox runs in a sibling container and talks via the docker
+# network, "host.docker.internal" works on macOS/Windows and on Linux
+# Docker engines that expose it. On Linux without host.docker.internal,
+# set this to the LAN IP of the host running compose.
+eip = "host.docker.internal"
+
+[log]
+level = "INFO"
+
+[runtime]
+type = "docker"
+# Image carrying the execd binary that bootstraps file / command access
+# inside each sandbox. Must be pullable by the host docker daemon.
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.18"
+
+[egress]
+# Egress sidecar image used when a sandbox is created with networkPolicy.
+# Required for cubebox (cubebox always passes a network_policy).
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
+
+[docker]
+# `bridge` is REQUIRED for cubebox — host mode disables networkPolicy.
+network_mode = "bridge"
+# When opensandbox-server runs in a container, this is the host address
+# returned to clients for bridge-mode sandbox endpoints. Same advice as
+# server.eip above.
+host_ip = "host.docker.internal"
+drop_capabilities = [
+  "AUDIT_WRITE",
+  "MKNOD",
+  "NET_ADMIN",
+  "NET_RAW",
+  "SYS_ADMIN",
+  "SYS_MODULE",
+  "SYS_PTRACE",
+  "SYS_TIME",
+  "SYS_TTY_CONFIG",
+]
+no_new_privileges = true
+pids_limit = 4096
+
+[ingress]
+# `direct`: SDK clients hit sandbox container ports directly via
+# host-mapped bridge addresses. `proxy`: server proxies all traffic.
+# cubebox sets `use_server_proxy: true` in its config — leave this as
+# direct AND set the proxy on the cubebox side.
+mode = "direct"
