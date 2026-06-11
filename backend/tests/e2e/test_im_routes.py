@@ -120,6 +120,91 @@ async def test_admin_can_list_and_toggle_enabled(
     await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
 
 
+@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_open_id")
+async def test_workspace_delete_refuses_account_from_sibling_workspace(
+    mock_hydrate: Any,
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Cross-workspace authz: an account created with workspace_id=A must NOT
+    be deletable by a request whose ctx.workspace_id=A but where the account
+    actually lives in workspace_id=B (different workspace, same org).
+    Without scoping the service by workspace_id, a member could delete a
+    sibling workspace's connector inside their org.
+    """
+
+    async def _fake_hydrate(app_id: str, app_secret: str, domain: str) -> str:
+        return "ou_isolation"
+
+    mock_hydrate.side_effect = _fake_hydrate
+
+    from sqlalchemy import text
+
+    from cubebox.db.engine import async_session_maker
+    from tests.e2e.conftest import DEFAULT_WS_ID
+
+    app_id = _unique_app_id("isol")
+    create = await async_client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts",
+        json={
+            "platform": "feishu",
+            "app_id": app_id,
+            "app_secret": "secret",
+            "encrypt_key": "ek",
+            "verification_token": "vt",
+            "domain": "feishu",
+            "delivery_mode": "long_connection",
+            "acting_user_id": "self",
+        },
+    )
+    assert create.status_code == 201, create.text
+    account_id = create.json()["id"]
+
+    # Move the account into a different (fake) workspace inside the same org
+    # to simulate the cross-workspace scenario. We do this via direct SQL
+    # because the public API doesn't allow moving accounts.
+    fake_ws_id = "ws-isolation-other"
+    async with async_session_maker() as s:
+        await s.execute(
+            text(
+                "INSERT INTO workspaces (id, org_id, name, created_at)"
+                " SELECT :ws, org_id, 'other-ws', NOW() FROM workspaces WHERE id = :src"
+                " ON CONFLICT (id) DO NOTHING"
+            ),
+            {"ws": fake_ws_id, "src": DEFAULT_WS_ID},
+        )
+        await s.execute(
+            text("UPDATE im_connector_accounts SET workspace_id = :ws WHERE id = :id"),
+            {"ws": fake_ws_id, "id": account_id},
+        )
+        await s.commit()
+
+    try:
+        # This member belongs to DEFAULT_WS_ID, not fake_ws_id. The DELETE
+        # call uses DEFAULT_WS_ID in the URL — and must NOT delete an
+        # account that lives in fake_ws_id.
+        deleted = await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
+        # Route returns 204 whether or not it found anything (delete is
+        # idempotent). What matters is the row still exists.
+        assert deleted.status_code == 204
+
+        async with async_session_maker() as s:
+            count = (
+                await s.execute(
+                    text("SELECT COUNT(*) FROM im_connector_accounts WHERE id = :id"),
+                    {"id": account_id},
+                )
+            ).scalar()
+            assert count == 1, "cross-workspace delete must NOT remove the row"
+    finally:
+        async with async_session_maker() as s:
+            await s.execute(
+                text("DELETE FROM im_connector_accounts WHERE id = :id"),
+                {"id": account_id},
+            )
+            await s.execute(text("DELETE FROM workspaces WHERE id = :id"), {"id": fake_ws_id})
+            await s.commit()
+
+
 async def test_anonymous_cannot_reach_admin_route() -> None:
     """Anonymous (no auth cookie) callers must not get past require_org_admin."""
     import httpx as _httpx

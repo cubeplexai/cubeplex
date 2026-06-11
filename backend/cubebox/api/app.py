@@ -71,13 +71,17 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
     from cubebox.models.im_connector import IMConnectorAccount
 
     # Per-account decrypted-secret cache so we don't pay KDF + Feishu client
-    # construction per turn. Invalidated on shutdown when the dict goes away.
-    secret_cache: dict[str, dict[str, Any]] = {}
-    client_cache: dict[str, Any] = {}
+    # construction per turn. Keyed by (account_id, credential_id) so a
+    # credential rotation (via ``connect_feishu`` re-bind, which writes a new
+    # credentials row and updates account.credential_id) automatically
+    # invalidates the entry without an explicit bust API.
+    secret_cache: dict[tuple[str, str], dict[str, Any]] = {}
+    client_cache: dict[tuple[str, str], Any] = {}
 
     async def _load_secrets(account: IMConnectorAccount) -> dict[str, Any]:
-        if account.id in secret_cache:
-            return secret_cache[account.id]
+        key = (account.id, account.credential_id)
+        if key in secret_cache:
+            return secret_cache[key]
         async with _im_session_maker() as s:
             svc = build_credential_service(
                 s, app.state.encryption_backend, org_id=account.org_id, actor_user_id=None
@@ -86,12 +90,12 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
                 credential_id=account.credential_id, requesting_kind="im_bot"
             )
         secrets: dict[str, Any] = _json.loads(plaintext)
-        secret_cache[account.id] = secrets
+        secret_cache[key] = secrets
         return secrets
 
-    def _client_for(account_id: str, secrets: dict[str, Any]) -> Any:
-        if account_id in client_cache:
-            return client_cache[account_id]
+    def _client_for(account_key: tuple[str, str], secrets: dict[str, Any]) -> Any:
+        if account_key in client_cache:
+            return client_cache[account_key]
         import lark_oapi as _lark
         from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 
@@ -104,7 +108,7 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
             .log_level(_lark.LogLevel.WARNING)
             .build()
         )
-        client_cache[account_id] = client
+        client_cache[account_key] = client
         return client
 
     async def _on_run_started(run_id: str, item: Any) -> None:
@@ -115,7 +119,7 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
                 )
             ).scalar_one()
         secrets = await _load_secrets(account)
-        client = _client_for(account.id, secrets)
+        client = _client_for((account.id, account.credential_id), secrets)
         connector = FeishuConnector(
             bot_open_id=str(secrets.get("bot_open_id") or "") or None,
             client=client,
@@ -160,11 +164,24 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
     async def _connect_one(account: IMConnectorAccount) -> None:
         try:
             secrets = await _load_secrets(account)
+            bot_open_id = str(secrets.get("bot_open_id") or "")
+            if not bot_open_id:
+                # Hydration failed at connect_feishu time. Without it the
+                # parser's defense-in-depth mention gate falls through and
+                # every group message becomes a run; AND the bot-echo guard
+                # cannot recognize the bot's own outbound replies, looping
+                # the agent on itself. Refuse to open the WebSocket.
+                logger.warning(
+                    "[IM] skipping long-connection for {} — bot_open_id not hydrated;"
+                    " re-run connect_feishu to fix",
+                    account.id,
+                )
+                return
             lc = FeishuLongConnection(
                 account=account,
                 app_id=str(secrets["app_id"]),
                 app_secret=str(secrets["app_secret"]),
-                bot_open_id=str(secrets.get("bot_open_id") or ""),
+                bot_open_id=bot_open_id,
                 ingest=ingest_inbound_event,
                 session_maker=_im_session_maker,
                 domain=str(secrets.get("domain", "feishu")),

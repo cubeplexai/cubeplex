@@ -162,12 +162,20 @@ class FeishuConnector:
 
         If the Feishu subscription is misconfigured to ``group_msg`` instead
         of ``group_at_msg``, we still drop everything that does not @ the
-        bot. When ``bot_open_id`` has not yet been hydrated (PoC/dev path),
-        pass through — startup glue is responsible for hydrating before
-        events start arriving.
+        bot.
+
+        When ``bot_open_id`` has not been hydrated (None), this method
+        returns ``False`` — i.e. DROP every group message. An earlier draft
+        passed through to support a PoC dev path, but in production the
+        only way ``bot_open_id`` ends up None is hydration failure at
+        connect time; passing through then would let the bot reply to every
+        group message in the workspace (and worse, fail to recognize its
+        own echoes). Long-connection startup refuses to bind such accounts,
+        and the webhook ingress will simply drop group traffic until
+        ``connect_feishu`` is re-run.
         """
         if self._bot_open_id is None:
-            return True
+            return False
         for mention in message.get("mentions") or []:
             mid = (mention.get("id") or {}).get("open_id")
             if mid and mid == self._bot_open_id:
@@ -203,13 +211,13 @@ class FeishuConnector:
     def _build_payload(content: str) -> tuple[str, str]:
         """Choose msg_type + payload for outbound text.
 
-        Markdown tables don't render inside Feishu ``post`` type, so we
-        fall back to plain text when one is detected. Otherwise prefer
-        plain text (most reliable across clients); ``post`` is reserved
-        for richer content the connector doesn't currently emit.
+        v1 always emits ``text`` type — most reliable across Feishu clients,
+        no markdown-rendering quirks (Feishu ``post`` type does NOT render
+        markdown tables, which would silently blank the message). When a
+        future connector adds richer ``post`` rendering it MUST branch the
+        message type BEFORE this method or detect tables inside it; the
+        ``_MARKDOWN_TABLE_RE`` constant is kept for that future branch.
         """
-        if _MARKDOWN_TABLE_RE.search(content):
-            return "text", json.dumps({"text": content}, ensure_ascii=False)
         return "text", json.dumps({"text": content}, ensure_ascii=False)
 
     @staticmethod

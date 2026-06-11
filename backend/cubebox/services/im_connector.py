@@ -98,15 +98,36 @@ class IMConnectorService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
-    async def get(self, *, account_id: str) -> IMConnectorAccount | None:
+    async def get(
+        self,
+        *,
+        account_id: str,
+        workspace_id: str | None = None,
+    ) -> IMConnectorAccount | None:
+        """Look up an account by id.
+
+        ``workspace_id`` is optional but **required for cross-workspace
+        isolation when called from a workspace-scoped route**. Org-admin
+        routes operate at org level and pass ``workspace_id=None``; the
+        workspace routes MUST pass their own ``ctx.workspace_id`` so a
+        member of workspace A cannot operate on an account in workspace B
+        within the same org.
+        """
         stmt = select(IMConnectorAccount).where(
             IMConnectorAccount.id == account_id,  # type: ignore[arg-type]
             IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
         )
+        if workspace_id is not None:
+            stmt = stmt.where(IMConnectorAccount.workspace_id == workspace_id)  # type: ignore[arg-type]
         return (await self._session.execute(stmt)).scalar_one_or_none()
 
-    async def delete(self, *, account_id: str) -> None:
-        account = await self.get(account_id=account_id)
+    async def delete(
+        self,
+        *,
+        account_id: str,
+        workspace_id: str | None = None,
+    ) -> None:
+        account = await self.get(account_id=account_id, workspace_id=workspace_id)
         if account is None:
             return
         credential_id = account.credential_id
@@ -117,8 +138,14 @@ class IMConnectorService:
         except Exception:
             logger.debug("[IM] credential delete after account removal failed", exc_info=True)
 
-    async def set_enabled(self, *, account_id: str, enabled: bool) -> IMConnectorAccount | None:
-        account = await self.get(account_id=account_id)
+    async def set_enabled(
+        self,
+        *,
+        account_id: str,
+        enabled: bool,
+        workspace_id: str | None = None,
+    ) -> IMConnectorAccount | None:
+        account = await self.get(account_id=account_id, workspace_id=workspace_id)
         if account is None:
             return None
         account.enabled = enabled

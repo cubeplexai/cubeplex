@@ -15,6 +15,7 @@ verbatim copy would silently never match and turn a recoverable race into a
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -60,6 +61,7 @@ async def ingest_inbound_event(
     *,
     account: IMConnectorAccount,
     session_maker: async_sessionmaker[Any],
+    _retry_depth: int = 0,
 ) -> IngestResult:
     """Atomically insert receipt + reuse-or-create conversation+link + enqueue run.
 
@@ -68,6 +70,26 @@ async def ingest_inbound_event(
     the same scope), retry once — the second attempt will find the
     just-committed link and reuse it.
     """
+    # Guard against poison-pill events: a missing/empty platform_event_id
+    # would otherwise insert a receipt with key (account_id, "") that wins
+    # the unique index forever, silently shadowing every subsequent malformed
+    # event from the same account as 'duplicate'.
+    if not event.platform_event_id:
+        logger.warning(
+            "[IM ingest] dropping event with empty platform_event_id (account={})",
+            account.id,
+        )
+        return IngestResult(outcome="duplicate", conversation_id=None)
+    # Cap retry recursion on the thread-link race path. A persistent
+    # IntegrityError or a future constraint-name substring collision must
+    # not unbounded-recurse the stack.
+    if _retry_depth > 2:
+        logger.warning(
+            "[IM ingest] aborting thread-link retry storm (account={}, event={})",
+            account.id,
+            event.platform_event_id,
+        )
+        return IngestResult(outcome="duplicate", conversation_id=None)
     async with session_maker() as session:
         receipt = IMWebhookReceipt(
             org_id=account.org_id,
@@ -129,9 +151,12 @@ async def ingest_inbound_event(
             if _is_thread_link_unique_violation(exc):
                 # Concurrent first-message race: the winning link now
                 # exists. Re-enter; the second attempt will find it and
-                # reuse the conversation.
+                # reuse the conversation. ``_retry_depth`` caps spin.
                 return await ingest_inbound_event(
-                    event, account=account, session_maker=session_maker
+                    event,
+                    account=account,
+                    session_maker=session_maker,
+                    _retry_depth=_retry_depth + 1,
                 )
             if not _is_receipt_unique_violation(exc):
                 raise
