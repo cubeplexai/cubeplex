@@ -503,6 +503,7 @@ def create_app(
         ws_sandbox_env,
         ws_scheduled_tasks,
         ws_settings,
+        ws_shares,
         ws_skills,
         ws_triggers,
     )
@@ -537,6 +538,7 @@ def create_app(
     app.include_router(admin_model_presets.router, prefix="/api/v1")
     app.include_router(ws_skills.router, prefix="/api/v1")
     app.include_router(ws_triggers.router, prefix="/api/v1")
+    app.include_router(ws_shares.router, prefix="/api/v1")
     app.include_router(model_presets.router, prefix="/api/v1")
     app.include_router(trigger_ingest.router, prefix="/api/v1")
     # Browser live-view/keepalive handlers require the SandboxManager, which is

@@ -20,6 +20,7 @@ from cubebox.api.routes.v1 import (
     ws_sandbox_env,
     ws_scheduled_tasks,
     ws_settings,
+    ws_shares,
     ws_skills,
     ws_triggers,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "ws_sandbox_env",
     "ws_scheduled_tasks",
     "ws_settings",
+    "ws_shares",
     "ws_skills",
     "ws_triggers",
 ]
