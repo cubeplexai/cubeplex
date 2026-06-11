@@ -1,6 +1,6 @@
 {{- $pgHost := include "cubebox.postgresql.host" . -}}
 {{- $redisHost := include "cubebox.redis.host" . -}}
-{{- $minioHost := include "cubebox.minio.host" . -}}
+{{- $rustfsHost := include "cubebox.rustfs.host" . -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -21,8 +21,8 @@ data:
         name: {{ .Values.postgres.auth.database | quote }}
       objectstore:
         provider: "s3"
-        endpoint: {{ printf "http://%s:9000" $minioHost | quote }}
-        bucket: {{ .Values.minio.defaultBucket | quote }}
+        endpoint: {{ printf "http://%s:9000" $rustfsHost | quote }}
+        bucket: {{ .Values.rustfs.defaultBucket | quote }}
         region: "us-east-1"
       sandbox:
         # Decoupled from the opensandbox subchart toggle so operators can

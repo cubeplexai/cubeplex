@@ -55,9 +55,9 @@ redis:
   auth:
     password: "REPLACE_ME"
 
-minio:
+rustfs:
   auth:
-    rootPassword: "REPLACE_ME"
+    secretKey: "REPLACE_ME"
 
 # ── Egress secret-injection (opt-in) ─────────────────────────────────────
 # Enables the MITM webhook + backend mTLS exchange. Requires building one

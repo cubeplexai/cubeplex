@@ -75,7 +75,7 @@ step "6. POST message → run_id"
 MSG=$(curl -fsS "${CURL_OPTS[@]}" -b "$CK" \
   -H "Content-Type: application/json" \
   -H "X-CSRF-Token: $CSRF" \
-  -d "$(python3 -c 'import json,os; print(json.dumps({"content": os.environ["PROMPT"]}))')" \
+  -d "$(python3 -c 'import json,sys; print(json.dumps({"content": sys.argv[1]}))' "$PROMPT")" \
   "$BASE/api/v1/ws/$WS/conversations/$CONV_ID/messages")
 RUN_ID=$(echo "$MSG" | python3 -c 'import json,sys; print(json.load(sys.stdin)["run_id"])')
 echo "  run_id=$RUN_ID"

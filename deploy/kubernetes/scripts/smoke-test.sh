@@ -27,8 +27,8 @@ kubectl -n "$NAMESPACE" rollout status \
 kubectl -n "$NAMESPACE" rollout status \
   "deploy/${RELEASE}-frontend" --timeout=300s
 
-step "2. Postgres / Redis / MinIO ready"
-for app in postgresql redis-master minio; do
+step "2. Postgres / Redis / RustFS ready"
+for app in postgresql redis-master rustfs; do
   if kubectl -n "$NAMESPACE" get sts "${RELEASE}-${app}" >/dev/null 2>&1; then
     kubectl -n "$NAMESPACE" rollout status "sts/${RELEASE}-${app}" --timeout=300s
   elif kubectl -n "$NAMESPACE" get deploy "${RELEASE}-${app}" >/dev/null 2>&1; then

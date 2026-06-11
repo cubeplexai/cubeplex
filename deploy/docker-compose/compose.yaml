@@ -71,9 +71,7 @@ services:
     volumes:
       - rustfs-data:/data
     healthcheck:
-      # rustfs exposes a similar health probe to minio; if a future image
-      # drops it, replace with a TCP-only probe.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/minio/health/ready || wget -qO- http://localhost:9000/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
