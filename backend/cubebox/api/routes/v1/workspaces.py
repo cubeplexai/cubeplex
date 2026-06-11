@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +26,10 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 class WorkspaceCreate(BaseModel):
     name: str
     org_id: str
+
+
+class WorkspaceUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
 
 
 class InviteCreate(BaseModel):
@@ -118,6 +122,32 @@ async def create_workspace(
         session, org_id=org_id, workspace_id=ws.id, actor_user_id=user.id
     )
     await session.commit()
+    return {"id": ws.id, "name": ws.name, "org_id": ws.org_id}
+
+
+@router.patch("/{workspace_id}")
+async def rename_workspace(
+    workspace_id: str,
+    body: Annotated[WorkspaceUpdate, Body()],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+) -> dict[str, str]:
+    ws_repo = WorkspaceRepository(session)
+    ws = await ws_repo.update_name(workspace_id, body.name)
+    if ws is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+
+    from cubebox.plugins.audit import audit_log
+
+    await audit_log(
+        action="workspace.renamed",
+        user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        ip=request.client.host if request.client else None,
+        metadata={"new_name": body.name},
+    )
     return {"id": ws.id, "name": ws.name, "org_id": ws.org_id}
 
 
