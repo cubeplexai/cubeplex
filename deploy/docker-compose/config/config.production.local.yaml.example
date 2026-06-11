@@ -1,0 +1,42 @@
+# Non-secret runtime overrides for backend, applied by dynaconf on top of
+# config.production.yaml. Copy to config.production.local.yaml and edit.
+# Mounted into the backend container at /app/config.production.local.yaml.
+
+dynaconf_merge: true
+production:
+  api:
+    host: "0.0.0.0"
+    port: 8000
+    # The URL operators / browsers reach the backend at. If you put a
+    # reverse proxy in front, use that URL.
+    public_url: "http://localhost:8000"
+  deployment:
+    mode: single_tenant            # single_tenant | multi_tenant
+
+  public_base_url: "http://localhost:8000"
+  frontend_base_url: "http://localhost:3000"
+
+  auth:
+    # ★ HTTP installs MUST set this to false — otherwise clients silently
+    # drop the auth cookie (Secure flag stripped on non-HTTPS).
+    cookie_secure: false
+
+  # Service-name DNS inside the compose default network.
+  database:
+    host: "postgres"
+    port: 5432
+    user: "cubebox"
+    name: "cubebox"
+
+  objectstore:
+    provider: "s3"
+    endpoint: "http://minio:9000"
+    bucket: "cubebox"
+    region: "us-east-1"
+
+  sandbox:
+    # Disabled by default — running OpenSandbox under compose is heavy.
+    # Operators wanting tool calls should point at an external OpenSandbox
+    # and flip this to true.
+    enabled: false
+    use_server_proxy: false

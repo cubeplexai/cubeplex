@@ -1,0 +1,4 @@
+# Operator-local secrets.
+.env
+config/config.production.local.yaml
+config/config.production.secrets.yaml
