@@ -204,7 +204,9 @@ class OutboundRunTailer:
                             logger.warning("edit failed", exc_info=True)
                     if op.final:
                         done = True
-                        if op.kind != "edit" or not op.text.startswith("⚠️"):
+                        # The error branch in fold_event prepends "⚠️" to the
+                        # text; success is "we never saw that marker".
+                        if not op.text.startswith("⚠️"):
                             succeeded = True
                 if done:
                     return
