@@ -368,8 +368,14 @@ async def lifespan(_app: FastAPI):  # type: ignore
     _app.state.embedding_worker = None
     _app.state.embedding_worker_task = None
     if _search_cfg.get("search.enabled", True):
-        embedding_provider = EmbeddingProvider.from_config()
-        if embedding_provider.dimensions != VECTOR_DIM:
+        embedding_provider: EmbeddingProvider | None
+        try:
+            embedding_provider = EmbeddingProvider.from_config()
+        except RuntimeError as exc:
+            # Missing api key etc. — refuse to start the worker, route 503s.
+            logger.critical("Embedding provider not started: {}", exc)
+            embedding_provider = None
+        if embedding_provider is not None and embedding_provider.dimensions != VECTOR_DIM:
             # Schema is frozen at 1024; config drift here would silently break
             # inserts. Refuse to start the worker and surface a critical log.
             logger.critical(
@@ -378,7 +384,8 @@ async def lifespan(_app: FastAPI):  # type: ignore
                 VECTOR_DIM,
             )
             await embedding_provider.aclose()
-        else:
+            embedding_provider = None
+        if embedding_provider is not None:
             _app.state.embedding_provider = embedding_provider
             embedding_worker = EmbeddingWorker(embedding_provider)
             embedding_worker_task = asyncio.create_task(
