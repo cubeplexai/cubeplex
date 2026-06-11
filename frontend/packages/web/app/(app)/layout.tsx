@@ -73,7 +73,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="ml-2 text-sm font-semibold tracking-tight">cubebox</span>
           </div>
         )}
-        {children}
+        {/* Reserve remaining vertical space for the child page so the 44px
+            mobile strip doesn't push h-full pages off the bottom of the
+            viewport. flex-1 min-h-0 ensures overflow-hidden parents clip
+            correctly and inner scroll regions still work. */}
+        <div className="flex-1 min-h-0 flex flex-col">{children}</div>
       </div>
       <Sheet open={drawerOpen} onOpenChange={(open) => setDrawerOpen(open)}>
         <SheetContent side="left" className="w-56 max-w-[80vw] p-0">

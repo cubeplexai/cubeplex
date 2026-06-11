@@ -34,6 +34,40 @@ describe('useUndoableDelete', () => {
     vi.useRealTimers()
   })
 
+  it('re-requesting the same id resets the timer — old timer no longer affects new entry', async () => {
+    vi.useFakeTimers()
+    const firstCommit = vi.fn().mockResolvedValue(undefined)
+    const secondCommit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() => useUndoableDelete())
+    act(() => result.current.requestDelete('item-r', firstCommit, OPTS))
+    // 3s in — almost at the first window
+    act(() => {
+      vi.advanceTimersByTime(3000)
+    })
+    expect(firstCommit).not.toHaveBeenCalled()
+    // Re-request with a different commit — should cancel the first timer
+    // and start a fresh 5s window for the new entry
+    act(() => result.current.requestDelete('item-r', secondCommit, OPTS))
+    // Advance another 3s — total 6s from start; if the first timer were
+    // still running it would have fired by now and force-committed the
+    // new entry. It must NOT have.
+    act(() => {
+      vi.advanceTimersByTime(3000)
+    })
+    expect(firstCommit).not.toHaveBeenCalled()
+    expect(secondCommit).not.toHaveBeenCalled()
+    // Now finish the new window
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(secondCommit).toHaveBeenCalledTimes(1)
+    expect(firstCommit).not.toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
   it('does NOT force-commit on unmount: timers fire on their original schedule', async () => {
     vi.useFakeTimers()
     const commit = vi.fn().mockResolvedValue(undefined)

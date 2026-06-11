@@ -55,6 +55,12 @@ export function useUndoableDelete() {
   const requestDelete = useCallback(
     (id: string, commit: () => void | Promise<void>, opts: UndoableDeleteOpts) => {
       const errorLabel = opts.errorLabel ?? opts.label
+      // If a delete for this id is already pending, cancel its timer first
+      // — otherwise the old timer would fire mid-window and force-commit
+      // whatever entry is currently in the map (the new one), shortening
+      // the new toast's undo window.
+      const existing = pending.get(id)
+      if (existing) clearTimeout(existing.timer)
       const entry: PendingDelete = {
         timer: setTimeout(() => {
           const e = pending.get(id)

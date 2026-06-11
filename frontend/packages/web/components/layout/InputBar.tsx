@@ -77,20 +77,30 @@ export function InputBar({
   // into useComposerDraft; we consume it once into local content. We
   // subscribe to the nonce so re-clicking the same card re-injects the
   // text even when its value is unchanged.
+  // We track "just consumed" with a ref so the height-sync runs on the
+  // NEXT render — when React has actually committed the new content and
+  // the textarea's scrollHeight reflects it. Doing the resize in the
+  // same effect would read scrollHeight from the pre-setContent textarea.
   const pendingDraft = useComposerDraft((s) => s.pending)
+  const justConsumedRef = useRef(false)
   useEffect(() => {
     if (pendingDraft === null) return
     const consumed = useComposerDraft.getState().consume()
     if (consumed === null) return
     setContent(consumed)
-    if (textareaRef.current) {
-      // sync textarea height to the injected text
-      const ta = textareaRef.current
-      ta.style.height = 'auto'
-      ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'
-      ta.focus()
-    }
+    justConsumedRef.current = true
   }, [pendingDraft])
+  // Height sync runs AFTER content commits; the [content] dep guarantees
+  // scrollHeight is measured from the latest textarea value.
+  useEffect(() => {
+    if (!justConsumedRef.current) return
+    justConsumedRef.current = false
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'
+    ta.focus()
+  }, [content])
 
   const uploadInFlight = stagingItems.some((u) => u.status === 'uploading')
   // Streaming no longer locks the textarea — the user can type to steer.
