@@ -1376,5 +1376,11 @@
     "revoke": "Revoke",
     "copyLink": "Copy link",
     "copied": "Copied!"
+  },
+  "publicShare": {
+    "sharedBy": "Shared by {name}",
+    "notFound": "Share not found",
+    "notFoundBody": "This share link may have been revoked or does not exist.",
+    "poweredBy": "Powered by cubebox"
   }
 }
