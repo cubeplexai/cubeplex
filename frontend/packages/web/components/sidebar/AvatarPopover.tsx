@@ -1,6 +1,7 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import { useRouter, usePathname } from 'next/navigation'
+import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
@@ -14,13 +15,15 @@ import {
 } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
-import { Languages, LogOut, Moon, Shield, Sun } from 'lucide-react'
+import { ArrowLeft, Languages, LogOut, Moon, Shield, Sun } from 'lucide-react'
 import { clearAllPresetSelectionStores } from '@/lib/stores/preset-selection'
 
 export function AvatarPopover() {
   const t = useTranslations('avatar')
   const tShell = useTranslations('shellLayout')
   const router = useRouter()
+  const pathname = usePathname()
+  const inAdminScope = pathname?.startsWith('/admin') ?? false
   const user = useAuthStore((s) => s.user)
   const { isAdmin } = useAdminAccess()
   const { resolvedTheme, setTheme } = useTheme()
@@ -81,7 +84,7 @@ export function AvatarPopover() {
           {user?.email}
         </div>
 
-        {isAdmin && (
+        {isAdmin && !inAdminScope && (
           <a
             href="/admin"
             target="_blank"
@@ -90,6 +93,15 @@ export function AvatarPopover() {
             <Shield className="size-3.5 text-muted-foreground" />
             <span>{t('adminPanel')}</span>
           </a>
+        )}
+        {inAdminScope && (
+          <Link
+            href="/"
+            className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
+          >
+            <ArrowLeft className="size-3.5 text-muted-foreground" />
+            <span>{t('backToApp')}</span>
+          </Link>
         )}
 
         {mounted && (
