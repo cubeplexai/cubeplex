@@ -178,7 +178,12 @@ function WsMemberRow({
 
   return (
     <TableRow className="relative">
-      <TableCell className="text-sm">{member.email}</TableCell>
+      <TableCell>
+        <div className="flex flex-col">
+          <span className="text-sm">{member.display_name ?? member.email.split('@')[0]}</span>
+          <span className="text-xs text-muted-foreground">{member.email}</span>
+        </div>
+      </TableCell>
       <TableCell>
         <Select
           value={member.role}

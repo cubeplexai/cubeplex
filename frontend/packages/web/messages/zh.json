@@ -10,7 +10,8 @@
     "creatingAccount": "创建中…",
     "newHere": "还没有账户？",
     "alreadyHaveAccount": "已有账户？",
-    "createAccount": "注册"
+    "createAccount": "注册",
+    "displayName": "你的名字（可选）"
   },
   "sidebar": {
     "newChat": "新建对话",

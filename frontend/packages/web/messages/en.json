@@ -10,7 +10,8 @@
     "creatingAccount": "Creating…",
     "newHere": "New here?",
     "alreadyHaveAccount": "Already have an account?",
-    "createAccount": "Create an account"
+    "createAccount": "Create an account",
+    "displayName": "Your name (optional)"
   },
   "sidebar": {
     "newChat": "New chat",

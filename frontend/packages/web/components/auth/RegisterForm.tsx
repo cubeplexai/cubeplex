@@ -9,6 +9,7 @@ import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubebox
 export function RegisterForm() {
   const t = useTranslations('auth')
   const router = useRouter()
+  const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -20,7 +21,7 @@ export function RegisterForm() {
     setSubmitting(true)
     try {
       const client = createApiClient('')
-      const result = await registerUser(client, email, password)
+      const result = await registerUser(client, email, password, displayName || undefined)
       // Register endpoint does NOT set an auth cookie — auto log-in here.
       await loginUser(client, email, password)
       await useAuthStore.getState().loadMe(client)
@@ -44,6 +45,17 @@ export function RegisterForm() {
       <div className="text-center mb-6">
         <h1 className="text-xl font-semibold">{t('signUpTitle')}</h1>
       </div>
+      <label className="block">
+        <span className="text-sm text-foreground/80">{t('displayName')}</span>
+        <input
+          type="text"
+          autoComplete="name"
+          maxLength={100}
+          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+          value={displayName}
+          onChange={(e) => setDisplayName(e.target.value)}
+        />
+      </label>
       <label className="block">
         <span className="text-sm text-foreground/80">{t('email')}</span>
         <input

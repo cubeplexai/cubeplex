@@ -14,7 +14,9 @@ export interface OrgMembership {
 export interface MeResult {
   id: string
   email: string
+  display_name: string | null
   language: string
+  is_verified?: boolean
   needs_org_setup?: boolean
   org_memberships?: OrgMembership[]
 }
@@ -23,8 +25,11 @@ export async function registerUser(
   client: ApiClient,
   email: string,
   password: string,
+  displayName?: string,
 ): Promise<RegisterResult> {
-  const res = await client.post('/api/v1/auth/register', { email, password })
+  const body: Record<string, string> = { email, password }
+  if (displayName) body.display_name = displayName
+  const res = await client.post('/api/v1/auth/register', body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as RegisterResult
 }
@@ -51,6 +56,15 @@ export async function getMe(client: ApiClient): Promise<MeResult | null> {
 
 export async function updateLanguage(client: ApiClient, language: 'en' | 'zh'): Promise<MeResult> {
   const res = await client.patch('/api/v1/auth/me', { language })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MeResult
+}
+
+export async function updateProfile(
+  client: ApiClient,
+  patch: { display_name?: string; language?: 'en' | 'zh' },
+): Promise<MeResult> {
+  const res = await client.patch('/api/v1/auth/me', patch)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MeResult
 }
