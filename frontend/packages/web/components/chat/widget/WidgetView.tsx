@@ -25,7 +25,7 @@ interface ThemeTokens {
  *  fallbacks here mirror the token palette (see globals.css §1). */
 function resolveThemeTokens(isDark: boolean): ThemeTokens {
   const fallback: ThemeTokens = isDark
-    ? { bg: '#050505', fg: '#ededed', muted: '#111111', border: '#1f1f1f', accent: '#0070f3' }
+    ? { bg: '#050505', fg: '#e4e4e7', muted: '#1c1c1c', border: '#262626', accent: '#0070f3' }
     : { bg: '#fafafa', fg: '#171717', muted: '#f5f5f5', border: '#eaeaea', accent: '#0070f3' }
   if (typeof window === 'undefined' || typeof document === 'undefined') return fallback
   const styles = getComputedStyle(document.documentElement)
