@@ -11,6 +11,7 @@ from cubebox.agents.checkpointer import init_checkpointer
 from cubebox.objectstore.client import get_objectstore_client
 
 _ATTACHMENT_KEEP_KEYS = {"filename", "mime_type", "size"}
+_METADATA_STRIP_KEYS = {"memory_snapshot", "relevance_snapshot"}
 
 
 def filter_messages_for_snapshot(
@@ -32,6 +33,9 @@ def filter_messages_for_snapshot(
 
         msg = copy.deepcopy(msg)
         metadata = msg.get("metadata") or {}
+
+        for key in _METADATA_STRIP_KEYS:
+            metadata.pop(key, None)
 
         attachments = metadata.get("attachments")
         if attachments and isinstance(attachments, list):
