@@ -192,3 +192,21 @@ class CredentialService:
             raise CredentialInUseError(
                 f"credential {credential_id} referenced by SandboxEnvVar: {[e.id for e in env_refs]}"
             )
+        from cubebox.models import IMConnectorAccount
+
+        im_refs = (
+            (
+                await session.execute(
+                    select(IMConnectorAccount).where(
+                        IMConnectorAccount.credential_id == credential_id  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if im_refs:
+            raise CredentialInUseError(
+                f"credential {credential_id} referenced by IMConnectorAccount: "
+                f"{[a.id for a in im_refs]}"
+            )
