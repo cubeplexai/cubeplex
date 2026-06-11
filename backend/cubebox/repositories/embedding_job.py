@@ -63,6 +63,32 @@ class EmbeddingJobRepository:
         result2 = await self.session.execute(stmt)
         return list(result2.scalars().all())
 
+    async def reap_stuck(self, *, threshold_seconds: int) -> int:
+        """Return jobs stuck in 'running' beyond threshold to 'pending'.
+
+        Bumps attempts so a permanently broken job (e.g. one that crashes the
+        worker on every claim) still drops to 'dead' once max_attempts is
+        reached via mark_failed's path.
+        """
+        sql = text(
+            """
+            UPDATE embedding_jobs
+            SET state = 'pending',
+                attempts = attempts + 1,
+                claimed_at = NULL,
+                scheduled_at = now(),
+                updated_at = now()
+            WHERE state = 'running'
+              AND claimed_at IS NOT NULL
+              AND claimed_at < now() - make_interval(secs => :threshold)
+            RETURNING id
+            """
+        )
+        result = await self.session.execute(sql, {"threshold": int(threshold_seconds)})
+        ids = [row[0] for row in result.fetchall()]
+        await self.session.commit()
+        return len(ids)
+
     async def mark_done(self, job_id: str) -> None:
         await self.session.execute(
             text("UPDATE embedding_jobs SET state='done', updated_at=now() WHERE id=:id"),

@@ -410,6 +410,10 @@ default:
       poll_interval_seconds: 2
       max_attempts: 5
       backoff_seconds: [60, 300, 1500, 7200, 36000]
+      # Jobs left in 'running' for longer than this (e.g. crashed worker)
+      # are returned to 'pending' on next worker startup. Attempts bumps so
+      # a permanently broken job still drops out via max_attempts.
+      stuck_threshold_seconds: 1800
     rrf:
       k: 60
       prefetch_per_leg: 20
