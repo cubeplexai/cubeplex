@@ -44,7 +44,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
     } finally {
       setLoading(false)
     }
-  }, [client])
+  }, [client, wsId])
 
   useEffect(() => {
     void load()
@@ -113,7 +113,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
                       className={cn(
                         'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
                         share.is_active
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                          ? 'bg-success/15 text-success'
                           : 'bg-muted text-muted-foreground',
                       )}
                     >
@@ -132,7 +132,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
                             onClick={() => handleCopy(share)}
                           >
                             {copiedId === share.id ? (
-                              <Check className="h-3.5 w-3.5 text-emerald-500" />
+                              <Check className="h-3.5 w-3.5 text-success" />
                             ) : (
                               <Copy className="h-3.5 w-3.5" />
                             )}
