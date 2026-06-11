@@ -6,6 +6,7 @@ from cubebox.repositories.billing import BillingRepository
 from cubebox.repositories.conversation import ConversationRepository
 from cubebox.repositories.conversation_chunk import ConversationChunkRepository
 from cubebox.repositories.conversation_share import ConversationShareRepository
+from cubebox.repositories.embedding_job import EmbeddingJobRepository
 from cubebox.repositories.invite_token import InviteTokenRepository
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
@@ -35,6 +36,7 @@ __all__ = [
     "ConversationChunkRepository",
     "ConversationRepository",
     "ConversationShareRepository",
+    "EmbeddingJobRepository",
     "InviteTokenRepository",
     "MembershipRepository",
     "MCPConnectorInstallRepository",
