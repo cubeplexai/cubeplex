@@ -40,6 +40,9 @@ PREFIX_TRIGGER_EVENT: str = "trev"
 PREFIX_USER_EVENT: str = "uev"
 PREFIX_ORG_SETTING: str = "oset"
 PREFIX_SHR: str = "shr"
+PREFIX_CONV_CHUNK: str = "cck"
+PREFIX_EMBEDDING_JOB: str = "ejob"
+PREFIX_BACKFILL: str = "sbp"
 
 
 @dataclass
