@@ -530,10 +530,12 @@ def create_app(
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
     app.include_router(shares.router, prefix="/api/v1")
-    from cubebox.api.routes.v1 import artifact_share, im_ingress
+    from cubebox.api.routes.v1 import admin_im, artifact_share, im_ingress, ws_im
 
     app.include_router(artifact_share.router, prefix="/api/v1")
     app.include_router(im_ingress.router, prefix="/api/v1")
+    app.include_router(ws_im.router, prefix="/api/v1")
+    app.include_router(admin_im.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")
