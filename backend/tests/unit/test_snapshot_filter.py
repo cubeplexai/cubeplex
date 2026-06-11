@@ -77,5 +77,16 @@ class TestFilterMessages:
         assert len(result) == 1
         assert result[0]["role"] == "user"
 
+    def test_strips_memory_snapshot(self) -> None:
+        msg = _user_msg(
+            "hello",
+            memory_snapshot={"text": "User prefers dark mode", "ids": ["m1"]},
+            relevance_snapshot={"score": 0.9},
+        )
+        result = filter_messages_for_snapshot([msg])
+        meta = result[0]["metadata"]
+        assert "memory_snapshot" not in meta
+        assert "relevance_snapshot" not in meta
+
     def test_empty_list(self) -> None:
         assert filter_messages_for_snapshot([]) == []

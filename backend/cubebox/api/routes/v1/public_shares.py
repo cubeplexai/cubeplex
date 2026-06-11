@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -70,8 +71,11 @@ async def get_public_share_artifact(
     except Exception:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Artifact file not found") from None
 
+    mime, _ = mimetypes.guess_type(file_path)
+    media_type = mime or content_type or "application/octet-stream"
+
     return Response(
         content=data,
-        media_type=content_type,
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        media_type=media_type,
+        headers={"Cache-Control": "private, no-store"},
     )

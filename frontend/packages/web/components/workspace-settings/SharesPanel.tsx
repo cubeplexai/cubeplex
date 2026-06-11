@@ -59,7 +59,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
   )
 
   const handleCopy = useCallback((share: ConversationShare) => {
-    void navigator.clipboard.writeText(share.url).then(() => {
+    void navigator.clipboard.writeText(window.location.origin + share.url).then(() => {
       setCopiedId(share.id)
       setTimeout(() => setCopiedId((prev) => (prev === share.id ? null : prev)), 2000)
     })

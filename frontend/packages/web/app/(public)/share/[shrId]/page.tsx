@@ -59,14 +59,17 @@ function SharedMessage({ message }: { message: Message }) {
 }
 
 function SharedArtifact({ artifact, shareId }: { artifact: PublicShareArtifact; shareId: string }) {
-  const filename = artifact.entry_file ?? artifact.path.split('/').pop() ?? artifact.name
-  const href = `/api/v1/public/shares/${shareId}/artifacts/${artifact.id}/v${artifact.version}/${filename}`
+  const filename = artifact.entry_file ?? artifact.path.split('/').pop()
+  const href = filename
+    ? `/api/v1/public/shares/${shareId}/artifacts/${artifact.id}/v${artifact.version}/${filename}`
+    : null
+
+  const Tag = href ? 'a' : 'div'
+  const linkProps = href ? { href, target: '_blank' as const, rel: 'noopener noreferrer' } : {}
 
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+    <Tag
+      {...linkProps}
       className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 hover:bg-muted/50 transition-colors group"
     >
       <div className="flex-1 min-w-0">
@@ -97,7 +100,7 @@ function SharedArtifact({ artifact, shareId }: { artifact: PublicShareArtifact; 
         <polyline points="15 3 21 3 21 9" />
         <line x1="10" y1="14" x2="21" y2="3" />
       </svg>
-    </a>
+    </Tag>
   )
 }
 
