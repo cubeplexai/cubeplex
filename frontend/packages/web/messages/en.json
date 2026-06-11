@@ -723,6 +723,10 @@
     "navMcp": "MCP Connectors",
     "navShares": "Shares",
     "soonBadge": "soon",
+    "workspaceName": "Workspace name",
+    "workspaceNameSaved": "Workspace name updated",
+    "workspaceNameSave": "Save",
+    "workspaceNameSaving": "Saving…",
     "persona": {
       "title": "Persona",
       "description": "Defines the agent's persona for every conversation in this workspace. Appended after the base system prompt.",

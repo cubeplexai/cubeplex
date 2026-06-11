@@ -723,6 +723,10 @@
     "navMcp": "MCP Connectors",
     "navShares": "分享",
     "soonBadge": "即将推出",
+    "workspaceName": "工作区名称",
+    "workspaceNameSaved": "工作区名称已更新",
+    "workspaceNameSave": "保存",
+    "workspaceNameSaving": "保存中…",
     "persona": {
       "title": "Persona",
       "description": "为本工作区里的每一次对话设置 agent 人设，附加在基础 system prompt 之后。",

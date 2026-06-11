@@ -23,3 +23,13 @@ export async function createWorkspace(
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as Workspace
 }
+
+export async function renameWorkspace(
+  client: ApiClient,
+  wsId: string,
+  name: string,
+): Promise<Workspace> {
+  const res = await client.patch(`/api/v1/workspaces/${wsId}`, { name })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as Workspace
+}
