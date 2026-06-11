@@ -259,7 +259,10 @@ async def test_worker_leaves_row_for_reclaim_on_start_run_failure(
     did_run = await process_one_queue_item(
         session_maker=maker, run_manager=_BrokenRM(), on_run_started=None, lease_seconds=300
     )
-    assert did_run is True  # we processed (and failed) one row
+    # process_one_queue_item now returns False on the failure path so the
+    # worker loop's idle-sleep branch fires — prevents the thundering
+    # herd of immediately re-claiming the rewound row.
+    assert did_run is False
     async with maker() as s:
         item = (
             await s.execute(

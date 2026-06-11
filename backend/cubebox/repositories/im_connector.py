@@ -169,7 +169,7 @@ async def mark_queue_item_for_retry_or_fail(
     *,
     item_id: str,
     max_attempts: int = 5,
-) -> None:
+) -> bool:
     """Handle a queue row whose ``start_run`` raised.
 
     The retry policy designed into ``claim_pending_queue_item`` expects:
@@ -182,8 +182,11 @@ async def mark_queue_item_for_retry_or_fail(
     Parking on the FIRST exception (the previous behaviour after the
     round-1 fix) would defeat ``max_attempts`` entirely: any transient
     error becomes a permanent silent drop. So this helper only flips to
-    ``failed`` once the cap is reached; otherwise it rewinds to ``pending``
-    + clears the lease so the next poll re-claims immediately.
+    ``failed`` once the cap is reached; otherwise it rewinds to
+    ``pending`` + clears the lease so the next poll re-claims.
+
+    Returns ``True`` iff the row was permanently parked (caller should
+    also flip the receipt to ``failed`` for symmetric observability).
     """
     item = (
         await session.execute(
@@ -192,7 +195,31 @@ async def mark_queue_item_for_retry_or_fail(
     ).scalar_one()
     if item.attempts >= max_attempts:
         item.status = "failed"
-    else:
-        item.status = "pending"
-        item.claim_lease_expires_at = None
+        session.add(item)
+        return True
+    item.status = "pending"
+    item.claim_lease_expires_at = None
     session.add(item)
+    return False
+
+
+async def mark_receipt_failed(
+    session: AsyncSession,
+    *,
+    receipt_id: str,
+) -> None:
+    """Flip a receipt to ``failed`` when its queue row was permanently parked.
+
+    Without this, the receipt would stay ``pending`` forever after a
+    persistent failure — operators looking at the receipts table can't
+    distinguish 'in-flight' from 'parked' rows. The receipt's unique
+    constraint on (account_id, platform_event_id) is unaffected; a Feishu
+    retry would still be dedupe-acked against the failed receipt.
+    """
+    receipt = (
+        await session.execute(
+            select(IMWebhookReceipt).where(IMWebhookReceipt.id == receipt_id)  # type: ignore[arg-type]
+        )
+    ).scalar_one()
+    receipt.status = "failed"
+    session.add(receipt)

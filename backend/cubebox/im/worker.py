@@ -31,6 +31,7 @@ from cubebox.repositories.im_connector import (
     mark_queue_item_completed,
     mark_queue_item_for_retry_or_fail,
     mark_receipt_completed,
+    mark_receipt_failed,
 )
 from cubebox.streams.run_manager import RunContext
 
@@ -98,11 +99,21 @@ async def process_one_queue_item(
             exc_info=True,
         )
         # Honor max_attempts: rewind to 'pending' for transient errors,
-        # park as 'failed' only when the attempt cap is reached.
+        # park as 'failed' only when the attempt cap is reached. When the
+        # queue row is permanently parked, also flip the receipt to
+        # 'failed' for symmetric observability — otherwise the receipt
+        # stays 'pending' forever and operators can't tell in-flight from
+        # parked rows.
         async with session_maker() as session:
-            await mark_queue_item_for_retry_or_fail(session, item_id=captured_item.id)
+            parked = await mark_queue_item_for_retry_or_fail(session, item_id=captured_item.id)
+            if parked:
+                await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
             await session.commit()
-        return True
+        # Return False so the worker loop's idle-sleep branch fires —
+        # otherwise the loop would immediately re-claim the rewound row
+        # within milliseconds, hammering a downstream service that just
+        # failed (thundering herd against a transient outage).
+        return False
 
     # Mark BOTH the receipt AND the queue row terminal. Without flipping the
     # queue row's status off 'started', claim_pending_queue_item would re-claim
@@ -158,6 +169,12 @@ class IMRunQueueWorker:
             except Exception:
                 logger.warning("[IM worker] poll error", exc_info=True)
                 ran = False
+            # ``ran=False`` covers both "queue was empty" and "start_run
+            # raised" (process_one_queue_item returns False in both cases —
+            # the latter intentionally so the failure path sleeps the
+            # poll_interval instead of immediately re-claiming the same
+            # row, which would hammer a downstream service that just
+            # failed (thundering herd, defeating max_attempts).
             if not ran:
                 await asyncio.sleep(self._poll_interval)
 
