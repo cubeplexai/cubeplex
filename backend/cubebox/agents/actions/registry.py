@@ -1,13 +1,19 @@
 """Agent capability registry — the single entry point for run_manager.
 
-Each capability is exposed to the model as a :class:`DeferredToolGroup`. The
-catalog (group_id, display_name, description, tool_names) lives in the system
-prompt; the actual tool schemas only ship when the model calls
-``load_tools(group_id)``.
+Each capability is exposed to the **main** agent as a
+:class:`DeferredToolGroup`: the catalog (group_id, display_name, description,
+tool_names) lives in the system prompt, and the actual tool schemas only ship
+when the model calls ``load_tools(group_id)``.
+
+The same per-operation AgentTools are also exposed flat (no deferred wrapper)
+so callers that need eager access — primarily ``SubagentMiddleware`` —
+can pass them as ``shared_tools`` to short-lived child agents where the
+catalog round-trip overhead would dominate.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from cubepi.agent.types import AgentTool
@@ -21,6 +27,22 @@ from cubebox.agents.actions.types import AgentCapability
 AGENT_CAPABILITIES: list[AgentCapability] = [
     SCHEDULED_TASKS_CAPABILITY,
 ]
+
+
+@dataclass(frozen=True)
+class CapabilityToolSet:
+    """Both views of the same per-op AgentTools.
+
+    ``groups`` is what the main agent sees — one DeferredToolGroup per
+    capability, schemas hidden until ``load_tools`` is called. ``flat_tools``
+    is the union of every per-op tool across every group, ready to be
+    passed eagerly to a subagent's ``shared_tools``. The two views reference
+    the same AgentTool instances, so executing through either resolves to
+    the same handler closure.
+    """
+
+    groups: list[DeferredToolGroup]
+    flat_tools: list[AgentTool[Any]]
 
 
 def _make_group(cap: AgentCapability, tools: list[AgentTool[Any]]) -> DeferredToolGroup:
@@ -48,33 +70,32 @@ def tools_for_run(
     *,
     allow_mutations: bool,
     skill_deps: SkillDeps | None = None,
-) -> list[DeferredToolGroup]:
-    """Build deferred groups for all registered capabilities.
+) -> CapabilityToolSet:
+    """Build deferred groups + flat per-op tools for all registered capabilities.
 
     Static capabilities (declared in AGENT_CAPABILITIES) are built
     unconditionally. The skills capability is dynamic: built only when
     skill_deps is supplied, because its handlers must close over run-scoped
     catalog / registry / session.
 
-    Groups whose mutation gate drops every operation are omitted entirely
-    (e.g. an automated run with a mutation-only capability would see no
-    catalog entry for it).
+    Capabilities whose mutation gate drops every operation are omitted
+    entirely (e.g. an automated run with a mutation-only capability would
+    see no catalog entry and no flat tools for it).
     """
     groups: list[DeferredToolGroup] = []
+    flat_tools: list[AgentTool[Any]] = []
+
+    def _add(cap: AgentCapability) -> None:
+        tools = build_capability_tools(cap, context_factory, allow_mutations=allow_mutations)
+        if not tools:
+            return
+        groups.append(_make_group(cap, tools))
+        flat_tools.extend(tools)
 
     for cap in AGENT_CAPABILITIES:
-        tools = build_capability_tools(cap, context_factory, allow_mutations=allow_mutations)
-        if tools:
-            groups.append(_make_group(cap, tools))
+        _add(cap)
 
     if skill_deps is not None:
-        skills_cap = build_skills_capability(skill_deps)
-        skills_tools = build_capability_tools(
-            skills_cap,
-            context_factory,
-            allow_mutations=allow_mutations,
-        )
-        if skills_tools:
-            groups.append(_make_group(skills_cap, skills_tools))
+        _add(build_skills_capability(skill_deps))
 
-    return groups
+    return CapabilityToolSet(groups=groups, flat_tools=flat_tools)

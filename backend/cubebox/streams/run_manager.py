@@ -2343,6 +2343,9 @@ class RunManager:
 
         # Platform action tools (scheduled_tasks, skills, etc.) — via the
         # capability registry. Automated runs get read-only tools (mutation gate).
+        # Initialized to [] so a setup failure leaves SubagentMiddleware able
+        # to build (just without action tools).
+        _action_flat_tools: list[Any] = []
         try:
             from cubebox.agents.actions.capabilities.skills import SkillDeps
             from cubebox.agents.actions.registry import (
@@ -2416,13 +2419,16 @@ class RunManager:
                             _skill_exc,
                         )
 
-                _deferred_groups.extend(
-                    _action_tools_for_run(
-                        _action_ctx_factory,
-                        allow_mutations=(trigger == "interactive"),
-                        skill_deps=_skill_deps,
-                    )
+                _action_toolset = _action_tools_for_run(
+                    _action_ctx_factory,
+                    allow_mutations=(trigger == "interactive"),
+                    skill_deps=_skill_deps,
                 )
+                _deferred_groups.extend(_action_toolset.groups)
+                # Subagents (built below) need the per-op tools eagerly —
+                # SubagentMiddleware takes shared_tools, not deferred groups,
+                # and the catalog round-trip would dominate a child run.
+                _action_flat_tools.extend(_action_toolset.flat_tools)
         except Exception as _exc:
             logger.warning(
                 "platform action tools unavailable for cubepi run: {}",
@@ -2674,11 +2680,13 @@ class RunManager:
             subagent_mw = SubagentMiddleware(
                 subagents={},
                 default_model=subagent_model,
-                # Pass all tools (sandbox + artifact + builtin) collected so far
-                # as shared tools for subagent spawning, minus show_widget
-                # (top-level only in v1).
+                # Pass all tools (sandbox + artifact + builtin + per-op action)
+                # collected so far as shared tools for subagent spawning, minus
+                # show_widget (top-level only in v1). Action tools live in the
+                # main agent's deferred groups; subagents get them eagerly
+                # because catalog round-trips would dominate a child run.
                 shared_tools=_subagent_shared_tools(
-                    _sandbox_tools + _artifact_tools + _builtin_tools
+                    _sandbox_tools + _artifact_tools + _builtin_tools + _action_flat_tools
                 ),
                 inherited_middleware=_cost_mw_for_inherit,
                 excluded_tool_names={"subagent", "load_skill"},
