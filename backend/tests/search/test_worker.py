@@ -42,3 +42,42 @@ async def test_worker_processes_job_for_seeded_conversation(
     async with async_session_maker() as session:
         n = await ConversationChunkRepository(session).count_for_conversation(conv_id)
     assert n > 0
+
+
+@pytest.mark.asyncio
+async def test_reap_stuck_returns_running_to_pending(
+    seeded_conversation: tuple[str, str, str, str],
+) -> None:
+    """A job stuck in 'running' beyond threshold is reset to 'pending'."""
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select, update
+
+    from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState
+
+    org_id, ws_id, user_id, conv_id = seeded_conversation
+    async with async_session_maker() as session:
+        job = await EmbeddingJobRepository(session).enqueue(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            conversation_id=conv_id,
+        )
+    # Pretend the worker claimed it an hour ago and then crashed.
+    one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
+    async with async_session_maker() as session:
+        await session.execute(
+            update(EmbeddingJob)
+            .where(EmbeddingJob.id == job.id)
+            .values(state=EmbeddingJobState.running, claimed_at=one_hour_ago)
+        )
+        await session.commit()
+    async with async_session_maker() as session:
+        reaped = await EmbeddingJobRepository(session).reap_stuck(threshold_seconds=1800)
+    assert reaped == 1
+    async with async_session_maker() as session:
+        result = await session.execute(select(EmbeddingJob).where(EmbeddingJob.id == job.id))
+        row = result.scalar_one()
+    assert row.state == EmbeddingJobState.pending
+    assert row.attempts == 1
+    assert row.claimed_at is None

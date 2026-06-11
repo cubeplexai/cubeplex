@@ -29,9 +29,21 @@ class EmbeddingWorker:
         )
         self._target_tokens = int(config.get("search.chunker.target_tokens", 600))
         self._overlap_tokens = int(config.get("search.chunker.overlap_tokens", 100))
+        self._stuck_threshold = int(config.get("search.worker.stuck_threshold_seconds", 1800))
 
     async def run(self) -> None:
         logger.info("EmbeddingWorker started")
+        # Reap jobs left in 'running' by a crashed prior worker before draining
+        # the normal queue. Idempotent — a healthy queue will reap zero rows.
+        try:
+            async with async_session_maker() as session:
+                reaped = await EmbeddingJobRepository(session).reap_stuck(
+                    threshold_seconds=self._stuck_threshold
+                )
+            if reaped:
+                logger.warning("Reaped %d stuck embedding job(s) on startup", reaped)
+        except Exception:
+            logger.exception("EmbeddingWorker reap_stuck failed; continuing")
         while not self._stop.is_set():
             try:
                 claimed = await self._claim_one()
