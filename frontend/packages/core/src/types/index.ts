@@ -20,3 +20,4 @@ export type {
   TimeseriesResponse,
 } from './billing'
 export { formatCostUsd } from './billing'
+export type * from './share'
