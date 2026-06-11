@@ -8,11 +8,10 @@ attributes change.
 
 from __future__ import annotations
 
-from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field
 
 
 class SpanKind(StrEnum):
@@ -84,7 +83,7 @@ class SpanNode(BaseModel):
     parent_span_id: str | None = None
     name: str
     kind: SpanKind
-    start_time: datetime
+    start_time: AwareDatetime
     duration_ms: int
     status_code: str | None = None  # "OK" / "ERROR" / None
     status_message: str | None = None
@@ -98,7 +97,7 @@ class SpanNode(BaseModel):
 class TraceSummary(BaseModel):
     trace_id: str
     root_name: str
-    start_time: datetime
+    start_time: AwareDatetime
     duration_ms: int
     span_count: int
     org_id: str | None = None

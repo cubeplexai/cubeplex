@@ -25,6 +25,8 @@ def test_trace_summary_required_fields() -> None:
         model="deepseek-v4-flash",
     )
     assert summary.trace_id == "abc"
+    assert summary.start_time.tzinfo is not None
+    assert summary.has_error is False
 
 
 def test_span_kind_discriminator() -> None:
@@ -75,4 +77,4 @@ def test_trace_detail_carries_tree() -> None:
             children=[],
         ),
     )
-    assert detail.root.kind == "agent"
+    assert detail.root.kind == SpanKind.AGENT
