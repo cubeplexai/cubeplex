@@ -83,7 +83,7 @@ async def login(
 
 class UserProfileUpdate(BaseModel):
     language: Literal["en", "zh"] | None = None
-    display_name: str | None = Field(None, min_length=1, max_length=100)
+    display_name: str | None = Field(None, max_length=100)
 
 
 @router.get("/me")
@@ -154,7 +154,7 @@ async def patch_me(
     if body.language is not None:
         user.language = body.language
     if body.display_name is not None:
-        user.display_name = body.display_name
+        user.display_name = body.display_name or None
     session.add(user)
     await session.commit()
     await session.refresh(user)
@@ -291,13 +291,14 @@ async def delete_account(
     from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
     from cubebox.models.skill import OrgPreinstalledTombstone, OrgSkillInstall
     from cubebox.models.skill_registry import SkillRegistry
-    from cubebox.models.trigger import Trigger
+    from cubebox.models.trigger import Trigger, TriggerEvent
     from cubebox.models.user_event import UserEvent
     from cubebox.models.user_sandbox import UserSandbox
 
     # NULL out nullable user-FK columns so org resources survive account deletion.
     for null_model, null_col in [
         (MemoryItem, "updated_by_user_id"),
+        (MemoryItem, "created_by_user_id"),
         (Credential, "created_by_user_id"),
         (Provider, "created_by_user_id"),
         (SkillRegistry, "created_by_user_id"),
@@ -343,6 +344,15 @@ async def delete_account(
     await session.execute(
         sa_delete(Artifact).where(
             Artifact.conversation_id.in_(user_conv_ids)  # type: ignore[attr-defined]
+        )
+    )
+
+    # TriggerEvent has no user FK — delete via trigger parent.
+    trigger_tbl = Trigger.__table__  # type: ignore[attr-defined]
+    user_trigger_ids = select(trigger_tbl.c.id).where(trigger_tbl.c.run_as_user_id == user.id)
+    await session.execute(
+        sa_delete(TriggerEvent).where(
+            TriggerEvent.trigger_id.in_(user_trigger_ids)  # type: ignore[attr-defined]
         )
     )
 

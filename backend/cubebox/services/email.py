@@ -53,7 +53,12 @@ class EmailService:
     def __init__(self, backend: EmailBackend | None = None) -> None:
         if backend is None:
             kind = config.get("email.backend", "log")
-            backend = SmtpEmailBackend() if kind == "smtp" else LogEmailBackend()
+            if kind == "smtp":
+                backend = SmtpEmailBackend()
+            elif kind == "log":
+                backend = LogEmailBackend()
+            else:
+                raise ValueError(f"Unsupported email backend: {kind!r}")
         self._backend = backend
         self._env = Environment(
             loader=FileSystemLoader(str(_TEMPLATE_DIR)),

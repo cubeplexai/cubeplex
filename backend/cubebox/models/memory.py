@@ -71,7 +71,9 @@ class MemoryItem(CubeboxBase, table=True):
     source_artifact_id: str | None = Field(default=None, max_length=20)
     source_excerpt: str | None = Field(default=None, max_length=500)
 
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
     updated_by_user_id: str | None = Field(default=None, max_length=20)
 
     last_used_at: datetime | None = Field(
