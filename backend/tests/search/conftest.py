@@ -69,3 +69,56 @@ async def seeded_conversation(
             ],
         )
     return org_id, ws_id, user_id, conv_id
+
+
+@pytest_asyncio.fixture
+async def seed_conversations_with_content(
+    test_user_ctx: tuple[str, str, str],
+) -> tuple[str, str, str, list[tuple[str, str]]]:
+    """Seed three conversations: English keyword, Chinese keyword, unrelated.
+
+    Returns ``(org_id, workspace_id, user_id, [(conv_id, gist), ...])`` so
+    callers can drive embedding + assert which conversation they expect to
+    find for each search query.
+    """
+    org_id, ws_id, user_id = test_user_ctx
+    seeds: list[tuple[str, list[TextContent], str]] = [
+        (
+            "docling-en",
+            [TextContent(text="docling is a PDF parser for agent pipelines")],
+            "english docling",
+        ),
+        (
+            "docling-zh",
+            [TextContent(text="docling 是一款用于智能体的文档解析工具")],
+            "chinese 文档解析",
+        ),
+        (
+            "unrelated",
+            [TextContent(text="weather is sunny today, no parsing here")],
+            "unrelated",
+        ),
+    ]
+    out: list[tuple[str, str]] = []
+    for title, user_content, gist in seeds:
+        async with async_session_maker() as session:
+            c = Conversation(
+                org_id=org_id,
+                workspace_id=ws_id,
+                creator_user_id=user_id,
+                title=title,
+            )
+            session.add(c)
+            await session.commit()
+            await session.refresh(c)
+            conv_id = c.id
+        async with init_checkpointer() as cp:
+            await cp.append(
+                conv_id,
+                [
+                    UserMessage(content=user_content, timestamp=1.0),
+                    AssistantMessage(content=[TextContent(text="ack")], timestamp=2.0),
+                ],
+            )
+        out.append((conv_id, gist))
+    return org_id, ws_id, user_id, out
