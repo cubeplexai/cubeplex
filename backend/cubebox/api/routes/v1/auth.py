@@ -289,7 +289,7 @@ async def delete_account(
     from cubebox.models.provider import Provider
     from cubebox.models.sandbox_env import SandboxEnvVar
     from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-    from cubebox.models.skill import OrgPreinstalledTombstone, OrgSkillInstall
+    from cubebox.models.skill import OrgPreinstalledTombstone, OrgSkillInstall, SkillVersion
     from cubebox.models.skill_registry import SkillRegistry
     from cubebox.models.trigger import Trigger, TriggerEvent
     from cubebox.models.user_event import UserEvent
@@ -302,9 +302,12 @@ async def delete_account(
         (Credential, "created_by_user_id"),
         (Provider, "created_by_user_id"),
         (SkillRegistry, "created_by_user_id"),
+        (SkillVersion, "uploaded_by_user_id"),
         (MCPConnectorInstall, "created_by_user_id"),
         (MCPWorkspaceConnectorState, "updated_by_user_id"),
         (MCPCredentialGrant, "created_by_user_id"),
+        (MCPCredentialGrant, "user_id"),
+        (SandboxEnvVar, "created_by_user_id"),
     ]:
         await session.execute(
             sa_update(null_model)

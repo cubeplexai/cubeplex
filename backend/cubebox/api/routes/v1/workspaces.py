@@ -376,11 +376,18 @@ async def delete_workspace(
     from cubebox.models.sandbox_env import SandboxEnvVar
     from cubebox.models.scheduled_task import ScheduledTaskRun
     from cubebox.models.trigger import Trigger, TriggerEvent
+    from cubebox.models.user_event import UserEvent
     from cubebox.models.user_sandbox import UserSandbox
 
+    ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
-    user_workspaces = await mem_repo.list_user_workspaces(ctx.user.id)
-    if len(user_workspaces) <= 1:
+    memberships = await mem_repo.list_user_workspaces(ctx.user.id)
+    active_others = 0
+    for m in memberships:
+        other = await ws_repo.get(m.workspace_id)
+        if other is not None and other.archived_at is None and other.id != workspace_id:
+            active_others += 1
+    if active_others == 0:
         raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
 
     # LlmBillingEvent has no workspace_id — delete via BillingEvent parent.
@@ -411,6 +418,7 @@ async def delete_workspace(
         Artifact,
         Attachment,
         BillingEvent,
+        UserEvent,
         Conversation,
         InviteToken,
         AgentConfig,
