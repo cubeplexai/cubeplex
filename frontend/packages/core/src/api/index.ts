@@ -25,3 +25,4 @@ export {
 export * from './skills'
 export * from './adminSkills'
 export { streamUserEvents } from './userEventStream'
+export * from './shares'
