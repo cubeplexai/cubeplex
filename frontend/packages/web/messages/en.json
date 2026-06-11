@@ -1469,5 +1469,17 @@
     "passwordChangeError": "Failed to change password",
     "passwordChanged": "Password updated",
     "updatePassword": "Update password"
+  },
+  "verifyEmail": {
+    "verifying": "Verifying your email...",
+    "success": "Email verified!",
+    "goToApp": "Go to app",
+    "error": "Invalid or expired verification link.",
+    "resend": "Resend verification email"
+  },
+  "verificationBanner": {
+    "message": "Please verify your email address.",
+    "resend": "Resend verification email",
+    "sent": "Verification email sent."
   }
 }

@@ -1469,5 +1469,17 @@
     "passwordChangeError": "修改密码失败",
     "passwordChanged": "密码已更新",
     "updatePassword": "更新密码"
+  },
+  "verifyEmail": {
+    "verifying": "正在验证邮箱...",
+    "success": "邮箱验证成功！",
+    "goToApp": "进入应用",
+    "error": "验证链接无效或已过期。",
+    "resend": "重新发送验证邮件"
+  },
+  "verificationBanner": {
+    "message": "请验证您的邮箱地址。",
+    "resend": "重新发送验证邮件",
+    "sent": "验证邮件已发送。"
   }
 }

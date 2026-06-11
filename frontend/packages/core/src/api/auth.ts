@@ -16,7 +16,7 @@ export interface MeResult {
   email: string
   display_name: string | null
   language: string
-  is_verified?: boolean
+  is_verified: boolean
   needs_org_setup?: boolean
   org_memberships?: OrgMembership[]
 }
@@ -67,4 +67,14 @@ export async function updateProfile(
   const res = await client.patch('/api/v1/auth/me', patch)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MeResult
+}
+
+export async function verifyEmail(client: ApiClient, token: string): Promise<void> {
+  const res = await client.post('/api/v1/auth/verify', { token })
+  if (!res.ok) throw await toApiError(res)
+}
+
+export async function requestVerifyToken(client: ApiClient, email: string): Promise<void> {
+  const res = await client.post('/api/v1/auth/request-verify-token', { email })
+  if (!res.ok) throw await toApiError(res)
 }
