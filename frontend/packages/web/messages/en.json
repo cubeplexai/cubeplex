@@ -45,7 +45,14 @@
     "settings": "Settings",
     "triggers": "Triggers",
     "sandboxEnv": "Sandbox env",
-    "noRecentChats": "No conversations yet"
+    "noRecentChats": "No conversations yet",
+    "search": {
+      "open": "Search conversations",
+      "placeholder": "Search conversations…",
+      "loading": "Searching…",
+      "noMatches": "No matches",
+      "unavailable": "Search unavailable"
+    }
   },
   "time": {
     "justNow": "Just now",

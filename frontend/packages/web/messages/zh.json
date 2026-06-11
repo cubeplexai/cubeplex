@@ -45,7 +45,14 @@
     "settings": "设置",
     "triggers": "触发器",
     "sandboxEnv": "沙盒环境变量",
-    "noRecentChats": "暂无会话"
+    "noRecentChats": "暂无会话",
+    "search": {
+      "open": "搜索会话",
+      "placeholder": "搜索会话…",
+      "loading": "搜索中…",
+      "noMatches": "没有匹配的会话",
+      "unavailable": "搜索暂不可用"
+    }
   },
   "time": {
     "justNow": "刚刚",
