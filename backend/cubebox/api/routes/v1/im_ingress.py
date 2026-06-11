@@ -85,6 +85,19 @@ async def feishu_events(
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
     secrets = json.loads(secret_json)
 
+    # Early-out for accounts whose bot identity wasn't hydrated. Without
+    # bot_open_id we cannot run the bot-echo guard, so the bot's own
+    # outbound replies could be re-ingested as inbound and loop the agent
+    # on itself. Drop BEFORE the verification-token / signature work so a
+    # permanently-broken account doesn't burn HMAC cycles per inbound event.
+    bot_open_id = str(secrets.get("bot_open_id") or "") or None
+    if bot_open_id is None:
+        logger.warning(
+            "[Feishu ingress] dropping event — bot_open_id not hydrated on account {}",
+            account.id,
+        )
+        return Response(status_code=status.HTTP_200_OK)
+
     # Verification token first — same call shape Feishu used in both v1 and v2.
     try:
         verify_verification_token(
@@ -125,20 +138,8 @@ async def feishu_events(
             logger.warning("[Feishu ingress] signature rejected: {}", exc)
             return Response(status_code=status.HTTP_401_UNAUTHORIZED)
 
-    # Parse + ingest the message event. bot_open_id was hydrated at
-    # connect_feishu time (Task 15) and lives on the credential.
-    bot_open_id = str(secrets.get("bot_open_id") or "") or None
-    if bot_open_id is None:
-        # Without bot_open_id we cannot run the bot-echo guard, so the
-        # bot's own outbound replies could be re-ingested as inbound and
-        # loop the agent on itself. The long-connection startup refuses
-        # to bind in this state — webhook delivery must do the same.
-        # Operator needs to re-run connect_feishu to hydrate.
-        logger.warning(
-            "[Feishu ingress] dropping event — bot_open_id not hydrated on account {}",
-            account.id,
-        )
-        return Response(status_code=status.HTTP_200_OK)
+    # Parse + ingest the message event. ``bot_open_id`` was already
+    # checked at the top of this handler (early-out path).
     connector = FeishuConnector(bot_open_id=bot_open_id)
     event = connector.parse_inbound(payload)
     if event is None:
