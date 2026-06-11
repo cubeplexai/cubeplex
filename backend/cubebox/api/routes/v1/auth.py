@@ -7,7 +7,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.authentication import Strategy
 from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists, UserNotExists
 from fastapi_users.schemas import BaseUser, BaseUserCreate
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.middleware.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limiter
@@ -24,7 +24,7 @@ class UserRead(BaseUser[str]):
 
 
 class UserCreate(BaseUserCreate):
-    pass
+    display_name: str | None = Field(None, min_length=1, max_length=100)
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -37,6 +37,7 @@ async def register(
     body: Annotated[UserCreate, Body()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
     locale: Annotated[str, Depends(get_locale)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, str]:
     _t = get_translator(locale)
     try:
@@ -51,6 +52,11 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_t("register_invalid_password"),
         ) from None
+    if body.display_name is not None:
+        await session.refresh(user)
+        user.display_name = body.display_name
+        session.add(user)
+        await session.commit()
     default_ws = getattr(user, "_default_workspace_id", None)
     return {
         "id": user.id,
@@ -81,8 +87,9 @@ async def login(
     return await auth_backend.login(strategy, user)
 
 
-class UserLanguageUpdate(BaseModel):
-    language: Literal["en", "zh"]
+class UserProfileUpdate(BaseModel):
+    language: Literal["en", "zh"] | None = None
+    display_name: str | None = Field(None, min_length=1, max_length=100)
 
 
 @router.get("/me")
@@ -127,6 +134,7 @@ async def me(
     return {
         "id": user.id,
         "email": user.email,
+        "display_name": user.display_name,
         "language": user.language,
         "needs_org_setup": needs_setup,
         "org_memberships": org_memberships,
@@ -136,14 +144,22 @@ async def me(
 @router.patch("/me")
 async def patch_me(
     user: Annotated[User, Depends(current_active_user)],
-    body: Annotated[UserLanguageUpdate, Body()],
+    body: Annotated[UserProfileUpdate, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, object]:
     from sqlalchemy import select
 
     from cubebox.models import OrganizationMembership
 
-    user.language = body.language
+    if body.language is None and body.display_name is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="at least one field required",
+        )
+    if body.language is not None:
+        user.language = body.language
+    if body.display_name is not None:
+        user.display_name = body.display_name
     session.add(user)
     await session.commit()
     await session.refresh(user)
@@ -162,6 +178,7 @@ async def patch_me(
     return {
         "id": user.id,
         "email": user.email,
+        "display_name": user.display_name,
         "language": user.language,
         "needs_org_setup": False,
         "org_memberships": org_memberships,
