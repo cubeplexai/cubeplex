@@ -33,9 +33,12 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
         <div className="size-6 rounded bg-gradient-to-br from-card to-raised border border-border-strong grid place-items-center font-mono text-2xs text-muted-foreground">
           cx
         </div>
-        <span className="text-2xs uppercase tracking-wider font-medium text-faint">
+        <h1
+          aria-label={t('title')}
+          className="text-2xs uppercase tracking-wider font-medium text-faint m-0"
+        >
           {t('title')}
-        </span>
+        </h1>
         {orgName && (
           <>
             <span className="text-faint">/</span>
