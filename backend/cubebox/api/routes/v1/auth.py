@@ -228,6 +228,116 @@ async def change_password(
     return {"ok": True}
 
 
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
+@router.post("/delete-account")
+async def delete_account(
+    body: Annotated[DeleteAccountRequest, Body()],
+    user: Annotated[User, Depends(current_active_user)],
+    user_manager: Annotated[UserManager, Depends(get_user_manager)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+) -> Response:
+    verified, _ = user_manager.password_helper.verify_and_update(
+        body.password, user.hashed_password
+    )
+    if not verified:
+        raise HTTPException(status_code=400, detail="incorrect_password")
+
+    from sqlalchemy import select
+
+    from cubebox.models import OrganizationMembership, OrgRole
+
+    owner_rows = (
+        (
+            await session.execute(
+                select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+                    OrganizationMembership.role == OrgRole.OWNER.value,  # type: ignore[arg-type]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if owner_rows:
+        raise HTTPException(status_code=400, detail="transfer_ownership_first")
+
+    from cubebox.plugins.audit import audit_log
+
+    await audit_log(
+        action="auth.account_deleted",
+        user_id=user.id,
+        ip=request.client.host if request.client else None,
+    )
+
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import update as sa_update
+
+    from cubebox.models import Membership
+    from cubebox.models import User as UserModel
+    from cubebox.models.attachment import Attachment
+    from cubebox.models.billing import BillingEvent
+    from cubebox.models.conversation import Conversation
+    from cubebox.models.egress_ref import EgressRef
+    from cubebox.models.invite_token import InviteToken
+    from cubebox.models.memory import MemoryItem
+    from cubebox.models.scheduled_task import ScheduledTask
+    from cubebox.models.skill import OrgPreinstalledTombstone, OrgSkillInstall
+    from cubebox.models.trigger import Trigger
+    from cubebox.models.user_event import UserEvent
+    from cubebox.models.user_sandbox import UserSandbox
+
+    # NULL out the nullable updated_by_user_id on MemoryItem before deleting the user.
+    # Workspace/org-scoped memories survive; personal (owner_user_id) ones are deleted below.
+    await session.execute(
+        sa_update(MemoryItem)
+        .where(MemoryItem.updated_by_user_id == user.id)  # type: ignore[arg-type]
+        .values(updated_by_user_id=None)
+    )
+    # Invite tokens created by the user are no longer redeemable — delete them.
+    await session.execute(
+        sa_delete(InviteToken).where(InviteToken.created_by == user.id)  # type: ignore[arg-type]
+    )
+
+    # Delete user-owned rows (deepest FK dependents first)
+    for model, col in [
+        (EgressRef, EgressRef.user_id),
+        (MemoryItem, MemoryItem.owner_user_id),
+        (UserSandbox, UserSandbox.user_id),
+        (Attachment, Attachment.uploader_user_id),
+        (BillingEvent, BillingEvent.user_id),
+        (UserEvent, UserEvent.user_id),
+        (ScheduledTask, ScheduledTask.owner_user_id),
+        (Trigger, Trigger.run_as_user_id),
+        (OrgPreinstalledTombstone, OrgPreinstalledTombstone.hidden_by_user_id),
+        (OrgSkillInstall, OrgSkillInstall.installed_by_user_id),
+        (Conversation, Conversation.creator_user_id),
+        (Membership, Membership.user_id),
+        (OrganizationMembership, OrganizationMembership.user_id),
+    ]:
+        await session.execute(
+            sa_delete(model).where(col == user.id)  # type: ignore[arg-type]
+        )
+
+    await session.execute(
+        sa_delete(UserModel).where(UserModel.id == user.id)  # type: ignore[arg-type]
+    )
+    await session.commit()
+
+    from cubebox.config import config
+
+    cookie_name = config.get("auth.cookie_name", "cubebox_auth")
+    response = Response(
+        content='{"deleted": true}',
+        media_type="application/json",
+    )
+    response.delete_cookie(cookie_name)
+    return response
+
+
 # Include fastapi-users built-in auth routes for /logout. Must stay BELOW our
 # custom /login above — FastAPI matches the first-registered route, so our
 # rate-limited /login takes precedence and fastapi-users' /login is shadowed.
