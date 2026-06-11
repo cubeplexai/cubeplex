@@ -143,8 +143,8 @@ async def _handle_find_impl(
         "hint": (
             "To use an 'enabled' candidate now, call load_skill(canonical_name). "
             "To install an 'in_catalog' or 'available' candidate: present it to the "
-            "user with skills(operation='preview', candidate_id=...) so they can see "
-            "what it does, then call skills(operation='install', candidate_id=...) "
+            "user with platform_skills_preview(candidate_id=...) so they can see "
+            "what it does, then call platform_skills_install(candidate_id=...) "
             "only when the user explicitly asks to install. Never install silently."
         ),
     }
