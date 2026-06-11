@@ -105,7 +105,21 @@
     },
     "empty": "没有符合条件的 Trace。",
     "disabled": "当前部署未配置 Trace 查看器。",
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "sections": {
+      "model": "模型",
+      "tokens": "Token 用量",
+      "messages": "消息",
+      "system": "系统指令",
+      "output": "输出消息",
+      "tools": "工具定义",
+      "rawRequest": "原始请求",
+      "rawResponse": "原始响应",
+      "performance": "性能",
+      "toolInfo": "工具",
+      "arguments": "参数",
+      "result": "结果"
+    }
   },
   "chat": {
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。",
