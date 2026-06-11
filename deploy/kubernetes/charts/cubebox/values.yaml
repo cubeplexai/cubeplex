@@ -134,7 +134,7 @@ redis:
 
 rustfs:
   enabled: true
-  image: rustfs/rustfs:latest
+  image: rustfs/rustfs:1.0.0-beta.4
   mcImage: minio/mc:RELEASE.2025-04-08T15-39-49Z
   auth:
     accessKey: cubebox

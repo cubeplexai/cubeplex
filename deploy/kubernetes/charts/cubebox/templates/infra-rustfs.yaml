@@ -33,6 +33,9 @@ spec:
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/component: rustfs
 ---
+# NOTE: upgrading from the previous minio-based chart renames the PVC from
+# data-<release>-minio-0 to data-<release>-rustfs-0. Existing object data
+# must be migrated manually before upgrading if preservation is needed.
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -54,6 +57,10 @@ spec:
         {{- include "cubebox.labels" . | nindent 8 }}
         app.kubernetes.io/component: rustfs
     spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
       containers:
         - name: rustfs
           image: {{ .Values.rustfs.image }}
