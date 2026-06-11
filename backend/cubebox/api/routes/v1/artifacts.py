@@ -188,6 +188,48 @@ async def download_artifact(
 
 OFFICE_EXTENSIONS = frozenset({".docx", ".xlsx", ".pptx"})
 OTK_TTL_SECONDS = 300
+SHARE_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 days
+
+
+@router.post("/{artifact_id}/share-token")
+async def create_share_token(
+    conversation_id: str,
+    artifact_id: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rh: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, str]:
+    """Issue a public, time-limited share URL for any artifact_type.
+
+    Used by the IM artifact dispatcher (Task 11 of the IM-connectors plan)
+    and any future "share this artifact" flow. The same Redis nonce + TTL
+    pattern as ``create_preview_token`` above, but generalized to all
+    artifact types — the dedicated Office-Viewer flow stays separate.
+    """
+    from cubebox.services.artifact_share import mint_share_token
+
+    await _require_conversation(session, ctx, conversation_id)
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    artifact = await repo.get_by_id(artifact_id)
+    if not artifact or artifact.conversation_id != conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_id} not found",
+        )
+    nonce = await mint_share_token(
+        redis=rh.client,
+        key_prefix=rh.key_prefix,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        conversation_id=conversation_id,
+        artifact_id=artifact_id,
+        version=artifact.version,
+        ttl_seconds=SHARE_TTL_SECONDS,
+    )
+    public_url = config.get("api.public_url", "")
+    base = str(public_url).rstrip("/") if public_url else str(request.base_url).rstrip("/")
+    return {"share_url": f"{base}/api/v1/public/artifacts/share/{nonce}"}
 
 
 @router.post("/{artifact_id}/preview-token")
