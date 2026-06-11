@@ -85,3 +85,42 @@ async def test_tag_values_passes_through() -> None:
         org_id="org-1",
     )
     assert values == ["ws-a", "ws-b"]
+
+
+@respx.mock
+async def test_search_handles_null_traces() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search").mock(
+        return_value=httpx.Response(200, json={"traces": None})
+    )
+    result = await client.search(org_id="org-1")
+    assert result == []
+
+
+@respx.mock
+async def test_tag_values_handles_null_values() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search/tag/cubepi.metadata.workspace_id/values").mock(
+        return_value=httpx.Response(200, json={"tagValues": None})
+    )
+    result = await client.tag_values(tag="cubepi.metadata.workspace_id", org_id="org-1")
+    assert result == []
+
+
+@respx.mock
+async def test_search_passes_zero_duration_filter() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    route = respx.get("http://tempo.local/api/search").mock(
+        return_value=httpx.Response(200, json={"traces": []})
+    )
+    await client.search(org_id="org-1", min_duration_ms=0)
+    q = route.calls.last.request.url.params["q"]
+    assert "trace:duration > 0ms" in q
+
+
+async def test_get_trace_rejects_invalid_trace_id() -> None:
+    from cubebox.services.tempo_client import TempoQueryValueError
+
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    with pytest.raises(TempoQueryValueError):
+        await client.get_trace("abc\ninjected")
