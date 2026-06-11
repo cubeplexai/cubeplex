@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
+import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
 import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
 import {
   Box,
@@ -358,6 +359,7 @@ export function Sidebar(): React.ReactElement {
             <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
           </div>
           <span className="text-sm font-semibold tracking-tight">cubebox</span>
+          <ConversationSearch wsId={currentWsId} />
         </div>
         <Link href={newChatHref}>
           <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-1.5">

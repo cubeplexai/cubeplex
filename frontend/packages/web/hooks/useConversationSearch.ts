@@ -27,6 +27,7 @@ export function useConversationSearch(query: string, wsId: string | null): Searc
 
   useEffect(() => {
     if (!wsId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState({ loading: false, error: null, results: [] })
       return
     }
