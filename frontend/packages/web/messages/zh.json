@@ -870,7 +870,34 @@
       "cancel": "取消"
     },
     "empty": "暂无成员。",
-    "accessDenied": "仅工作区管理员可管理成员。"
+    "accessDenied": "仅工作区管理员可管理成员。",
+    "invite": {
+      "sectionTitle": "邀请链接",
+      "createLink": "创建邀请链接",
+      "role": "角色",
+      "createdBy": "创建者",
+      "expires": "过期时间",
+      "status": "状态",
+      "title": "创建邀请链接",
+      "roleLabel": "被邀请用户的角色",
+      "admin": "管理员",
+      "member": "成员",
+      "cancel": "取消",
+      "create": "创建",
+      "creating": "创建中…",
+      "createError": "创建邀请失败",
+      "linkReady": "将此链接分享给您想邀请的人：",
+      "done": "完成"
+    }
+  },
+  "invite": {
+    "accepting": "正在接受邀请…",
+    "invalidLink": "无效的邀请链接。",
+    "expiredOrUsed": "此邀请链接已过期或已被使用。",
+    "goHome": "返回首页",
+    "joined": "加入成功！",
+    "joinedDescription": "您已成功加入工作区\"{workspace}\"。",
+    "openWorkspace": "打开工作区"
   },
   "panel": {
     "header": {
