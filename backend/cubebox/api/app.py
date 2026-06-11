@@ -359,6 +359,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # route handlers (search endpoint) can reuse the provider's connection
     # pool, and the worker keeps draining embedding_jobs in the background.
     from cubebox.config import config as _search_cfg
+    from cubebox.models.conversation_chunk import VECTOR_DIM
     from cubebox.search.embedding import EmbeddingProvider
     from cubebox.search.worker import EmbeddingWorker
 
@@ -368,13 +369,25 @@ async def lifespan(_app: FastAPI):  # type: ignore
     _app.state.embedding_worker_task = None
     if _search_cfg.get("search.enabled", True):
         embedding_provider = EmbeddingProvider.from_config()
-        _app.state.embedding_provider = embedding_provider
-        embedding_worker = EmbeddingWorker(embedding_provider)
-        embedding_worker_task = asyncio.create_task(embedding_worker.run(), name="embedding-worker")
-        _app.state.embedding_worker = embedding_worker
-        # Expose the task so tests can cancel it cleanly before driving the
-        # worker themselves with a deterministic provider.
-        _app.state.embedding_worker_task = embedding_worker_task
+        if embedding_provider.dimensions != VECTOR_DIM:
+            # Schema is frozen at 1024; config drift here would silently break
+            # inserts. Refuse to start the worker and surface a critical log.
+            logger.critical(
+                "search.embedding.dimensions={} but schema VECTOR_DIM={}; refusing to start worker",
+                embedding_provider.dimensions,
+                VECTOR_DIM,
+            )
+            await embedding_provider.aclose()
+        else:
+            _app.state.embedding_provider = embedding_provider
+            embedding_worker = EmbeddingWorker(embedding_provider)
+            embedding_worker_task = asyncio.create_task(
+                embedding_worker.run(), name="embedding-worker"
+            )
+            _app.state.embedding_worker = embedding_worker
+            # Expose the task so tests can cancel it cleanly before driving the
+            # worker themselves with a deterministic provider.
+            _app.state.embedding_worker_task = embedding_worker_task
 
     yield
 
