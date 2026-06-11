@@ -51,6 +51,35 @@ def test_oneshot_collapses_to_single_chat(oneshot_json: dict) -> None:
     assert any(n.kind == SpanKind.CHAT for n in leaves)
 
 
+def test_parser_rejects_self_cycle() -> None:
+    """A span whose parentSpanId == spanId must not be appended as its own child."""
+    payload = {
+        "batches": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "traceId": "tabc",
+                                "spanId": "s1",
+                                "parentSpanId": "s1",  # self-cycle
+                                "name": "invoke_agent",
+                                "startTimeUnixNano": "1700000000000000000",
+                                "endTimeUnixNano": "1700000000100000000",
+                                "attributes": [],
+                                "status": {},
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+    detail = parse_trace_detail(payload)
+    # Must not loop; tree depth from root must be exactly 1 node.
+    assert detail.root.children == []
+
+
 def _count(node) -> int:
     return 1 + sum(_count(c) for c in node.children)
 
