@@ -517,6 +517,7 @@ def create_app(
         admin_traces,
         artifacts_router,
         attachments_router,
+        conversation_search_router,
         conversations_router,
         mcp_oauth,
         memory_router,
@@ -540,6 +541,10 @@ def create_app(
 
     app.include_router(system.router, prefix="/api/v1")
     app.include_router(workspaces_router, prefix="/api/v1")
+    # Search router goes first: it owns `/conversations/search`, while the
+    # conversations router declares `/conversations/{conversation_id}` which
+    # would otherwise swallow the literal `search` segment as an ID and 404.
+    app.include_router(conversation_search_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
