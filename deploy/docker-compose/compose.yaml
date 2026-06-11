@@ -1,0 +1,162 @@
+# cubebox single-host docker-compose deployment.
+#
+# Variables come from .env (operator copies from .env.example). Images
+# are pulled from the same registry the kubernetes mode uses; build them
+# once with deploy/kubernetes/scripts/build-and-push.sh.
+#
+# Quick start:
+#   cp .env.example .env
+#   cp config/config.production.local.yaml.example config/config.production.local.yaml
+#   cp config/config.production.secrets.yaml.example config/config.production.secrets.yaml
+#   $EDITOR .env config/config.production.{local,secrets}.yaml
+#   docker compose up -d
+#
+# All services share the default network. Backend is reachable as
+# `backend:8000` from frontend; frontend serves the user on host port
+# ${FRONTEND_PORT:-3000} and proxies /api/* to backend internally.
+
+name: cubebox
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart-policy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cubebox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-cubebox}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cubebox} -d ${POSTGRES_DB:-cubebox}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    <<: *restart-policy
+    command: >
+      redis-server
+      --requirepass "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}"
+      --appendonly yes
+      --dir /data
+    volumes:
+      - redis-data:/data
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # S3-compatible object store. We use rustfs (smaller / pure-Rust) over
+  # minio for the compose mode. config.production.secrets.yaml points
+  # the backend at this endpoint.
+  rustfs:
+    image: ${RUSTFS_IMAGE:-rustfs/rustfs:latest}
+    <<: *restart-policy
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-cubebox}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_VOLUMES: /data
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      # rustfs exposes a similar health probe to minio; if a future image
+      # drops it, replace with a TCP-only probe.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/minio/health/ready || wget -qO- http://localhost:9000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # One-shot bucket create. mc speaks S3 so it works against rustfs too.
+  # Idempotent — `mc mb --ignore-existing` is a no-op when the bucket exists.
+  bucket-init:
+    image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-cubebox}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      BUCKET: ${OBJECTSTORE_BUCKET:-cubebox}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        until mc alias set local http://rustfs:9000 "$$RUSTFS_ACCESS_KEY" "$$RUSTFS_SECRET_KEY"; do
+          echo "waiting for rustfs..."; sleep 2
+        done
+        mc mb --ignore-existing "local/$$BUCKET"
+        echo "bucket $$BUCKET ready"
+    restart: "no"
+
+  # Alembic migrate. Runs to completion before backend starts.
+  backend-migrate:
+    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubebox-backend:${BACKEND_TAG:?set BACKEND_TAG in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENV_FOR_DYNACONF: production
+    volumes:
+      - ./config/config.production.local.yaml:/app/config.production.local.yaml:ro
+      - ./config/config.production.secrets.yaml:/app/config.production.secrets.yaml:ro
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+
+  backend:
+    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubebox-backend:${BACKEND_TAG}
+    <<: *restart-policy
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+    environment:
+      ENV_FOR_DYNACONF: production
+    volumes:
+      - ./config/config.production.local.yaml:/app/config.production.local.yaml:ro
+      - ./config/config.production.secrets.yaml:/app/config.production.secrets.yaml:ro
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health/ready', timeout=2).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  frontend:
+    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubebox-frontend:${FRONTEND_TAG:?set FRONTEND_TAG in .env}
+    <<: *restart-policy
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # Frontend's Next.js server proxies /api/* server-side to this URL.
+      CUBEBOX_API_URL: "http://backend:8000"
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+volumes:
+  postgres-data:
+  redis-data:
+  rustfs-data:
