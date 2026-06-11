@@ -22,7 +22,7 @@ class EmbeddingJob(CubeboxBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = PREFIX_EMBEDDING_JOB
     __tablename__ = "embedding_jobs"
     __table_args__ = (
-        Index("ix_ejob_pending", "state", "created_at"),
+        Index("ix_ejob_pending", "state", "scheduled_at"),
         Index("ix_ejob_conversation", "conversation_id"),
     )
 
