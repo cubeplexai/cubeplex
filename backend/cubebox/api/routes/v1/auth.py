@@ -272,32 +272,81 @@ async def delete_account(
 
     from cubebox.models import Membership
     from cubebox.models import User as UserModel
+    from cubebox.models.artifact import Artifact
+    from cubebox.models.artifact_version import ArtifactVersion
     from cubebox.models.attachment import Attachment
-    from cubebox.models.billing import BillingEvent
+    from cubebox.models.billing import BillingEvent, LlmBillingEvent
     from cubebox.models.conversation import Conversation
+    from cubebox.models.credential import Credential
     from cubebox.models.egress_ref import EgressRef
     from cubebox.models.invite_token import InviteToken
+    from cubebox.models.mcp import (
+        MCPConnectorInstall,
+        MCPCredentialGrant,
+        MCPWorkspaceConnectorState,
+    )
     from cubebox.models.memory import MemoryItem
+    from cubebox.models.provider import Provider
     from cubebox.models.sandbox_env import SandboxEnvVar
-    from cubebox.models.scheduled_task import ScheduledTask
+    from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
     from cubebox.models.skill import OrgPreinstalledTombstone, OrgSkillInstall
+    from cubebox.models.skill_registry import SkillRegistry
     from cubebox.models.trigger import Trigger
     from cubebox.models.user_event import UserEvent
     from cubebox.models.user_sandbox import UserSandbox
 
-    # NULL out the nullable updated_by_user_id on MemoryItem before deleting the user.
-    # Workspace/org-scoped memories survive; personal (owner_user_id) ones are deleted below.
-    await session.execute(
-        sa_update(MemoryItem)
-        .where(MemoryItem.updated_by_user_id == user.id)  # type: ignore[arg-type]
-        .values(updated_by_user_id=None)
-    )
+    # NULL out nullable user-FK columns so org resources survive account deletion.
+    for null_model, null_col in [
+        (MemoryItem, "updated_by_user_id"),
+        (Credential, "created_by_user_id"),
+        (Provider, "created_by_user_id"),
+        (SkillRegistry, "created_by_user_id"),
+        (MCPConnectorInstall, "created_by_user_id"),
+        (MCPWorkspaceConnectorState, "updated_by_user_id"),
+        (MCPCredentialGrant, "created_by_user_id"),
+    ]:
+        await session.execute(
+            sa_update(null_model)
+            .where(getattr(null_model, null_col) == user.id)
+            .values(**{null_col: None})
+        )
+
     # Invite tokens created by the user are no longer redeemable — delete them.
     await session.execute(
         sa_delete(InviteToken).where(InviteToken.created_by == user.id)  # type: ignore[arg-type]
     )
 
-    # Delete user-owned rows (deepest FK dependents first)
+    # Subquery deletes for child tables that lack a direct user FK.
+    billing_tbl = BillingEvent.__table__  # type: ignore[attr-defined]
+    user_billing_ids = select(billing_tbl.c.id).where(billing_tbl.c.user_id == user.id)
+    await session.execute(
+        sa_delete(LlmBillingEvent).where(
+            LlmBillingEvent.billing_event_id.in_(user_billing_ids)  # type: ignore[attr-defined]
+        )
+    )
+    task_tbl = ScheduledTask.__table__  # type: ignore[attr-defined]
+    user_task_ids = select(task_tbl.c.id).where(task_tbl.c.owner_user_id == user.id)
+    await session.execute(
+        sa_delete(ScheduledTaskRun).where(
+            ScheduledTaskRun.scheduled_task_id.in_(user_task_ids)  # type: ignore[attr-defined]
+        )
+    )
+    conv_tbl = Conversation.__table__  # type: ignore[attr-defined]
+    user_conv_ids = select(conv_tbl.c.id).where(conv_tbl.c.creator_user_id == user.id)
+    art_tbl = Artifact.__table__  # type: ignore[attr-defined]
+    user_artifact_ids = select(art_tbl.c.id).where(art_tbl.c.conversation_id.in_(user_conv_ids))
+    await session.execute(
+        sa_delete(ArtifactVersion).where(
+            ArtifactVersion.artifact_id.in_(user_artifact_ids)  # type: ignore[attr-defined]
+        )
+    )
+    await session.execute(
+        sa_delete(Artifact).where(
+            Artifact.conversation_id.in_(user_conv_ids)  # type: ignore[attr-defined]
+        )
+    )
+
+    # Delete user-owned rows (deepest FK dependents first).
     for model, col in [
         (EgressRef, EgressRef.user_id),
         (MemoryItem, MemoryItem.owner_user_id),

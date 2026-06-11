@@ -24,4 +24,6 @@ class SkillRegistry(CubeboxBase, table=True):
     repo: str | None = Field(default=None, max_length=256)
     trust_tier: str = Field(max_length=16, default="untrusted")
     enabled: bool = Field(default=True)
-    created_by_user_id: str = Field(foreign_key="users.id", max_length=20)
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
