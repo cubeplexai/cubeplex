@@ -389,3 +389,27 @@ default:
       # Leave null to disable the admin trace UI in this environment.
       query_endpoint: null
       timeout_seconds: 10
+
+  # Conversation search (hybrid lexical + vector). See
+  # docs/dev/specs/2026-06-11-conversation-search-design.md.
+  search:
+    enabled: true
+    lexical:
+      backend: "pgroonga"          # | "pg_bigm"
+    embedding:
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      api_key_env: "DASHSCOPE_API_KEY"
+      model: "qwen3-embedding-0.6b"
+      dimensions: 1024
+      batch_size: 32
+      timeout_seconds: 30
+    chunker:
+      target_tokens: 600
+      overlap_tokens: 100
+    worker:
+      poll_interval_seconds: 2
+      max_attempts: 5
+      backoff_seconds: [60, 300, 1500, 7200, 36000]
+    rrf:
+      k: 60
+      prefetch_per_leg: 20
