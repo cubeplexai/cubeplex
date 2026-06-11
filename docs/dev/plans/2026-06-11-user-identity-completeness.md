@@ -386,34 +386,19 @@ class UserCreate(BaseUserCreate):
     display_name: str | None = Field(None, min_length=1, max_length=100)
 ```
 
-In the `register()` function, after `user = await user_manager.create(body, safe=True, request=request)`, add:
+Add `session: Annotated[AsyncSession, Depends(get_session)],` to the `register()` function signature.
+
+After `user = await user_manager.create(body, safe=True, request=request)`, add:
 
 ```python
     if body.display_name is not None:
-        session = request.state.session if hasattr(request.state, "session") else None
-        if session is None:
-            from cubebox.db import get_session as _gs
-            async for _s in _gs():
-                session = _s
-                break
-        if session is not None:
-            user.display_name = body.display_name
-            session.add(user)
-            await session.commit()
-```
-
-Actually, simpler approach — add `session` as a dependency to `register()` and set display_name:
-
-Add `session: Annotated[AsyncSession, Depends(get_session)],` to the register function signature.
-
-After `user = await user_manager.create(...)`, add:
-
-```python
-    if body.display_name is not None:
+        await session.refresh(user)
         user.display_name = body.display_name
         session.add(user)
         await session.commit()
 ```
+
+Note: `session.refresh(user)` re-attaches the user object to the current session after `user_manager.create()` committed its own transaction.
 
 - [ ] **Step 6: Add display_name to member list responses**
 
@@ -1276,7 +1261,42 @@ async def revoke_invite(
     await inv_repo.delete(token)
 ```
 
-- [ ] **Step 4: Extend accept_invite response**
+- [ ] **Step 4: Extend invite creation to support email notification (F10)**
+
+In `backend/cubebox/api/routes/v1/workspaces.py`, find the existing `InviteCreate` model (or add one) and add an optional `email` field:
+
+```python
+class InviteCreate(BaseModel):
+    role: Literal["admin", "member"]
+    email: str | None = None
+```
+
+In the `create_invite` function, after issuing the token, add:
+
+```python
+    email_sent = False
+    if body.email is not None:
+        from cubebox.services.email import get_email_service
+
+        base_url = config.get("app.base_url", "http://localhost:3000")
+        invite_url = f"{base_url}/invite/accept?token={tok.token}"
+        ws = await WorkspaceRepository(session).get(workspace_id)
+        ws_name = ws.name if ws else workspace_id
+        try:
+            await get_email_service().send(
+                to=body.email,
+                subject=f"You're invited to {ws_name} on cubebox",
+                template="workspace_invite",
+                context={"invite_url": invite_url, "workspace_name": ws_name},
+            )
+            email_sent = True
+        except Exception:
+            logger.warning("Failed to send invite email to {}", body.email)
+```
+
+Include `"email_sent": email_sent` in the response dict.
+
+- [ ] **Step 5: Extend accept_invite response**
 
 In the `accept_invite` function, after consuming the token and granting membership, look up the workspace and return additional fields:
 
@@ -1611,6 +1631,13 @@ function inviteStatus(invite: InviteToken): 'pending' | 'used' | 'expired' {
   return 'pending'
 }
 
+function statusBadge(s: 'pending' | 'used' | 'expired') {
+  const cls = s === 'pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+    : s === 'used' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+    : 'bg-muted text-muted-foreground'
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>{s}</span>
+}
+
 export function InviteSection({ wsId }: { wsId: string }) {
   const t = useTranslations('wsMembers.invite')
   const format = useFormatter()
@@ -1630,8 +1657,6 @@ export function InviteSection({ wsId }: { wsId: string }) {
     setInvites((prev) => prev.filter((i) => i.token !== token))
   }
 
-  const pending = invites.filter((i) => inviteStatus(i) === 'pending')
-
   return (
     <div className="mt-6">
       <div className="flex items-center justify-between mb-2">
@@ -1641,29 +1666,40 @@ export function InviteSection({ wsId }: { wsId: string }) {
           {t('createLink')}
         </Button>
       </div>
-      {pending.length > 0 && (
+      {invites.length > 0 && (
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>{t('role')}</TableHead>
+              <TableHead>{t('createdBy')}</TableHead>
               <TableHead>{t('expires')}</TableHead>
+              <TableHead>{t('status')}</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pending.map((inv) => (
-              <TableRow key={inv.token}>
-                <TableCell className="text-sm capitalize">{inv.role}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {format.dateTime(new Date(inv.expires_at), { dateStyle: 'short', timeStyle: 'short' })}
-                </TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="icon" onClick={() => onRevoke(inv.token)}>
-                    <Trash2 className="size-3.5 text-destructive" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {invites.map((inv) => {
+              const s = inviteStatus(inv)
+              return (
+                <TableRow key={inv.token}>
+                  <TableCell className="text-sm capitalize">{inv.role}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground truncate max-w-[140px]">
+                    {inv.created_by}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {format.dateTime(new Date(inv.expires_at), { dateStyle: 'short', timeStyle: 'short' })}
+                  </TableCell>
+                  <TableCell>{statusBadge(s)}</TableCell>
+                  <TableCell>
+                    {s === 'pending' && (
+                      <Button variant="ghost" size="icon" onClick={() => onRevoke(inv.token)}>
+                        <Trash2 className="size-3.5 text-destructive" />
+                      </Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       )}
@@ -2003,11 +2039,28 @@ git commit -m "feat(ui): user profile page with display name and password change
 ### Task 12: Organization Settings — Backend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin.py` — add PATCH /admin/org
+- Modify: `backend/cubebox/api/routes/v1/admin.py` — add GET /admin/org and PATCH /admin/org
 
-- [ ] **Step 1: Add PATCH /admin/org endpoint**
+- [ ] **Step 1: Add GET /admin/org endpoint**
 
 In `backend/cubebox/api/routes/v1/admin.py`, add:
+
+```python
+@router.get("/org")
+async def get_org(
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, str]:
+    org_id = await resolve_current_org_id(user, session)
+    org = await OrganizationRepository(session).get(org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="org not found")
+    return {"id": org.id, "name": org.name, "slug": org.slug}
+```
+
+- [ ] **Step 2: Add PATCH /admin/org endpoint**
+
+In `backend/cubebox/api/routes/v1/admin.py`, add at module level:
 
 ```python
 import re
@@ -2018,8 +2071,11 @@ _SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 class OrgUpdate(BaseModel):
     name: str | None = Field(None, min_length=2, max_length=255)
     slug: str | None = Field(None, min_length=3, max_length=32)
+```
 
+Add the route (use the already-imported `resolve_current_org_id` and `OrganizationRepository` — do NOT re-import inside the function body):
 
+```python
 @router.patch("/org")
 async def update_org(
     body: Annotated[OrgUpdate, Body()],
@@ -2032,12 +2088,8 @@ async def update_org(
     if body.slug is not None and not _SLUG_RE.match(body.slug):
         raise HTTPException(status_code=400, detail="slug_invalid_format")
 
-    from cubebox.auth.dependencies import resolve_current_org_id
-    from cubebox.repositories import OrganizationRepository
-
     org_id = await resolve_current_org_id(user, session)
-    org_repo = OrganizationRepository(session)
-    org = await org_repo.get(org_id)
+    org = await OrganizationRepository(session).get(org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="org not found")
 
@@ -2072,19 +2124,19 @@ async def update_org(
 
 Add necessary imports at the top of the file: `re`, `Field`, `Request` from existing imports; add `Body` if missing.
 
-- [ ] **Step 2: Run mypy**
+- [ ] **Step 3: Run mypy**
 
 ```bash
 cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
 uv run mypy cubebox/api/routes/v1/admin.py
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
 git add backend/cubebox/api/routes/v1/admin.py
-git commit -m "feat: add PATCH /admin/org endpoint for org name/slug editing"
+git commit -m "feat: add GET + PATCH /admin/org endpoints for org settings"
 ```
 
 ---
@@ -2200,24 +2252,6 @@ export function OrgInfoCard() {
 }
 ```
 
-Note: We also need a GET /admin/org endpoint. Since admin.py's `get_admin_me` already returns `org_name`, we can either add a dedicated GET or reuse the PATCH response. For simplicity, the OrgInfoCard fetches via GET /admin/org. Add a simple GET route to `admin.py`:
-
-```python
-@router.get("/org")
-async def get_org(
-    user: Annotated[User, Depends(require_org_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> dict[str, str]:
-    from cubebox.auth.dependencies import resolve_current_org_id
-    from cubebox.repositories import OrganizationRepository
-
-    org_id = await resolve_current_org_id(user, session)
-    org = await OrganizationRepository(session).get(org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="org not found")
-    return {"id": org.id, "name": org.name, "slug": org.slug}
-```
-
 - [ ] **Step 2: Add OrgInfoCard to admin settings page**
 
 In `frontend/packages/web/app/admin/settings/page.tsx`, import and render:
@@ -2329,6 +2363,274 @@ git commit -m "feat: enable email verification via fastapi-users router + email 
 
 ---
 
+### Task 14b: Email Verification — Frontend + Auto-Trigger
+
+**Files:**
+- Modify: `backend/cubebox/auth/users.py` — auto-trigger request_verify on registration
+- Create: `frontend/packages/web/app/(auth)/verify-email/page.tsx` — token landing page
+- Create: `frontend/packages/web/components/auth/VerifyEmailPage.tsx` — verify logic
+- Create: `frontend/packages/web/components/layout/VerificationBanner.tsx` — persistent banner
+- Modify: `frontend/packages/web/app/(app)/layout.tsx` — render banner
+- Modify: `frontend/packages/core/src/api/auth.ts` — add verifyEmail, requestVerifyToken, is_verified
+- Modify: `frontend/packages/web/messages/en.json` / `zh.json`
+
+- [ ] **Step 1: Add is_verified to MeResult and add API functions**
+
+In `frontend/packages/core/src/api/auth.ts`, add `is_verified` to `MeResult`:
+
+```typescript
+export interface MeResult {
+  id: string
+  email: string
+  language: string
+  is_verified: boolean
+  needs_org_setup?: boolean
+  org_memberships?: OrgMembership[]
+}
+```
+
+Then add two new functions:
+
+```typescript
+export async function verifyEmail(
+  client: ApiClient,
+  token: string,
+): Promise<void> {
+  const res = await client.post('/api/v1/auth/verify', { token })
+  if (!res.ok) throw await toApiError(res)
+}
+
+export async function requestVerifyToken(
+  client: ApiClient,
+  email: string,
+): Promise<void> {
+  const res = await client.post('/api/v1/auth/request-verify-token', {
+    email,
+  })
+  if (!res.ok) throw await toApiError(res)
+}
+```
+
+- [ ] **Step 2: Create verify-email page**
+
+Create `frontend/packages/web/app/(auth)/verify-email/page.tsx`:
+
+```tsx
+import { VerifyEmailPage } from '@/components/auth/VerifyEmailPage'
+
+export default function Page() {
+  return <VerifyEmailPage />
+}
+```
+
+Create `frontend/packages/web/components/auth/VerifyEmailPage.tsx`:
+
+```tsx
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useTranslations } from 'next-intl'
+import Link from 'next/link'
+import {
+  createApiClient,
+  verifyEmail,
+  requestVerifyToken,
+  useAuthStore,
+} from '@cubebox/core'
+
+export function VerifyEmailPage() {
+  const t = useTranslations('verifyEmail')
+  const searchParams = useSearchParams()
+  const token = searchParams.get('token')
+  const client = useMemo(() => createApiClient(''), [])
+  const user = useAuthStore((s) => s.user)
+
+  const [status, setStatus] = useState<
+    'verifying' | 'success' | 'error'
+  >('verifying')
+
+  useEffect(() => {
+    if (!token) {
+      setStatus('error')
+      return
+    }
+    verifyEmail(client, token)
+      .then(() => setStatus('success'))
+      .catch(() => setStatus('error'))
+  }, [client, token])
+
+  const handleResend = async () => {
+    if (!user?.email) return
+    await requestVerifyToken(client, user.email)
+  }
+
+  if (status === 'verifying') {
+    return <p className="text-center text-sm text-muted-foreground">{t('verifying')}</p>
+  }
+
+  if (status === 'success') {
+    return (
+      <div className="text-center space-y-3">
+        <p className="text-sm font-medium">{t('success')}</p>
+        <Link href="/" className="text-sm text-primary underline">
+          {t('goToApp')}
+        </Link>
+      </div>
+    )
+  }
+
+  return (
+    <div className="text-center space-y-3">
+      <p className="text-sm text-destructive">{t('error')}</p>
+      {user?.email && (
+        <button
+          type="button"
+          onClick={() => void handleResend()}
+          className="text-sm text-primary underline"
+        >
+          {t('resend')}
+        </button>
+      )}
+    </div>
+  )
+}
+```
+
+- [ ] **Step 3: Create verification banner**
+
+Create `frontend/packages/web/components/layout/VerificationBanner.tsx`:
+
+```tsx
+'use client'
+
+import { useMemo, useState } from 'react'
+import { useTranslations } from 'next-intl'
+import {
+  createApiClient,
+  requestVerifyToken,
+  useAuthStore,
+} from '@cubebox/core'
+
+export function VerificationBanner() {
+  const t = useTranslations('verificationBanner')
+  const user = useAuthStore((s) => s.user)
+  const client = useMemo(() => createApiClient(''), [])
+  const [sent, setSent] = useState(false)
+
+  if (!user || user.is_verified) return null
+
+  const handleResend = async () => {
+    await requestVerifyToken(client, user.email)
+    setSent(true)
+  }
+
+  return (
+    <div className="bg-warning/10 border-b border-warning/30 px-4 py-2 text-center text-xs">
+      <span className="text-warning-foreground">{t('message')}</span>
+      {' '}
+      {sent ? (
+        <span className="text-muted-foreground">{t('sent')}</span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleResend()}
+          className="text-primary underline"
+        >
+          {t('resend')}
+        </button>
+      )}
+    </div>
+  )
+}
+```
+
+- [ ] **Step 4: Mount banner in app layout**
+
+In `frontend/packages/web/app/(app)/layout.tsx`, import the banner:
+
+```typescript
+import { VerificationBanner } from '@/components/layout/VerificationBanner'
+```
+
+Render it at the top of the layout's main content area, above `{children}`:
+
+```tsx
+<VerificationBanner />
+```
+
+- [ ] **Step 5: Add i18n keys**
+
+In `en.json`:
+
+```json
+"verifyEmail": {
+  "verifying": "Verifying your email...",
+  "success": "Email verified!",
+  "goToApp": "Go to app",
+  "error": "Invalid or expired verification link.",
+  "resend": "Resend verification email"
+},
+"verificationBanner": {
+  "message": "Please verify your email address.",
+  "resend": "Resend verification email",
+  "sent": "Verification email sent."
+}
+```
+
+In `zh.json`:
+
+```json
+"verifyEmail": {
+  "verifying": "正在验证邮箱...",
+  "success": "邮箱验证成功！",
+  "goToApp": "进入应用",
+  "error": "验证链接无效或已过期。",
+  "resend": "重新发送验证邮件"
+},
+"verificationBanner": {
+  "message": "请验证您的邮箱地址。",
+  "resend": "重新发送验证邮件",
+  "sent": "验证邮件已发送。"
+}
+```
+
+- [ ] **Step 6: Auto-trigger verification email on registration**
+
+In `backend/cubebox/auth/users.py`, at the end of `on_after_register` (after the audit_log call), add:
+
+```python
+try:
+    await self.request_verify(user, request)
+except Exception:
+    logger.warning("Failed to send initial verification email to {}", user.email)
+```
+
+This calls `request_verify`, which triggers `on_after_request_verify` (implemented in Task 14 Step 3), sending the verification email automatically upon registration.
+
+- [ ] **Step 7: Build and verify**
+
+```bash
+cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubebox/core build
+pnpm --filter @cubebox/web typecheck
+```
+
+```bash
+cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubebox/auth/users.py
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+git add frontend/ backend/cubebox/auth/users.py
+git commit -m "feat: email verification frontend (verify page, banner, auto-trigger on register)"
+```
+
+---
+
 ## Phase 5 — Lifecycle
 
 ### Task 15: Leave Workspace — Backend + Frontend
@@ -2365,6 +2667,9 @@ async def leave_workspace(
                 detail="cannot_leave_as_last_admin",
             )
 
+    ws = await WorkspaceRepository(session).get(workspace_id)
+    org_id = ws.org_id if ws else None
+
     from sqlalchemy import delete as sa_delete
     from cubebox.models import Membership
 
@@ -2381,6 +2686,7 @@ async def leave_workspace(
     await audit_log(
         action="workspace.member_left",
         user_id=user.id,
+        org_id=org_id,
         workspace_id=workspace_id,
         ip=request.client.host if request.client else None,
     )
@@ -2509,6 +2815,31 @@ async def delete_workspace(
         raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
 
     from sqlalchemy import delete as sa_delete
+    from cubebox.models import (
+        Conversation,
+        InviteToken,
+        Membership,
+    )
+    from cubebox.models.mcp import McpConnectorInstall, McpWorkspaceToken
+    from cubebox.models.skill import SkillInstall, SkillHide
+    from cubebox.models.trigger import Trigger
+    from cubebox.models.scheduled_task import ScheduledTask
+    from cubebox.models.egress_ref import EgressRef
+    from cubebox.models.memory import Memory
+    from cubebox.models.sandbox_env import SandboxEnv
+
+    # Delete child rows that lack ON DELETE CASCADE on workspace_id FK.
+    # Order: deepest dependents first to avoid FK violations.
+    for model in [
+        EgressRef, Memory, SkillHide, SkillInstall, Trigger,
+        ScheduledTask, McpWorkspaceToken, McpConnectorInstall,
+        SandboxEnv, Conversation, InviteToken, Membership,
+    ]:
+        await session.execute(
+            sa_delete(model).where(
+                model.workspace_id == workspace_id  # type: ignore[arg-type]
+            )
+        )
 
     await session.execute(
         sa_delete(Workspace).where(Workspace.id == workspace_id)  # type: ignore[arg-type]
@@ -2626,26 +2957,71 @@ async def delete_account(
         ip=request.client.host if request.client else None,
     )
 
-    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import delete as sa_delete, update as sa_update
     from cubebox.models import Membership, OrganizationMembership as OM
+    from cubebox.models.conversation import Conversation
+    from cubebox.models.attachment import Attachment
+    from cubebox.models.billing import BillingEvent
+    from cubebox.models.user_event import UserEvent
+    from cubebox.models.trigger import Trigger
+    from cubebox.models.scheduled_task import ScheduledTask
+    from cubebox.models.egress_ref import EgressRef
+    from cubebox.models.memory import Memory
+    from cubebox.models.user_sandbox import UserSandbox
+    from cubebox.models.invite_token import InviteToken
+    from cubebox.models.mcp import McpConnectorInstall, McpWorkspaceToken
+    from cubebox.models.skill import SkillInstall, SkillHide, SkillRegistry
 
+    # NULL out created_by / user_id on shared data that should survive.
     await session.execute(
-        sa_delete(Membership).where(Membership.user_id == user.id)  # type: ignore[arg-type]
+        sa_update(InviteToken)
+        .where(InviteToken.created_by == user.id)  # type: ignore[arg-type]
+        .values(created_by=None)
     )
     await session.execute(
-        sa_delete(OM).where(OM.user_id == user.id)  # type: ignore[arg-type]
+        sa_update(McpConnectorInstall)
+        .where(McpConnectorInstall.created_by_user_id == user.id)  # type: ignore[arg-type]
+        .values(created_by_user_id=None)
     )
+    await session.execute(
+        sa_update(SkillRegistry)
+        .where(SkillRegistry.created_by_user_id == user.id)  # type: ignore[arg-type]
+        .values(created_by_user_id=None)
+    )
+
+    # Delete rows that belong solely to this user.
+    for model, col in [
+        (EgressRef, EgressRef.user_id),
+        (Memory, Memory.created_by_user_id),
+        (UserSandbox, UserSandbox.user_id),
+        (Attachment, Attachment.uploader_user_id),
+        (BillingEvent, BillingEvent.user_id),
+        (UserEvent, UserEvent.user_id),
+        (ScheduledTask, ScheduledTask.owner_user_id),
+        (Trigger, Trigger.run_as_user_id),
+        (SkillHide, SkillHide.hidden_by_user_id),
+        (SkillInstall, SkillInstall.installed_by_user_id),
+        (Conversation, Conversation.creator_user_id),
+        (Membership, Membership.user_id),
+        (OM, OM.user_id),
+    ]:
+        await session.execute(
+            sa_delete(model).where(col == user.id)  # type: ignore[arg-type]
+        )
+
     from cubebox.models import User as UserModel
+
     await session.execute(
         sa_delete(UserModel).where(UserModel.id == user.id)  # type: ignore[arg-type]
     )
     await session.commit()
 
+    cookie_name = config.get("auth.cookie_name", "cubebox_auth")
     response = Response(
         content='{"deleted": true}',
         media_type="application/json",
     )
-    response.delete_cookie("cubebox_auth")
+    response.delete_cookie(cookie_name)
     return response
 ```
 
@@ -2736,7 +3112,7 @@ const [deleteOpen, setDeleteOpen] = useState(false)
       <p className="text-xs text-muted-foreground">{t('deleteAccountDesc')}</p>
     </div>
     <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
-      {t('deleteAccount')}
+      {t('deleteAccountButton')}
     </Button>
   </div>
   <DeleteAccountDialog open={deleteOpen} onOpenChange={setDeleteOpen} />
@@ -2751,7 +3127,7 @@ In `en.json` under `"profile"`, add:
 "dangerZone": "Danger zone",
 "deleteAccountTitle": "Delete account",
 "deleteAccountDesc": "Permanently delete your account and all your data.",
-"deleteAccount": "Delete account",
+"deleteAccountButton": "Delete account",
 "deleteAccount": {
   "title": "Delete your account",
   "warning": "This action cannot be undone. All your data will be permanently deleted.",
