@@ -332,6 +332,23 @@ class UserManager(BaseUserManager[User, str]):
         except Exception:
             logger.warning("Failed to send password reset email to {}", user.email)
 
+    async def on_after_request_verify(
+        self, user: User, token: str, request: Request | None = None
+    ) -> None:
+        from cubebox.services.email import get_email_service
+
+        base_url = config.get("app.base_url", "http://localhost:3000")
+        verify_url = f"{base_url}/verify-email?token={token}"
+        try:
+            await get_email_service().send(
+                to=user.email,
+                subject="Verify your cubebox email",
+                template="email_verification",
+                context={"verify_url": verify_url},
+            )
+        except Exception:
+            logger.warning("Failed to send verification email to {}", user.email)
+
 
 async def get_user_manager(
     user_db: Annotated[SQLAlchemyUserDatabase[User, str], Depends(get_user_db)],
