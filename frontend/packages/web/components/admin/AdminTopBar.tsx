@@ -3,7 +3,6 @@
 import { useTranslations } from 'next-intl'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { AdminAvatarMenu } from './AdminAvatarMenu'
 
 interface AdminTopBarProps {
   orgName: string
@@ -50,7 +49,6 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
           <ArrowLeft className="size-3.5" />
           {t('backToApp')}
         </Button>
-        <AdminAvatarMenu />
       </div>
     </header>
   )
