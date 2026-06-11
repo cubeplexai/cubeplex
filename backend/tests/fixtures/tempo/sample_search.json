@@ -1,0 +1,321 @@
+{
+    "traces": [
+        {
+            "traceID": "e8d4a90b148b1b36e32bddaff29779f1",
+            "rootServiceName": "cubebox",
+            "rootTraceName": "invoke_agent",
+            "startTimeUnixNano": "1781186527992507016",
+            "durationMs": 2614,
+            "spanSet": {
+                "spans": [
+                    {
+                        "spanID": "4ff92a870d80edcb",
+                        "startTimeUnixNano": "1781186527992507016",
+                        "durationNanos": "2614127002",
+                        "attributes": [
+                            {
+                                "key": "service.name",
+                                "value": {
+                                    "stringValue": "cubebox"
+                                }
+                            },
+                            {
+                                "key": "cubepi.metadata.conversation_id",
+                                "value": {
+                                    "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "matched": 1
+            },
+            "spanSets": [
+                {
+                    "spans": [
+                        {
+                            "spanID": "4ff92a870d80edcb",
+                            "startTimeUnixNano": "1781186527992507016",
+                            "durationNanos": "2614127002",
+                            "attributes": [
+                                {
+                                    "key": "service.name",
+                                    "value": {
+                                        "stringValue": "cubebox"
+                                    }
+                                },
+                                {
+                                    "key": "cubepi.metadata.conversation_id",
+                                    "value": {
+                                        "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "matched": 1
+                }
+            ],
+            "serviceStats": {
+                "cubebox": {
+                    "spanCount": 2
+                }
+            }
+        },
+        {
+            "traceID": "32bc55a5b4d5d2b3e1279c9abc1bf58a",
+            "rootServiceName": "cubebox",
+            "rootTraceName": "invoke_agent",
+            "startTimeUnixNano": "1781164911580894061",
+            "durationMs": 8055,
+            "spanSet": {
+                "spans": [
+                    {
+                        "spanID": "c4d05135532eb588",
+                        "startTimeUnixNano": "1781164911580894061",
+                        "durationNanos": "8055552632",
+                        "attributes": [
+                            {
+                                "key": "service.name",
+                                "value": {
+                                    "stringValue": "cubebox"
+                                }
+                            },
+                            {
+                                "key": "cubepi.metadata.conversation_id",
+                                "value": {
+                                    "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "matched": 1
+            },
+            "spanSets": [
+                {
+                    "spans": [
+                        {
+                            "spanID": "c4d05135532eb588",
+                            "startTimeUnixNano": "1781164911580894061",
+                            "durationNanos": "8055552632",
+                            "attributes": [
+                                {
+                                    "key": "service.name",
+                                    "value": {
+                                        "stringValue": "cubebox"
+                                    }
+                                },
+                                {
+                                    "key": "cubepi.metadata.conversation_id",
+                                    "value": {
+                                        "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "matched": 1
+                }
+            ],
+            "serviceStats": {
+                "cubebox": {
+                    "spanCount": 2
+                }
+            }
+        },
+        {
+            "traceID": "430403470ba5b4ab37e1e919be6f3876",
+            "rootServiceName": "cubebox",
+            "rootTraceName": "invoke_agent",
+            "startTimeUnixNano": "1781164823214973178",
+            "durationMs": 87644,
+            "spanSet": {
+                "spans": [
+                    {
+                        "spanID": "bcdaac8005a39313",
+                        "startTimeUnixNano": "1781164823214973178",
+                        "durationNanos": "87644904705",
+                        "attributes": [
+                            {
+                                "key": "service.name",
+                                "value": {
+                                    "stringValue": "cubebox"
+                                }
+                            },
+                            {
+                                "key": "cubepi.metadata.conversation_id",
+                                "value": {
+                                    "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "matched": 1
+            },
+            "spanSets": [
+                {
+                    "spans": [
+                        {
+                            "spanID": "bcdaac8005a39313",
+                            "startTimeUnixNano": "1781164823214973178",
+                            "durationNanos": "87644904705",
+                            "attributes": [
+                                {
+                                    "key": "service.name",
+                                    "value": {
+                                        "stringValue": "cubebox"
+                                    }
+                                },
+                                {
+                                    "key": "cubepi.metadata.conversation_id",
+                                    "value": {
+                                        "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "matched": 1
+                }
+            ],
+            "serviceStats": {
+                "cubebox": {
+                    "spanCount": 19
+                }
+            }
+        },
+        {
+            "traceID": "8222f0602ec0aa03d0837d0be3535c30",
+            "rootServiceName": "cubebox",
+            "rootTraceName": "invoke_agent",
+            "startTimeUnixNano": "1781129093991299916",
+            "durationMs": 6349,
+            "spanSet": {
+                "spans": [
+                    {
+                        "spanID": "feeec5ce18867680",
+                        "startTimeUnixNano": "1781129093991299916",
+                        "durationNanos": "6349596137",
+                        "attributes": [
+                            {
+                                "key": "service.name",
+                                "value": {
+                                    "stringValue": "cubebox"
+                                }
+                            },
+                            {
+                                "key": "cubepi.metadata.conversation_id",
+                                "value": {
+                                    "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "matched": 1
+            },
+            "spanSets": [
+                {
+                    "spans": [
+                        {
+                            "spanID": "feeec5ce18867680",
+                            "startTimeUnixNano": "1781129093991299916",
+                            "durationNanos": "6349596137",
+                            "attributes": [
+                                {
+                                    "key": "service.name",
+                                    "value": {
+                                        "stringValue": "cubebox"
+                                    }
+                                },
+                                {
+                                    "key": "cubepi.metadata.conversation_id",
+                                    "value": {
+                                        "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "matched": 1
+                }
+            ],
+            "serviceStats": {
+                "cubebox": {
+                    "spanCount": 2
+                }
+            }
+        },
+        {
+            "traceID": "b27ff7f74d6a240317884914b20a6edf",
+            "rootServiceName": "cubebox",
+            "rootTraceName": "invoke_agent",
+            "startTimeUnixNano": "1781128814868050161",
+            "durationMs": 278060,
+            "spanSet": {
+                "spans": [
+                    {
+                        "spanID": "c2952d0875b1fdca",
+                        "startTimeUnixNano": "1781128814868050161",
+                        "durationNanos": "278060743866",
+                        "attributes": [
+                            {
+                                "key": "service.name",
+                                "value": {
+                                    "stringValue": "cubebox"
+                                }
+                            },
+                            {
+                                "key": "cubepi.metadata.conversation_id",
+                                "value": {
+                                    "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "matched": 1
+            },
+            "spanSets": [
+                {
+                    "spans": [
+                        {
+                            "spanID": "c2952d0875b1fdca",
+                            "startTimeUnixNano": "1781128814868050161",
+                            "durationNanos": "278060743866",
+                            "attributes": [
+                                {
+                                    "key": "service.name",
+                                    "value": {
+                                        "stringValue": "cubebox"
+                                    }
+                                },
+                                {
+                                    "key": "cubepi.metadata.conversation_id",
+                                    "value": {
+                                        "stringValue": "conv-1fwZQ8u3ZDukx3"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "matched": 1
+                }
+            ],
+            "serviceStats": {
+                "cubebox": {
+                    "spanCount": 46
+                }
+            }
+        }
+    ],
+    "metrics": {
+        "inspectedBytes": "16619595",
+        "totalBlocks": 55,
+        "completedJobs": 46,
+        "totalJobs": 58,
+        "totalBlockBytes": "412028659"
+    }
+}
