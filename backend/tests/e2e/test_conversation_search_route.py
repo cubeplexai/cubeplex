@@ -110,6 +110,21 @@ def test_search_route_503_when_provider_missing(client: TestClient) -> None:
 @pytest.mark.asyncio
 async def test_search_route_returns_indexed_conversation(client: TestClient) -> None:
     """End-to-end happy path: seed → index → search returns the conversation."""
+    # The lifespan-managed worker uses the real EmbeddingProvider (built from
+    # config) and would race us, claiming the job we enqueue and failing it
+    # against the live DashScope endpoint. Cancel its task before driving
+    # the worker ourselves with a deterministic provider.
+    import asyncio
+
+    lifespan_task = getattr(client.app.state, "embedding_worker_task", None)
+    if lifespan_task is not None:
+        lifespan_task.cancel()
+        try:
+            await lifespan_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        client.app.state.embedding_worker_task = None
+        client.app.state.embedding_worker = None
     client.app.state.embedding_provider = _KeywordEmbedder()
     conv_id = await _seed_indexed_conversation(client)
 

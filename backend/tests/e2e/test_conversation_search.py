@@ -53,6 +53,20 @@ async def _seed_conv(client: TestClient, title: str, user_text: str) -> str:
 
 @pytest.mark.asyncio
 async def test_e2e_search_finds_seeded_conversations(client: TestClient) -> None:
+    # Cancel the lifespan worker so a single provider drains the queue
+    # below and the test stays deterministic.
+    import asyncio as _aio
+
+    lifespan_task = getattr(client.app.state, "embedding_worker_task", None)
+    if lifespan_task is not None:
+        lifespan_task.cancel()
+        try:
+            await lifespan_task
+        except (_aio.CancelledError, Exception):
+            pass
+        client.app.state.embedding_worker_task = None
+        client.app.state.embedding_worker = None
+
     me = client.get("/api/v1/auth/me")
     me.raise_for_status()
     user_id = str(me.json()["id"])
