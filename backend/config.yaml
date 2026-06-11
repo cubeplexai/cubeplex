@@ -383,3 +383,9 @@ default:
       # Optional bearer / auth headers, as a flat dict of string→string.
       headers: null
       timeout_seconds: 10
+    tempo:
+      # HTTP query endpoint for Tempo (admin trace viewer reads from here).
+      # Distinct from otlp.endpoint, which is the write path.
+      # Leave null to disable the admin trace UI in this environment.
+      query_endpoint: null
+      timeout_seconds: 10
