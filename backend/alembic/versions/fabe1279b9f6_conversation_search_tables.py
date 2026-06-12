@@ -69,7 +69,12 @@ def upgrade() -> None:
         sa.Column("seq_lo", sa.BigInteger, nullable=False),
         sa.Column("seq_hi", sa.BigInteger, nullable=False),
         sa.Column("text", sa.Text, nullable=False),
-        sa.Column("embedding", Vector(VECTOR_DIM), nullable=False),
+        # Nullable so the worker can index lexically when no embedding
+        # provider is configured. HNSW (pgvector ≥ 0.5) excludes NULL rows
+        # from the index and from ORDER BY <=>; the vector leg also filters
+        # `embedding IS NOT NULL` defensively. Backfill re-embeds NULL rows
+        # once an operator configures a key.
+        sa.Column("embedding", Vector(VECTOR_DIM), nullable=True),
         sa.Column("embed_model", sa.String(length=128), nullable=False),
         sa.Column(
             "created_at",

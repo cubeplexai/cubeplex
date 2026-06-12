@@ -36,7 +36,10 @@ class ConversationChunk(CubeboxBase, OrgScopedMixin, table=True):
     seq_lo: int = Field(sa_column=Column(BigInteger, nullable=False))
     seq_hi: int = Field(sa_column=Column(BigInteger, nullable=False))
     text: str
-    embedding: Any = Field(
-        sa_column=Column(Vector(VECTOR_DIM), nullable=False),
+    # Nullable: when no embedding provider is configured the worker writes
+    # chunks with embedding=NULL so the lexical leg still has rows to query.
+    embedding: Any | None = Field(
+        default=None,
+        sa_column=Column(Vector(VECTOR_DIM), nullable=True),
     )
     embed_model: str = Field(max_length=128)
