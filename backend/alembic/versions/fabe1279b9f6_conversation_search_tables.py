@@ -11,16 +11,22 @@ import sqlalchemy as sa
 from alembic import op
 from pgvector.sqlalchemy import Vector
 
+from cubebox.config import config
+
 revision: str = "fabe1279b9f6"
 down_revision: str | None = "ab40489adff0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# Frozen at migration-author time. Migrations are immutable assets — one
-# revision must always emit the same DDL. Switching backend or dimension
-# post-deploy requires a NEW revision (drop+create), not editing this one.
+# Lexical backend stays a frozen literal — picking pgroonga vs pg_bigm is a
+# deploy-level decision baked into the schema, not a runtime config knob.
 LEXICAL_BACKEND = "pgroonga"
-VECTOR_DIM = 1024
+# Vector dim is config-driven so operators can plug in any OpenAI-protocol
+# embedding model without editing this file. Trade-off: the same revision id
+# now emits different DDL across deployments depending on each operator's
+# config. The runtime three-way check in cubebox.search.startup catches drift
+# between schema, config, and provider.
+VECTOR_DIM = int(config.get("search.embedding.dimensions", 1024))
 
 
 def upgrade() -> None:

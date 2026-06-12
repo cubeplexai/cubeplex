@@ -6,10 +6,15 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import BigInteger, Column, Index
 from sqlmodel import Field
 
+from cubebox.config import config
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
 from cubebox.models.public_id import PREFIX_CONV_CHUNK, generate_public_id
 
-VECTOR_DIM = 1024
+# Read at import time so the SQLAlchemy column is built with the operator's
+# chosen dim. Operators who want a different dim set search.embedding.dimensions
+# in config and run the migration on a fresh schema; see the startup three-way
+# check (cubebox.search.startup) for drift detection.
+VECTOR_DIM = int(config.get("search.embedding.dimensions", 1024))
 
 
 class ConversationChunk(CubeboxBase, OrgScopedMixin, table=True):
