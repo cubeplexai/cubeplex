@@ -131,6 +131,40 @@ async def test_search_excludes_soft_deleted_conversation(
 
 
 @pytest.mark.asyncio
+async def test_search_legs_run_concurrently_without_session_race(
+    seeded_conversation: tuple[str, str, str, str],
+) -> None:
+    """Both legs fire under asyncio.gather without raising MissingGreenlet.
+
+    Pre-fix, both _lexical_leg and _vector_leg shared the service-level
+    AsyncSession, which SQLAlchemy treats as a single-task unit of work. The
+    overlap raised greenlet / transaction errors that ``return_exceptions=True``
+    silently swallowed as empty legs. After the fix, each leg opens its own
+    ``async_session_maker()`` and both legs see real data.
+    """
+    from cubebox.search.service import ConversationSearchService
+
+    org_id, ws_id, user_id, conv_id = seeded_conversation
+    async with async_session_maker() as s:
+        repo = EmbeddingJobRepository(s, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        await repo.enqueue(conversation_id=conv_id)
+    await EmbeddingWorker(_KeywordEmbedder())._claim_one()
+    async with async_session_maker() as s:
+        svc = ConversationSearchService(s, _KeywordEmbedder())
+        resp = await svc.search(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            q="docling",
+            limit=8,
+        )
+    # Both legs returned hits — pre-fix, the race made at least one leg empty.
+    assert resp.lexical_count > 0
+    assert resp.vector_count > 0
+    assert resp.fused_count > 0
+
+
+@pytest.mark.asyncio
 async def test_search_rejects_control_characters(
     seeded_conversation: tuple[str, str, str, str],
 ) -> None:

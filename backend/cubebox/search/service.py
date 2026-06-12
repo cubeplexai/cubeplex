@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.exceptions import InvalidInputError
 from cubebox.config import config
+from cubebox.db.engine import async_session_maker
 from cubebox.models.conversation import Conversation
 from cubebox.search.embedding import EmbeddingProvider
 from cubebox.search.lexical import build_lexical_backend
@@ -79,17 +80,15 @@ class ConversationSearchService:
         # NFC-normalize so the same visible string indexes the same way the
         # snippet extractor casefolds it later.
         q = unicodedata.normalize("NFC", q)
-        lex_hits, vec_hits = await asyncio.gather(
+        # Each leg opens its own session: SQLAlchemy AsyncSession is a
+        # single-task unit of work, so running both legs against
+        # ``self._session`` concurrently raises MissingGreenlet / transaction
+        # errors. Sequential _hydrate_chunks / _titles below keep using
+        # ``self._session`` because they run after the gather.
+        lex_list, vec_list = await asyncio.gather(
             self._lexical_leg(org_id, workspace_id, creator_user_id, q),
             self._vector_leg(org_id, workspace_id, creator_user_id, q),
-            return_exceptions=True,
         )
-        lex_list: list[tuple[str, float]] = lex_hits if isinstance(lex_hits, list) else []
-        vec_list: list[tuple[str, float]] = vec_hits if isinstance(vec_hits, list) else []
-        if isinstance(lex_hits, BaseException):
-            logger.warning("Lexical leg failed: %s", lex_hits)
-        if isinstance(vec_hits, BaseException):
-            logger.warning("Vector leg failed: %s", vec_hits)
         fused = rrf_fuse(
             lexical=[r[0] for r in lex_list],
             vector=[r[0] for r in vec_list],
@@ -157,36 +156,48 @@ class ConversationSearchService:
             "user_id": user_id,
             "q": self._lexical.normalize_query(q),
         }
-        result = await self._session.execute(text(bundle.sql), binds)
-        return [(row[0], float(row[1])) for row in result.fetchall()]
+        try:
+            async with async_session_maker() as session:
+                result = await session.execute(text(bundle.sql), binds)
+                return [(row[0], float(row[1])) for row in result.fetchall()]
+        except Exception:
+            # Degrade to vector-only rather than fail the whole search.
+            logger.warning("Lexical leg failed", exc_info=True)
+            return []
 
     async def _vector_leg(
         self, org_id: str, ws_id: str, user_id: str, q: str
     ) -> list[tuple[str, float]]:
-        vectors = await self._provider.embed([q])
-        if not vectors:
+        try:
+            vectors = await self._provider.embed([q])
+            if not vectors:
+                return []
+            sql = text(
+                """
+                SELECT cc.id, 1.0 - (cc.embedding <=> :v) AS score
+                FROM conversation_chunks cc
+                JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
+                WHERE cc.org_id = :org_id
+                  AND cc.workspace_id = :ws_id
+                  AND cc.creator_user_id = :user_id
+                ORDER BY cc.embedding <=> :v
+                LIMIT :lim
+                """
+            ).bindparams(bindparam("v", type_=Vector(self._provider.dimensions)))
+            binds: dict[str, Any] = {
+                "org_id": org_id,
+                "ws_id": ws_id,
+                "user_id": user_id,
+                "v": vectors[0],
+                "lim": self._prefetch,
+            }
+            async with async_session_maker() as session:
+                result = await session.execute(sql, binds)
+                return [(row[0], float(row[1])) for row in result.fetchall()]
+        except Exception:
+            # Degrade to lexical-only rather than fail the whole search.
+            logger.warning("Vector leg failed", exc_info=True)
             return []
-        sql = text(
-            """
-            SELECT cc.id, 1.0 - (cc.embedding <=> :v) AS score
-            FROM conversation_chunks cc
-            JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
-            WHERE cc.org_id = :org_id
-              AND cc.workspace_id = :ws_id
-              AND cc.creator_user_id = :user_id
-            ORDER BY cc.embedding <=> :v
-            LIMIT :lim
-            """
-        ).bindparams(bindparam("v", type_=Vector(self._provider.dimensions)))
-        binds: dict[str, Any] = {
-            "org_id": org_id,
-            "ws_id": ws_id,
-            "user_id": user_id,
-            "v": vectors[0],
-            "lim": self._prefetch,
-        }
-        result = await self._session.execute(sql, binds)
-        return [(row[0], float(row[1])) for row in result.fetchall()]
 
     async def _hydrate_chunks(self, chunk_ids: list[str]) -> dict[str, dict[str, Any]]:
         if not chunk_ids:
