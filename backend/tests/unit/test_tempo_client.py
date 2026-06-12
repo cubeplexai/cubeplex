@@ -77,7 +77,7 @@ async def test_get_trace_returns_detail() -> None:
 @respx.mock
 async def test_tag_values_passes_through() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
-    respx.get("http://tempo.local/api/v2/search/tag/span/cubepi.metadata.workspace_id/values").mock(
+    respx.get("http://tempo.local/api/v2/search/tag/span.cubepi.metadata.workspace_id/values").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -96,6 +96,24 @@ async def test_tag_values_passes_through() -> None:
 
 
 @respx.mock
+async def test_tag_values_uses_v2_path_with_span_prefix_as_single_segment() -> None:
+    """Regression for the round-3 mishap that built /api/v2/search/tag/span/<tag>/values
+    (scope as its own path segment). Tempo expects the prefixed tag name as one
+    segment — otherwise every autocomplete call 404s and the route returns 502.
+    """
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    correct = respx.get(
+        "http://tempo.local/api/v2/search/tag/span.cubepi.metadata.user_id/values"
+    ).mock(return_value=httpx.Response(200, json={"tagValues": []}))
+    wrong = respx.get(
+        "http://tempo.local/api/v2/search/tag/span/cubepi.metadata.user_id/values"
+    ).mock(return_value=httpx.Response(200, json={"tagValues": []}))
+    await client.tag_values(tag="cubepi.metadata.user_id", org_id="org-1")
+    assert correct.called, "tag_values must hit the single-segment v2 path"
+    assert not wrong.called, "tag_values must NOT split scope into its own path segment"
+
+
+@respx.mock
 async def test_search_handles_null_traces() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
     respx.get("http://tempo.local/api/search").mock(
@@ -108,7 +126,7 @@ async def test_search_handles_null_traces() -> None:
 @respx.mock
 async def test_tag_values_handles_null_values() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
-    respx.get("http://tempo.local/api/v2/search/tag/span/cubepi.metadata.workspace_id/values").mock(
+    respx.get("http://tempo.local/api/v2/search/tag/span.cubepi.metadata.workspace_id/values").mock(
         return_value=httpx.Response(200, json={"tagValues": None})
     )
     result = await client.tag_values(tag="cubepi.metadata.workspace_id", org_id="org-1")
