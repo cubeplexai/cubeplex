@@ -22,7 +22,11 @@ x-restart-policy: &restart-policy
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Custom image: postgres:18 + PGroonga (CJK full-text) + pgvector (HNSW
+    # vector search). Required by the conversation-search feature; falling
+    # back to plain postgres breaks the alembic migration that does
+    # `CREATE EXTENSION pgroonga / vector`.
+    image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
     <<: *restart-policy
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cubebox}
