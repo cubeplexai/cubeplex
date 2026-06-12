@@ -13,6 +13,7 @@ import {
 
 export interface WorkspaceStore {
   workspaces: Workspace[]
+  lastOrgId: string | null
   isLoading: boolean
   error: string | null
   fetchList(client: ApiClient): Promise<void>
@@ -28,8 +29,11 @@ export interface WorkspaceStore {
 // One-user-one-org M1 assumption: a new workspace is created under the first
 // workspace's org_id. When multi-org-per-user ships (P2), pass an explicit
 // org id instead of reusing the first-seen one.
+// lastOrgId persists across leave/archive/delete so the create form still has
+// an org to target when the workspace list is empty.
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   workspaces: [],
+  lastOrgId: null,
   isLoading: false,
   error: null,
 
@@ -37,7 +41,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const workspaces = await listWorkspaces(client)
-      set({ workspaces })
+      const lastOrgId = workspaces.length > 0 ? workspaces[0].org_id : get().lastOrgId
+      set({ workspaces, lastOrgId })
     } catch (err) {
       set({ error: (err as Error).message })
     } finally {
@@ -46,11 +51,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   async create(client, name) {
-    const existing = get().workspaces
-    if (existing.length === 0) {
+    const { workspaces, lastOrgId } = get()
+    const orgId = workspaces.length > 0 ? workspaces[0].org_id : lastOrgId
+    if (!orgId) {
       throw new Error('Cannot create workspace: load workspaces first to determine org_id')
     }
-    const orgId = existing[0].org_id
     const ws = await createWorkspace(client, { name, orgId })
     set((s) => ({ workspaces: [ws, ...s.workspaces] }))
     return ws
@@ -85,6 +90,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   reset() {
-    set({ workspaces: [], isLoading: false, error: null })
+    set({ workspaces: [], lastOrgId: null, isLoading: false, error: null })
   },
 }))

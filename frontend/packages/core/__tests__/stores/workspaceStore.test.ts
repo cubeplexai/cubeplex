@@ -5,7 +5,7 @@ import { createApiClient } from '../../src/api/client'
 describe('workspaceStore', () => {
   let fetchMock: ReturnType<typeof vi.fn>
   beforeEach(() => {
-    useWorkspaceStore.setState({ workspaces: [], isLoading: false, error: null })
+    useWorkspaceStore.setState({ workspaces: [], lastOrgId: null, isLoading: false, error: null })
     fetchMock = vi.fn()
     globalThis.fetch = fetchMock as unknown as typeof fetch
   })

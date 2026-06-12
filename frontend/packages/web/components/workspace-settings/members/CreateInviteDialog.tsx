@@ -24,6 +24,7 @@ interface CreateInviteDialogProps {
 export function CreateInviteDialog({ wsId, open, onOpenChange }: CreateInviteDialogProps) {
   const t = useTranslations('wsMembers.invite')
   const [role, setRole] = useState('member')
+  const [email, setEmail] = useState('')
   const [link, setLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -34,7 +35,7 @@ export function CreateInviteDialog({ wsId, open, onOpenChange }: CreateInviteDia
     setError(null)
     try {
       const client = createApiClient('')
-      const result = await createInvite(client, wsId, role)
+      const result = await createInvite(client, wsId, role, email || undefined)
       setLink(`${window.location.origin}/invite/accept?token=${result.token}`)
     } catch {
       setError(t('createError'))
@@ -55,6 +56,7 @@ export function CreateInviteDialog({ wsId, open, onOpenChange }: CreateInviteDia
     setCopied(false)
     setError(null)
     setRole('member')
+    setEmail('')
     onOpenChange(false)
   }
 
@@ -97,6 +99,16 @@ export function CreateInviteDialog({ wsId, open, onOpenChange }: CreateInviteDia
                     <SelectItem value="member">{t('member')}</SelectItem>
                   </SelectContent>
                 </Select>
+              </label>
+              <label className="block mb-3">
+                <span className="text-sm text-foreground/80">{t('emailLabel')}</span>
+                <input
+                  type="email"
+                  placeholder={t('emailPlaceholder')}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
               </label>
               {error && <div className="text-sm text-destructive mb-3">{error}</div>}
               <div className="flex justify-end gap-2">

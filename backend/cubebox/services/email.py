@@ -41,6 +41,14 @@ class SmtpEmailBackend(EmailBackend):
 
         port = config.get("email.smtp_port", 587)
         use_tls = config.get("email.smtp_tls", port == 465)
+        smtp_tls_explicit = config.get("email.smtp_tls") is not None
+        if use_tls:
+            start_tls = False
+        elif smtp_tls_explicit and not use_tls:
+            # TLS explicitly disabled — don't force STARTTLS (plaintext relay).
+            start_tls = False
+        else:
+            start_tls = True
         await aiosmtplib.send(
             msg,
             hostname=config.get("email.smtp_host", "localhost"),
@@ -48,7 +56,7 @@ class SmtpEmailBackend(EmailBackend):
             username=config.get("email.smtp_user", None),
             password=config.get("email.smtp_password", None),
             use_tls=use_tls,
-            start_tls=not use_tls,
+            start_tls=start_tls,
         )
 
 

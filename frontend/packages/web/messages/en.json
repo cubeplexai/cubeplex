@@ -913,6 +913,8 @@
       "status": "Status",
       "title": "Create invite link",
       "roleLabel": "Role for invited user",
+      "emailLabel": "Email (optional — sends invitation email)",
+      "emailPlaceholder": "colleague@example.com",
       "admin": "Admin",
       "member": "Member",
       "cancel": "Cancel",

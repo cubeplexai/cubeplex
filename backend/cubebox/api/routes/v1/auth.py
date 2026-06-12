@@ -268,6 +268,7 @@ async def delete_account(
     )
 
     from sqlalchemy import delete as sa_delete
+    from sqlalchemy import text
     from sqlalchemy import update as sa_update
 
     from cubebox.models import Membership
@@ -316,6 +317,31 @@ async def delete_account(
             .values(**{null_col: None})
         )
 
+    # Collect backing credential ids from user-scoped grants BEFORE deleting the
+    # grants, so we can delete the vault rows too and avoid orphaned OAuth/API tokens.
+    mcp_grant_tbl = MCPCredentialGrant.__table__  # type: ignore[attr-defined]
+    user_grant_cred_ids = (
+        (
+            await session.execute(
+                select(mcp_grant_tbl.c.credential_id).where(mcp_grant_tbl.c.user_id == user.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    user_grant_refresh_ids = (
+        (
+            await session.execute(
+                select(mcp_grant_tbl.c.refresh_credential_id).where(
+                    mcp_grant_tbl.c.user_id == user.id,
+                    mcp_grant_tbl.c.refresh_credential_id.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     # User-scoped credential grants have a check constraint requiring user_id NOT NULL,
     # so we delete them rather than nulling user_id.
     await session.execute(
@@ -323,6 +349,15 @@ async def delete_account(
             MCPCredentialGrant.user_id == user.id  # type: ignore[arg-type]
         )
     )
+
+    # Delete the backing Credential rows that the grants referenced.
+    all_grant_cred_ids = set(list(user_grant_cred_ids) + list(user_grant_refresh_ids))
+    if all_grant_cred_ids:
+        await session.execute(
+            sa_delete(Credential).where(
+                Credential.id.in_(list(all_grant_cred_ids))  # type: ignore[attr-defined]
+            )
+        )
 
     # Invite tokens created by the user are no longer redeemable — delete them.
     await session.execute(
@@ -348,6 +383,31 @@ async def delete_account(
     user_conv_ids = select(conv_tbl.c.id).where(conv_tbl.c.creator_user_id == user.id)
     art_tbl = Artifact.__table__  # type: ignore[attr-defined]
     user_artifact_ids = select(art_tbl.c.id).where(art_tbl.c.conversation_id.in_(user_conv_ids))
+
+    # Delete ConversationShare rows referencing the user's conversations, and
+    # delete cubepi checkpointer threads (thread_id == conversation_id) so chat
+    # history is removed with the account.
+    from cubebox.models.conversation_share import ConversationShare
+
+    await session.execute(
+        sa_delete(ConversationShare).where(
+            ConversationShare.conversation_id.in_(user_conv_ids)  # type: ignore[attr-defined]
+        )
+    )
+    await session.execute(
+        sa_delete(ConversationShare).where(
+            ConversationShare.creator_user_id == user.id  # type: ignore[arg-type]
+        )
+    )
+    # cubepi_threads / cubepi_messages live outside SQLModel ORM — use raw SQL.
+    # cubepi_messages cascades from cubepi_threads (ON DELETE CASCADE).
+    await session.execute(
+        text(
+            "DELETE FROM cubepi_threads WHERE thread_id IN (SELECT id FROM conversations WHERE creator_user_id = :uid)"
+        ),
+        {"uid": user.id},
+    )
+
     await session.execute(
         sa_delete(ArtifactVersion).where(
             ArtifactVersion.artifact_id.in_(user_artifact_ids)  # type: ignore[attr-defined]
@@ -368,7 +428,43 @@ async def delete_account(
         )
     )
 
+    # Preserve workspace ownership: for workspaces where the deleting user is the
+    # sole member or last admin, archive sole-member workspaces and transfer admin
+    # in shared ones before removing memberships.
+    from datetime import UTC, datetime
+
+    from cubebox.models import Role
+    from cubebox.repositories.membership import MembershipRepository
+    from cubebox.repositories.workspace import WorkspaceRepository
+
+    mem_repo = MembershipRepository(session)
+    ws_repo = WorkspaceRepository(session)
+    user_memberships = await mem_repo.list_user_workspaces(user.id)
+    for m in user_memberships:
+        ws = await ws_repo.get(m.workspace_id)
+        if ws is None:
+            continue
+        members = await mem_repo.list_workspace_members(m.workspace_id)
+        if len(members) <= 1:
+            # Sole member — archive the workspace so it isn't left memberless.
+            ws.archived_at = datetime.now(UTC)
+            session.add(ws)
+        elif m.role == Role.ADMIN.value:
+            admin_count = sum(1 for mb in members if mb.role == Role.ADMIN.value)
+            if admin_count <= 1:
+                # Last admin in a workspace with other members — promote the
+                # earliest non-admin member so the workspace remains manageable.
+                non_admins = [mb for mb in members if mb.role != Role.ADMIN.value]
+                if non_admins:
+                    non_admins.sort(key=lambda mb: mb.created_at)
+                    non_admins[0].role = Role.ADMIN.value
+                    session.add(non_admins[0])
+
     # Delete user-owned rows (deepest FK dependents first).
+    # NOTE: UserSandbox rows are deleted directly without calling the sandbox
+    # manager's kill path. Provider sandboxes tied to these rows will be reaped
+    # by the sandbox cleanup loop (cleanup_expired). A public sandbox-manager
+    # kill-by-user API is the proper fix — tracked for follow-up.
     for model, col in [
         (EgressRef, EgressRef.user_id),
         (MemoryItem, MemoryItem.owner_user_id),
