@@ -355,72 +355,20 @@ async def lifespan(_app: FastAPI):  # type: ignore
             await _egress_listener.start()
     _app.state._egress_listener = _egress_listener
 
-    # Conversation-search embedding worker. Single instance on app.state so
-    # route handlers (search endpoint) can reuse the provider's connection
-    # pool, and the worker keeps draining embedding_jobs in the background.
-    from cubebox.config import config as _search_cfg
-    from cubebox.models.conversation_chunk import VECTOR_DIM
-    from cubebox.search.embedding import EmbeddingProvider
-    from cubebox.search.lexical import build_lexical_backend
-    from cubebox.search.worker import EmbeddingWorker
+    # Conversation-search embedding provider + worker. Owns the three-way dim
+    # check (schema ↔ config ↔ provider). Best-effort: failures leave
+    # app.state.embedding_provider as None and the search route returns 503.
+    from cubebox.search.startup import start_search_subsystem
 
-    embedding_worker_task: asyncio.Task[None] | None = None
-    _app.state.embedding_provider = None
-    _app.state.embedding_worker = None
-    _app.state.embedding_worker_task = None
-    # Lexical backend has no per-request state; build it once at startup so
-    # the search route doesn't reconstruct it on every keystroke.
-    _app.state.lexical_backend = build_lexical_backend()
-    if _search_cfg.get("search.enabled", True):
-        embedding_provider: EmbeddingProvider | None
-        try:
-            embedding_provider = EmbeddingProvider.from_config()
-        except RuntimeError as exc:
-            # Missing api key etc. — refuse to start the worker, route 503s.
-            logger.critical("Embedding provider not started: {}", exc)
-            embedding_provider = None
-        if embedding_provider is not None and embedding_provider.dimensions != VECTOR_DIM:
-            # Schema is frozen at 1024; config drift here would silently break
-            # inserts. Refuse to start the worker and surface a critical log.
-            logger.critical(
-                "search.embedding.dimensions={} but schema VECTOR_DIM={}; refusing to start worker",
-                embedding_provider.dimensions,
-                VECTOR_DIM,
-            )
-            await embedding_provider.aclose()
-            embedding_provider = None
-        if embedding_provider is not None:
-            _app.state.embedding_provider = embedding_provider
-            embedding_worker = EmbeddingWorker(embedding_provider)
-            embedding_worker_task = asyncio.create_task(
-                embedding_worker.run(), name="embedding-worker"
-            )
-            _app.state.embedding_worker = embedding_worker
-            # Expose the task so tests can cancel it cleanly before driving the
-            # worker themselves with a deterministic provider.
-            _app.state.embedding_worker_task = embedding_worker_task
+    await start_search_subsystem(_app)
 
     yield
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
-    # Tests may have cancelled the lifespan worker and cleared the state
-    # references (see test_conversation_search_route.py). Re-read from
-    # app.state so we don't blow up on the None.
-    _live_worker = getattr(_app.state, "embedding_worker", None)
-    _live_task: asyncio.Task[None] | None = getattr(_app.state, "embedding_worker_task", None)
-    if _live_task is not None and _live_worker is not None:
-        _live_worker.stop()
-        try:
-            await asyncio.wait_for(_live_task, timeout=5.0)
-        except TimeoutError:
-            _live_task.cancel()
-            try:
-                await _live_task
-            except (asyncio.CancelledError, Exception):
-                pass
-    if _app.state.embedding_provider is not None:
-        await _app.state.embedding_provider.aclose()
+    from cubebox.search.startup import stop_search_subsystem
+
+    await stop_search_subsystem(_app)
     _egress_listener = getattr(_app.state, "_egress_listener", None)
     if _egress_listener is not None:
         await _egress_listener.stop()
