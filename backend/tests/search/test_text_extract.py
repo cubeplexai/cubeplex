@@ -21,14 +21,16 @@ def test_assistant_text_strips_reasoning() -> None:
     assert extract_searchable_text(msg) == "[assistant] answer"
 
 
-def test_tool_result_extracts_text_contents() -> None:
+def test_tool_result_is_skipped() -> None:
+    # Tool results are folded into the assistant panel in the UI; indexing
+    # them would point matched_message_seq at a row with no anchor.
     msg = ToolResultMessage(
         tool_call_id="tc_1",
         tool_name="run",
         content=[TextContent(text="42")],
         timestamp=1.0,
     )
-    assert extract_searchable_text(msg) == "[tool_result] 42"
+    assert extract_searchable_text(msg) == ""
 
 
 def test_tool_call_is_skipped() -> None:

@@ -12,6 +12,11 @@ from cubepi.providers.base import (
 def extract_searchable_text(message: Message) -> str:
     """Return a one-line, prefixed representation, or empty string when nothing
     search-worthy is present (tool calls, empty messages, attachments-only).
+
+    Tool-result messages are skipped: the conversation page folds tool
+    results into the parent assistant panel rather than rendering them as
+    their own anchored row, so a hit pointing at a tool_result seq would
+    scroll the deep-link to nothing.
     """
     if isinstance(message, UserMessage):
         text = _flatten_text_parts(message.content)
@@ -20,8 +25,7 @@ def extract_searchable_text(message: Message) -> str:
         text = _flatten_text_parts(message.content)
         return f"[assistant] {text}" if text else ""
     if isinstance(message, ToolResultMessage):
-        text = _flatten_text_parts(message.content)
-        return f"[tool_result] {text}" if text else ""
+        return ""
     return ""
 
 
