@@ -178,12 +178,21 @@ jq -n \
   --argjson   summary_id      "$(split_id "$CUR_SUMMARY")" \
   --arg       exclude_author  "$EXCLUDE_AUTHOR" \
   '
+  # Strip C0 control chars (0x00–0x1F) from body text, preserving \t \n \r.
+  # GitHub permits comments containing raw escape sequences / terminal
+  # output pasted as-is; if those bytes survive into our JSON output, a
+  # downstream `jq` consumer hits "Invalid string: control characters must
+  # be escaped" and aborts. The body of every kind goes through here.
+  def safe_body:
+    if . == null then ""
+    else gsub("[\u0000-\u0008\u000b\u000c\u000e-\u001f]"; "")
+    end;
   def norm_review:
     {
       kind:       "review",
       id:         .id,
       author:     .user.login,
-      body:       (.body // ""),
+      body:       (.body | safe_body),
       path:       .path,
       line:       (.line // .original_line),
       state:      null,
@@ -195,7 +204,7 @@ jq -n \
       kind:       "issue",
       id:         .id,
       author:     .user.login,
-      body:       (.body // ""),
+      body:       (.body | safe_body),
       path:       null,
       line:       null,
       state:      null,
@@ -207,7 +216,7 @@ jq -n \
       kind:       "review_summary",
       id:         .id,
       author:     .user.login,
-      body:       (.body // ""),
+      body:       (.body | safe_body),
       path:       null,
       line:       null,
       state:      .state,
