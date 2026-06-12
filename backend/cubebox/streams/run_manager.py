@@ -2935,6 +2935,11 @@ class RunManager:
             "cache_write_tokens": 0,
         }
         last_context_tokens: int = 0
+        # Re-enqueue the search index in `finally` on cancel/exception when
+        # cubepi may have written partial history before the failure. The
+        # enqueue is idempotent (replace_for_conversation), so the flag is
+        # only to skip a redundant enqueue on the happy path.
+        search_index_enqueued = False
 
         async def emit_status(phase: str, detail: str | None = None) -> None:
             data: dict[str, str] = {"phase": phase}
@@ -3178,13 +3183,16 @@ class RunManager:
                 user_id=ctx.user_id,
             )
             # Indexing is enqueued AFTER the run finishes writing history to
-            # the checkpointer — see _enqueue_search_index docstring.
+            # the checkpointer — see _enqueue_search_index docstring. The
+            # finally block re-enqueues on cancel/exception paths where
+            # cubepi may have written partial history before the failure.
             await _enqueue_search_index(
                 conversation_id,
                 org_id=ctx.org_id,
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
+            search_index_enqueued = True
             # Drain the subagent/citation queue BEFORE DoneEvent: SSE
             # consumers (and the frontend) close on `done`, so any event
             # still sitting in the drainer after the final tool call would
@@ -3322,6 +3330,20 @@ class RunManager:
                     params=_classify_params,
                 )
         finally:
+            # If we got here via cancel/exception, the success path's
+            # enqueue was skipped. Cubepi may still have written partial
+            # history (user message + any completed assistant/tool turns)
+            # before the failure, so enqueue best-effort here. The job is
+            # idempotent; the worker re-chunks whatever history exists.
+            if not search_index_enqueued:
+                with suppress(Exception):
+                    await _enqueue_search_index(
+                        conversation_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        user_id=ctx.user_id,
+                    )
+
             if stream_task is not None and not stream_task.done():
                 stream_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -3470,6 +3492,11 @@ class RunManager:
             "cache_write_tokens": 0,
         }
         last_context_tokens: int = 0
+        # Re-enqueue the search index in `finally` on cancel/exception when
+        # cubepi may have written partial history before the failure. The
+        # enqueue is idempotent (replace_for_conversation), so the flag is
+        # only to skip a redundant enqueue on the happy path.
+        search_index_enqueued = False
 
         async def emit_status(phase: str, detail: str | None = None) -> None:
             data: dict[str, str] = {"phase": phase}
@@ -3684,13 +3711,16 @@ class RunManager:
             )
             # Indexing is enqueued AFTER the resumed run finishes writing
             # history to the checkpointer — see _enqueue_search_index
-            # docstring.
+            # docstring. The finally block re-enqueues on cancel/exception
+            # paths where cubepi may have written partial history before
+            # the failure.
             await _enqueue_search_index(
                 conversation_id,
                 org_id=ctx.org_id,
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
+            search_index_enqueued = True
 
             # Drain shared subagent/citation queue BEFORE DoneEvent — same
             # rationale as _execute_run.
@@ -3830,6 +3860,18 @@ class RunManager:
                     params=_classify_params,
                 )
         finally:
+            # Mirror the prompt-path safety net: cancel/exception bypassed
+            # the success-path enqueue, but cubepi may have written partial
+            # history before the failure. Idempotent enqueue.
+            if not search_index_enqueued:
+                with suppress(Exception):
+                    await _enqueue_search_index(
+                        conversation_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        user_id=ctx.user_id,
+                    )
+
             if stream_task is not None and not stream_task.done():
                 stream_task.cancel()
                 with suppress(asyncio.CancelledError):
