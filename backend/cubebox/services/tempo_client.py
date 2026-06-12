@@ -386,7 +386,8 @@ class TempoClient:
             "span.cubepi.metadata.workspace_id, "
             "span.cubepi.metadata.user_id, "
             "span.cubepi.metadata.conversation_id, "
-            "span.cubepi.run_id"
+            "span.cubepi.run_id, "
+            "span.gen_ai.request.model"
             ")"
         )
 
@@ -430,33 +431,44 @@ class TempoClient:
             ) from exc
 
     async def tag_values(self, *, tag: str, org_id: str) -> list[str]:
-        # Tempo's v1 `/api/search/tag/{name}/values` returns the complete
-        # value list for the tag scoped by the `q=` TraceQL. There is no
-        # server-side prefix filter; typeahead narrows client-side.
+        # Tempo v2 scoped tag-values endpoint. v1 ignores `q=` (verified against
+        # 2.8.2), which would leak workspace/user/conversation/model identifiers
+        # across orgs via autocomplete. v2 honors the org-scoping TraceQL.
         params: dict[str, Any] = {
             "q": '{ resource.service.name="cubebox" '
             f"&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }}",
         }
+        url = f"{self._endpoint}/api/v2/search/tag/span/{tag}/values"
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             try:
-                resp = await http.get(
-                    f"{self._endpoint}/api/search/tag/{tag}/values",
-                    params=params,
-                )
+                resp = await http.get(url, params=params)
             except httpx.HTTPError as exc:
                 raise TempoQueryError("Tempo tag values request failed") from exc
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo tag values returned {resp.status_code}")
         try:
             payload = resp.json()
-            return [str(v) for v in (payload.get("tagValues") or [])]
+            # v2 shape: {"tagValues": [{"type": "string", "value": "..."}], ...}
+            return [
+                str(item["value"])
+                for item in (payload.get("tagValues") or [])
+                if isinstance(item, dict) and "value" in item
+            ]
         except (ValueError, KeyError, TypeError) as exc:
             raise TempoQueryError("Tempo tag values returned malformed payload") from exc
 
 
 def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
-    # Tempo surfaces select()-requested attrs on the matched spans inside spanSet.
-    spans = (t.get("spanSet") or {}).get("spans") or []
+    # Tempo surfaces select()-requested attrs on the matched spans inside
+    # spanSets (plural, documented v2 shape). Some Tempo versions also emit
+    # `spanSet` (singular legacy alias) — prefer the array, fall back to the alias.
+    sets = t.get("spanSets") or []
+    matched_set: dict[str, Any]
+    if sets and isinstance(sets, list):
+        matched_set = sets[0] if isinstance(sets[0], dict) else {}
+    else:
+        matched_set = t.get("spanSet") or {}
+    spans = matched_set.get("spans") or []
     attrs_list = [
         {a["key"]: _attr_value(a) for a in (span.get("attributes") or [])} for span in spans
     ]
@@ -473,7 +485,7 @@ def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
         root_name=t.get("rootTraceName", ""),
         start_time=_ns_to_dt(t.get("startTimeUnixNano", "0")),
         duration_ms=int(t.get("durationMs", 0)),
-        span_count=(t.get("spanSet") or {}).get("matched", 0),
+        span_count=int(matched_set.get("matched") or 0),
         workspace_id=first("cubepi.metadata.workspace_id"),
         user_id=first("cubepi.metadata.user_id"),
         conversation_id=first("cubepi.metadata.conversation_id"),

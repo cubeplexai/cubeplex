@@ -77,8 +77,16 @@ async def test_get_trace_returns_detail() -> None:
 @respx.mock
 async def test_tag_values_passes_through() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
-    respx.get("http://tempo.local/api/search/tag/cubepi.metadata.workspace_id/values").mock(
-        return_value=httpx.Response(200, json={"tagValues": ["ws-a", "ws-b"]})
+    respx.get("http://tempo.local/api/v2/search/tag/span/cubepi.metadata.workspace_id/values").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "tagValues": [
+                    {"type": "string", "value": "ws-a"},
+                    {"type": "string", "value": "ws-b"},
+                ]
+            },
+        )
     )
     values = await client.tag_values(
         tag="cubepi.metadata.workspace_id",
@@ -100,7 +108,7 @@ async def test_search_handles_null_traces() -> None:
 @respx.mock
 async def test_tag_values_handles_null_values() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
-    respx.get("http://tempo.local/api/search/tag/cubepi.metadata.workspace_id/values").mock(
+    respx.get("http://tempo.local/api/v2/search/tag/span/cubepi.metadata.workspace_id/values").mock(
         return_value=httpx.Response(200, json={"tagValues": None})
     )
     result = await client.tag_values(tag="cubepi.metadata.workspace_id", org_id="org-1")
@@ -202,6 +210,8 @@ async def test_search_splits_model_into_sibling_spanset() -> None:
     assert 'gen_ai.request.model="deepseek-v4-flash"' in q
     # Two top-level selectors joined by &&:
     assert q.count("} &&") >= 1
+    # Model must be included in the select() projection.
+    assert "gen_ai.request.model" in q
 
 
 @respx.mock
@@ -220,3 +230,40 @@ async def test_get_trace_wraps_transport_errors() -> None:
     respx.get("http://tempo.local/api/traces/abc").mock(side_effect=httpx.ReadTimeout("timed out"))
     with pytest.raises(TempoQueryError):
         await client.get_trace("abc")
+
+
+@respx.mock
+async def test_search_reads_spansets_plural() -> None:
+    # Tempo deployment that emits only the documented `spanSets` array (no legacy alias).
+    payload = {
+        "traces": [
+            {
+                "traceID": "abc",
+                "rootTraceName": "invoke_agent",
+                "startTimeUnixNano": "1781164911000000000",
+                "durationMs": 8055,
+                "spanSets": [
+                    {
+                        "matched": 1,
+                        "spans": [
+                            {
+                                "spanID": "s1",
+                                "attributes": [
+                                    {
+                                        "key": "cubepi.metadata.workspace_id",
+                                        "value": {"stringValue": "ws-plural"},
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+                # NO spanSet (singular)
+            }
+        ],
+    }
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search").mock(return_value=httpx.Response(200, json=payload))
+    [summary] = await client.search(org_id="org-1")
+    assert summary.workspace_id == "ws-plural"
+    assert summary.span_count == 1

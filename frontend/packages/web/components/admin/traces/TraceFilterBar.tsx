@@ -21,6 +21,24 @@ export function TraceFilterBar({ value, onChange }: Props) {
       />
     </label>
   )
+  const numField = (k: 'min_duration_ms' | 'max_duration_ms', label: string) => (
+    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={(value[k] as number | undefined) ?? ''}
+        onChange={(e) => {
+          const raw = e.target.value
+          onChange({
+            ...value,
+            [k]: raw === '' ? undefined : Number(raw),
+          })
+        }}
+        className="rounded border border-border bg-card px-2 py-1 text-sm text-foreground w-28"
+      />
+    </label>
+  )
   return (
     <div className="flex flex-wrap gap-3 border-b border-border bg-card/40 px-4 py-3">
       {field('workspace_id', t('workspace'))}
@@ -30,6 +48,8 @@ export function TraceFilterBar({ value, onChange }: Props) {
       {field('run_id', t('runId'))}
       {field('start', t('from'), 'datetime-local')}
       {field('end', t('to'), 'datetime-local')}
+      {numField('min_duration_ms', t('minDurationMs'))}
+      {numField('max_duration_ms', t('maxDurationMs'))}
     </div>
   )
 }
