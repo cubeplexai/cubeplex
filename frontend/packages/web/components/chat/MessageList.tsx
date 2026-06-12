@@ -396,8 +396,13 @@ export function MessageList({ conversationId }: MessageListProps) {
   return (
     <ScrollArea ref={scrollRef} className="flex-1 p-4" onScroll={handleScroll}>
       <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto px-4 md:px-0">
-        {(messages ?? []).map((msg) => (
-          <div key={msg.id}>
+        {(messages ?? []).map((msg, idx) => (
+          // id="msg-{seq}" matches the conversation-search route's
+          // matched_message_seq (1-based load order over cubepi's
+          // data.messages — see backend/cubebox/search/worker.py).
+          // SearchResultRow links to #msg-N; the browser scrolls to this
+          // anchor when the user clicks a search hit.
+          <div key={msg.id} id={`msg-${idx + 1}`}>
             {msg.role === 'user' && msg.metadata?.synthetic !== true && (
               <>
                 {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
