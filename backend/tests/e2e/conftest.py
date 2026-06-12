@@ -1435,6 +1435,162 @@ async def fake_registry_url() -> AsyncIterator[str]:
         await task
 
 
+# ---------------------------------------------------------------------------
+# Conversation-search fixtures (moved from tests/search/conftest.py).
+#
+# Lives here because the underlying tests now sit in tests/e2e/ — that keeps
+# the unit-tier CI job (which runs without Postgres) from collecting them and
+# hitting connection errors at import time. The DB-touching cleanup is scoped
+# to the seed fixtures rather than module-level autouse, so non-search e2e
+# tests don't pay for an extra TRUNCATE per test.
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def _clean_search_tables() -> AsyncIterator[None]:
+    """Clear search-derived tables before each search test.
+
+    Without this, orphan rows from prior failed runs (``embedding_jobs.state =
+    pending`` referencing now-vanished conversations) get claimed first by the
+    worker under test, starving the test's own enqueue.
+    """
+    from cubebox.db.engine import async_session_maker as _asm
+
+    async with _asm() as session:
+        await session.execute(text("TRUNCATE TABLE embedding_jobs RESTART IDENTITY"))
+        await session.execute(text("TRUNCATE TABLE conversation_chunks RESTART IDENTITY"))
+        await session.commit()
+    yield
+
+
+@pytest_asyncio.fixture
+async def search_test_user_ctx(_clean_search_tables: None) -> tuple[str, str, str]:
+    """Create a minimal org / workspace / user trio and return their IDs.
+
+    Bypasses the fastapi_users registration flow — search tests don't
+    authenticate, they just need scope IDs that satisfy FK constraints on
+    Conversation / ConversationChunk / EmbeddingJob. The slug and email are
+    randomized so concurrent / repeated runs don't collide.
+    """
+    from cubebox.db.engine import async_session_maker as _asm
+    from cubebox.models.organization import Organization
+    from cubebox.models.user import User as UserModel
+    from cubebox.models.workspace import Workspace
+
+    suffix = secrets.token_hex(6)
+    async with _asm() as session:
+        org = Organization(name=f"search-test-{suffix}", slug=f"search-test-{suffix}")
+        session.add(org)
+        await session.commit()
+        await session.refresh(org)
+        ws = Workspace(org_id=org.id, name="search-test-ws")
+        session.add(ws)
+        await session.commit()
+        await session.refresh(ws)
+        user = UserModel(
+            email=f"search-test-{suffix}@example.com",
+            hashed_password="x",
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return org.id, ws.id, user.id
+
+
+@pytest_asyncio.fixture
+async def seeded_conversation(
+    search_test_user_ctx: tuple[str, str, str],
+) -> tuple[str, str, str, str]:
+    """Create a conversation and seed three small cubepi messages."""
+    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+
+    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.db.engine import async_session_maker as _asm
+    from cubebox.models.conversation import Conversation
+
+    org_id, ws_id, user_id = search_test_user_ctx
+    async with _asm() as session:
+        c = Conversation(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            title="seed",
+        )
+        session.add(c)
+        await session.commit()
+        await session.refresh(c)
+        conv_id = c.id
+    async with init_checkpointer() as cp:
+        await cp.append(
+            conv_id,
+            [
+                UserMessage(content=[TextContent(text="hello docling")], timestamp=1.0),
+                AssistantMessage(content=[TextContent(text="hi there")], timestamp=2.0),
+                UserMessage(content=[TextContent(text="文档解析问题")], timestamp=3.0),
+            ],
+        )
+    return org_id, ws_id, user_id, conv_id
+
+
+@pytest_asyncio.fixture
+async def seed_conversations_with_content(
+    search_test_user_ctx: tuple[str, str, str],
+) -> tuple[str, str, str, list[tuple[str, str]]]:
+    """Seed three conversations: English keyword, Chinese keyword, unrelated.
+
+    Returns ``(org_id, workspace_id, user_id, [(conv_id, gist), ...])`` so
+    callers can drive embedding + assert which conversation they expect to
+    find for each search query.
+    """
+    from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
+
+    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.db.engine import async_session_maker as _asm
+    from cubebox.models.conversation import Conversation
+
+    org_id, ws_id, user_id = search_test_user_ctx
+    seeds: list[tuple[str, list[TextContent], str]] = [
+        (
+            "docling-en",
+            [TextContent(text="docling is a PDF parser for agent pipelines")],
+            "english docling",
+        ),
+        (
+            "docling-zh",
+            [TextContent(text="docling 是一款用于智能体的文档解析工具")],
+            "chinese 文档解析",
+        ),
+        (
+            "unrelated",
+            [TextContent(text="weather is sunny today, no parsing here")],
+            "unrelated",
+        ),
+    ]
+    out: list[tuple[str, str]] = []
+    for title, user_content, gist in seeds:
+        async with _asm() as session:
+            c = Conversation(
+                org_id=org_id,
+                workspace_id=ws_id,
+                creator_user_id=user_id,
+                title=title,
+            )
+            session.add(c)
+            await session.commit()
+            await session.refresh(c)
+            conv_id = c.id
+        async with init_checkpointer() as cp:
+            await cp.append(
+                conv_id,
+                [
+                    UserMessage(content=user_content, timestamp=1.0),
+                    AssistantMessage(content=[TextContent(text="ack")], timestamp=2.0),
+                ],
+            )
+        out.append((conv_id, gist))
+    return org_id, ws_id, user_id, out
+
+
 @pytest_asyncio.fixture
 async def seed_remote_source() -> AsyncIterator[Callable[..., Awaitable[str]]]:
     """Insert a SkillRegistry row directly, returning its id.
