@@ -47,11 +47,13 @@ class ConversationSearchService:
     def __init__(
         self,
         session: AsyncSession,
-        provider: EmbeddingProvider,
+        provider: EmbeddingProvider | None,
         *,
         lexical_backend: LexicalSearchBackend | None = None,
     ) -> None:
         self._session = session
+        # provider=None is the lexical-only degraded mode — vector leg is
+        # skipped and RRF degenerates to "lexical scores only".
         self._provider = provider
         # In production the lexical backend is built once at lifespan startup
         # and passed in; tests construct the service directly and may rely on
@@ -168,6 +170,9 @@ class ConversationSearchService:
     async def _vector_leg(
         self, org_id: str, ws_id: str, user_id: str, q: str
     ) -> list[tuple[str, float]]:
+        # Lexical-only mode: nothing to compare against.
+        if self._provider is None:
+            return []
         try:
             vectors = await self._provider.embed([q])
             if not vectors:
@@ -178,6 +183,9 @@ class ConversationSearchService:
             # incompatible embedding space. The worker re-indexes on
             # rotation; until then, the vector leg silently returns
             # nothing and search degrades to lexical-only.
+            # `embedding IS NOT NULL` is defensive — lexical-only chunks
+            # written when no provider is configured carry NULL embeddings
+            # and would otherwise break the cosine operator.
             sql = text(
                 """
                 SELECT cc.id, 1.0 - (cc.embedding <=> :v) AS score
@@ -187,6 +195,7 @@ class ConversationSearchService:
                   AND cc.workspace_id = :ws_id
                   AND cc.creator_user_id = :user_id
                   AND cc.embed_model = :embed_model
+                  AND cc.embedding IS NOT NULL
                 ORDER BY cc.embedding <=> :v
                 LIMIT :lim
                 """

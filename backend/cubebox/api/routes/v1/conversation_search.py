@@ -30,13 +30,10 @@ async def search_conversations(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="empty query")
     # Provider is created once at lifespan startup (Task 19) and shared across
     # all requests; building one per request would re-init httpx connection
-    # pools and re-parse config on every keystroke.
+    # pools and re-parse config on every keystroke. provider may be None
+    # when no embedding key is configured — the service degrades to the
+    # lexical leg only.
     provider = getattr(raw_request.app.state, "embedding_provider", None)
-    if provider is None:
-        raise HTTPException(
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="search is disabled",
-        )
     lexical_backend = getattr(raw_request.app.state, "lexical_backend", None)
     svc = ConversationSearchService(session, provider, lexical_backend=lexical_backend)
     resp = await svc.search(
