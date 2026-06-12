@@ -202,3 +202,21 @@ async def test_search_splits_model_into_sibling_spanset() -> None:
     assert 'gen_ai.request.model="deepseek-v4-flash"' in q
     # Two top-level selectors joined by &&:
     assert q.count("} &&") >= 1
+
+
+@respx.mock
+async def test_search_wraps_transport_errors() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search").mock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    with pytest.raises(TempoQueryError):
+        await client.search(org_id="org-1")
+
+
+@respx.mock
+async def test_get_trace_wraps_transport_errors() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/traces/abc").mock(side_effect=httpx.ReadTimeout("timed out"))
+    with pytest.raises(TempoQueryError):
+        await client.get_trace("abc")
