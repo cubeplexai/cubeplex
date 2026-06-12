@@ -78,6 +78,10 @@ cubebox is a full-stack agent platform.
   `generate_public_id(PREFIX_X)`.
 - **Migrations: `alembic revision --autogenerate -m "..."`.** Do not hand-edit
   migration files; do not skip autogen.
+- **Migration head conflicts after rebase:** When rebasing onto main
+  introduces a second alembic head, do NOT use `alembic merge heads`.
+  Instead, edit the branch's first migration file to change its
+  `down_revision` to main's new head. This keeps the history linear.
 - **Dependencies: `uv add <pkg>` (backend), `pnpm add` (frontend).** Don't
   hand-edit `pyproject.toml` / `package.json`.
 - **Do not create new docs without permission.** Update an existing doc when
