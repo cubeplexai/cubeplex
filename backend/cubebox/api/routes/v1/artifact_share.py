@@ -120,7 +120,13 @@ def _render_body(
     if artifact_type == "image":
         return f'<img src="{file_url}" alt="">'
     if artifact_type == "website":
-        return f'<iframe src="{file_url}" sandbox="allow-scripts allow-same-origin"></iframe>'
+        # Scripts allowed (websites are interactive) but NOT same-origin —
+        # MDN explicitly notes that `allow-scripts allow-same-origin`
+        # together is equivalent to no sandbox at all. Letting attacker /
+        # agent-authored HTML read same-origin cookies (including the
+        # non-HttpOnly CSRF cookie of a logged-in cubebox session that
+        # happens to open the share link) is a real exfiltration path.
+        return f'<iframe src="{file_url}" sandbox="allow-scripts"></iframe>'
     if artifact_type in {"code", "document", "data", "skill"}:
         return f'<iframe src="{file_url}" sandbox></iframe>'
     # Visible link text IS user-facing HTML — keep html.escape there.

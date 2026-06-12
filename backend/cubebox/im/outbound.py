@@ -187,13 +187,23 @@ class OutboundRunTailer:
                                 logger.warning("artifact dispatch failed", exc_info=True)
                         continue
                     if op.kind == "post":
+                        # _FloodSignal MUST be caught before the broad
+                        # Exception clause — otherwise a rate-limited first
+                        # post leaves state.message_id=None and every
+                        # subsequent text_delta re-emits 'post' (because
+                        # fold_event branches on message_id), turning a hot
+                        # rate-limit into a tight loop of create attempts
+                        # instead of adaptive backoff.
+                        ts: str | None = None
                         try:
                             ts = await self._connector.post_placeholder(op.text)
+                        except _FloodSignal:
+                            note_flood_strike(self._state)
                         except Exception:
                             logger.warning("post_placeholder failed", exc_info=True)
-                            ts = None
                         if ts:
                             self._state.message_id = ts
+                            note_edit_success(self._state)
                     elif op.kind == "edit":
                         try:
                             await self._connector.edit(self._state.message_id, op.text)

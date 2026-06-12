@@ -96,6 +96,20 @@ class IMArtifactDispatcher:
         atype: str,
         artifact: dict[str, Any],
     ) -> None:
+        # An absolute public URL is required: the background IM tailer has no
+        # FastAPI Request to derive a base URL from, so an empty
+        # ``public_base_url`` would produce a relative path the Feishu client
+        # can't open. Skip the share-link entirely and log loudly so the
+        # operator sees a config gap rather than a silently-broken bot.
+        base = self.public_base_url.rstrip("/") if self.public_base_url else ""
+        if not (base.startswith("http://") or base.startswith("https://")):
+            logger.warning(
+                "[IM artifacts] cannot post share link for artifact {} — "
+                "api.public_url is not an absolute URL ({!r}); skipping link",
+                artifact_id,
+                self.public_base_url,
+            )
+            return
         version = int(artifact.get("version") or 1)
         nonce = await mint_share_token(
             redis=self.redis,
@@ -106,6 +120,6 @@ class IMArtifactDispatcher:
             artifact_id=artifact_id,
             version=version,
         )
-        share_url = f"{self.public_base_url.rstrip('/')}/api/v1/public/artifacts/share/{nonce}"
+        share_url = f"{base}/api/v1/public/artifacts/share/{nonce}"
         label = atype or "artifact"
         await self.connector.send_text_message(f"📎 {name} · {label} · view → {share_url}")

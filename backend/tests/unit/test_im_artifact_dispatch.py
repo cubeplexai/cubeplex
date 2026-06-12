@@ -152,6 +152,46 @@ async def test_missing_artifact_id_is_dropped(monkeypatch: pytest.MonkeyPatch) -
     assert connector.texts == []
 
 
+async def test_share_link_skipped_when_public_url_not_absolute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If api.public_url isn't configured (or is relative), posting a
+    relative path into Feishu would produce an unopenable link. Skip the
+    send + log instead of shipping a broken link the user can't click."""
+    connector = _RecordingConnector()
+    minted: list[Any] = []
+
+    async def fake_mint(**_kwargs: Any) -> str:
+        minted.append(_kwargs)
+        return "should-not-mint"
+
+    monkeypatch.setattr(im_artifacts, "mint_share_token", fake_mint)
+    monkeypatch.setattr(
+        im_artifacts, "get_objectstore_client", lambda: (_ for _ in ()).throw(AssertionError())
+    )
+
+    dispatcher = im_artifacts.IMArtifactDispatcher(
+        connector=connector,
+        redis=object(),
+        redis_key_prefix="kp",
+        public_base_url="",  # not configured
+        org_id="org",
+        workspace_id="ws",
+        conversation_id="conv",
+    )
+    await dispatcher.handle(
+        {
+            "id": "doc-art",
+            "name": "report.md",
+            "artifact_type": "document",
+            "entry_file": "report.md",
+            "version": 1,
+        }
+    )
+    assert connector.texts == [], "must not post a relative share-link"
+    assert minted == [], "must not mint a token we're not going to use"
+
+
 async def test_image_download_failure_falls_back_to_share_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.im_connector import (
@@ -113,6 +114,7 @@ async def list_accounts(
 async def delete_account(
     workspace_id: str,
     account_id: str,
+    request: Request,
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
@@ -123,3 +125,16 @@ async def delete_account(
     # Pass workspace_id so a member of workspace A cannot delete an account
     # that lives in workspace B within the same org.
     await svc.delete(account_id=account_id, workspace_id=ctx.workspace_id)
+    # Tear down any live long-connection client so a deleted account stops
+    # accepting events immediately, not after the next API restart.
+    long_conns = getattr(request.app.state, "im_long_connections", None) or {}
+    lc = long_conns.pop(account_id, None)
+    if lc is not None:
+        try:
+            await lc.disconnect()
+        except Exception:
+            logger.warning(
+                "[IM ws] long-connection disconnect failed on delete for {}",
+                account_id,
+                exc_info=True,
+            )

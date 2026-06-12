@@ -115,25 +115,40 @@ async def process_one_queue_item(
         # failed (thundering herd against a transient outage).
         return False
 
-    # Mark BOTH the receipt AND the queue row terminal. Without flipping the
-    # queue row's status off 'started', claim_pending_queue_item would re-claim
-    # it via the lease-expiry branch and re-fire start_run up to max_attempts
-    # times — every accepted IM message would become 5 duplicate runs ~5 min
-    # apart, billed N times.
-    async with session_maker() as session:
-        await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
-        await mark_queue_item_completed(session, item_id=captured_item.id)
-        await session.commit()
-
+    # Fire ``on_run_started`` BEFORE flipping the queue row to terminal
+    # state. The callback is what spawns the outbound tailer (and decrypts
+    # the connector's secrets, builds the lark_oapi client, etc.); if any
+    # of that fails AFTER we've marked 'completed', the run silently
+    # succeeds on the agent side but the user never receives any IM reply
+    # and there is no retry path. By letting an exception here flow into
+    # the retry/park branch, the run becomes claimable again and the next
+    # attempt's tailer setup gets a second chance.
     if on_run_started is not None:
         try:
             await on_run_started(run_id, captured_item)
         except Exception:
             logger.warning(
-                "[IM worker] on_run_started callback raised for run {}",
+                "[IM worker] on_run_started callback raised for run {}; "
+                "treating as transient and leaving the row for re-claim",
                 run_id,
                 exc_info=True,
             )
+            async with session_maker() as session:
+                parked = await mark_queue_item_for_retry_or_fail(session, item_id=captured_item.id)
+                if parked:
+                    await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
+                await session.commit()
+            return False
+
+    # Mark BOTH the receipt AND the queue row terminal. Without flipping the
+    # queue row's status off 'started', claim_pending_queue_item would
+    # re-claim it via the lease-expiry branch and re-fire start_run up to
+    # max_attempts times — every accepted IM message would become 5
+    # duplicate runs ~5 min apart, billed N times.
+    async with session_maker() as session:
+        await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
+        await mark_queue_item_completed(session, item_id=captured_item.id)
+        await session.commit()
     return True
 
 

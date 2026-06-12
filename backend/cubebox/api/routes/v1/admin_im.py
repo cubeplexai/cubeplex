@@ -13,7 +13,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.im_connector import IMAccountListOut, IMAccountOut
@@ -67,9 +68,35 @@ async def list_org_accounts(
     return IMAccountListOut(accounts=[_to_out(a) for a in await svc.list_for_org()])
 
 
+async def _disconnect_long_connection(request: Request, account_id: str) -> None:
+    """Tear down a live long-connection client for ``account_id`` if one exists.
+
+    Disabling/deleting an account must stop the long-connection in process
+    state; otherwise the captured account object continues feeding events
+    into ``ingest_inbound_event`` and the bot keeps responding until the
+    next API restart. The webhook path drops disabled accounts on lookup,
+    so this is specifically for the long-connection branch.
+    """
+    long_conns = getattr(request.app.state, "im_long_connections", None)
+    if not long_conns:
+        return
+    lc = long_conns.pop(account_id, None)
+    if lc is None:
+        return
+    try:
+        await lc.disconnect()
+    except Exception:
+        logger.warning(
+            "[IM admin] failed to disconnect long-connection for {} on disable",
+            account_id,
+            exc_info=True,
+        )
+
+
 @router.post("/accounts/{account_id}/disable", response_model=IMAccountOut)
 async def disable_account(
     account_id: str,
+    request: Request,
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
@@ -78,6 +105,7 @@ async def disable_account(
     account = await svc.set_enabled(account_id=account_id, enabled=False)
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    await _disconnect_long_connection(request, account_id)
     return _to_out(account)
 
 
@@ -92,4 +120,9 @@ async def enable_account(
     account = await svc.set_enabled(account_id=account_id, enabled=True)
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    # NOTE: Re-binding a long-connection client requires the full lifespan
+    # context (secret cache, ingest callable, client cache) that lives only
+    # in ``_start_im_runtime``. v1 path for re-enable: restart the API. This
+    # is documented in the setup guide. Webhook accounts pick up immediately
+    # because the ingress route reloads the enabled flag per request.
     return _to_out(account)
