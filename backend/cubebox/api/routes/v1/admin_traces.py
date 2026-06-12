@@ -17,6 +17,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.trace import (
+    SpanNode,
     TagValuesResponse,
     TraceDetail,
     TraceListResponse,
@@ -78,6 +79,12 @@ async def list_traces(
 ) -> TraceListResponse:
     if start and end and start >= end:
         raise HTTPException(status_code=400, detail="start must be earlier than end")
+    for label, dt in (("start", start), ("end", end)):
+        if dt is not None and dt.tzinfo is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{label} must be a timezone-aware ISO 8601 timestamp",
+            )
     client = await _client_or_503()
     org_id = await resolve_current_org_id(user, session)
     try:
@@ -118,6 +125,13 @@ async def get_tag_values(
     return TagValuesResponse(values=values)
 
 
+def _has_foreign_org_span(node: SpanNode, expected_org_id: str) -> bool:
+    span_org = node.raw_attributes.get("cubepi.metadata.org_id")
+    if span_org is not None and str(span_org) != expected_org_id:
+        return True
+    return any(_has_foreign_org_span(c, expected_org_id) for c in node.children)
+
+
 @router.get("/{trace_id}", response_model=TraceDetail)
 async def get_trace_detail(
     trace_id: str,
@@ -137,7 +151,10 @@ async def get_trace_detail(
 
     # Defence in depth: TraceQL is the primary gate, but a stray trace
     # without an org_id, or one belonging to another org, must never reach
-    # the caller.
+    # the caller. Walk every span to catch mixed traces where a child span
+    # carries a different org_id.
     if detail.summary.org_id is None or detail.summary.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Trace not found")
+    if _has_foreign_org_span(detail.root, org_id):
         raise HTTPException(status_code=404, detail="Trace not found")
     return detail

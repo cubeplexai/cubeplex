@@ -124,3 +124,81 @@ async def test_get_trace_rejects_invalid_trace_id() -> None:
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
     with pytest.raises(TempoQueryValueError):
         await client.get_trace("abc\ninjected")
+
+
+@respx.mock
+async def test_get_trace_wraps_parse_errors() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/traces/abc").mock(
+        return_value=httpx.Response(200, text="not json")
+    )
+    with pytest.raises(TempoQueryError):
+        await client.get_trace("abc")
+
+
+@respx.mock
+async def test_search_wraps_parse_errors() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search").mock(
+        return_value=httpx.Response(200, text="not json")
+    )
+    with pytest.raises(TempoQueryError):
+        await client.search(org_id="org-1")
+
+
+@respx.mock
+async def test_search_extracts_metadata_from_spansets() -> None:
+    payload = {
+        "traces": [
+            {
+                "traceID": "abc",
+                "rootTraceName": "invoke_agent",
+                "startTimeUnixNano": "1781164911000000000",
+                "durationMs": 8055,
+                "spanSet": {
+                    "matched": 1,
+                    "spans": [
+                        {
+                            "spanID": "s1",
+                            "attributes": [
+                                {
+                                    "key": "cubepi.metadata.workspace_id",
+                                    "value": {"stringValue": "ws-a"},
+                                },
+                                {
+                                    "key": "cubepi.metadata.user_id",
+                                    "value": {"stringValue": "usr-x"},
+                                },
+                                {
+                                    "key": "cubepi.metadata.conversation_id",
+                                    "value": {"stringValue": "conv-7"},
+                                },
+                                {"key": "cubepi.run_id", "value": {"stringValue": "run-99"}},
+                            ],
+                        }
+                    ],
+                },
+            }
+        ],
+    }
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search").mock(return_value=httpx.Response(200, json=payload))
+    [summary] = await client.search(org_id="org-1")
+    assert summary.workspace_id == "ws-a"
+    assert summary.user_id == "usr-x"
+    assert summary.conversation_id == "conv-7"
+    assert summary.run_id == "run-99"
+
+
+@respx.mock
+async def test_search_splits_model_into_sibling_spanset() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    route = respx.get("http://tempo.local/api/search").mock(
+        return_value=httpx.Response(200, json={"traces": []})
+    )
+    await client.search(org_id="org-1", model="deepseek-v4-flash")
+    q = route.calls.last.request.url.params["q"]
+    # The model clause must be in its own selector to avoid same-span && match.
+    assert 'gen_ai.request.model="deepseek-v4-flash"' in q
+    # Two top-level selectors joined by &&:
+    assert q.count("} &&") >= 1

@@ -349,27 +349,46 @@ class TempoClient:
         max_duration_ms: int | None = None,
         limit: int = 20,
     ) -> list[TraceSummary]:
-        clauses = [
+        # cubepi.metadata.org_id lives on invoke_agent spans; gen_ai.request.model
+        # lives on chat spans. A single {…} selector requires both on the same span,
+        # which would miss cross-span matches. Use sibling spansets joined at the top
+        # level so each selector matches independently within the same trace.
+        metadata_clauses = [
             'resource.service.name="cubebox"',
             f"span.cubepi.metadata.org_id={_quote_traceql(org_id)}",
         ]
         if workspace_id:
-            clauses.append(f"span.cubepi.metadata.workspace_id={_quote_traceql(workspace_id)}")
+            metadata_clauses.append(
+                f"span.cubepi.metadata.workspace_id={_quote_traceql(workspace_id)}"
+            )
         if user_id:
-            clauses.append(f"span.cubepi.metadata.user_id={_quote_traceql(user_id)}")
+            metadata_clauses.append(f"span.cubepi.metadata.user_id={_quote_traceql(user_id)}")
         if conversation_id:
-            clauses.append(
+            metadata_clauses.append(
                 f"span.cubepi.metadata.conversation_id={_quote_traceql(conversation_id)}"
             )
         if run_id:
-            clauses.append(f"span.cubepi.run_id={_quote_traceql(run_id)}")
-        if model:
-            clauses.append(f"span.gen_ai.request.model={_quote_traceql(model)}")
+            metadata_clauses.append(f"span.cubepi.run_id={_quote_traceql(run_id)}")
         if min_duration_ms is not None:
-            clauses.append(f"trace:duration > {int(min_duration_ms)}ms")
+            metadata_clauses.append(f"trace:duration > {int(min_duration_ms)}ms")
         if max_duration_ms is not None:
-            clauses.append(f"trace:duration < {int(max_duration_ms)}ms")
-        q = "{ " + " && ".join(clauses) + " }"
+            metadata_clauses.append(f"trace:duration < {int(max_duration_ms)}ms")
+
+        model_clauses: list[str] = []
+        if model:
+            model_clauses.append(f"span.gen_ai.request.model={_quote_traceql(model)}")
+
+        q = "{ " + " && ".join(metadata_clauses) + " }"
+        if model_clauses:
+            q += " && { " + " && ".join(model_clauses) + " }"
+        q += (
+            " | select("
+            "span.cubepi.metadata.workspace_id, "
+            "span.cubepi.metadata.user_id, "
+            "span.cubepi.metadata.conversation_id, "
+            "span.cubepi.run_id"
+            ")"
+        )
 
         params: dict[str, Any] = {"q": q, "limit": str(limit)}
         if start:
@@ -381,8 +400,12 @@ class TempoClient:
             resp = await http.get(f"{self._endpoint}/api/search", params=params)
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo /api/search returned {resp.status_code}")
-        payload = resp.json()
-        return [_search_hit_to_summary(t) for t in (payload.get("traces") or [])]
+        try:
+            payload = resp.json()
+            hits = payload.get("traces") or []
+            return [_search_hit_to_summary(t) for t in hits]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise TempoQueryError("Tempo /api/search returned malformed payload") from exc
 
     async def get_trace(self, trace_id: str) -> TraceDetail:
         if not _TRACE_ID_RE.match(trace_id):
@@ -393,7 +416,12 @@ class TempoClient:
             raise TempoQueryError(f"Trace {trace_id} not found")
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo /api/traces/{trace_id} returned {resp.status_code}")
-        return parse_trace_detail(resp.json())
+        try:
+            return parse_trace_detail(resp.json())
+        except (ValueError, KeyError, TypeError) as exc:
+            raise TempoQueryError(
+                f"Tempo /api/traces/{trace_id} returned malformed payload"
+            ) from exc
 
     async def tag_values(self, *, tag: str, org_id: str) -> list[str]:
         # Tempo's v1 `/api/search/tag/{name}/values` returns the complete
@@ -410,17 +438,38 @@ class TempoClient:
             )
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo tag values returned {resp.status_code}")
-        payload = resp.json()
-        return [str(v) for v in (payload.get("tagValues") or [])]
+        try:
+            payload = resp.json()
+            return [str(v) for v in (payload.get("tagValues") or [])]
+        except (ValueError, KeyError, TypeError) as exc:
+            raise TempoQueryError("Tempo tag values returned malformed payload") from exc
 
 
 def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
+    # Tempo surfaces select()-requested attrs on the matched spans inside spanSet.
+    spans = (t.get("spanSet") or {}).get("spans") or []
+    attrs_list = [
+        {a["key"]: _attr_value(a) for a in (span.get("attributes") or [])} for span in spans
+    ]
+
+    def first(key: str) -> str | None:
+        for attrs in attrs_list:
+            v = attrs.get(key)
+            if v not in (None, ""):
+                return str(v)
+        return None
+
     return TraceSummary(
         trace_id=t["traceID"],
         root_name=t.get("rootTraceName", ""),
         start_time=_ns_to_dt(t.get("startTimeUnixNano", "0")),
         duration_ms=int(t.get("durationMs", 0)),
-        span_count=t.get("spanSet", {}).get("matched", 0),
+        span_count=(t.get("spanSet") or {}).get("matched", 0),
+        workspace_id=first("cubepi.metadata.workspace_id"),
+        user_id=first("cubepi.metadata.user_id"),
+        conversation_id=first("cubepi.metadata.conversation_id"),
+        run_id=first("cubepi.run_id"),
+        model=first("gen_ai.request.model"),
     )
 
 
