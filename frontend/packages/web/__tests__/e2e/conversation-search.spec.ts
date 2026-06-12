@@ -1,4 +1,4 @@
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 
 const PASSWORD = 'correcthorsebatterystaple'
 
@@ -19,9 +19,13 @@ async function registerAndLand(page: Page): Promise<string> {
 // decide whether indexing has actually produced results yet (requires a
 // working embedding key in the backend lifespan; without one the worker
 // errors and fused_count stays 0).
-async function probeSearch(request: APIRequestContext, wsId: string, q: string): Promise<number> {
+//
+// Uses page.request so the call shares the browser context's cookie jar
+// — the standalone `request` fixture has its own jar and would hit
+// require_member unauthenticated → 401 → silent 0.
+async function probeSearch(page: Page, wsId: string, q: string): Promise<number> {
   const url = `/api/v1/ws/${wsId}/conversations/search?q=${encodeURIComponent(q)}&limit=8`
-  const res = await request.get(url)
+  const res = await page.request.get(url)
   if (!res.ok()) return 0
   const data = (await res.json()) as { fused_count?: number }
   return data.fused_count ?? 0
@@ -36,7 +40,7 @@ test.describe('conversation search', () => {
     'DASHSCOPE_API_KEY not set; embedding worker cannot index in this run',
   )
 
-  test('typing a keyword shows a matching result', async ({ page, request }) => {
+  test('typing a keyword shows a matching result', async ({ page }) => {
     const wsId = await registerAndLand(page)
 
     // Seed a conversation by sending a real chat message. The backend's
@@ -55,7 +59,7 @@ test.describe('conversation search', () => {
     let fused = 0
     const deadline = Date.now() + 15_000
     while (Date.now() < deadline) {
-      fused = await probeSearch(request, wsId, KEYWORD)
+      fused = await probeSearch(page, wsId, KEYWORD)
       if (fused > 0) break
       await page.waitForTimeout(1000)
     }
