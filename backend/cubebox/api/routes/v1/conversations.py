@@ -84,6 +84,11 @@ async def _update_conversation_timestamp(
     depend on the request-scoped pool state. Always sets has_messages=True
     and bumps updated_at, so the conversation is visible in ``list_all`` and
     its position in the recency-ordered list reflects the latest activity.
+
+    Indexing is intentionally NOT triggered here. Callers enqueue the index
+    job AFTER the message-write completion point (run-end persistence or
+    install-fallback synthetic append) so the worker never claims a job
+    against a still-empty history. See ``_enqueue_search_index`` below.
     """
     save_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
@@ -95,25 +100,36 @@ async def _update_conversation_timestamp(
                 user_id=user_id,
             )
             await save_conv_repo.mark_active(conversation_id)
-        try:
-            from cubebox.config import config as _cfg
-            from cubebox.search.indexer import enqueue_index_job
-
-            if _cfg.get("search.enabled", True):
-                await enqueue_index_job(
-                    org_id=org_id,
-                    workspace_id=workspace_id,
-                    creator_user_id=user_id,
-                    conversation_id=conversation_id,
-                )
-        except Exception:
-            # Indexing is best-effort: failure must not poison the
-            # conversation timestamp bump. The indexer already logged a
-            # structured event=search_index_enqueue_failed line, so the
-            # failure is observable via log-based alerting.
-            logger.exception("search index enqueue failed for %s", conversation_id)
     finally:
         await save_engine.dispose()
+
+
+async def _enqueue_search_index(
+    conversation_id: str,
+    *,
+    org_id: str,
+    workspace_id: str,
+    user_id: str,
+) -> None:
+    """Best-effort enqueue of a search-index job after history is persisted.
+
+    Indexing is best-effort: failure must not poison the calling path. The
+    indexer already logs a structured ``event=search_index_enqueue_failed``
+    line, so the failure is observable via log-based alerting.
+    """
+    try:
+        from cubebox.config import config as _cfg
+        from cubebox.search.indexer import enqueue_index_job
+
+        if _cfg.get("search.enabled", True):
+            await enqueue_index_job(
+                org_id=org_id,
+                workspace_id=workspace_id,
+                creator_user_id=user_id,
+                conversation_id=conversation_id,
+            )
+    except Exception:
+        logger.exception("search index enqueue failed for %s", conversation_id)
 
 
 def _skill_cache() -> SkillCache:
@@ -730,6 +746,18 @@ async def send_message(
                             ),
                         ],
                     )
+                # Enqueue indexing AFTER the synthetic messages land in
+                # checkpointer storage. Doing it inside the timestamp hook
+                # (or before this append) would let the worker claim the
+                # job during the window when conversation history is still
+                # empty and index nothing — no subsequent run-completion
+                # hook covers this fallback path.
+                await _enqueue_search_index(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user.id,
+                )
         finally:
             # The fallback spawns no background run — release the slot now that
             # the install + append (the only writes we needed to serialize) are done.

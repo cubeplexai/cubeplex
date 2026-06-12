@@ -2901,7 +2901,10 @@ class RunManager:
         preset_label: str | None = None,
         thinking: ThinkingLevel = "off",
     ) -> None:
-        from cubebox.api.routes.v1.conversations import _update_conversation_timestamp
+        from cubebox.api.routes.v1.conversations import (
+            _enqueue_search_index,
+            _update_conversation_timestamp,
+        )
         from cubebox.middleware.citations.counter import (
             CitationCounter,
             citation_counter_var,
@@ -3174,6 +3177,14 @@ class RunManager:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
+            # Indexing is enqueued AFTER the run finishes writing history to
+            # the checkpointer — see _enqueue_search_index docstring.
+            await _enqueue_search_index(
+                conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+            )
             # Drain the subagent/citation queue BEFORE DoneEvent: SSE
             # consumers (and the frontend) close on `done`, so any event
             # still sitting in the drainer after the final tool call would
@@ -3425,7 +3436,10 @@ class RunManager:
         identical to ``_execute_run``'s — keeping it byte-stable preserves
         the prompt cache prefix across pause/resume.
         """
-        from cubebox.api.routes.v1.conversations import _update_conversation_timestamp
+        from cubebox.api.routes.v1.conversations import (
+            _enqueue_search_index,
+            _update_conversation_timestamp,
+        )
         from cubebox.middleware.citations.counter import (
             CitationCounter,
             citation_counter_var,
@@ -3663,6 +3677,15 @@ class RunManager:
                 extra_ref_holder=extra_ref_holder,
             )
             await _update_conversation_timestamp(
+                conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+            )
+            # Indexing is enqueued AFTER the resumed run finishes writing
+            # history to the checkpointer — see _enqueue_search_index
+            # docstring.
+            await _enqueue_search_index(
                 conversation_id,
                 org_id=ctx.org_id,
                 workspace_id=ctx.workspace_id,
