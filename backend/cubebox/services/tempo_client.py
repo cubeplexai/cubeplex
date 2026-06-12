@@ -397,7 +397,10 @@ class TempoClient:
             params["end"] = str(int(end.timestamp()))
 
         async with httpx.AsyncClient(timeout=self._timeout) as http:
-            resp = await http.get(f"{self._endpoint}/api/search", params=params)
+            try:
+                resp = await http.get(f"{self._endpoint}/api/search", params=params)
+            except httpx.HTTPError as exc:
+                raise TempoQueryError("Tempo /api/search request failed") from exc
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo /api/search returned {resp.status_code}")
         try:
@@ -411,7 +414,10 @@ class TempoClient:
         if not _TRACE_ID_RE.match(trace_id):
             raise TempoQueryValueError(f"Invalid trace id: {trace_id!r}")
         async with httpx.AsyncClient(timeout=self._timeout) as http:
-            resp = await http.get(f"{self._endpoint}/api/traces/{trace_id}")
+            try:
+                resp = await http.get(f"{self._endpoint}/api/traces/{trace_id}")
+            except httpx.HTTPError as exc:
+                raise TempoQueryError(f"Tempo /api/traces/{trace_id} request failed") from exc
         if resp.status_code == 404:
             raise TempoQueryError(f"Trace {trace_id} not found")
         if resp.status_code >= 400:
@@ -432,10 +438,13 @@ class TempoClient:
             f"&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }}",
         }
         async with httpx.AsyncClient(timeout=self._timeout) as http:
-            resp = await http.get(
-                f"{self._endpoint}/api/search/tag/{tag}/values",
-                params=params,
-            )
+            try:
+                resp = await http.get(
+                    f"{self._endpoint}/api/search/tag/{tag}/values",
+                    params=params,
+                )
+            except httpx.HTTPError as exc:
+                raise TempoQueryError("Tempo tag values request failed") from exc
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo tag values returned {resp.status_code}")
         try:

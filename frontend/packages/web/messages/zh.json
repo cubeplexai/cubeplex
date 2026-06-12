@@ -136,7 +136,8 @@
       "performance": "性能",
       "toolInfo": "工具",
       "arguments": "参数",
-      "result": "结果"
+      "result": "结果",
+      "rawAttributes": "原始属性"
     }
   },
   "chat": {

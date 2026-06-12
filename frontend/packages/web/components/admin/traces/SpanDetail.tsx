@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
 import type { SpanNode } from './types'
 import { JsonBlock } from './cards/JsonBlock'
 import { LlmCard } from './cards/LlmCard'
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function SpanDetail({ node }: Props) {
+  const t = useTranslations('adminTraces.sections')
   return (
     <div className="space-y-4 p-4">
       <div>
@@ -28,7 +30,14 @@ export function SpanDetail({ node }: Props) {
           </div>
         </div>
       )}
-      {node.kind === 'other' && <JsonBlock value={JSON.stringify(node.raw_attributes, null, 2)} />}
+      <details className="rounded border border-border bg-card" open={node.kind === 'other'}>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium select-none">
+          {t('rawAttributes')}
+        </summary>
+        <div className="border-t border-border px-3 py-3">
+          <JsonBlock value={JSON.stringify(node.raw_attributes, null, 2)} />
+        </div>
+      </details>
     </div>
   )
 }

@@ -136,7 +136,8 @@
       "performance": "Performance",
       "toolInfo": "Tool",
       "arguments": "Arguments",
-      "result": "Result"
+      "result": "Result",
+      "rawAttributes": "Raw attributes"
     }
   },
   "chat": {
