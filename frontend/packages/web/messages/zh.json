@@ -110,7 +110,9 @@
       "model": "模型",
       "runId": "运行 ID",
       "from": "开始时间",
-      "to": "结束时间"
+      "to": "结束时间",
+      "minDurationMs": "最短时长 (ms)",
+      "maxDurationMs": "最长时长 (ms)"
     },
     "columns": {
       "startTime": "开始",

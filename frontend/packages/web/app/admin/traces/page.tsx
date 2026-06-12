@@ -23,6 +23,10 @@ function valuesFromSearchParams(sp: URLSearchParams): TraceFilterValues {
     const val = sp.get(k)
     if (val) v[k] = val
   }
+  for (const k of ['min_duration_ms', 'max_duration_ms'] as const) {
+    const val = sp.get(k)
+    if (val && !Number.isNaN(Number(val))) v[k] = Number(val)
+  }
   return v
 }
 

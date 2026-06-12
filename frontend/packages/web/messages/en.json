@@ -110,7 +110,9 @@
       "model": "Model",
       "runId": "Run ID",
       "from": "From",
-      "to": "To"
+      "to": "To",
+      "minDurationMs": "Min duration (ms)",
+      "maxDurationMs": "Max duration (ms)"
     },
     "columns": {
       "startTime": "Start",
