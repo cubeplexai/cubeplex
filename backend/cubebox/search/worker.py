@@ -19,7 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingWorker:
-    def __init__(self, provider: EmbeddingProvider) -> None:
+    def __init__(self, provider: EmbeddingProvider | None) -> None:
+        # provider=None is the lexical-only degraded mode: the worker still
+        # chunks and writes rows so PGroonga has something to query, but
+        # leaves embedding=NULL. Backfill re-embeds those rows once an
+        # operator configures a provider.
         self._provider = provider
         self._stop = asyncio.Event()
         self._poll_interval = int(config.get("search.worker.poll_interval_seconds", 2))
@@ -113,28 +117,43 @@ class EmbeddingWorker:
         )
         if not chunks:
             return
-        # 5. Embed.
-        vectors = await self._provider.embed([c.text for c in chunks])
-        # zip(..., strict=True) raises a ValueError whose message ('zip()
-        # argument 2 is shorter/longer than argument 1') is opaque in logs.
-        # An explicit check gives operators a greppable root cause and the
-        # same retry path via _claim_one's except.
-        if len(vectors) != len(chunks):
-            raise RuntimeError(
-                f"embedding provider returned {len(vectors)} vectors for {len(chunks)} inputs"
-            )
+        # 5. Embed (skipped in lexical-only mode).
+        if self._provider is None:
+            # Sentinel embed_model so backfill can `WHERE embed_model = ''`
+            # to find rows that still need vectors after a key is configured.
+            rows = [
+                ConversationChunk(
+                    chunk_seq=c.chunk_seq,
+                    seq_lo=c.seq_lo,
+                    seq_hi=c.seq_hi,
+                    text=c.text,
+                    embedding=None,
+                    embed_model="",
+                )
+                for c in chunks
+            ]
+        else:
+            vectors = await self._provider.embed([c.text for c in chunks])
+            # zip(..., strict=True) raises a ValueError whose message ('zip()
+            # argument 2 is shorter/longer than argument 1') is opaque in logs.
+            # An explicit check gives operators a greppable root cause and the
+            # same retry path via _claim_one's except.
+            if len(vectors) != len(chunks):
+                raise RuntimeError(
+                    f"embedding provider returned {len(vectors)} vectors for {len(chunks)} inputs"
+                )
+            rows = [
+                ConversationChunk(
+                    chunk_seq=c.chunk_seq,
+                    seq_lo=c.seq_lo,
+                    seq_hi=c.seq_hi,
+                    text=c.text,
+                    embedding=v,
+                    embed_model=self._provider.model_id,
+                )
+                for c, v in zip(chunks, vectors, strict=False)
+            ]
         # 6. Persist.
-        rows = [
-            ConversationChunk(
-                chunk_seq=c.chunk_seq,
-                seq_lo=c.seq_lo,
-                seq_hi=c.seq_hi,
-                text=c.text,
-                embedding=v,
-                embed_model=self._provider.model_id,
-            )
-            for c, v in zip(chunks, vectors, strict=False)
-        ]
         async with async_session_maker() as session:
             repo = ConversationChunkRepository(
                 session,

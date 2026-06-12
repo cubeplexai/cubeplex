@@ -1,6 +1,7 @@
 """Integration test for EmbeddingWorker — real Postgres, fake embedding provider."""
 
 import pytest
+from sqlalchemy import text as sql_text
 
 from cubebox.db.engine import async_session_maker
 from cubebox.repositories.conversation_chunk import ConversationChunkRepository
@@ -43,6 +44,39 @@ async def test_worker_processes_job_for_seeded_conversation(
         )
         n = await chunk_repo.count_for_conversation(conv_id)
     assert n > 0
+
+
+@pytest.mark.asyncio
+async def test_worker_writes_null_embedding_when_provider_absent(
+    seeded_conversation: tuple[str, str, str, str],
+) -> None:
+    """Lexical-only mode: worker still chunks, but embedding column is NULL."""
+    org_id, ws_id, user_id, conv_id = seeded_conversation
+    async with async_session_maker() as session:
+        ejob_repo = EmbeddingJobRepository(
+            session, org_id=org_id, workspace_id=ws_id, user_id=user_id
+        )
+        await ejob_repo.enqueue(conversation_id=conv_id)
+    worker = EmbeddingWorker(None)
+    job = await worker._claim_one()
+    assert job is not None
+    async with async_session_maker() as session:
+        chunk_repo = ConversationChunkRepository(
+            session, org_id=org_id, workspace_id=ws_id, user_id=user_id
+        )
+        n = await chunk_repo.count_for_conversation(conv_id)
+    assert n > 0
+    async with async_session_maker() as session:
+        result = await session.execute(
+            sql_text(
+                "SELECT COUNT(*) FROM conversation_chunks "
+                "WHERE conversation_id = :cid AND embedding IS NULL "
+                "AND embed_model = ''"
+            ),
+            {"cid": conv_id},
+        )
+        null_count = int(result.scalar_one())
+    assert null_count == n
 
 
 @pytest.mark.asyncio
