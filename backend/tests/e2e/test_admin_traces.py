@@ -101,6 +101,56 @@ async def test_detail_returns_trace(admin_client, fake_tempo, fake_resolve_org) 
     assert resp.json()["summary"]["trace_id"] == "t1"
 
 
+async def test_list_rejects_naive_datetime(admin_client, fake_tempo) -> None:
+    client, _ws = admin_client
+    resp = await client.get(
+        "/api/v1/admin/traces?start=2026-06-11T09:00:00&end=2026-06-12T09:00:00"
+    )
+    assert resp.status_code == 400
+    assert "timezone" in resp.text.lower()
+
+
+async def test_detail_rejects_foreign_org_in_child_span(
+    admin_client, fake_tempo, fake_resolve_org
+) -> None:
+    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+
+    fake_tempo.get_trace.return_value = TraceDetail(
+        summary=TraceSummary(
+            trace_id="t1",
+            root_name="invoke_agent",
+            start_time=datetime(2026, 6, 11, tzinfo=UTC),
+            duration_ms=1000,
+            span_count=2,
+            org_id="org-MATCH",  # summary looks fine
+        ),
+        root=SpanNode(
+            span_id="s1",
+            parent_span_id=None,
+            name="invoke_agent",
+            kind=SpanKind.AGENT,
+            start_time=datetime(2026, 6, 11, tzinfo=UTC),
+            duration_ms=1000,
+            raw_attributes={"cubepi.metadata.org_id": "org-MATCH"},
+            children=[
+                SpanNode(
+                    span_id="s2",
+                    parent_span_id="s1",
+                    name="chat",
+                    kind=SpanKind.CHAT,
+                    start_time=datetime(2026, 6, 11, tzinfo=UTC),
+                    duration_ms=500,
+                    raw_attributes={"cubepi.metadata.org_id": "org-EVIL"},  # foreign
+                    children=[],
+                ),
+            ],
+        ),
+    )
+    client, _ws = admin_client
+    resp = await client.get("/api/v1/admin/traces/t1")
+    assert resp.status_code == 404
+
+
 async def test_detail_404_on_org_mismatch(admin_client, fake_tempo, fake_resolve_org) -> None:
     from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
 

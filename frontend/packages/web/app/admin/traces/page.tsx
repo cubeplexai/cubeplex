@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
@@ -37,22 +37,28 @@ export default function AdminTracesPage() {
   const [error, setError] = useState<string | null>(null)
   const [disabled, setDisabled] = useState(false)
   const [loading, setLoading] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
 
   const fetchPage = useCallback(async (f: TraceFilterValues) => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
     setLoading(true)
     setError(null)
     setDisabled(false)
     try {
-      const res = await listAdminTraces({ ...f, limit: 50 })
+      const res = await listAdminTraces({ ...f, limit: 50 }, ctrl.signal)
+      if (ctrl.signal.aborted) return
       setTraces(res.traces)
     } catch (e: unknown) {
+      if (ctrl.signal.aborted) return
       if (e instanceof AdminTracesDisabledError) {
         setDisabled(true)
       } else {
         setError(e instanceof Error ? e.message : String(e))
       }
     } finally {
-      setLoading(false)
+      if (!ctrl.signal.aborted) setLoading(false)
     }
   }, [])
 
