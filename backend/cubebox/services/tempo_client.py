@@ -434,11 +434,15 @@ class TempoClient:
         # Tempo v2 scoped tag-values endpoint. v1 ignores `q=` (verified against
         # 2.8.2), which would leak workspace/user/conversation/model identifiers
         # across orgs via autocomplete. v2 honors the org-scoping TraceQL.
+        #
+        # Tempo v2 takes the FULL prefixed tag name (e.g. `span.cubepi.run_id`)
+        # as a single path segment — NOT `span/<tag>` as two segments. All tags
+        # in _ALLOWED_TAGS live on spans, so we prepend `span.` here.
         params: dict[str, Any] = {
             "q": '{ resource.service.name="cubebox" '
             f"&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }}",
         }
-        url = f"{self._endpoint}/api/v2/search/tag/span/{tag}/values"
+        url = f"{self._endpoint}/api/v2/search/tag/span.{tag}/values"
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             try:
                 resp = await http.get(url, params=params)
