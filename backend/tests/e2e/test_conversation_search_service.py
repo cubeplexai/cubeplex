@@ -165,6 +165,52 @@ async def test_search_legs_run_concurrently_without_session_race(
 
 
 @pytest.mark.asyncio
+async def test_vector_leg_filters_by_embed_model(
+    seeded_conversation: tuple[str, str, str, str],
+) -> None:
+    """Vector leg returns only chunks embedded with the current provider's model.
+
+    Simulates an operator rotation of ``search.embedding.model`` /
+    ``base_url`` (same dimension). After indexing with model A, swap the
+    rows' ``embed_model`` to a stale tag and search with model B — the
+    vector leg must report zero hits while the lexical leg (which is
+    model-agnostic) still finds the seeded conversation.
+    """
+    from sqlalchemy import text as sql_text
+
+    from cubebox.search.service import ConversationSearchService
+
+    org_id, ws_id, user_id, conv_id = seeded_conversation
+    async with async_session_maker() as s:
+        repo = EmbeddingJobRepository(s, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        await repo.enqueue(conversation_id=conv_id)
+    await EmbeddingWorker(_KeywordEmbedder())._claim_one()
+
+    # Rotate the stored embed_model out from under the live provider.
+    async with async_session_maker() as s:
+        await s.execute(
+            sql_text(
+                "UPDATE conversation_chunks SET embed_model = :stale WHERE conversation_id = :cid"
+            ),
+            {"stale": "stale@old.local", "cid": conv_id},
+        )
+        await s.commit()
+
+    async with async_session_maker() as s:
+        svc = ConversationSearchService(s, _KeywordEmbedder())
+        resp = await svc.search(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            q="docling",
+            limit=8,
+        )
+    # Vector leg saw zero matching-model chunks; lexical leg is unaffected.
+    assert resp.vector_count == 0
+    assert resp.lexical_count > 0
+
+
+@pytest.mark.asyncio
 async def test_search_rejects_control_characters(
     seeded_conversation: tuple[str, str, str, str],
 ) -> None:

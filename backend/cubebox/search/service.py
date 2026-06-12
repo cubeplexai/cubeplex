@@ -172,6 +172,12 @@ class ConversationSearchService:
             vectors = await self._provider.embed([q])
             if not vectors:
                 return []
+            # Filter by embed_model so an operator rotation of
+            # search.embedding.model / base_url (same dimension) doesn't
+            # mix the new query vector with stale chunks in an
+            # incompatible embedding space. The worker re-indexes on
+            # rotation; until then, the vector leg silently returns
+            # nothing and search degrades to lexical-only.
             sql = text(
                 """
                 SELECT cc.id, 1.0 - (cc.embedding <=> :v) AS score
@@ -180,6 +186,7 @@ class ConversationSearchService:
                 WHERE cc.org_id = :org_id
                   AND cc.workspace_id = :ws_id
                   AND cc.creator_user_id = :user_id
+                  AND cc.embed_model = :embed_model
                 ORDER BY cc.embedding <=> :v
                 LIMIT :lim
                 """
@@ -189,6 +196,7 @@ class ConversationSearchService:
                 "ws_id": ws_id,
                 "user_id": user_id,
                 "v": vectors[0],
+                "embed_model": self._provider.model_id,
                 "lim": self._prefetch,
             }
             async with async_session_maker() as session:
