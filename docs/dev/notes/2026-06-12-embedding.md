@@ -46,7 +46,7 @@ What happens on each mismatch:
 | schema_dim is None | CRITICAL log "has alembic upgrade head been run?"; provider closed; route returns 503. |
 | config_dim ≠ schema_dim | CRITICAL log naming all three values + recovery steps; route returns 503. |
 | provider_dim ≠ schema_dim | Same — wrong embedding model for this schema. |
-| Provider not constructable (no API key) | Error log; subsystem inert; route returns 503; rest of API boots normally. |
+| Provider not constructable (no API key) | WARNING log; worker still runs lexical-only (chunks written with embedding=NULL); route returns 200 with lexical results and vector_count=0. |
 
 The point of this check is loud failure at startup, not silent corruption
 at insert time. Without it an operator who edits `search.embedding.model`
@@ -109,15 +109,18 @@ anyway.
 Decision flow when the service comes up:
 
 ```
-search.enabled == false        → subsystem inert, route 404? No — route 503.
+search.enabled == false        → subsystem inert, route 503.
 search.enabled == true
   EmbeddingProvider.from_config raises (no API key)
-                               → error log, subsystem inert, route 503,
-                                  rest of API healthy.
+                               → WARNING log, worker runs lexical-only
+                                  (embedding=NULL), route 200 with
+                                  lexical results + vector_count=0.
   provider built
     _verify_dim_alignment fails
                                → CRITICAL log with recovery path,
-                                  provider closed, route 503.
+                                  provider closed, worker runs
+                                  lexical-only (route 200, vector
+                                  leg skipped).
     _verify_dim_alignment passes
                                → lexical backend built, worker started,
                                   route serves traffic.
@@ -128,7 +131,55 @@ lexical extension missing      → alembic upgrade fails earlier
 
 Three failure modes, three different fixes — and only the lexical-extension
 case actually stops the API, because at that point we can't even create
-the chunks table.
+the chunks table. Unlike the earlier design, the "no API key" and "dim
+mismatch" no longer return 503 — they degrade to lexical-only so users
+without an embedding budget still get usable keyword search.
+
+## Lexical-only mode
+
+When `DASHSCOPE_API_KEY` (or the configured provider's key) is unset,
+`EmbeddingProvider.from_config()` raises `RuntimeError`. The startup
+subsystem catches this and:
+
+- Logs a WARNING (not an error — the operator may have intentionally
+  skipped vector search).
+- Sets `app.state.embedding_provider = None`.
+- `build_lexical_backend()` still runs — PGroonga (or pg_bigm) is
+  available.
+- The `EmbeddingWorker` is started with `provider=None`.
+
+The worker skeleton runs normally: it ticks, claims jobs, loads messages,
+chunks text, and writes `ConversationChunk` rows — but with
+`embedding=NULL` and `embed_model=""`. This means the lexical leg
+(PGroonga over the chunk text) has data to query even without vectors.
+
+The search route always returns 200 (no 503). The `ConversationSearchService`
+is constructed with `provider=None`; `_vector_leg` returns `[]`
+immediately (it also filters `WHERE cc.embedding IS NOT NULL` defensively).
+RRF receives empty vector results, so the fused ranking is purely the
+lexical scores. The response carries `vector_count=0` and
+`lexical_count > 0`.
+
+When an operator later configures an API key and restarts:
+1. The worker runs with a real provider and writes vector chunks normally.
+2. Existing conversations that were indexed in lexical-only mode still
+   have rows with `embedding=NULL` and `embed_model=""`.
+3. The backfill script (`scripts/dev/backfill_search_index.py`) re-enqueues
+   all conversations; re-indexed rows get vectors. Until then, the vector
+   leg skips NULL-embedding rows (the `IS NOT NULL` guard) while the
+   lexical leg continues to serve them.
+
+To re-embed all NULL chunks in bulk:
+
+```bash
+# Re-enqueue every conversation for re-indexing.
+python scripts/dev/backfill_search_index.py
+```
+
+The `WHERE embed_model = ''` condition identifies chunks that still need
+vectors after a provider is configured. A future operator command could
+target only these, but the backfill script is idempotent — re-running it
+is safe.
 
 ## See also
 
