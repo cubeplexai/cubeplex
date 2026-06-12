@@ -321,3 +321,69 @@ async def test_unknown_app_acked_and_dropped(
     )
     # Ack without disclosing existence; the platform retries are gracefully absorbed.
     assert resp.status_code == 200
+
+
+def _encrypt_body_for_test(plaintext: bytes, encrypt_key: str) -> str:
+    """Mirror of decrypt_feishu_payload to fabricate encrypted webhook bodies."""
+    import base64
+    import hashlib
+    import secrets as _secrets
+
+    from Crypto.Cipher import AES
+
+    key = hashlib.sha256(encrypt_key.encode()).digest()
+    iv = _secrets.token_bytes(16)
+    pad = 16 - (len(plaintext) % 16)
+    padded = plaintext + bytes([pad]) * pad
+    ct = AES.new(key, AES.MODE_CBC, iv).encrypt(padded)
+    return base64.b64encode(iv + ct).decode()
+
+
+async def test_encrypted_event_callback_decrypts_and_enqueues(
+    async_client: httpx.AsyncClient,
+    _seeded_feishu_account: None,
+) -> None:
+    """Feishu "Event Encryption" mode: outer body has only {"encrypt": "..."};
+    ingress must try-decrypt against each enabled account's encrypt_key,
+    route by the inner app_id, and enqueue a run just like the plain path.
+    """
+    inner = _ev_callback_body(event_id="ev_iA_enc")
+    encrypted = _encrypt_body_for_test(inner, _ENCRYPT_KEY)
+    body = json.dumps({"encrypt": encrypted}).encode()
+    # Encryption mode: Feishu still computes signature over the OUTER body.
+    ts, nonce = "1700000000", "abc"
+    headers = {
+        "x-lark-request-timestamp": ts,
+        "x-lark-request-nonce": nonce,
+        "x-lark-signature": _sign(ts=ts, nonce=nonce, body=body),
+        "Content-Type": "application/json",
+    }
+    resp = await async_client.post("/api/v1/im/feishu/events", content=body, headers=headers)
+    assert resp.status_code == 200, resp.text
+
+
+async def test_encrypted_payload_with_non_string_encrypt_rejected(
+    async_client: httpx.AsyncClient,
+    _seeded_feishu_account: None,
+) -> None:
+    """A malformed ``encrypt`` field (not a base64 string) is a programming
+    error or attack probe — refuse loudly with 400 rather than silently
+    drop, so misconfiguration is visible."""
+    body = json.dumps({"encrypt": {"unexpected": "object"}}).encode()
+    resp = await async_client.post(
+        "/api/v1/im/feishu/events", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert resp.status_code == 400
+
+
+async def test_encrypted_payload_unknown_account_acked(
+    async_client: httpx.AsyncClient,
+    _seeded_feishu_account: None,
+) -> None:
+    """If no enabled account's encrypt_key decrypts the body, return 200 +
+    log (don't 4xx — Feishu would otherwise mark the endpoint unhealthy)."""
+    body = json.dumps({"encrypt": "not-valid-base64-ciphertext"}).encode()
+    resp = await async_client.post(
+        "/api/v1/im/feishu/events", content=body, headers={"Content-Type": "application/json"}
+    )
+    assert resp.status_code == 200

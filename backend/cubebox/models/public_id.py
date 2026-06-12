@@ -43,6 +43,11 @@ PREFIX_SHR: str = "shr"
 PREFIX_CONV_CHUNK: str = "cck"
 PREFIX_EMBEDDING_JOB: str = "ejob"
 PREFIX_BACKFILL: str = "sbp"
+PREFIX_IM_CONNECTOR_ACCOUNT: str = "imac"
+PREFIX_IM_THREAD_LINK: str = "imtl"
+PREFIX_IM_IDENTITY_LINK: str = "imil"
+PREFIX_IM_WEBHOOK_RECEIPT: str = "imwr"
+PREFIX_IM_RUN_QUEUE_ITEM: str = "imrq"
 
 
 @dataclass

@@ -29,6 +29,13 @@ cubebox can bind a Feishu (Lark) bot to a workspace so messages and
    - For **webhook**: set the request URL to
      `https://<your-host>/api/v1/im/feishu/events`. Copy the
      **Encrypt Key** and **Verification Token** from the same page.
+     The Encrypt Key serves two roles: (a) signature verification on
+     every request (the `x-lark-signature` header is HMAC'd with this
+     key); (b) body encryption when you flip the "Event Encryption"
+     toggle. cubebox supports **both modes** — if you enable
+     encryption, the ingress route try-decrypts against each enabled
+     account's `encrypt_key` and routes by the `app_id` inside the
+     decrypted payload.
    - Subscribe to the event `im.message.receive_v1`. Future overlays
      (`im.message.reaction.created_v1`, `card.action.trigger`) are not used
      in v1.

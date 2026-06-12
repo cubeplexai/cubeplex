@@ -55,6 +55,26 @@ class IMConnectorService:
         edit the credential later to populate it. Hydration failures are
         logged loudly so this degraded state is not silent.
         """
+        # Preflight: refuse early if an account already exists for this
+        # platform+app_id. Without this, ``CredentialService.create`` commits
+        # the credential successfully but the account INSERT then hits
+        # ``uq_im_account_platform_external`` and raises — leaving an
+        # orphan ``feishu:{app_id}`` credential whose unique-name constraint
+        # blocks every subsequent retry. The plan's "delete-and-recreate is
+        # the rotation path" workflow depends on this preflight working.
+        existing = (
+            await self._session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.platform == "feishu",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id == app_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(
+                f"feishu account already exists for app_id={app_id} (id={existing.id})"
+            )
+
         bot_open_id = await self._hydrate_bot_open_id(app_id, app_secret, domain)
         secret_payload = json.dumps(
             {
@@ -66,24 +86,41 @@ class IMConnectorService:
                 "bot_open_id": bot_open_id,
             }
         )
+        # Best-effort atomicity: create the credential (commits inside the
+        # service), then INSERT the account. If the account INSERT fails
+        # (e.g. concurrent insert lost the preflight race, FK violation,
+        # transient DB error), roll back the orphan credential so a retry
+        # doesn't bounce off ``uq_credential_org_kind_name``.
         credential_id = await self._credentials.create(
             kind="im_bot",
             name=f"feishu:{app_id}",
             plaintext=secret_payload,
         )
-        account = IMConnectorAccount(
-            org_id=self._org_id,
-            workspace_id=workspace_id,
-            platform="feishu",
-            external_account_id=app_id,
-            acting_user_id=acting_user_id,
-            credential_id=credential_id,
-            delivery_mode=delivery_mode,
-        )
-        self._session.add(account)
-        await self._session.commit()
-        await self._session.refresh(account)
-        return account
+        try:
+            account = IMConnectorAccount(
+                org_id=self._org_id,
+                workspace_id=workspace_id,
+                platform="feishu",
+                external_account_id=app_id,
+                acting_user_id=acting_user_id,
+                credential_id=credential_id,
+                delivery_mode=delivery_mode,
+            )
+            self._session.add(account)
+            await self._session.commit()
+            await self._session.refresh(account)
+            return account
+        except Exception:
+            await self._session.rollback()
+            try:
+                await self._credentials.delete(credential_id=credential_id)
+            except Exception:
+                logger.warning(
+                    "[IM] orphan credential {} could not be rolled back; manual cleanup needed",
+                    credential_id,
+                    exc_info=True,
+                )
+            raise
 
     async def list_for_workspace(self, *, workspace_id: str) -> list[IMConnectorAccount]:
         stmt = select(IMConnectorAccount).where(
