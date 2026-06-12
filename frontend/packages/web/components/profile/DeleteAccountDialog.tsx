@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import { createApiClient, useAuthStore } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -48,6 +48,7 @@ export function DeleteAccountDialog({ open, onOpenChange }: DeleteAccountDialogP
         return
       }
       useAuthStore.getState().reset()
+      useWorkspaceStore.getState().reset()
       router.replace('/login')
     } catch {
       setError(t('error'))

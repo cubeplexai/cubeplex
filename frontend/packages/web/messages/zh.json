@@ -913,6 +913,8 @@
       "status": "状态",
       "title": "创建邀请链接",
       "roleLabel": "被邀请用户的角色",
+      "emailLabel": "邮箱（可选 — 将发送邀请邮件）",
+      "emailPlaceholder": "colleague@example.com",
       "admin": "管理员",
       "member": "成员",
       "cancel": "取消",

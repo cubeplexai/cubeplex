@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { createApiClient, updateProfile, useAuthStore } from '@cubebox/core'
@@ -11,7 +11,17 @@ export function ProfileForm() {
   const user = useAuthStore((s) => s.user)
   const [displayName, setDisplayName] = useState(user?.display_name ?? '')
   const [saving, setSaving] = useState(false)
+  // Track whether the user has manually edited the field so we don't overwrite
+  // their input when auth loads asynchronously.
+  const userEdited = useRef(false)
   const dirty = displayName !== (user?.display_name ?? '')
+
+  // Sync display name from auth store when it loads (only if user hasn't typed).
+  useEffect(() => {
+    if (!userEdited.current) {
+      setDisplayName(user?.display_name ?? '')
+    }
+  }, [user?.display_name])
 
   const onSave = async () => {
     setSaving(true)
@@ -37,7 +47,10 @@ export function ProfileForm() {
           maxLength={100}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
+          onChange={(e) => {
+            userEdited.current = true
+            setDisplayName(e.target.value)
+          }}
         />
       </label>
       <label className="block">

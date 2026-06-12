@@ -319,7 +319,12 @@ async def archive_workspace(
     active_count = 0
     for m in memberships:
         other = await ws_repo.get(m.workspace_id)
-        if other is not None and other.archived_at is None and other.id != workspace_id:
+        if (
+            other is not None
+            and other.archived_at is None
+            and other.id != workspace_id
+            and other.org_id == ctx.org_id
+        ):
             active_count += 1
     if active_count == 0:
         raise HTTPException(status_code=400, detail="cannot_archive_last_workspace")
@@ -385,10 +390,57 @@ async def delete_workspace(
     active_others = 0
     for m in memberships:
         other = await ws_repo.get(m.workspace_id)
-        if other is not None and other.archived_at is None and other.id != workspace_id:
+        if (
+            other is not None
+            and other.archived_at is None
+            and other.id != workspace_id
+            and other.org_id == ctx.org_id
+        ):
             active_others += 1
     if active_others == 0:
         raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
+
+    # Collect vault credential ids from workspace-scoped grants and sandbox env
+    # vars before those rows are deleted, so we can remove the backing secrets.
+    from cubebox.models.credential import Credential
+
+    mcp_grant_tbl = MCPCredentialGrant.__table__  # type: ignore[attr-defined]
+    ws_grant_cred_ids = (
+        (
+            await session.execute(
+                sa_select(mcp_grant_tbl.c.credential_id).where(
+                    mcp_grant_tbl.c.workspace_id == workspace_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ws_grant_refresh_ids = (
+        (
+            await session.execute(
+                sa_select(mcp_grant_tbl.c.refresh_credential_id).where(
+                    mcp_grant_tbl.c.workspace_id == workspace_id,
+                    mcp_grant_tbl.c.refresh_credential_id.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sandbox_tbl = SandboxEnvVar.__table__  # type: ignore[attr-defined]
+    ws_sandbox_cred_ids = (
+        (
+            await session.execute(
+                sa_select(sandbox_tbl.c.credential_id).where(
+                    sandbox_tbl.c.workspace_id == workspace_id,
+                    sandbox_tbl.c.credential_id.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     # LlmBillingEvent has no workspace_id — delete via BillingEvent parent.
     billing_tbl = BillingEvent.__table__  # type: ignore[attr-defined]
@@ -399,7 +451,33 @@ async def delete_workspace(
         )
     )
 
+    # Collect conversation ids in this workspace so we can delete checkpointer
+    # threads and ConversationShare rows before the Conversation rows go.
+    conv_tbl = Conversation.__table__  # type: ignore[attr-defined]
+    ws_conv_ids = sa_select(conv_tbl.c.id).where(conv_tbl.c.workspace_id == workspace_id)
+
+    from cubebox.models.conversation_share import ConversationShare
+
+    await session.execute(
+        sa_delete(ConversationShare).where(
+            ConversationShare.conversation_id.in_(ws_conv_ids)  # type: ignore[attr-defined]
+        )
+    )
+    # cubepi_threads / cubepi_messages: thread_id == conversation_id.
+    # cubepi_messages cascades from cubepi_threads (ON DELETE CASCADE).
+    from sqlalchemy import text
+
+    await session.execute(
+        text(
+            "DELETE FROM cubepi_threads WHERE thread_id IN (SELECT id FROM conversations WHERE workspace_id = :wsid)"
+        ),
+        {"wsid": workspace_id},
+    )
+
     # Delete child rows deepest-first to avoid FK violations.
+    # NOTE: UserSandbox rows are deleted without calling the sandbox manager's
+    # kill path. Provider sandboxes are reaped by cleanup_expired. A public
+    # sandbox-manager kill-by-workspace API is the proper fix — tracked follow-up.
     ws_child_tables = [
         EgressRef,
         MemoryItem,
@@ -427,6 +505,18 @@ async def delete_workspace(
     for model in ws_child_tables:
         col = model.workspace_id  # type: ignore[attr-defined]
         await session.execute(sa_delete(model).where(col == workspace_id))
+
+    # Delete backing Credential rows that the deleted grants and sandbox env vars
+    # referenced (they're now orphaned after the referencing rows are gone).
+    all_ws_cred_ids = set(
+        list(ws_grant_cred_ids) + list(ws_grant_refresh_ids) + list(ws_sandbox_cred_ids)
+    )
+    if all_ws_cred_ids:
+        await session.execute(
+            sa_delete(Credential).where(
+                Credential.id.in_(list(all_ws_cred_ids))  # type: ignore[attr-defined]
+            )
+        )
 
     await session.execute(
         sa_delete(Workspace).where(Workspace.id == workspace_id)  # type: ignore[arg-type]
