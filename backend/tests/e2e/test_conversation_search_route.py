@@ -94,8 +94,10 @@ def test_search_route_rejects_empty_query(client: TestClient) -> None:
     assert resp.status_code == 422
 
 
-def test_search_route_503_when_provider_missing(client: TestClient) -> None:
-    """Drop the provider off app.state and confirm 503."""
+def test_search_route_runs_lexical_only_when_provider_missing(
+    client: TestClient,
+) -> None:
+    """No provider on app.state → route returns 200 with vector_count=0."""
     previous: Any = getattr(client.app.state, "embedding_provider", None)
     client.app.state.embedding_provider = None
     try:
@@ -103,7 +105,9 @@ def test_search_route_503_when_provider_missing(client: TestClient) -> None:
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/search",
             params={"q": "docling"},
         )
-        assert resp.status_code == 503
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["vector_count"] == 0
     finally:
         client.app.state.embedding_provider = previous
 

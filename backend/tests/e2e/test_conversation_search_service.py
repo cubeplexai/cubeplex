@@ -211,6 +211,37 @@ async def test_vector_leg_filters_by_embed_model(
 
 
 @pytest.mark.asyncio
+async def test_search_runs_lexical_only_when_provider_is_none(
+    seeded_conversation: tuple[str, str, str, str],
+) -> None:
+    """Service(provider=None) runs the lexical leg only.
+
+    Worker writes chunks with embedding=NULL; service must return real
+    lexical hits and vector_count=0 (vector leg short-circuits).
+    """
+    from cubebox.search.service import ConversationSearchService
+    from cubebox.search.worker import EmbeddingWorker
+
+    org_id, ws_id, user_id, conv_id = seeded_conversation
+    async with async_session_maker() as s:
+        repo = EmbeddingJobRepository(s, org_id=org_id, workspace_id=ws_id, user_id=user_id)
+        await repo.enqueue(conversation_id=conv_id)
+    await EmbeddingWorker(None)._claim_one()
+    async with async_session_maker() as s:
+        svc = ConversationSearchService(s, None)
+        resp = await svc.search(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            q="docling",
+            limit=8,
+        )
+    assert resp.vector_count == 0
+    assert resp.lexical_count > 0
+    assert any(r.conversation_id == conv_id for r in resp.results)
+
+
+@pytest.mark.asyncio
 async def test_search_rejects_control_characters(
     seeded_conversation: tuple[str, str, str, str],
 ) -> None:

@@ -3,13 +3,13 @@
 Owns the embedding provider + worker lifecycle and the three-way dim
 verification (schema vs config vs provider) that catches drift between the
 DDL emitted by the migration, the operator's current config, and the
-embedding model the provider actually talks to. If any of those disagree,
-HNSW inserts would silently break, so we refuse to start the worker and
-log a recovery path.
+embedding model the provider actually talks to.
 
-The subsystem is best-effort: failures here must not stop the rest of the
-API from coming up. The search route guards on `app.state.embedding_provider`
-being None and returns 503 in that case.
+The subsystem degrades gracefully: when no provider can be built, or
+schema/config/provider disagree on dim, the worker still runs in
+lexical-only mode (chunks rows with embedding=NULL) and the search
+route serves results from the lexical leg alone. `app.state.embedding_provider`
+remains None and the service skips the vector leg.
 """
 
 import asyncio
@@ -97,6 +97,12 @@ async def start_search_subsystem(app: FastAPI) -> None:
       - embedding_worker
       - embedding_worker_task
       - lexical_backend
+
+    When the provider can't be built or the dim check fails, the worker
+    still runs with provider=None so the lexical leg has chunks to query.
+    Operators get a WARNING in the "no provider" case and a CRITICAL in
+    the "dim mismatch with a working provider" case — the second is
+    operator misconfiguration that probably wanted vector search.
     """
     app.state.embedding_provider = None
     app.state.embedding_worker = None
@@ -107,16 +113,20 @@ async def start_search_subsystem(app: FastAPI) -> None:
         logger.info("Search subsystem disabled via config; skipping startup")
         return
 
+    provider: EmbeddingProvider | None
     try:
         provider = EmbeddingProvider.from_config()
     except RuntimeError as exc:
-        # Missing api key etc. — the rest of the API must still come up.
-        logger.error("Embedding provider not started: {}", exc)
-        return
+        # Missing api key etc. — degrade to lexical-only.
+        logger.warning("Embedding provider not configured ({}); search will run lexical-only", exc)
+        provider = None
 
-    if not await _verify_dim_alignment(provider):
+    if provider is not None and not await _verify_dim_alignment(provider):
+        # Dim mismatch with a working provider — the operator probably
+        # intended vector search; loudest log already came from the
+        # alignment check. Close the provider and degrade to lexical-only.
         await provider.aclose()
-        return
+        provider = None
 
     app.state.lexical_backend = build_lexical_backend()
     app.state.embedding_provider = provider
