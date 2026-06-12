@@ -100,7 +100,10 @@ storageClass:
 # ── Bundled infrastructure (single-node defaults) ───────────────────────
 postgres:
   enabled: true
-  image: postgres:16-alpine
+  # Custom image: postgres:18 + PGroonga (CJK full-text) + pgvector (HNSW
+  # vector search). Required by conversation-search; plain postgres won't
+  # pass the alembic migration that does `CREATE EXTENSION pgroonga / vector`.
+  image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
   auth:
     username: cubebox
     database: cubebox
