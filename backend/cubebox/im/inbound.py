@@ -19,6 +19,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from cubebox.im.identity import IdentityResolver, RejectionNotifier, resolve_or_reject
 from cubebox.im.types import InboundEvent
 from cubebox.models.conversation import Conversation
 from cubebox.models.im_connector import (
@@ -73,6 +74,8 @@ async def ingest_inbound_event(
     *,
     account: IMConnectorAccount,
     session_maker: async_sessionmaker[Any],
+    identity_resolver: IdentityResolver | None = None,
+    rejection_notifier: RejectionNotifier | None = None,
     _retry_depth: int = 0,
 ) -> IngestResult:
     """Atomically insert receipt + reuse-or-create conversation+link + enqueue run.
@@ -119,11 +122,33 @@ async def ingest_inbound_event(
                 raise
             return IngestResult(outcome="duplicate", conversation_id=None)
 
+        # Identity gate (sender → workspace member). When wired by the
+        # caller, a non-member sender is rejected here: the receipt above
+        # still commits (so Feishu retries dedupe) but no conversation /
+        # queue row is created. ``acting_user_id`` is the fallback when no
+        # resolver is configured — preserves existing behavior.
+        effective_user_id: str = account.acting_user_id
+        if identity_resolver is not None and rejection_notifier is not None:
+            resolved = await resolve_or_reject(
+                session=session,
+                account=account,
+                event=event,
+                resolver=identity_resolver,
+                notifier=rejection_notifier,
+            )
+            if resolved is None:
+                # Mark receipt terminal so the worker (and dashboards)
+                # don't conflate this with a still-pending row.
+                receipt.status = "rejected"
+                await session.commit()
+                return IngestResult(outcome="rejected", conversation_id=None)
+            effective_user_id = resolved
+
         async def _make_conversation_id() -> str:
             conv = Conversation(
                 org_id=account.org_id,
                 workspace_id=account.workspace_id,
-                creator_user_id=account.acting_user_id,
+                creator_user_id=effective_user_id,
                 title=(event.text[:80] or "IM conversation"),
             )
             session.add(conv)
@@ -168,6 +193,8 @@ async def ingest_inbound_event(
                     event,
                     account=account,
                     session_maker=session_maker,
+                    identity_resolver=identity_resolver,
+                    rejection_notifier=rejection_notifier,
                     _retry_depth=_retry_depth + 1,
                 )
             if not _is_receipt_unique_violation(exc):

@@ -54,18 +54,29 @@ def build_event_handler(
     ingest: IngestCallable,
     session_maker: Any,
     loop: asyncio.AbstractEventLoop,
+    outbound_client: Any | None = None,
 ) -> Any:
     """Build a lark_oapi event dispatcher that routes events into ``ingest``.
 
     ``loop`` is the running asyncio loop captured at startup. The SDK
     callback fires on its own thread; we hop back via
     ``asyncio.run_coroutine_threadsafe``.
+
+    ``outbound_client`` is an authenticated ``lark.Client`` used by the
+    identity gate to call ``contact/v3/users`` and send rejection replies.
+    Without it, ingest still works but every inbound is routed as the
+    account's ``acting_user_id`` (no per-sender identity gate).
     """
     if not LARK_AVAILABLE:
         raise RuntimeError("lark_oapi not installed")
     assert lark is not None  # narrowed via LARK_AVAILABLE
 
     connector = FeishuConnector(bot_open_id=bot_open_id)
+    gate_connector = (
+        FeishuConnector(bot_open_id=bot_open_id, client=outbound_client)
+        if outbound_client is not None
+        else None
+    )
 
     def _on_message(data: Any) -> None:
         # Reconstruct the webhook envelope so parse_inbound sees the same
@@ -92,7 +103,16 @@ def build_event_handler(
 
         async def _do_ingest() -> None:
             try:
-                res = await ingest(event, account=account, session_maker=session_maker)
+                kwargs: dict[str, Any] = {}
+                if gate_connector is not None:
+                    kwargs["identity_resolver"] = gate_connector
+                    kwargs["rejection_notifier"] = gate_connector
+                res = await ingest(
+                    event,
+                    account=account,
+                    session_maker=session_maker,
+                    **kwargs,
+                )
                 logger.info("[Feishu LC] inbound {}: {}", event.platform_event_id, res.outcome)
             except Exception:
                 logger.exception("[Feishu LC] ingest failed for {}", event.platform_event_id)
@@ -156,12 +176,24 @@ class FeishuLongConnection:
         # Capture loop NOW on the asyncio main thread; the handler closure
         # uses it via run_coroutine_threadsafe from the SDK worker.
         loop = asyncio.get_running_loop()
+        # Outbound client for identity-gate calls (contact/v3/user.get) and
+        # rejection replies. Same credentials as the WS client; the WS
+        # ``Client`` doesn't expose the REST surface itself.
+        outbound_client = (
+            lark.Client.builder()
+            .app_id(self._app_id)
+            .app_secret(self._app_secret)
+            .domain(domain)
+            .log_level(lark.LogLevel.WARNING)
+            .build()
+        )
         handler = build_event_handler(
             account=self._account,
             bot_open_id=self._bot_open_id,
             ingest=self._ingest,
             session_maker=self._session_maker,
             loop=loop,
+            outbound_client=outbound_client,
         )
         self._client = lark.ws.Client(
             app_id=self._app_id,

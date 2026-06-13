@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.models.conversation import Conversation
 from cubebox.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
@@ -60,14 +61,29 @@ async def get_or_create_thread_link(
     NULL on both, and a verbatim copy of the Slack-plan helper that ignored
     ``scope_kind`` would fail on first insert. Returns ``(link, created)``.
     """
-    stmt = select(IMThreadLink).where(
-        IMThreadLink.account_id == account_id,  # type: ignore[arg-type]
-        IMThreadLink.channel_id == channel_id,  # type: ignore[arg-type]
-        IMThreadLink.scope_key == scope_key,  # type: ignore[arg-type]
+    stmt = (
+        select(IMThreadLink, Conversation)
+        .join(Conversation, Conversation.id == IMThreadLink.conversation_id)  # type: ignore[arg-type]
+        .where(
+            IMThreadLink.account_id == account_id,  # type: ignore[arg-type]
+            IMThreadLink.channel_id == channel_id,  # type: ignore[arg-type]
+            IMThreadLink.scope_key == scope_key,  # type: ignore[arg-type]
+        )
     )
-    existing = (await session.execute(stmt)).scalar_one_or_none()
-    if existing is not None:
-        return existing, False
+    row = (await session.execute(stmt)).one_or_none()
+    if row is not None:
+        existing, conv = row
+        # If the cubebox-side conversation was soft-deleted (user wiped
+        # the thread in the UI), the next IM message would otherwise
+        # land in that hidden conversation — the bot replies but the
+        # user never sees them because the conversation reader filters
+        # ``deleted_at IS NULL``. Mint a fresh conversation and repoint
+        # the link.
+        if conv.deleted_at is None:
+            return existing, False
+        existing.conversation_id = await make_conversation_id()
+        session.add(existing)
+        return existing, True
     conversation_id = await make_conversation_id()
     link = IMThreadLink(
         org_id=org_id,

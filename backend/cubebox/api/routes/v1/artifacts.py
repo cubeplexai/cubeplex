@@ -225,6 +225,9 @@ async def create_share_token(
         conversation_id=conversation_id,
         artifact_id=artifact_id,
         version=artifact.version,
+        name=artifact.name,
+        artifact_type=artifact.artifact_type,
+        entry_file=artifact.entry_file,
         ttl_seconds=SHARE_TTL_SECONDS,
     )
     public_url = config.get("api.public_url", "")
