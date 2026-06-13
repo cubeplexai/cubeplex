@@ -22,6 +22,7 @@ class ToolStep:
     result: Any = None
     error: str | None = None
     elapsed_ms: int = 0
+    start_monotonic: float = 0.0
 
     def mark_succeeded(self, *, result: Any, elapsed_ms: int) -> None:
         self.status = "succeeded"
