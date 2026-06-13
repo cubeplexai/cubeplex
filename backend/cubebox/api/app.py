@@ -149,6 +149,11 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
             run_id=run_id,
             connector=connector,
             state=state,
+            # Path-(a) shim: Task 17 will construct a real CardKitClient
+            # bound to the lark_oapi tenant_access_token provider; until
+            # then the tailer's dispatch short-circuits to False and the
+            # legacy non-card path keeps working.
+            cardkit=None,
             artifact_dispatcher=dispatcher,
         )
         _asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")

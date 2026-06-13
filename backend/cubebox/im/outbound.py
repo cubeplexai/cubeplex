@@ -309,6 +309,7 @@ class OutboundRunTailer:
         run_id: str,
         connector: Any,
         state: RenderState,
+        cardkit: Any,
         artifact_dispatcher: Any | None = None,
         block_ms: int = 2000,
     ) -> None:
@@ -317,6 +318,7 @@ class OutboundRunTailer:
         self._run_id = run_id
         self._connector = connector
         self._state = state
+        self._cardkit = cardkit
         self._artifact_dispatcher = artifact_dispatcher
         self._block_ms = block_ms
 
@@ -367,17 +369,114 @@ class OutboundRunTailer:
                 logger.warning("on_processing_* hook raised", exc_info=True)
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
-        """Stub dispatcher pending Task 12.
+        """Translate one OutboundOp into the matching CardKit call.
 
-        Task 8 narrowed ``OutboundOp.kind`` to the cardkit op-set
-        (card_create / stream_text / patch_card / finalize). The real
-        dispatch — calling ``CardKitClient.create_entity`` / ``stream_text``
-        / ``patch_card`` / ``finalize`` plus terminal-delivery retries with
-        flood-backoff — lands in Task 12. Until then no ops actually reach
-        Feishu; the tailer just folds events.
+        Returns True iff the op was delivered. ``card_create`` failures
+        flip ``state.card_unavailable`` and fall back to emergency-text
+        bubbles so the user still sees an answer. ``stream_text`` /
+        ``patch_card`` flood signals collapse to a False return — the
+        next fold step rebuilds and the tailer retries.
+
+        The ``_cardkit=None`` shim path used by ``app.py`` for the path-(a)
+        transition (Task 12 ↔ Task 17) short-circuits every op to False so
+        the legacy non-card path keeps working until CardKit is wired in.
         """
-        _ = (op, is_terminal, _FloodSignal, _TERMINAL_RETRY_DELAYS, asyncio)
+        _ = (is_terminal, _TERMINAL_RETRY_DELAYS, asyncio)
+        from cubebox.im.feishu.card_renderer import render
+
+        state = self._state
+        cardkit = self._cardkit
+        if cardkit is None:
+            return False
+
+        if op.kind == "card_create":
+            if state.card_unavailable:
+                return False
+            card_json = render(state.card_state)
+            try:
+                card_id = await cardkit.create_entity(card_json)
+            except Exception:
+                logger.warning(
+                    "[outbound] CardKit create_entity failed; engaging emergency text",
+                    exc_info=True,
+                )
+                state.card_unavailable = True
+                await self._emergency_text("⚠️ 飞书富文本渲染暂时不可用，结果将以文本展示")
+                if state.card_state.streaming_content:
+                    await self._emergency_text(state.card_state.streaming_content[:4000])
+                return False
+            state.card_id = card_id
+            state.card_state.advance_seq()
+            try:
+                msg_id = await self._connector.send_card_init_message(card_id)
+            except Exception:
+                logger.warning("[outbound] send_card_init_message raised", exc_info=True)
+                msg_id = None
+            state.bot_message_id = msg_id
+            return True
+
+        if op.kind == "stream_text":
+            if state.card_id is None or state.card_unavailable:
+                return False
+            seq = state.card_state.advance_seq()
+            try:
+                await cardkit.stream_text(
+                    card_id=state.card_id,
+                    element_id=op.element_id or "streaming_content",
+                    content=op.text,
+                    sequence=seq,
+                )
+                note_edit_success(state)
+                return True
+            except _FloodSignal:
+                note_flood_strike(state)
+                return False
+            except Exception:
+                logger.warning("[outbound] stream_text failed", exc_info=True)
+                return False
+
+        if op.kind == "patch_card":
+            if state.card_id is None or state.card_unavailable:
+                return False
+            seq = state.card_state.advance_seq()
+            try:
+                await cardkit.patch_card(
+                    card_id=state.card_id,
+                    card_json=render(state.card_state),
+                    sequence=seq,
+                )
+                note_edit_success(state)
+                return True
+            except _FloodSignal:
+                # Coalesce — next event will rebuild and resend.
+                return False
+            except Exception:
+                logger.warning("[outbound] patch_card failed", exc_info=True)
+                return False
+
+        if op.kind == "finalize":
+            if state.card_id is None or state.card_unavailable:
+                if state.card_state.error:
+                    await self._emergency_text(f"⚠️ {state.card_state.error}")
+                elif state.card_state.streaming_content:
+                    await self._emergency_text(state.card_state.streaming_content[:4000])
+                return False
+            seq = state.card_state.advance_seq()
+            return bool(
+                await cardkit.finalize(
+                    card_id=state.card_id,
+                    card_json=render(state.card_state),
+                    sequence=seq,
+                )
+            )
+
         return False
+
+    async def _emergency_text(self, text: str) -> None:
+        try:
+            await self._connector._send_emergency_text(text)
+        except Exception:
+            logger.warning("[outbound] emergency text send failed", exc_info=True)
 
 
 class _FloodSignal(Exception):

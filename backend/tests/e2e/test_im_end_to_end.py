@@ -94,6 +94,7 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
         run_id=run_id,
         connector=connector,
         state=state,
+        cardkit=None,
         block_ms=200,
     )
     tailer_task = asyncio.create_task(tailer.run())
@@ -149,6 +150,7 @@ async def test_outbound_tailer_emits_failure_on_error_event(
         run_id=run_id,
         connector=connector,
         state=state,
+        cardkit=None,
         block_ms=200,
     )
     tailer_task = asyncio.create_task(tailer.run())
