@@ -151,17 +151,33 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
             conversation_id=item.conversation_id,
             card_state=state.card_state,
         )
+        # CardKitClient bound to the same Feishu/Lark domain + token cache
+        # as the lark_oapi client. TokenManager caches tenant_access_token in
+        # process memory (LocalCache), so this provider is effectively free
+        # after the first call.
+        from lark_oapi.core.const import LARK_DOMAIN as _LARK_DOMAIN
+        from lark_oapi.core.token.manager import TokenManager as _TokenManager
+
+        from cubebox.im.feishu.cardkit_client import CardKitClient
+
+        _client_config = client.config
+        _client_domain = str(secrets.get("domain", "feishu"))
+        _cardkit_base_url = _LARK_DOMAIN if _client_domain == "lark" else "https://open.feishu.cn"
+
+        def _token_provider() -> str:
+            return str(_TokenManager.get_self_tenant_token(_client_config))
+
+        cardkit = CardKitClient(
+            token_provider=_token_provider,
+            base_url=_cardkit_base_url,
+        )
         tailer = OutboundRunTailer(
             redis=app.state.redis,
             key_prefix=app.state.redis_key_prefix,
             run_id=run_id,
             connector=connector,
             state=state,
-            # Path-(a) shim: Task 17 will construct a real CardKitClient
-            # bound to the lark_oapi tenant_access_token provider; until
-            # then the tailer's dispatch short-circuits to False and the
-            # legacy non-card path keeps working.
-            cardkit=None,
+            cardkit=cardkit,
             artifact_dispatcher=dispatcher,
             responder_open_id=item.sender_open_id,
         )

@@ -41,8 +41,11 @@ _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 _IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 _VALID_IMAGE_KEY_RE = re.compile(r"^img_[A-Za-z0-9_-]+$")
 
-# Citation markers: ASCII [N], [N-M] and full-width 【N-M】.
-_ASCII_CITATION_RE = re.compile(r"\[(\d+(?:-\d+)?)\]")
+# Citation markers: ASCII [N], [N-M] and full-width 【N-M】. The ASCII
+# variant uses a negative lookahead so `[1](https://...)` markdown links
+# in cubepi output don't get treated as citation markers and rewritten
+# into broken `[1](resolved_url)(https://...)` double-parens.
+_ASCII_CITATION_RE = re.compile(r"\[(\d+(?:-\d+)?)\](?!\()")
 _CN_CITATION_RE = re.compile(r"【(\d+(?:-\d+)?)】")
 
 
