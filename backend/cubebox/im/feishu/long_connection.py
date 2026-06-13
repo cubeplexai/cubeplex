@@ -324,3 +324,13 @@ class FeishuLongConnection:
                 logger.debug("[Feishu LC] stop() raised", exc_info=True)
         if self._ws_future is not None:
             self._ws_future.cancel()
+
+    def is_open(self) -> bool:
+        """True iff the WebSocket task is still running.
+
+        Reading this from the asyncio main thread is safe — the
+        underlying Future is set/cleared by the SDK worker thread but
+        our query is a single boolean read.
+        """
+        fut = self._ws_future
+        return fut is not None and not fut.done()
