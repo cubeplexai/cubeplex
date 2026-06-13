@@ -146,6 +146,41 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card")
 
+    if etype == "artifact":
+        from cubebox.im.feishu.card_model import ArtifactItem
+
+        action = str(data.get("action") or "created")
+        artifact = data.get("artifact") or {}
+        art_id = str(artifact.get("id") or "")
+        if not art_id:
+            return None
+        existing = next((a for a in state.card_state.artifacts if a.id == art_id), None)
+        if existing is not None and action == "created":
+            return None
+        if existing is None:
+            state.card_state.artifacts.append(
+                ArtifactItem(
+                    id=art_id,
+                    artifact_type=str(artifact.get("artifact_type") or ""),
+                    name=str(artifact.get("name") or art_id),
+                )
+            )
+        if state.card_id is None:
+            return OutboundOp(kind="card_create")
+        state.last_patch_monotonic = now
+        return OutboundOp(kind="patch_card")
+
+    if etype == "citation":
+        citation_id = str(data.get("citation_id") or "")
+        metadata = data.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            return None
+        url = str(metadata.get("url") or "")
+        title = str(metadata.get("title") or "")
+        if citation_id and url:
+            state.card_state.citation_index[citation_id] = (url, title)
+        return None
+
     return None
 
 
