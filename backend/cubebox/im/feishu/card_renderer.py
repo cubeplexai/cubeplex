@@ -12,6 +12,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from cubebox.im.feishu.card_model import (
+    ArtifactItem,
+    CardState,
+    PendingInput,
+    SubAgentRow,
+    ToolStep,
+)
+
 # Demote H1/H2 → H4/H5 (cardkit renders larger headings full-width and
 # breaks the card layout). H3–H6 all collapse to H5 to keep visual rhythm
 # consistent.
@@ -173,10 +181,254 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
 }
 
 
+def _header(state: CardState) -> dict[str, Any]:
+    if state.error:
+        template = "red"
+        subtitle = "运行失败"
+    elif state.finalized:
+        template = "green"
+        subtitle = f"已完成 · {state.elapsed_ms / 1000:.1f}s" if state.elapsed_ms else "已完成"
+    else:
+        template = "blue"
+        subtitle = "运行中…"
+    return {
+        "title": {"tag": "plain_text", "content": state.bot_name},
+        "subtitle": {"tag": "plain_text", "content": subtitle},
+        "template": template,
+    }
+
+
+def _markdown_element(state: CardState) -> dict[str, Any]:
+    content = optimize_markdown_style(
+        state.streaming_content,
+        citation_index=state.citation_index,
+    )
+    if state.error and not state.streaming_content.endswith(state.error):
+        content = f"{content}\n\n```text\n⚠️ {state.error}\n```"
+    return {
+        "tag": "markdown",
+        "element_id": "streaming_content",
+        "content": content,
+    }
+
+
+def _tool_panel_header_title(state: CardState) -> str:
+    step_count = len(state.tool_steps)
+    if step_count == 0:
+        return "工具调用"
+    any_failed = any(s.status == "failed" for s in state.tool_steps)
+    any_running = any(s.status == "running" for s in state.tool_steps)
+    total_ms = sum(s.elapsed_ms for s in state.tool_steps)
+    duration = f" · {total_ms / 1000:.1f}s" if total_ms > 0 else ""
+    if any_running:
+        return f"运行中 · {step_count} step{duration}"
+    if any_failed:
+        return f"失败 · {step_count} step{duration}"
+    return f"已完成 · {step_count} step{duration}"
+
+
+def _format_result_block(step: ToolStep) -> str:
+    if step.status == "failed":
+        body = step.error or "(no error message)"
+        return f"```text\n{body[:2000]}\n```"
+    raw = step.result
+    if raw is None:
+        return ""
+    if isinstance(raw, (dict, list)):
+        try:
+            body = json.dumps(raw, ensure_ascii=False, indent=2)
+            return f"```json\n{body[:2000]}\n```"
+        except (TypeError, ValueError):
+            pass
+    return f"```text\n{str(raw)[:2000]}\n```"
+
+
+def _render_tool_step(step: ToolStep) -> list[dict[str, Any]]:
+    display = TOOL_DISPLAY.get(step.name) or default_display(step.name)
+    summary = display.summarize(step.args)
+    title_md = f"{display.icon} **{step.name}**"
+    if summary:
+        title_md += f" · {summary}"
+    parts: list[dict[str, Any]] = [
+        {"tag": "div", "text": {"tag": "lark_md", "content": title_md}},
+    ]
+    if step.elapsed_ms > 0:
+        parts.append(
+            {
+                "tag": "div",
+                "margin": "0px 0px 0px 22px",
+                "text": {"tag": "plain_text", "content": f"{step.elapsed_ms}ms"},
+            }
+        )
+    result_block = _format_result_block(step)
+    if result_block:
+        parts.append(
+            {
+                "tag": "div",
+                "margin": "0px 0px 0px 22px",
+                "text": {"tag": "lark_md", "content": result_block},
+            }
+        )
+    return parts
+
+
+def _render_sub_agent_row(row: SubAgentRow) -> dict[str, Any]:
+    return {
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": f"🤖 sub-agent **{row.name}** · 已调用 {row.tool_count} 个工具",
+        },
+    }
+
+
+def _tool_panel(state: CardState) -> dict[str, Any]:
+    elements: list[dict[str, Any]] = []
+    for sub in state.sub_agents:
+        elements.append(_render_sub_agent_row(sub))
+    for step in state.tool_steps:
+        elements.extend(_render_tool_step(step))
+    return {
+        "tag": "collapsible_panel",
+        "element_id": "tool_panel",
+        "header": {
+            "title": {
+                "tag": "plain_text",
+                "content": _tool_panel_header_title(state),
+            },
+        },
+        "expanded": True,
+        "elements": elements,
+    }
+
+
+def _render_artifact(art: ArtifactItem) -> dict[str, Any]:
+    if art.artifact_type == "image" and art.image_key:
+        return {
+            "tag": "img",
+            "img_key": art.image_key,
+            "alt": {"tag": "plain_text", "content": art.name},
+        }
+    title_md = f"📎 **{art.name}** <text_tag color='blue'>{art.artifact_type}</text_tag>"
+    if art.artifact_type == "html_widget":
+        title_md = f"📊 **{art.name}** <text_tag color='purple'>预览</text_tag>"
+    rows: list[dict[str, Any]] = [
+        {"tag": "div", "text": {"tag": "lark_md", "content": title_md}},
+    ]
+    if art.description:
+        rows.append({"tag": "div", "text": {"tag": "plain_text", "content": art.description[:200]}})
+    if art.share_url:
+        button_label = "在浏览器中打开" if art.artifact_type == "html_widget" else "查看"
+        rows.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": button_label},
+                "type": "default",
+                "behaviors": [{"type": "open_url", "default_url": art.share_url}],
+            }
+        )
+    return {
+        "tag": "interactive_container",
+        "elements": rows,
+    }
+
+
+def _artifacts_panel(state: CardState) -> dict[str, Any]:
+    return {
+        "tag": "collapsible_panel",
+        "element_id": "artifacts",
+        "header": {
+            "title": {
+                "tag": "plain_text",
+                "content": f"附件 · {len(state.artifacts)}",
+            },
+        },
+        "expanded": True,
+        "elements": [_render_artifact(a) for a in state.artifacts],
+    }
+
+
+def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
+    if pending.resolved_choice is not None:
+        receipt = (
+            f"✓ 已选择「{pending.resolved_choice}」"
+            + (f" · 由 {pending.resolved_by_open_id} 操作" if pending.resolved_by_open_id else "")
+            + (f" · {pending.resolved_at_iso}" if pending.resolved_at_iso else "")
+        )
+        return {
+            "tag": "interactive_container",
+            "element_id": "pending_input",
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": pending.question}},
+                {"tag": "div", "text": {"tag": "lark_md", "content": receipt}},
+            ],
+        }
+    columns: list[dict[str, Any]] = []
+    for choice_key, btn_type in pending.choices:
+        value_payload: dict[str, Any] = {
+            "action": pending.kind,
+            "run_id": pending.run_id,
+            "choice": choice_key,
+        }
+        if pending.question_id:
+            value_payload["question_id"] = pending.question_id
+        columns.append(
+            {
+                "elements": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": choice_key},
+                        "type": btn_type,
+                        "behaviors": [{"type": "callback"}],
+                        "value": value_payload,
+                    }
+                ]
+            }
+        )
+    body_elements: list[dict[str, Any]] = [
+        {"tag": "div", "text": {"tag": "lark_md", "content": pending.question}},
+    ]
+    if columns:
+        body_elements.append({"tag": "column_set", "columns": columns})
+    else:
+        body_elements.append({"tag": "div", "text": {"tag": "plain_text", "content": "(等待响应)"}})
+    return {
+        "tag": "interactive_container",
+        "element_id": "pending_input",
+        "elements": body_elements,
+    }
+
+
+def render(state: CardState) -> dict[str, Any]:
+    """Project `CardState` into a CardKit JSON 2.0 payload.
+
+    Empty panels are dropped so an in-progress run with no tools yet does
+    not render an empty `tool_panel` slot.
+    """
+    elements: list[dict[str, Any]] = [_markdown_element(state)]
+    if state.tool_steps or state.sub_agents:
+        elements.append(_tool_panel(state))
+    if state.artifacts:
+        elements.append(_artifacts_panel(state))
+    if state.pending_input is not None:
+        elements.append(_render_pending_input(state.pending_input))
+    return {
+        "schema": "2.0",
+        "header": _header(state),
+        "config": {
+            "streaming_mode": not state.finalized,
+            "update_multi": True,
+            "locales": ["zh_cn", "en_us"],
+        },
+        "body": {"elements": elements},
+    }
+
+
 __all__ = [
     "TOOL_DISPLAY",
     "ToolDisplay",
     "default_display",
     "optimize_markdown_style",
+    "render",
     "summarize_args",
 ]
