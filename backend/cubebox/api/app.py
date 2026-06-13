@@ -358,7 +358,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
     # Conversation-search embedding provider + worker. Owns the three-way dim
     # check (schema ↔ config ↔ provider). Best-effort: failures leave
     # app.state.embedding_provider as None and the search route returns 503.
-    from cubebox.search.startup import start_search_subsystem
+    from cubebox.services.conversation_search.startup import start_search_subsystem
 
     await start_search_subsystem(_app)
 
@@ -366,7 +366,7 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     # ==================== Shutdown ====================
     logger.info("Application shutting down")
-    from cubebox.search.startup import stop_search_subsystem
+    from cubebox.services.conversation_search.startup import stop_search_subsystem
 
     await stop_search_subsystem(_app)
     _egress_listener = getattr(_app.state, "_egress_listener", None)

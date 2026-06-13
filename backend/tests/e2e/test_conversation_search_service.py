@@ -6,13 +6,13 @@ import pytest
 from cubebox.db.engine import async_session_maker
 from cubebox.repositories.conversation_chunk import ConversationChunkRepository
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.worker import EmbeddingWorker
+from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubebox.services.conversation_search.worker import EmbeddingWorker
 
 
 class _Det(EmbeddingProvider):
     def __init__(self) -> None:
-        self.dimensions = 1024
+        self.vector_dim = 1024
         self._model = "det"
         self._base_url = "https://det.local"
 
@@ -21,7 +21,7 @@ class _Det(EmbeddingProvider):
         return "det@det.local"
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[1.0 / (i + 1)] * self.dimensions for i, _ in enumerate(texts)]
+        return [[1.0 / (i + 1)] * self.vector_dim for i, _ in enumerate(texts)]
 
 
 @pytest.mark.asyncio
@@ -50,7 +50,7 @@ class _KeywordEmbedder(EmbeddingProvider):
     """
 
     def __init__(self) -> None:
-        self.dimensions = 1024
+        self.vector_dim = 1024
         self._model = "kw"
         self._base_url = "https://kw.local"
 
@@ -60,7 +60,7 @@ class _KeywordEmbedder(EmbeddingProvider):
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [
-            [1.0] * self.dimensions if "docling" in t.lower() else [0.0] * self.dimensions
+            [1.0] * self.vector_dim if "docling" in t.lower() else [0.0] * self.vector_dim
             for t in texts
         ]
 
@@ -70,7 +70,7 @@ async def test_search_returns_seeded_conversation(
     seeded_conversation: tuple[str, str, str, str],
 ) -> None:
     """After indexing, a search for 'docling' returns the seeded conversation."""
-    from cubebox.search.service import ConversationSearchService
+    from cubebox.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -103,7 +103,7 @@ async def test_search_excludes_soft_deleted_conversation(
     from sqlalchemy import update
 
     from cubebox.models.conversation import Conversation
-    from cubebox.search.service import ConversationSearchService
+    from cubebox.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -142,7 +142,7 @@ async def test_search_legs_run_concurrently_without_session_race(
     silently swallowed as empty legs. After the fix, each leg opens its own
     ``async_session_maker()`` and both legs see real data.
     """
-    from cubebox.search.service import ConversationSearchService
+    from cubebox.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -178,7 +178,7 @@ async def test_vector_leg_filters_by_embed_model(
     """
     from sqlalchemy import text as sql_text
 
-    from cubebox.search.service import ConversationSearchService
+    from cubebox.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -219,8 +219,8 @@ async def test_search_runs_lexical_only_when_provider_is_none(
     Worker writes chunks with embedding=NULL; service must return real
     lexical hits and vector_count=0 (vector leg short-circuits).
     """
-    from cubebox.search.service import ConversationSearchService
-    from cubebox.search.worker import EmbeddingWorker
+    from cubebox.services.conversation_search.service import ConversationSearchService
+    from cubebox.services.conversation_search.worker import EmbeddingWorker
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
     async with async_session_maker() as s:
@@ -247,7 +247,7 @@ async def test_search_rejects_control_characters(
 ) -> None:
     """Query with embedded control characters raises InvalidInputError."""
     from cubebox.api.exceptions import InvalidInputError
-    from cubebox.search.service import ConversationSearchService
+    from cubebox.services.conversation_search.service import ConversationSearchService
 
     org_id, ws_id, user_id, _conv_id = seeded_conversation
     async with async_session_maker() as s:

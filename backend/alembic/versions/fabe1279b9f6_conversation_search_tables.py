@@ -24,9 +24,9 @@ LEXICAL_BACKEND = "pgroonga"
 # Vector dim is config-driven so operators can plug in any OpenAI-protocol
 # embedding model without editing this file. Trade-off: the same revision id
 # now emits different DDL across deployments depending on each operator's
-# config. The runtime three-way check in cubebox.search.startup catches drift
-# between schema, config, and provider.
-VECTOR_DIM = int(config.get("search.embedding.dimensions", 1024))
+# config. The runtime three-way check in cubebox.services.conversation_search.
+# startup catches drift between schema, config, and provider.
+VECTOR_DIM = int(config.get("search.embedding.vector_dim", 1024))
 
 
 def upgrade() -> None:

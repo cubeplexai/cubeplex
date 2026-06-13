@@ -14,11 +14,11 @@ from cubebox.api.exceptions import InvalidInputError
 from cubebox.config import config
 from cubebox.db.engine import async_session_maker
 from cubebox.models.conversation import Conversation
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.lexical import build_lexical_backend
-from cubebox.search.lexical.base import LexicalSearchBackend
-from cubebox.search.rrf import rrf_fuse
-from cubebox.search.snippet import Snippet, extract_snippet
+from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubebox.services.conversation_search.lexical import build_lexical_backend
+from cubebox.services.conversation_search.lexical.base import LexicalSearchBackend
+from cubebox.services.conversation_search.rrf import rrf_fuse
+from cubebox.services.conversation_search.snippet import Snippet, extract_snippet
 from cubebox.utils.time import utc_isoformat
 
 logger = logging.getLogger(__name__)
@@ -199,7 +199,7 @@ class ConversationSearchService:
                 ORDER BY cc.embedding <=> :v
                 LIMIT :lim
                 """
-            ).bindparams(bindparam("v", type_=Vector(self._provider.dimensions)))
+            ).bindparams(bindparam("v", type_=Vector(self._provider.vector_dim)))
             binds: dict[str, Any] = {
                 "org_id": org_id,
                 "ws_id": ws_id,

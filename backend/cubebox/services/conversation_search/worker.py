@@ -11,9 +11,9 @@ from cubebox.models.conversation_chunk import ConversationChunk
 from cubebox.models.embedding_job import EmbeddingJob
 from cubebox.repositories.conversation_chunk import ConversationChunkRepository
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.search.chunker import MessageInput, chunk_messages
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.text_extract import extract_searchable_text
+from cubebox.services.conversation_search.chunker import MessageInput, chunk_messages
+from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubebox.services.conversation_search.text_extract import extract_searchable_text
 
 logger = logging.getLogger(__name__)
 

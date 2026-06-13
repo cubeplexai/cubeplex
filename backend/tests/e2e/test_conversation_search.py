@@ -1,9 +1,11 @@
 """End-to-end: seed conversations → enqueue → drive worker → call search API.
 
-Requires a real embedding endpoint (DASHSCOPE-compatible). Skipped cleanly
+Requires a real embedding endpoint (OpenAI-compatible). Skipped cleanly
 when neither DASHSCOPE_API_KEY nor CUBEBOX_TEST_LOCAL_EMBED is set so the
 default test pass stays hermetic; CI sets DASHSCOPE_API_KEY to exercise
-the real-network path.
+the real-network path. The test bypasses EmbeddingProvider.from_config so
+it doesn't depend on whether the operator wired the key into config —
+the env-var skip-gate above is the only knob.
 """
 
 from __future__ import annotations
@@ -16,8 +18,8 @@ from fastapi.testclient import TestClient
 from cubebox.agents.checkpointer import init_checkpointer
 from cubebox.db.engine import async_session_maker
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.worker import EmbeddingWorker
+from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubebox.services.conversation_search.worker import EmbeddingWorker
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 # Skip the entire module unless a real embedding endpoint is available.
@@ -88,7 +90,19 @@ async def test_e2e_search_finds_seeded_conversations(client: TestClient) -> None
 
     # Drive the worker until the queue drains. The lifespan-managed worker
     # would also drain it; doing it inline keeps the test deterministic.
-    provider = EmbeddingProvider.from_config()
+    # Build the provider explicitly so the test doesn't depend on whether
+    # the operator wired search.embedding.api_key into config.
+    provider = EmbeddingProvider(
+        base_url=os.environ.get(
+            "CUBEBOX_TEST_EMBED_BASE_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+        api_key=str(_EMBED_KEY),
+        model=os.environ.get("CUBEBOX_TEST_EMBED_MODEL", "text-embedding-v4"),
+        vector_dim=1024,
+        api_dimensions=1024,
+        timeout_seconds=30,
+    )
     try:
         worker = EmbeddingWorker(provider)
         while await worker._claim_one() is not None:

@@ -1436,7 +1436,7 @@ async def fake_registry_url() -> AsyncIterator[str]:
 
 
 # ---------------------------------------------------------------------------
-# Conversation-search fixtures (moved from tests/search/conftest.py).
+# Conversation-search fixtures (moved from tests/services/conversation_search/conftest.py).
 #
 # Lives here because the underlying tests now sit in tests/e2e/ — that keeps
 # the unit-tier CI job (which runs without Postgres) from collecting them and

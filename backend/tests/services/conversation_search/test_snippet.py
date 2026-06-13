@@ -1,4 +1,4 @@
-from cubebox.search.snippet import extract_snippet
+from cubebox.services.conversation_search.snippet import extract_snippet
 
 
 def test_keyword_hit_centers_window() -> None:

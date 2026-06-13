@@ -15,8 +15,8 @@ from fastapi.testclient import TestClient
 
 from cubebox.db.engine import async_session_maker
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.worker import EmbeddingWorker
+from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubebox.services.conversation_search.worker import EmbeddingWorker
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 
@@ -24,7 +24,7 @@ class _KeywordEmbedder(EmbeddingProvider):
     """Deterministic provider: 'docling' → unit vector, otherwise zeros."""
 
     def __init__(self) -> None:
-        self.dimensions = 1024
+        self.vector_dim = 1024
         self._model = "kw"
         self._base_url = "https://kw.local"
 
@@ -34,7 +34,7 @@ class _KeywordEmbedder(EmbeddingProvider):
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [
-            [1.0] * self.dimensions if "docling" in t.lower() else [0.0] * self.dimensions
+            [1.0] * self.vector_dim if "docling" in t.lower() else [0.0] * self.vector_dim
             for t in texts
         ]
 
