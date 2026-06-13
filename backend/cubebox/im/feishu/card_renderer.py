@@ -377,6 +377,7 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
             value_payload["question_id"] = pending.question_id
         columns.append(
             {
+                "tag": "column",
                 "elements": [
                     {
                         "tag": "button",
@@ -385,7 +386,7 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
                         "behaviors": [{"type": "callback"}],
                         "value": value_payload,
                     }
-                ]
+                ],
             }
         )
     body_elements: list[dict[str, Any]] = [

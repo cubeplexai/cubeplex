@@ -9,6 +9,7 @@ and idempotent finalize.
 from __future__ import annotations
 
 import asyncio
+import json as _json
 from collections.abc import Callable
 from typing import Any
 
@@ -76,7 +77,10 @@ class CardKitClient:
         Raises ``CardKitCreateError`` after exhausting retries.
         """
         url = f"{self._base_url}/open-apis/cardkit/v1/cards"
-        payload = {"type": "card_json", "data": card_json}
+        # Feishu's CardKit `data` field is a JSON-encoded STRING, not a nested
+        # object — sending the dict gets `code=9499 Invalid parameter type in
+        # json: Data` back. Same encoding on every POST/PATCH below.
+        payload = {"type": "card_json", "data": _json.dumps(card_json, ensure_ascii=False)}
         last_exc: Exception | None = None
         async with self._new_client() as http:
             for attempt in range(len(_CREATE_RETRY_DELAYS) + 1):
@@ -140,18 +144,21 @@ class CardKitClient:
         card_json: dict[str, Any],
         sequence: int,
     ) -> None:
-        """PATCH /open-apis/cardkit/v1/cards/{card_id}.
+        """PUT /open-apis/cardkit/v1/cards/{card_id}.
 
-        Replaces the whole card JSON. Raises ``CardKitRateLimit`` on 230020;
-        caller coalesces.
+        Replaces the whole card JSON. The Feishu CardKit "update card"
+        endpoint is PUT, not PATCH — PATCH on the same path targets
+        ``/settings`` only. Raises ``CardKitRateLimit`` on 230020; caller
+        coalesces.
         """
         url = f"{self._base_url}/open-apis/cardkit/v1/cards/{card_id}"
         payload = {
-            "card": {"type": "card_json", "data": card_json},
+            "card": {"type": "card_json", "data": _json.dumps(card_json, ensure_ascii=False)},
+            "uuid": f"{card_id}-{sequence}",
             "sequence": sequence,
         }
         async with self._new_client() as http:
-            resp = await http.patch(url, json=payload, headers=self._headers())
+            resp = await http.put(url, json=payload, headers=self._headers())
             body = resp.json()
             code = int(body.get("code", -1))
             if code == _FLOOD_CODE:
@@ -166,20 +173,22 @@ class CardKitClient:
         card_json: dict[str, Any],
         sequence: int,
     ) -> bool:
-        """Terminal patch. Idempotent, retried up to ~2.5 minutes total.
+        """Terminal full-card replace via PUT /cards/{card_id}. Idempotent,
+        retried up to ~2.5 minutes total.
 
         Returns True if the final patch landed; False if all retries
         failed (caller logs + accepts half-locked state, sets ❌ reaction).
         """
         url = f"{self._base_url}/open-apis/cardkit/v1/cards/{card_id}"
         payload = {
-            "card": {"type": "card_json", "data": card_json},
+            "card": {"type": "card_json", "data": _json.dumps(card_json, ensure_ascii=False)},
+            "uuid": f"{card_id}-{sequence}",
             "sequence": sequence,
         }
         async with self._new_client() as http:
             for attempt in range(len(_FINALIZE_RETRY_DELAYS) + 1):
                 try:
-                    resp = await http.patch(url, json=payload, headers=self._headers())
+                    resp = await http.put(url, json=payload, headers=self._headers())
                     if 500 <= resp.status_code < 600:
                         raise CardKitError(f"finalize HTTP {resp.status_code}")
                     body = resp.json()
