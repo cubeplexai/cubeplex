@@ -346,6 +346,15 @@ class OutboundRunTailer:
                 for ev in events:
                     last_id = ev.event_id
                     op = fold_event(ev.payload, self._state, now=time.monotonic())
+                    if (
+                        ev.payload.get("type") == "artifact"
+                        and self._artifact_dispatcher is not None
+                    ):
+                        artifact_payload = (ev.payload.get("data") or {}).get("artifact") or {}
+                        try:
+                            await self._artifact_dispatcher.handle(artifact_payload)
+                        except Exception:
+                            logger.warning("artifact dispatch failed", exc_info=True)
                     if op is None:
                         continue
                     # Task 8: dispatch is a no-op stub. Task 12 rewires this to

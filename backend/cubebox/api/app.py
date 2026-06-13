@@ -142,6 +142,7 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
             org_id=account.org_id,
             workspace_id=account.workspace_id,
             conversation_id=item.conversation_id,
+            card_state=state.card_state,
         )
         tailer = OutboundRunTailer(
             redis=app.state.redis,
