@@ -12,6 +12,8 @@ See docs/dev/plans/2026-06-11-im-connectors-feishu.md
 
 from dataclasses import dataclass, field
 
+from cubebox.im.feishu.card_model import CardState
+
 DM_SCOPE_KEY = "dm"
 
 
@@ -64,22 +66,39 @@ class InboundEvent:
 
 @dataclass(slots=True)
 class RenderState:
-    """Per-run outbound render state.
+    """Per-run outbound render state, projected into a CardKit card.
 
-    Held by the tailer for one run from first text_delta to terminal event.
+    Held by the tailer for one run from first event to terminal event.
     """
 
-    message_id: str | None = None
-    text_buffer: str = ""
-    tool_lines: list[str] = field(default_factory=list)
-    last_edit_monotonic: float = 0.0
-    edit_interval: float = 0.8  # adaptive: doubles on flood up to 10s
+    bot_name: str = ""
+    run_id: str = ""
+    card_state: CardState = field(init=False)
+    card_id: str | None = None
+    card_unavailable: bool = False
+    last_stream_monotonic: float = 0.0
+    last_patch_monotonic: float = 0.0
+    stream_interval: float = 0.1
+    patch_interval: float = 1.5
     consecutive_flood_strikes: int = 0
     edits_disabled: bool = False
     reaction_in_progress_id: str | None = None
-    posted_artifacts: set[str] = field(default_factory=set)
     # Bound at tailer start from IMRunQueueItem fields.
     reply_to_id: str | None = None
     # The originating user message id (NOT the bot's reply). Used by reaction
     # calls so the ⏱️ / ❌ chip attaches to the user's message.
     inbound_message_id: str | None = None
+    bot_message_id: str | None = None
+    """Feishu message_id of the bubble that carries the card."""
+
+    # TODO(task-8): remove the legacy text-path fields below once fold_event is
+    # rewritten to project events into ``card_state`` instead of free-form text.
+    message_id: str | None = None
+    text_buffer: str = ""
+    tool_lines: list[str] = field(default_factory=list)
+    last_edit_monotonic: float = 0.0
+    edit_interval: float = 0.8  # adaptive: doubles on flood up to 10s
+    posted_artifacts: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        self.card_state = CardState(bot_name=self.bot_name, run_id=self.run_id)
