@@ -180,3 +180,84 @@ async def delete_account(
                 account_id,
                 exc_info=True,
             )
+
+
+@router.post("/accounts/{account_id}/disable", response_model=IMAccountOut)
+async def disable_workspace_account(
+    workspace_id: str,
+    account_id: str,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> IMAccountOut:
+    """Workspace-scope disable. The admin route remains for org-wide ops."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    role = await MembershipRepository(session).get_role(
+        user_id=ctx.user.id, workspace_id=ctx.workspace_id
+    )
+    if role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace admin required",
+        )
+    svc = _service(session, backend, ctx)
+    account = await svc.get(account_id=account_id, workspace_id=ctx.workspace_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    updated = await svc.set_enabled(account_id=account_id, enabled=False)
+    assert updated is not None
+    # Drop any live long-conn so the bot stops responding immediately.
+    long_conns = getattr(request.app.state, "im_long_connections", None) or {}
+    lc = long_conns.pop(account_id, None)
+    if lc is not None:
+        try:
+            await lc.disconnect()
+        except Exception:
+            logger.warning(
+                "[IM ws] long-conn disconnect failed on disable for {}",
+                account_id,
+                exc_info=True,
+            )
+    return _to_out(updated)
+
+
+@router.post("/accounts/{account_id}/enable", response_model=IMAccountOut)
+async def enable_workspace_account(
+    workspace_id: str,
+    account_id: str,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> IMAccountOut:
+    """Workspace-scope enable. Spins up the long-conn inline."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    role = await MembershipRepository(session).get_role(
+        user_id=ctx.user.id, workspace_id=ctx.workspace_id
+    )
+    if role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace admin required",
+        )
+    svc = _service(session, backend, ctx)
+    account = await svc.get(account_id=account_id, workspace_id=ctx.workspace_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    updated = await svc.set_enabled(account_id=account_id, enabled=True)
+    assert updated is not None
+    if updated.delivery_mode == "long_connection":
+        starter = getattr(request.app.state, "im_connect_account", None)
+        if starter is not None:
+            try:
+                await starter(updated)
+            except Exception:
+                logger.warning(
+                    "[IM ws] long-conn startup failed on enable for {}",
+                    account_id,
+                    exc_info=True,
+                )
+    return _to_out(updated)
