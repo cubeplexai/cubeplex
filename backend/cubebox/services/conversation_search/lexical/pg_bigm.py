@@ -1,26 +1,24 @@
-"""PGroonga backend — `&@~` operator with pgroonga_score()."""
+"""pg_bigm backend — LIKE-based with bigm_similarity()."""
 
-from cubebox.search.lexical.base import LexicalSqlBundle
+from cubebox.services.conversation_search.lexical.base import LexicalSqlBundle
 
 
-class PgroongaBackend:
-    name = "pgroonga"
+class PgBigmBackend:
+    name = "pg_bigm"
 
     def normalize_query(self, q: str) -> str:
-        # PGroonga treats unescaped " ( ) \\ as operators; drop them so the
-        # query string can't accidentally inject syntax.
-        bad = set('"()\\')
-        return "".join(c for c in q if c not in bad).strip()
+        # Escape SQL LIKE wildcards. Leading/trailing % are added by SQL.
+        return q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").strip()
 
     def search_sql(self, limit: int) -> LexicalSqlBundle:
         sql = f"""
-            SELECT cc.id, pgroonga_score(cc.tableoid, cc.ctid) AS score
+            SELECT cc.id, bigm_similarity(cc.text, :q) AS score
             FROM conversation_chunks cc
             JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
             WHERE cc.org_id = :org_id
               AND cc.workspace_id = :ws_id
               AND cc.creator_user_id = :user_id
-              AND cc.text &@~ :q
+              AND cc.text LIKE '%' || :q || '%' ESCAPE '\\'
             ORDER BY score DESC
             LIMIT {int(limit)}
         """

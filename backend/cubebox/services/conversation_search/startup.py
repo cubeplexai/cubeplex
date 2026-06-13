@@ -22,9 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.config import config
 from cubebox.db.engine import async_session_maker
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.lexical import build_lexical_backend
-from cubebox.search.worker import EmbeddingWorker
+from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubebox.services.conversation_search.lexical import build_lexical_backend
+from cubebox.services.conversation_search.worker import EmbeddingWorker
 
 _VECTOR_TYPE_RE = re.compile(r"vector\((\d+)\)")
 
@@ -61,8 +61,8 @@ async def _verify_dim_alignment(provider: EmbeddingProvider) -> bool:
     Returns False on any mismatch (with a CRITICAL log naming each value and
     the recovery steps) or when the schema is missing entirely.
     """
-    config_dim = int(config.get("search.embedding.dimensions", 1024))
-    provider_dim = provider.dimensions
+    config_dim = int(config.get("search.embedding.vector_dim", 1024))
+    provider_dim = provider.vector_dim
     async with async_session_maker() as session:
         schema_dim = await _read_schema_dim(session)
 
@@ -78,7 +78,7 @@ async def _verify_dim_alignment(provider: EmbeddingProvider) -> bool:
     logger.critical(
         "vector dim mismatch (schema={}, config={}, provider={}). To change dim:\n"
         "  1) drop the conversation_chunks table\n"
-        "  2) set search.embedding.dimensions to the desired value\n"
+        "  2) set search.embedding.vector_dim to the desired value\n"
         "  3) alembic upgrade head\n"
         "  4) backfill via scripts/dev/backfill_search_index.py",
         schema_dim,
@@ -114,12 +114,21 @@ async def start_search_subsystem(app: FastAPI) -> None:
         return
 
     provider: EmbeddingProvider | None
-    try:
-        provider = EmbeddingProvider.from_config()
-    except RuntimeError as exc:
-        # Missing api key etc. — degrade to lexical-only.
-        logger.warning("Embedding provider not configured ({}); search will run lexical-only", exc)
+    if not config.get("search.embedding.enabled", False):
+        # Operator hasn't flipped the embedding switch yet — run lexical-only.
+        # No warning: this is the documented default for fresh deployments.
+        logger.info("Embedding provider disabled via config; search will run lexical-only")
         provider = None
+    else:
+        try:
+            provider = EmbeddingProvider.from_config()
+        except RuntimeError as exc:
+            # Misconfig with embedding.enabled=true is louder — operator
+            # asked for vector search but the config is wrong.
+            logger.warning(
+                "Embedding provider not configured ({}); search will run lexical-only", exc
+            )
+            provider = None
 
     if provider is not None and not await _verify_dim_alignment(provider):
         # Dim mismatch with a working provider — the operator probably

@@ -6,14 +6,14 @@ from sqlalchemy import text as sql_text
 from cubebox.db.engine import async_session_maker
 from cubebox.repositories.conversation_chunk import ConversationChunkRepository
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.worker import EmbeddingWorker
+from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubebox.services.conversation_search.worker import EmbeddingWorker
 
 
 class _FakeProvider(EmbeddingProvider):
     def __init__(self) -> None:
         # Bypass real init; we never call HTTP.
-        self.dimensions = 1024
+        self.vector_dim = 1024
         self._model = "fake"
         self._base_url = "https://fake.local"
 
@@ -22,7 +22,7 @@ class _FakeProvider(EmbeddingProvider):
         return "fake@fake.local"
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[0.01 * (i + 1)] * self.dimensions for i, _ in enumerate(texts)]
+        return [[0.01 * (i + 1)] * self.vector_dim for i, _ in enumerate(texts)]
 
 
 @pytest.mark.asyncio

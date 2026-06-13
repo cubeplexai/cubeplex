@@ -12,7 +12,7 @@ from cubebox.api.schemas.conversation_search import (
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.db import get_session
-from cubebox.search.service import ConversationSearchService
+from cubebox.services.conversation_search.service import ConversationSearchService
 
 router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
 

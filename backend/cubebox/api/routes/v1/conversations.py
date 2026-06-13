@@ -119,7 +119,7 @@ async def _enqueue_search_index(
     """
     try:
         from cubebox.config import config as _cfg
-        from cubebox.search.indexer import enqueue_index_job
+        from cubebox.services.conversation_search.indexer import enqueue_index_job
 
         if _cfg.get("search.enabled", True):
             await enqueue_index_job(

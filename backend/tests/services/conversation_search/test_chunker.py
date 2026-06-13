@@ -1,4 +1,4 @@
-from cubebox.search.chunker import Chunk, MessageInput, chunk_messages
+from cubebox.services.conversation_search.chunker import Chunk, MessageInput, chunk_messages
 
 
 def _msg(seq: int, text: str) -> MessageInput:

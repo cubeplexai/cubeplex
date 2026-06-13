@@ -56,7 +56,7 @@ async def test_search_route_returns_lexical_results_without_provider(
     from cubebox.agents.checkpointer import init_checkpointer
     from cubebox.db.engine import async_session_maker
     from cubebox.repositories.embedding_job import EmbeddingJobRepository
-    from cubebox.search.worker import EmbeddingWorker
+    from cubebox.services.conversation_search.worker import EmbeddingWorker
     from tests.e2e.conftest import (
         DEFAULT_ORG_ID,
         DEFAULT_TEST_EMAIL,

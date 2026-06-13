@@ -397,10 +397,30 @@ default:
     lexical:
       backend: "pgroonga"          # | "pg_bigm"
     embedding:
-      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-      api_key_env: "DASHSCOPE_API_KEY"
-      model: "qwen3-embedding-0.6b"
-      dimensions: 1024
+      # Explicit on/off. When false (default) the worker still indexes chunks
+      # so PGroonga has rows to query, but skips embedding — search runs in
+      # lexical-only mode. Flip to true after you fill in api_key + a model.
+      enabled: false
+      # OpenAI-compatible /v1/embeddings endpoint. Any backend that speaks
+      # the OpenAI embeddings protocol works (DashScope compatible-mode,
+      # local vLLM/Ollama, etc.). Override per-deployment.
+      base_url: "https://api.openai.com/v1"
+      # Leave empty here; supply via env (`CUBEBOX_SEARCH__EMBEDDING__API_KEY`)
+      # or a gitignored .secrets.yaml. Dynaconf merges env over yaml.
+      api_key: ""
+      model: "text-embedding-3-small"
+      # Vector column width in conversation_chunks.embedding. Frozen at
+      # `alembic upgrade head` time — to change later, drop the table and
+      # re-migrate. The startup three-way check (cubebox.services.
+      # conversation_search.startup) catches drift between this, the live
+      # schema, and the provider's actual output dim.
+      vector_dim: 1024
+      # `dimensions` parameter sent on the /v1/embeddings request. 0 means
+      # "don't send it" — the model returns its native dim. Set to a positive
+      # int to ask the provider to truncate (Matryoshka models +
+      # text-embedding-3-* support this; many models do not). When non-zero,
+      # must equal vector_dim.
+      dimensions: 0
       batch_size: 32
       timeout_seconds: 30
     chunker:
