@@ -83,7 +83,34 @@ async def resolve_or_reject(
         )
     ).scalar_one_or_none()
     if cached is not None:
-        return cached.user_id
+        # Re-verify workspace membership on every cache hit. Without this,
+        # a user removed from the workspace AFTER their first message would
+        # keep sending IM messages forever (the cached link bypasses the
+        # gate). Cheap O(1) PK lookup on memberships; well under the cost
+        # of the Feishu API call we'd otherwise have to make.
+        still_member = (
+            await session.execute(
+                select(Membership).where(
+                    Membership.user_id == cached.user_id,  # type: ignore[arg-type]
+                    Membership.workspace_id == account.workspace_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if still_member is not None:
+            return cached.user_id
+        # Stale link: drop it so a future message goes through the full
+        # resolver path again (which may match a re-added membership or
+        # land in the not-member branch + reject).
+        logger.info(
+            "[IM identity] cached link {} stale — user {} no longer in workspace {}",
+            cached.id,
+            cached.user_id,
+            account.workspace_id,
+        )
+        await session.delete(cached)
+        await session.flush()
+        await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+        return None
 
     if not event.sender_open_id:
         # No open_id → can't ask Feishu. Reject.
@@ -133,29 +160,44 @@ async def resolve_or_reject(
         await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
         return None
 
-    # Cache. Race-safe: a concurrent ingest for the same sender may have
-    # just inserted; uq_im_identity_link catches it and we re-read.
-    link = IMIdentityLink(
-        org_id=account.org_id,
-        workspace_id=account.workspace_id,
-        account_id=account.id,
-        im_user_id=im_user_id,
-        user_id=user.id,
-    )
-    session.add(link)
-    try:
-        await session.flush()
-    except IntegrityError:
-        await session.rollback()
-        existing = (
-            await session.execute(
-                select(IMIdentityLink).where(
-                    IMIdentityLink.account_id == account.id,  # type: ignore[arg-type]
-                    IMIdentityLink.im_user_id == im_user_id,  # type: ignore[arg-type]
-                )
+    # Cache. Wrap the INSERT in a SAVEPOINT so a unique-key race against
+    # a concurrent ingest for the same sender doesn't roll back the
+    # outer ``ingest_inbound_event`` transaction (which already flushed
+    # ``IMWebhookReceipt`` — losing that means the queue insert below
+    # would reference a non-existent receipt_id and FK-fail, AND Feishu
+    # retries would no longer dedupe). The savepoint lets us roll back
+    # only the failed INSERT and re-read the winner's row.
+    async with session.begin_nested():
+        try:
+            link = IMIdentityLink(
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+                account_id=account.id,
+                im_user_id=im_user_id,
+                user_id=user.id,
             )
-        ).scalar_one_or_none()
-        if existing is not None:
-            return existing.user_id
-        raise
-    return user.id
+            session.add(link)
+            await session.flush()
+            return user.id
+        except IntegrityError:
+            # SAVEPOINT-scoped rollback happens automatically on exit.
+            pass
+    existing = (
+        await session.execute(
+            select(IMIdentityLink).where(
+                IMIdentityLink.account_id == account.id,  # type: ignore[arg-type]
+                IMIdentityLink.im_user_id == im_user_id,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing.user_id
+    # Lost the race AND can't find the winner — shouldn't happen, but
+    # don't silently corrupt the run by returning a wrong user_id.
+    logger.warning(
+        "[IM identity] link insert race for ({}, {}) lost, but winner not found",
+        account.id,
+        im_user_id,
+    )
+    await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+    return None

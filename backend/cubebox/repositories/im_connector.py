@@ -113,6 +113,40 @@ async def claim_pending_queue_item(
     than letting it spin.
     """
     now = datetime.now(UTC)
+    # First pass: park stale-leased rows that already hit the attempt cap.
+    # Without this, a worker that crashed AFTER claiming the last allowed
+    # attempt leaves the row at ``status='started', attempts=max_attempts``
+    # with an expired lease; the main claim predicate below excludes
+    # ``attempts >= max_attempts``, so the row would otherwise stay
+    # ``started`` and ``receipt`` ``pending`` indefinitely. Park it
+    # terminal here, which is observability-equivalent to
+    # ``mark_queue_item_for_retry_or_fail`` reaching the cap.
+    capped_stmt = (
+        select(IMRunQueueItem)
+        .where(
+            IMRunQueueItem.attempts >= max_attempts,  # type: ignore[arg-type]
+            IMRunQueueItem.status == "started",  # type: ignore[arg-type]
+            IMRunQueueItem.claim_lease_expires_at.is_not(None),  # type: ignore[union-attr]
+            IMRunQueueItem.claim_lease_expires_at < now,  # type: ignore[arg-type,operator]
+        )
+        .limit(10)
+        .with_for_update(skip_locked=True)
+    )
+    capped_rows = list((await session.execute(capped_stmt)).scalars().all())
+    for capped in capped_rows:
+        capped.status = "failed"
+        capped.claim_lease_expires_at = None
+        session.add(capped)
+        # Symmetric: matching receipt also goes terminal so dashboards
+        # can distinguish "in-flight" from "permanently parked".
+        receipt = (
+            await session.execute(
+                select(IMWebhookReceipt).where(IMWebhookReceipt.id == capped.receipt_id)  # type: ignore[arg-type]
+            )
+        ).scalar_one_or_none()
+        if receipt is not None:
+            receipt.status = "failed"
+            session.add(receipt)
     stmt = (
         select(IMRunQueueItem)
         .where(
@@ -217,6 +251,37 @@ async def mark_queue_item_for_retry_or_fail(
     item.claim_lease_expires_at = None
     session.add(item)
     return False
+
+
+async def rewind_queue_item_no_attempt_charge(
+    session: AsyncSession,
+    *,
+    item_id: str,
+) -> None:
+    """Rewind a ``started`` queue row to ``pending`` without consuming an attempt.
+
+    Used when ``start_run`` refused for a reason the queue worker should
+    NOT count as a retry — most importantly the "conversation already has
+    an active run" rejection. If we consumed an attempt for that, two IM
+    messages in quick succession (typical UX: user sends a follow-up
+    while the first reply is still rendering) would burn through
+    ``max_attempts`` in seconds and park the follow-up as ``failed``
+    instead of just waiting.
+
+    Symmetric ``attempts -= 1`` (claim incremented by one) keeps the
+    invariant: ``attempts`` only ever reflects calls that actually
+    invoked the run path.
+    """
+    item = (
+        await session.execute(
+            select(IMRunQueueItem).where(IMRunQueueItem.id == item_id)  # type: ignore[arg-type]
+        )
+    ).scalar_one()
+    item.status = "pending"
+    item.claim_lease_expires_at = None
+    if item.attempts > 0:
+        item.attempts -= 1
+    session.add(item)
 
 
 async def mark_receipt_failed(

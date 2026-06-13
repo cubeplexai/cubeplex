@@ -241,6 +241,7 @@ class OutboundRunTailer:
 
         attempt_budget = len(_TERMINAL_RETRY_DELAYS) if is_terminal else 1
         last_signal: Exception | None = None
+        edit_rejected = False  # non-flood failure that should fall back to send
         for attempt in range(attempt_budget):
             try:
                 if op.kind == "post":
@@ -262,9 +263,18 @@ class OutboundRunTailer:
                             note_edit_success(self._state)
                             return True
                         return False
-                    await self._connector.edit(self._state.message_id, op.text)
-                    note_edit_success(self._state)
-                    return True
+                    delivered = await self._connector.edit(self._state.message_id, op.text)
+                    if delivered:
+                        note_edit_success(self._state)
+                        return True
+                    # Non-flood edit failure (e.g. message deleted,
+                    # content too large). Terminal ops fall through to
+                    # send_text_message below; streaming ops just give
+                    # up this turn — the next delta gets another chance.
+                    if not is_terminal:
+                        return False
+                    edit_rejected = True
+                    break
             except _FloodSignal as exc:
                 note_flood_strike(self._state)
                 last_signal = exc
@@ -275,12 +285,14 @@ class OutboundRunTailer:
                 logger.warning("[outbound] {} op failed", op.kind, exc_info=True)
                 return False
 
-        if is_terminal and last_signal is not None:
-            # Edits exhausted under flood. Fall back to a NEW bubble:
-            # ``messages/create`` has a separate quota from ``messages/update``
-            # so the final answer can still land. The user sees both the
-            # stale partial AND the final bubble — slightly noisy but the
-            # answer is preserved, which matters more.
+        if is_terminal and (last_signal is not None or edit_rejected):
+            # Either edits exhausted under flood OR the prior message
+            # cannot be updated (deleted by user, too large, ...). Fall
+            # back to a NEW bubble: ``messages/create`` has a separate
+            # quota from ``messages/update`` AND a different validation
+            # surface, so the final answer can still land. The user may
+            # see both the stale partial AND the final bubble — noisy
+            # but the answer is preserved, which matters more.
             try:
                 new_id = await self._connector.send_text_message(op.text)
                 if new_id:

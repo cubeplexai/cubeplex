@@ -32,6 +32,7 @@ from cubebox.repositories.im_connector import (
     mark_queue_item_for_retry_or_fail,
     mark_receipt_completed,
     mark_receipt_failed,
+    rewind_queue_item_no_attempt_charge,
 )
 from cubebox.streams.run_manager import RunContext
 
@@ -122,7 +123,25 @@ async def process_one_queue_item(
                 trigger="im",
             ),
         )
-    except Exception:
+    except Exception as exc:
+        # ``RunManager.start_run`` raises a plain RuntimeError when the
+        # conversation already has an active run. That's a normal UX
+        # scenario (user sends a follow-up while the first reply is
+        # still rendering, ~5–60s typical), NOT a failed inbound —
+        # rewinding to pending without consuming an attempt lets the
+        # next poll re-claim once the first run finishes. At default
+        # poll=1s, max_attempts=5, charging the attempt would park the
+        # follow-up as ``failed`` in ~5s even though the conversation
+        # just needed a few seconds to finish.
+        if isinstance(exc, RuntimeError) and "already has an active run" in str(exc):
+            logger.info(
+                "[IM worker] queue item {} waiting on active run (no attempt charge)",
+                captured_item.id,
+            )
+            async with session_maker() as session:
+                await rewind_queue_item_no_attempt_charge(session, item_id=captured_item.id)
+                await session.commit()
+            return False
         logger.warning(
             "[IM worker] start_run failed for queue item {}; leaving for re-claim",
             captured_item.id,

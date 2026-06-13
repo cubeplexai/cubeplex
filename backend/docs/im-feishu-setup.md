@@ -22,24 +22,42 @@ cubebox can bind a Feishu (Lark) bot to a workspace so messages and
    - `im:message.group_at_msg` (group @mentions delivered)
    - `im:message.p2p_msg` (DMs delivered)
    - `im:message.reaction:write` (processing reactions)
-   - `contact:user.base:readonly` (optional — used for sender names)
-4. Open **Event Subscriptions**:
+   - `contact:user.base:readonly` (sender display name)
+   - `contact:user.email:readonly` — **REQUIRED** for the sender
+     identity gate. Without it, Feishu omits `user.email` from
+     `contact/v3/users/{open_id}` responses and every sender is
+     rejected as "not a workspace member". This is a separately
+     governed scope from `contact:user.base:readonly`.
+   - `contact:user.id:readonly` — used by the gate's reverse lookup
+     (resolve email → user). Required for the same reason.
+4. **Create the cubebox connector FIRST, then configure the Feishu
+   event subscription.** The ingress route drops events for unknown
+   `app_id` with a bare 200 and never echoes the `url_verification`
+   challenge — Feishu's "verify request URL" step would fail until the
+   app_id is known to cubebox. So:
+   1. Copy the App ID + App Secret (and Encrypt Key / Verification
+      Token, if you'll use webhook mode) from this page.
+   2. Jump to "Connect the bot to a cubebox workspace" below and POST
+      the credentials to cubebox. The endpoint hydrates `bot_open_id`
+      and refuses to persist the account if hydration fails — so a
+      successful 201 confirms the credentials are good.
+   3. Then return here.
+5. Open **Event Subscriptions**:
    - For **long connection**: switch the event-subscription mode to
      "Long Connection" / "Persistent Connection". No request URL.
    - For **webhook**: set the request URL to
-     `https://<your-host>/api/v1/im/feishu/events`. Copy the
-     **Encrypt Key** and **Verification Token** from the same page.
-     The Encrypt Key serves two roles: (a) signature verification on
-     every request (the `x-lark-signature` header is HMAC'd with this
-     key); (b) body encryption when you flip the "Event Encryption"
-     toggle. cubebox supports **both modes** — if you enable
-     encryption, the ingress route try-decrypts against each enabled
-     account's `encrypt_key` and routes by the `app_id` inside the
-     decrypted payload.
+     `https://<your-host>/api/v1/im/feishu/events`. The
+     **Encrypt Key** and **Verification Token** you copied in step 4.1
+     serve two roles: (a) signature verification on every request (the
+     `x-lark-signature` header is HMAC'd with this key); (b) body
+     encryption when you flip the "Event Encryption" toggle. cubebox
+     supports **both modes** — if you enable encryption, the ingress
+     route try-decrypts against each enabled account's `encrypt_key`
+     and routes by the `app_id` inside the decrypted payload.
    - Subscribe to the event `im.message.receive_v1`. Future overlays
      (`im.message.reaction.created_v1`, `card.action.trigger`) are not used
      in v1.
-5. Publish a version of the app and grant it to your tenant.
+6. Publish a version of the app and grant it to your tenant.
 
 ## Connect the bot to a cubebox workspace
 
