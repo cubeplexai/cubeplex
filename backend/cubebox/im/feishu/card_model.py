@@ -58,6 +58,10 @@ class PendingInput:
     """Pairs of (choice_key, button_type). button_type ∈ {"primary","default","danger"}."""
     question_id: str | None = None
     """cubepi-side identifier for matching the resume call."""
+    answer_key: str | None = None
+    """cubepi form schema key (questions[0].key for ask_user). The resume call
+    builds the answer dict as {answer_key: choice} — without this, cubepi
+    rejects the answer because our key won't match its schema."""
     resolved_choice: str | None = None
     resolved_by_open_id: str | None = None
     resolved_at_iso: str | None = None

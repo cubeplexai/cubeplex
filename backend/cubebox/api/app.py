@@ -63,12 +63,7 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
     from cubebox.db.engine import async_session_maker as _im_session_maker
     from cubebox.im.artifacts import IMArtifactDispatcher
     from cubebox.im.feishu.connector import FeishuConnector
-    from cubebox.im.feishu.long_connection import (
-        FeishuLongConnection,
-    )
-    from cubebox.im.feishu.long_connection import (
-        set_run_manager as _set_lc_run_manager,
-    )
+    from cubebox.im.feishu.long_connection import FeishuLongConnection
     from cubebox.im.inbound import ingest_inbound_event
     from cubebox.im.outbound import OutboundRunTailer
     from cubebox.im.types import RenderState
@@ -194,11 +189,6 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
     app.state.im_run_queue_worker = worker
     app.state.im_long_connections = {}
 
-    # Long-connection card-action handler runs on the SDK thread with no
-    # request context — give it a process-wide handle to the RunManager
-    # so card clicks can resume paused runs.
-    _set_lc_run_manager(run_manager)
-
     async def _connect_one(account: IMConnectorAccount) -> None:
         try:
             secrets = await _load_secrets(account)
@@ -222,6 +212,8 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
                 bot_open_id=bot_open_id,
                 ingest=ingest_inbound_event,
                 session_maker=_im_session_maker,
+                run_manager=run_manager,
+                redis_key_prefix=app.state.redis_key_prefix,
                 domain=str(secrets.get("domain", "feishu")),
             )
             await lc.connect()

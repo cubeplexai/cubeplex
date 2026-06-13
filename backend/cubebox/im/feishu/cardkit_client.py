@@ -57,12 +57,29 @@ class CardKitClient:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._transport = transport
+        # One AsyncClient per CardKitClient — reused across all CardKit ops
+        # in a single run (create + N stream_text + M patch_card + finalize
+        # against open.feishu.cn). Without this, each call re-opens TCP +
+        # TLS to Feishu, which adds 50-200ms per token on a cold path.
+        # Owner closes via ``aclose()``; the tailer's run() finally block
+        # is the canonical close site.
+        self._client: httpx.AsyncClient | None = None
 
-    def _new_client(self) -> httpx.AsyncClient:
-        kwargs: dict[str, Any] = {"timeout": self._timeout}
-        if self._transport is not None:
-            kwargs["transport"] = self._transport
-        return httpx.AsyncClient(**kwargs)
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            kwargs: dict[str, Any] = {"timeout": self._timeout}
+            if self._transport is not None:
+                kwargs["transport"] = self._transport
+            self._client = httpx.AsyncClient(**kwargs)
+        return self._client
+
+    async def aclose(self) -> None:
+        """Release the underlying connection pool. Idempotent."""
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            finally:
+                self._client = None
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -82,30 +99,28 @@ class CardKitClient:
         # json: Data` back. Same encoding on every POST/PATCH below.
         payload = {"type": "card_json", "data": _json.dumps(card_json, ensure_ascii=False)}
         last_exc: Exception | None = None
-        async with self._new_client() as http:
-            for attempt in range(len(_CREATE_RETRY_DELAYS) + 1):
-                try:
-                    resp = await http.post(url, json=payload, headers=self._headers())
-                    if 500 <= resp.status_code < 600:
-                        raise CardKitError(f"create_entity HTTP {resp.status_code}")
-                    body = resp.json()
-                    code = int(body.get("code", -1))
-                    if code == 0:
-                        data = body.get("data") or {}
-                        card_id = str(data.get("card_id") or "")
-                        if not card_id:
-                            raise CardKitCreateError("create_entity returned no card_id")
-                        return card_id
-                    raise CardKitError(f"create_entity code={code} msg={body.get('msg')}")
-                except (httpx.HTTPError, CardKitError) as exc:
-                    last_exc = exc
-                    logger.warning(
-                        "[CardKit] create_entity attempt {} failed: {}", attempt + 1, exc
-                    )
-                    if attempt < len(_CREATE_RETRY_DELAYS):
-                        await asyncio.sleep(_CREATE_RETRY_DELAYS[attempt])
-                        continue
-                    break
+        http = self._get_client()
+        for attempt in range(len(_CREATE_RETRY_DELAYS) + 1):
+            try:
+                resp = await http.post(url, json=payload, headers=self._headers())
+                if 500 <= resp.status_code < 600:
+                    raise CardKitError(f"create_entity HTTP {resp.status_code}")
+                body = resp.json()
+                code = int(body.get("code", -1))
+                if code == 0:
+                    data = body.get("data") or {}
+                    card_id = str(data.get("card_id") or "")
+                    if not card_id:
+                        raise CardKitCreateError("create_entity returned no card_id")
+                    return card_id
+                raise CardKitError(f"create_entity code={code} msg={body.get('msg')}")
+            except (httpx.HTTPError, CardKitError) as exc:
+                last_exc = exc
+                logger.warning("[CardKit] create_entity attempt {} failed: {}", attempt + 1, exc)
+                if attempt < len(_CREATE_RETRY_DELAYS):
+                    await asyncio.sleep(_CREATE_RETRY_DELAYS[attempt])
+                    continue
+                break
         raise CardKitCreateError(str(last_exc) if last_exc else "unknown")
 
     async def stream_text(
@@ -128,14 +143,14 @@ class CardKitClient:
             "sequence": sequence,
             "uuid": f"{card_id}-{sequence}",
         }
-        async with self._new_client() as http:
-            resp = await http.put(url, json=payload, headers=self._headers())
-            body = resp.json()
-            code = int(body.get("code", -1))
-            if code == _FLOOD_CODE:
-                raise CardKitRateLimit(f"stream_text flood (code={code})")
-            if code != 0:
-                raise CardKitError(f"stream_text code={code} msg={body.get('msg')}")
+        http = self._get_client()
+        resp = await http.put(url, json=payload, headers=self._headers())
+        body = resp.json()
+        code = int(body.get("code", -1))
+        if code == _FLOOD_CODE:
+            raise CardKitRateLimit(f"stream_text flood (code={code})")
+        if code != 0:
+            raise CardKitError(f"stream_text code={code} msg={body.get('msg')}")
 
     async def patch_card(
         self,
@@ -157,14 +172,14 @@ class CardKitClient:
             "uuid": f"{card_id}-{sequence}",
             "sequence": sequence,
         }
-        async with self._new_client() as http:
-            resp = await http.put(url, json=payload, headers=self._headers())
-            body = resp.json()
-            code = int(body.get("code", -1))
-            if code == _FLOOD_CODE:
-                raise CardKitRateLimit(f"patch_card flood (code={code})")
-            if code != 0:
-                raise CardKitError(f"patch_card code={code} msg={body.get('msg')}")
+        http = self._get_client()
+        resp = await http.put(url, json=payload, headers=self._headers())
+        body = resp.json()
+        code = int(body.get("code", -1))
+        if code == _FLOOD_CODE:
+            raise CardKitRateLimit(f"patch_card flood (code={code})")
+        if code != 0:
+            raise CardKitError(f"patch_card code={code} msg={body.get('msg')}")
 
     async def finalize(
         self,
@@ -185,26 +200,26 @@ class CardKitClient:
             "uuid": f"{card_id}-{sequence}",
             "sequence": sequence,
         }
-        async with self._new_client() as http:
-            for attempt in range(len(_FINALIZE_RETRY_DELAYS) + 1):
-                try:
-                    resp = await http.put(url, json=payload, headers=self._headers())
-                    if 500 <= resp.status_code < 600:
-                        raise CardKitError(f"finalize HTTP {resp.status_code}")
-                    body = resp.json()
-                    code = int(body.get("code", -1))
-                    if code == 0:
-                        return True
-                    if code == _FLOOD_CODE:
-                        # Throttle counts as transient; retry like 5xx.
-                        raise CardKitError(f"finalize flood (code={code})")
-                    raise CardKitError(f"finalize code={code} msg={body.get('msg')}")
-                except (httpx.HTTPError, CardKitError) as exc:
-                    logger.warning("[CardKit] finalize attempt {} failed: {}", attempt + 1, exc)
-                    if attempt < len(_FINALIZE_RETRY_DELAYS):
-                        await asyncio.sleep(_FINALIZE_RETRY_DELAYS[attempt])
-                        continue
-                    break
+        http = self._get_client()
+        for attempt in range(len(_FINALIZE_RETRY_DELAYS) + 1):
+            try:
+                resp = await http.put(url, json=payload, headers=self._headers())
+                if 500 <= resp.status_code < 600:
+                    raise CardKitError(f"finalize HTTP {resp.status_code}")
+                body = resp.json()
+                code = int(body.get("code", -1))
+                if code == 0:
+                    return True
+                if code == _FLOOD_CODE:
+                    # Throttle counts as transient; retry like 5xx.
+                    raise CardKitError(f"finalize flood (code={code})")
+                raise CardKitError(f"finalize code={code} msg={body.get('msg')}")
+            except (httpx.HTTPError, CardKitError) as exc:
+                logger.warning("[CardKit] finalize attempt {} failed: {}", attempt + 1, exc)
+                if attempt < len(_FINALIZE_RETRY_DELAYS):
+                    await asyncio.sleep(_FINALIZE_RETRY_DELAYS[attempt])
+                    continue
+                break
         logger.error("[CardKit] finalize gave up for card_id={}", card_id)
         return False
 

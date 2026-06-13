@@ -38,6 +38,7 @@ def test_ask_user_request_populates_pending_input() -> None:
     assert pending.kind == "ask_user"
     assert pending.question == "Continue?"
     assert pending.question_id == "q_1"
+    assert pending.answer_key == "choice"
     assert pending.choices == [("yes", "default"), ("no", "default")]
     assert op is not None and op.kind == "patch_card"
 

@@ -19,9 +19,11 @@ async def test_register_awaiting_responder_writes_key_with_ttl() -> None:
     await register_awaiting_responder(
         run_id="run_1",
         responder_open_id="ou_user_1",
+        redis_key_prefix="cubebox-dev",
         set_fn=fake_set,
     )
-    assert state["run:run_1:awaiting_responder"] == ("ou_user_1", 600)
+    # Keys are prefixed so two envs sharing Redis don't collide.
+    assert state["cubebox-dev:run:run_1:awaiting_responder"] == ("ou_user_1", 600)
 
 
 @pytest.mark.asyncio
@@ -37,6 +39,7 @@ async def test_register_awaiting_responder_noop_when_missing_inputs() -> None:
     await register_awaiting_responder(
         run_id="run_1",
         responder_open_id="",
+        redis_key_prefix="cubebox-dev",
         set_fn=fake_set,
     )
     assert state == {}
@@ -93,7 +96,7 @@ async def test_tailer_registers_responder_after_ask_user_request() -> None:
     await tailer.maybe_register_awaiting_responder(
         ev_payload={"type": "ask_user_request", "data": {"question_id": "q_1"}}
     )
-    assert redis_writes["run:run_1:awaiting_responder"] == ("ou_user_42", 600)
+    assert redis_writes["cb-:run:run_1:awaiting_responder"] == ("ou_user_42", 600)
 
 
 @pytest.mark.asyncio
@@ -185,4 +188,4 @@ async def test_tailer_registers_for_sandbox_confirm_request() -> None:
     await tailer.maybe_register_awaiting_responder(
         ev_payload={"type": "sandbox_confirm_request", "data": {"question_id": "qsc_1"}}
     )
-    assert redis_writes["run:run_1:awaiting_responder"] == ("ou_user_X", 600)
+    assert redis_writes["cb-:run:run_1:awaiting_responder"] == ("ou_user_X", 600)

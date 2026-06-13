@@ -87,14 +87,17 @@ def test_pending_input_renders_buttons_with_payload() -> None:
         question="Continue?",
         choices=[("yes", "primary"), ("no", "default")],
         question_id="q_1",
+        answer_key="approve_deploy",
     )
     card = render(state)
     container = next(e for e in card["body"]["elements"] if e.get("element_id") == "pending_input")
     s = str(container)
     assert "yes" in s and "no" in s
     assert "run_1" in s
-    # button.value also includes question_id so the resume call can match the cubepi side.
+    # button.value carries question_id so the resume call matches cubepi's
+    # pending side, and answer_key so the answer dict has the right shape.
     assert "q_1" in s
+    assert "approve_deploy" in s
 
 
 def test_finalized_state_disables_streaming_mode() -> None:

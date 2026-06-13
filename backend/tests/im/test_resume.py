@@ -104,6 +104,40 @@ async def test_resume_paused_run_ask_user_passes_choice_dict(
         choice="yes",
         operator_open_id="ou_x",
         question_id="q_1",
+        answer_key="approve_deploy",
+        run_manager=_FakeRunManager(),
+    )
+    assert ok is True
+    # cubepi expects the answer dict keyed by the question schema's `key`.
+    assert seen[0]["answer"] == {"approve_deploy": "yes"}
+
+
+@pytest.mark.asyncio
+async def test_resume_paused_run_ask_user_falls_back_to_choice_key_when_no_answer_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the card payload didn't carry answer_key (legacy / defensive),
+    the answer falls back to ``{"choice": choice}`` so cubepi at least gets a
+    syntactically valid dict — schema mismatch is then cubepi's to report."""
+    from cubebox.im import resume as resume_mod
+
+    seen: list[dict[str, Any]] = []
+
+    class _FakeRunManager:
+        async def resume_run_with_answer(self, **kwargs: Any) -> str:
+            seen.append(kwargs)
+            return "new_run_xyz"
+
+    async def fake_resolve(_: str) -> tuple[str, str, str, str] | None:
+        return ("conv_1", "user_1", "org_1", "ws_1")
+
+    monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
+    ok = await resume_mod.resume_paused_run(
+        run_id="run_1",
+        input_kind="ask_user",
+        choice="yes",
+        operator_open_id="ou_x",
+        question_id="q_1",
         run_manager=_FakeRunManager(),
     )
     assert ok is True
