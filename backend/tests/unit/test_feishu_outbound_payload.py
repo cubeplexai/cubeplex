@@ -1,15 +1,14 @@
-"""Unit tests for FeishuConnector outbound payload + reaction hooks
-(Task 9 + Task 10).
+"""Unit tests for FeishuConnector flood-code recognition + reaction hooks.
 
 The lark_oapi HTTP boundary is the unsimulatable part (covered by the manual
 smoke checklist in Task 16). Here we test:
-- ``_build_payload``: pure payload-selection logic, no SDK calls.
 - ``_response_code`` / ``_raise_for_flood``: flood-code recognition.
 - ``on_processing_start`` / ``_complete`` / ``_failed``: lifecycle hooks
   against a recording-stub connector.
-"""
 
-import json
+The legacy ``_build_payload`` tests were removed in Task 8 when the outbound
+path moved from ``messages/create`` text payloads to the cardkit op-set.
+"""
 
 import pytest
 
@@ -20,26 +19,6 @@ from cubebox.im.feishu.connector import (
 )
 from cubebox.im.outbound import _FloodSignal
 from cubebox.im.types import RenderState
-
-# ----------------------------------------------------------------------
-# Payload selection
-# ----------------------------------------------------------------------
-
-
-def test_plain_text_payload_is_text_type_with_json_body() -> None:
-    msg_type, payload = FeishuConnector._build_payload("hello world")
-    assert msg_type == "text"
-    obj = json.loads(payload)
-    assert obj == {"text": "hello world"}
-
-
-def test_markdown_table_falls_back_to_text() -> None:
-    table = "| a | b |\n|---|---|\n| 1 | 2 |\n"
-    msg_type, payload = FeishuConnector._build_payload(table)
-    assert msg_type == "text"
-    obj = json.loads(payload)
-    assert obj["text"].startswith("| a")
-
 
 # ----------------------------------------------------------------------
 # Flood-code recognition

@@ -35,81 +35,47 @@ _MAX_FLOOD_STRIKES = 3
 _TERMINAL_RETRY_DELAYS = (0.5, 1.5, 4.0)
 
 
+OpKind = Literal[
+    "card_create",
+    "stream_text",
+    "patch_card",
+    "finalize",
+    "no_op",
+]
+
+
 @dataclass(slots=True)
 class OutboundOp:
-    """One emitted action for the connector."""
+    """One emitted action for the cardkit client."""
 
-    kind: Literal["post", "edit", "artifact", "no_op"]
+    kind: OpKind
+    element_id: str | None = None
     text: str = ""
     final: bool = False
-    artifact: dict[str, Any] | None = None
-
-
-def _composite_text(state: RenderState) -> str:
-    parts: list[str] = []
-    if state.tool_lines:
-        parts.append("\n".join(state.tool_lines))
-    if state.text_buffer:
-        parts.append(state.text_buffer)
-    return "\n\n".join(parts) if parts else "…"
 
 
 def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> OutboundOp | None:
-    """Fold one run event into the render state and emit zero-or-one op.
+    """Fold one cubepi run event into ``state.card_state``.
 
-    Branches:
-    - ``text_delta`` accumulates text; first delta emits ``post``, later
-      deltas emit debounced ``edit`` ops (suppressed when
-      ``state.edits_disabled``).
-    - ``tool_call`` coalesces into a single italic line per tool name.
-    - ``artifact`` emits ``kind="artifact"`` exactly once per artifact id
-      for ``action="created"``; ``action="updated"`` always re-emits.
-    - ``done`` / ``error`` are terminal; emit ``post`` instead of ``edit``
-      when no placeholder has been posted yet (so a run that finishes
-      before any text_delta still surfaces a final message).
+    Task 8 covers text_delta only. Tasks 9-11 add tool_call, tool_result,
+    artifact, citation, ask_user_request, sandbox_confirm_request,
+    sub-agent routing via agent_id, done, error.
     """
     etype = event.get("type")
     data = event.get("data") or {}
 
     if etype == "text_delta":
-        state.text_buffer += data.get("content", "")
-        if state.message_id is None:
-            state.last_edit_monotonic = now
-            return OutboundOp(kind="post", text=_composite_text(state))
+        delta = str(data.get("content", ""))
+        state.card_state.streaming_content += delta
+        if state.card_id is None:
+            state.last_stream_monotonic = now
+            return OutboundOp(kind="card_create")
         if state.edits_disabled:
             return None
-        if now - state.last_edit_monotonic < state.edit_interval:
+        if now - state.last_stream_monotonic < state.stream_interval:
             return None
-        state.last_edit_monotonic = now
-        return OutboundOp(kind="edit", text=_composite_text(state))
-
-    if etype == "tool_call":
-        name = data.get("name", "tool")
-        line = f"_running `{name}`…_"
-        if line not in state.tool_lines:
-            state.tool_lines.append(line)
-        return None
-
-    if etype == "artifact":
-        artifact = data.get("artifact") or {}
-        art_id = artifact.get("id", "")
-        action = data.get("action", "created")
-        if not art_id:
-            return None
-        already = art_id in state.posted_artifacts
-        if already and action == "created":
-            return None
-        state.posted_artifacts.add(art_id)
-        return OutboundOp(kind="artifact", artifact=artifact)
-
-    if etype == "done":
-        kind: Literal["post", "edit"] = "post" if state.message_id is None else "edit"
-        return OutboundOp(kind=kind, text=_composite_text(state), final=True)
-
-    if etype == "error":
-        msg = data.get("message", "the run failed")
-        err_kind: Literal["post", "edit"] = "post" if state.message_id is None else "edit"
-        return OutboundOp(kind=err_kind, text=f"⚠️ error: {msg}", final=True)
+        state.last_stream_monotonic = now
+        return OutboundOp(kind="stream_text", element_id="streaming_content", text=delta)
 
     return None
 
@@ -189,24 +155,14 @@ class OutboundRunTailer:
                     op = fold_event(ev.payload, self._state, now=time.monotonic())
                     if op is None:
                         continue
-                    if op.kind == "artifact" and op.artifact is not None:
-                        if self._artifact_dispatcher is not None:
-                            try:
-                                await self._artifact_dispatcher.handle(op.artifact)
-                            except Exception:
-                                logger.warning("artifact dispatch failed", exc_info=True)
-                        continue
+                    # Task 8: dispatch is a no-op stub. Task 12 rewires this to
+                    # the cardkit client and re-introduces terminal-delivery
+                    # retries against the new op kinds (card_create /
+                    # stream_text / patch_card / finalize).
                     delivered = await self._dispatch_op(op, is_terminal=op.final)
                     if op.final:
                         done = True
-                        # The error branch in fold_event prepends "⚠️" to the
-                        # text; success is "we never saw that marker AND the
-                        # terminal send actually landed". Without the
-                        # ``delivered`` half a flood-blocked final edit would
-                        # exit the loop with no visible answer but the
-                        # success-side hook (remove ⏳ reaction) would still
-                        # fire — misleading.
-                        if delivered and not op.text.startswith("⚠️"):
+                        if delivered:
                             succeeded = True
                 if done:
                     return
@@ -220,89 +176,16 @@ class OutboundRunTailer:
                 logger.warning("on_processing_* hook raised", exc_info=True)
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
-        """Dispatch one post/edit/artifact op. Returns True iff delivered.
+        """Stub dispatcher pending Task 12.
 
-        - Streaming ops (non-terminal): single attempt; flood / failure
-          updates the run state but the bubble may visibly fall behind.
-        - Terminal ops: retry on ``_FloodSignal`` up to ``_TERMINAL_RETRY_DELAYS``
-          with exponential backoff, then fall back to ``send_text_message``
-          (a NEW bubble via ``messages/create``, separate quota from
-          ``messages/update``) so the user always sees the final answer
-          even if Feishu was rate-limiting edits when the run finished.
+        Task 8 narrowed ``OutboundOp.kind`` to the cardkit op-set
+        (card_create / stream_text / patch_card / finalize). The real
+        dispatch — calling ``CardKitClient.create_entity`` / ``stream_text``
+        / ``patch_card`` / ``finalize`` plus terminal-delivery retries with
+        flood-backoff — lands in Task 12. Until then no ops actually reach
+        Feishu; the tailer just folds events.
         """
-        if op.kind == "artifact" and op.artifact is not None:
-            if self._artifact_dispatcher is not None:
-                try:
-                    await self._artifact_dispatcher.handle(op.artifact)
-                    return True
-                except Exception:
-                    logger.warning("artifact dispatch failed", exc_info=True)
-            return False
-
-        attempt_budget = len(_TERMINAL_RETRY_DELAYS) if is_terminal else 1
-        last_signal: Exception | None = None
-        edit_rejected = False  # non-flood failure that should fall back to send
-        for attempt in range(attempt_budget):
-            try:
-                if op.kind == "post":
-                    ts = await self._connector.post_placeholder(op.text)
-                    if ts:
-                        self._state.message_id = ts
-                        note_edit_success(self._state)
-                        return True
-                    # ``post_placeholder`` returned None — non-flood failure
-                    # already logged inside the connector.
-                    return False
-                if op.kind == "edit":
-                    if self._state.message_id is None:
-                        # No placeholder yet; a terminal that arrived
-                        # before any text_delta can land. Promote to post.
-                        ts = await self._connector.post_placeholder(op.text)
-                        if ts:
-                            self._state.message_id = ts
-                            note_edit_success(self._state)
-                            return True
-                        return False
-                    delivered = await self._connector.edit(self._state.message_id, op.text)
-                    if delivered:
-                        note_edit_success(self._state)
-                        return True
-                    # Non-flood edit failure (e.g. message deleted,
-                    # content too large). Terminal ops fall through to
-                    # send_text_message below; streaming ops just give
-                    # up this turn — the next delta gets another chance.
-                    if not is_terminal:
-                        return False
-                    edit_rejected = True
-                    break
-            except _FloodSignal as exc:
-                note_flood_strike(self._state)
-                last_signal = exc
-                if attempt + 1 < attempt_budget:
-                    await asyncio.sleep(_TERMINAL_RETRY_DELAYS[attempt])
-                    continue
-            except Exception:
-                logger.warning("[outbound] {} op failed", op.kind, exc_info=True)
-                return False
-
-        if is_terminal and (last_signal is not None or edit_rejected):
-            # Either edits exhausted under flood OR the prior message
-            # cannot be updated (deleted by user, too large, ...). Fall
-            # back to a NEW bubble: ``messages/create`` has a separate
-            # quota from ``messages/update`` AND a different validation
-            # surface, so the final answer can still land. The user may
-            # see both the stale partial AND the final bubble — noisy
-            # but the answer is preserved, which matters more.
-            try:
-                new_id = await self._connector.send_text_message(op.text)
-                if new_id:
-                    self._state.message_id = new_id
-                    note_edit_success(self._state)
-                    return True
-            except Exception:
-                logger.warning(
-                    "[outbound] terminal send_text_message fallback failed", exc_info=True
-                )
+        _ = (op, is_terminal, _FloodSignal, _TERMINAL_RETRY_DELAYS, asyncio)
         return False
 
 
