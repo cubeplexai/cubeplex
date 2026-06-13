@@ -163,6 +163,7 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
             # legacy non-card path keeps working.
             cardkit=None,
             artifact_dispatcher=dispatcher,
+            responder_open_id=item.sender_open_id,
         )
         _asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 

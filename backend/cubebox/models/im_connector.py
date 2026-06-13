@@ -173,6 +173,11 @@ class IMRunQueueItem(CubeboxBase, OrgScopedMixin, table=True):
     reply_to_id: str | None = Field(default=None, max_length=128, nullable=True)
     inbound_message_id: str | None = Field(default=None, max_length=128, nullable=True)
     sender_im_user_id: str | None = Field(default=None, max_length=128, nullable=True)
+    # Platform-app-scoped sender id (Feishu open_id). Distinct from
+    # ``sender_im_user_id`` which prefers union_id when available; the
+    # AskUser / SandboxConfirm card-action callback only carries open_id,
+    # so we persist it explicitly to gate button clicks per sender.
+    sender_open_id: str | None = Field(default=None, max_length=128, nullable=True)
     status: str = Field(default="pending", max_length=16)
     claimed_at: datetime | None = Field(
         default=None,
