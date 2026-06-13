@@ -14,6 +14,7 @@ from typing import Any
 
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.im_connector import IMConnectorAccount
@@ -76,6 +77,17 @@ class IMConnectorService:
             )
 
         bot_open_id = await self._hydrate_bot_open_id(app_id, app_secret, domain)
+        if not bot_open_id:
+            # Without ``bot_open_id`` the long-connection / webhook startup
+            # would refuse to bind this account (the mention gate + bot-echo
+            # guard need it), leaving the workspace with a connected-but-silent
+            # bot. Fail loudly NOW so the operator sees a real error from
+            # the API rather than discovering it weeks later when their bot
+            # ignores every message.
+            raise ValueError(
+                f"could not hydrate bot_open_id for app_id={app_id} — check that "
+                "the app_secret is correct and the bot identity is published"
+            )
         secret_payload = json.dumps(
             {
                 "app_id": app_id,
@@ -91,11 +103,21 @@ class IMConnectorService:
         # (e.g. concurrent insert lost the preflight race, FK violation,
         # transient DB error), roll back the orphan credential so a retry
         # doesn't bounce off ``uq_credential_org_kind_name``.
-        credential_id = await self._credentials.create(
-            kind="im_bot",
-            name=f"feishu:{app_id}",
-            plaintext=secret_payload,
-        )
+        try:
+            credential_id = await self._credentials.create(
+                kind="im_bot",
+                name=f"feishu:{app_id}",
+                plaintext=secret_payload,
+            )
+        except IntegrityError as exc:
+            # Same-org double-submit race: both requests passed the
+            # account preflight, then the loser's credential insert hits
+            # ``uq_credential_org_kind_name``. Surface as the duplicate
+            # case so the route can map to 409, not 500.
+            await self._session.rollback()
+            raise ValueError(
+                f"feishu account already exists for app_id={app_id} (credential race)"
+            ) from exc
         try:
             account = IMConnectorAccount(
                 org_id=self._org_id,

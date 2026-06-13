@@ -460,6 +460,26 @@ async def delete_account(
                     non_admins[0].role = Role.ADMIN.value
                     session.add(non_admins[0])
 
+    # IM connector + identity-link cleanup. ``IMConnectorAccount.acting_user_id``
+    # is a non-null FK to users; ``IMIdentityLink.user_id`` is too. A user
+    # who connected a Feishu bot OR was ever cached by the sender-identity
+    # gate would otherwise hit an FK violation here when their account is
+    # deleted. Children of ``IMConnectorAccount`` (thread_links, run_queue,
+    # receipts, identity_links) CASCADE off the account row, so deleting
+    # accounts first clears the bulk of the IM scope.
+    from cubebox.models.im_connector import IMConnectorAccount, IMIdentityLink
+
+    await session.execute(
+        sa_delete(IMConnectorAccount).where(
+            IMConnectorAccount.acting_user_id == user.id  # type: ignore[arg-type]
+        )
+    )
+    # Any remaining identity_links where this user was the resolved
+    # cubebox identity on someone else's bot.
+    await session.execute(
+        sa_delete(IMIdentityLink).where(IMIdentityLink.user_id == user.id)  # type: ignore[arg-type]
+    )
+
     # Delete user-owned rows (deepest FK dependents first).
     # NOTE: UserSandbox rows are deleted directly without calling the sandbox
     # manager's kill path. Provider sandboxes tied to these rows will be reaped

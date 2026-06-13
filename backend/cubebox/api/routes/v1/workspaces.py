@@ -378,6 +378,7 @@ async def delete_workspace(
     )
     from cubebox.models.billing import BillingEvent, LlmBillingEvent
     from cubebox.models.egress_ref import EgressRef
+    from cubebox.models.im_connector import IMConnectorAccount
     from cubebox.models.sandbox_env import SandboxEnvVar
     from cubebox.models.scheduled_task import ScheduledTaskRun
     from cubebox.models.trigger import Trigger, TriggerEvent
@@ -497,6 +498,12 @@ async def delete_workspace(
         Attachment,
         BillingEvent,
         UserEvent,
+        # IMConnectorAccount must precede Conversation: each account's
+        # child IM tables (thread_links, receipts, run_queue, identity_links)
+        # CASCADE from the account, and ``im_thread_links.conversation_id``
+        # has no CASCADE back from conversations, so deleting accounts
+        # first clears the thread_links before the Conversation rows go.
+        IMConnectorAccount,
         Conversation,
         InviteToken,
         AgentConfig,

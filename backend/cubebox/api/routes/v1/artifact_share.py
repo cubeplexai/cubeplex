@@ -219,7 +219,11 @@ async def share_file(
     # issue authenticated XHRs back to /api. ``sandbox`` strips all
     # default capabilities; ``allow-scripts`` (no ``allow-same-origin``)
     # keeps interactive previews working while severing the same-origin
-    # link. ``frame-ancestors 'none'`` blocks clickjacking embedding.
+    # link. ``frame-ancestors 'self'`` allows the share preview page on
+    # the same origin to iframe this file (the page's `_render_body()`
+    # embeds non-image artifacts via iframe pointing here); ``'none'``
+    # would block that and leave website/code/document previews blank.
+    # X-Frame-Options SAMEORIGIN mirrors the modern CSP for legacy UAs.
     return Response(
         content=data,
         media_type=media_type,
@@ -227,7 +231,7 @@ async def share_file(
             "Cache-Control": "public, max-age=3600",
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": (
-                "sandbox allow-scripts; frame-ancestors 'none'; default-src 'self'"
+                "sandbox allow-scripts; frame-ancestors 'self'; default-src 'self'"
             ),
             "X-Frame-Options": "SAMEORIGIN",
         },

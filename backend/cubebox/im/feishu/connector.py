@@ -317,10 +317,19 @@ class FeishuConnector:
         message_id = getattr(data, "message_id", None) if data is not None else None
         return str(message_id) if message_id else None
 
-    async def edit(self, message_id: str | None, text: str) -> None:
-        """Update an already-posted message's content."""
+    async def edit(self, message_id: str | None, text: str) -> bool:
+        """Update an already-posted message's content. Returns True iff delivered.
+
+        Non-flood failures (e.g. message deleted by user, content too
+        large for an update, transient API rejection) used to be only
+        logged, which left ``OutboundRunTailer._dispatch_op`` thinking
+        the terminal edit succeeded and the fallback ``send_text_message``
+        path never ran — the user was stuck on a stale partial reply.
+        Now we return False on non-flood failures so the tailer can
+        decide whether to retry / fall back.
+        """
         if self._client is None or not message_id:
-            return
+            return False
         from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
 
         msg_type, payload = self._build_payload(text)
@@ -334,6 +343,8 @@ class FeishuConnector:
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )
+            return False
+        return True
 
     async def resolve_email(self, open_id: str) -> str | None:
         """Look up a Feishu user's email via ``contact/v3/users/{open_id}``.
@@ -420,32 +431,19 @@ class FeishuConnector:
 
     async def send_text_message(self, text: str) -> str | None:
         """Post a new (non-edit) bubble — used for share-link / artifact
-        captions that should be a separate message from the streaming reply."""
-        if self._client is None:
-            return None
-        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
+        captions that should be a separate message from the streaming reply.
 
-        msg_type, payload = self._build_payload(text)
-        body = (
-            CreateMessageRequestBody.builder()
-            .receive_id(self._channel_id or "")
-            .msg_type(msg_type)
-            .content(payload)
-            .build()
+        Threads when ``reply_to_id`` is bound on the connector (group
+        runs were triggered by an ``@mention`` that gave us a parent
+        message id to reply to). Without this, a follow-up share-link
+        bubble in a group chat would post as a top-level message,
+        visually orphaned from the rest of the reply.
+        """
+        return await self.send_to_chat(
+            self._channel_id or "",
+            self._reply_to_id,
+            text,
         )
-        req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
-        response = await asyncio.to_thread(self._client.im.v1.message.create, req)
-        self._raise_for_flood(response, "send_text_message")
-        if not getattr(response, "success", lambda: False)():
-            logger.warning(
-                "[Feishu] send_text_message failed: code={} msg={}",
-                getattr(response, "code", None),
-                getattr(response, "msg", None),
-            )
-            return None
-        data = getattr(response, "data", None)
-        message_id = getattr(data, "message_id", None) if data is not None else None
-        return str(message_id) if message_id else None
 
     async def upload_image(self, local_path: str) -> str | None:
         """Upload an image to Feishu; return the resulting ``image_key``."""
