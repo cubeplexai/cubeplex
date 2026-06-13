@@ -211,6 +211,12 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
     if accounts:
         await _asyncio.gather(*(_connect_one(a) for a in accounts), return_exceptions=True)
 
+    # Expose the connector so the workspace POST /im/accounts route can
+    # spin up the WebSocket inline instead of waiting for the next API
+    # restart. Without this, creating an account via the API leaves it
+    # dormant until a restart re-runs the bulk loop above.
+    app.state.im_connect_account = _connect_one
+
 
 async def _stop_im_runtime(app: FastAPI) -> None:
     """Stop IM long-connection clients then the queue worker."""

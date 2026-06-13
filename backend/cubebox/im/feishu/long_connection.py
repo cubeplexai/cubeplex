@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from typing import Any, Protocol
 
 from loguru import logger
@@ -169,8 +170,28 @@ class FeishuLongConnection:
             log_level=lark.LogLevel.INFO,
             domain=domain,
         )
+
+        def _start_in_thread() -> None:
+            # ``lark_oapi.ws.client`` captures a module-level ``loop`` at
+            # import time via ``asyncio.get_event_loop()`` — under uvicorn
+            # that grabs the main asyncio loop and then ``client.start()``
+            # calls ``loop.run_until_complete()`` on it, raising
+            # "This event loop is already running". Install a fresh loop on
+            # this executor thread and replace the captured global so the
+            # SDK's run_until_complete targets this thread instead.
+            import lark_oapi.ws.client as _ws_client_mod
+
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            _ws_client_mod.loop = new_loop
+            try:
+                self._client.start()
+            finally:
+                with suppress(Exception):
+                    new_loop.close()
+
         # ws.Client.start() is blocking — run it in a thread executor.
-        self._ws_future = loop.run_in_executor(None, self._client.start)
+        self._ws_future = loop.run_in_executor(None, _start_in_thread)
 
     async def disconnect(self) -> None:
         if self._client is not None:

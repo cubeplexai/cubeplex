@@ -53,6 +53,7 @@ def _to_out(account: IMConnectorAccount) -> IMAccountOut:
 async def connect_account(
     workspace_id: str,
     body: ConnectFeishuAccountIn,
+    request: Request,
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
@@ -93,6 +94,18 @@ async def connect_account(
         delivery_mode=body.delivery_mode,
         acting_user_id=acting,
     )
+    # Start the long-connection NOW so the bot is live as soon as the API
+    # returns 201; otherwise the WebSocket only opens on the next API
+    # restart and operators see the account "connected" but silent.
+    if account.delivery_mode == "long_connection" and account.enabled:
+        starter = getattr(request.app.state, "im_connect_account", None)
+        if starter is not None:
+            try:
+                await starter(account)
+            except Exception:
+                logger.warning(
+                    "[IM ws] long-connection startup failed for {}", account.id, exc_info=True
+                )
     return _to_out(account)
 
 
