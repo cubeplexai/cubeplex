@@ -212,7 +212,9 @@ async def feishu_events(
     # im.message.receive_v1 (no agent run kicked off, just a resume signal).
     event_type = str(header.get("event_type") or "")
     if event_type == "card.action.trigger":
-        handled, toast = await _handle_card_action(payload)
+        handled, toast = await _handle_card_action(
+            payload, run_manager=request.app.state.run_manager
+        )
         if handled:
             body: dict[str, Any] = {}
             if toast:
@@ -330,7 +332,9 @@ async def _redis_setnx(key: str, value: str, ex: int) -> bool:
     return bool(await client.set(key, value, ex=ex, nx=True))
 
 
-async def _handle_card_action(event: dict[str, Any]) -> tuple[bool, str | None]:
+async def _handle_card_action(
+    event: dict[str, Any], *, run_manager: Any
+) -> tuple[bool, str | None]:
     """Process a ``card.action.trigger`` event.
 
     Returns ``(handled, toast)``. ``handled=True`` means we processed the
@@ -364,11 +368,12 @@ async def _handle_card_action(event: dict[str, Any]) -> tuple[bool, str | None]:
             choice=action.choice,
             operator_open_id=action.operator_open_id,
             question_id=action.question_id,
+            run_manager=run_manager,
         )
-    except NotImplementedError:
-        logger.warning("[Feishu ingress] resume_paused_run not implemented yet (Task 17)")
-        return True, "暂时无法响应"
     except Exception:
+        # resume_paused_run is contracted to never raise, but keep the
+        # belt-and-braces guard so a downstream regression can't turn a
+        # card click into a Feishu retry storm.
         logger.warning("[Feishu ingress] resume_paused_run raised", exc_info=True)
         return True, "暂时无法响应"
 

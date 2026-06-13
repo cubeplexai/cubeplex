@@ -21,7 +21,9 @@ async def test_lc_handler_builds_envelope_and_calls_ingress(
 
     seen: list[dict[str, Any]] = []
 
-    async def fake_handler(envelope: dict[str, Any]) -> tuple[bool, str | None]:
+    async def fake_handler(
+        envelope: dict[str, Any], *, run_manager: Any = None
+    ) -> tuple[bool, str | None]:
         seen.append(envelope)
         return True, None
 
@@ -76,7 +78,9 @@ async def test_lc_handler_carries_toast_when_set(
 ) -> None:
     from cubebox.im.feishu import long_connection as lc
 
-    async def fake_handler(envelope: dict[str, Any]) -> tuple[bool, str | None]:
+    async def fake_handler(
+        envelope: dict[str, Any], *, run_manager: Any = None
+    ) -> tuple[bool, str | None]:
         return True, "这不是发给你的"
 
     monkeypatch.setattr(lc, "_handle_card_action", fake_handler)
@@ -111,7 +115,9 @@ async def test_lc_handler_tolerates_missing_event_data(
 
     called: list[Any] = []
 
-    async def fake_handler(envelope: dict[str, Any]) -> tuple[bool, str | None]:
+    async def fake_handler(
+        envelope: dict[str, Any], *, run_manager: Any = None
+    ) -> tuple[bool, str | None]:
         called.append(envelope)
         return True, "未知操作"
 

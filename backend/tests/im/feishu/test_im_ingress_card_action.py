@@ -7,6 +7,11 @@ from typing import Any
 import pytest
 
 
+class _FakeRunManager:
+    async def resume_run_with_answer(self, **_: Any) -> str:
+        return "new_run"
+
+
 @pytest.mark.asyncio
 async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch) -> None:
     from cubebox.api.routes.v1 import im_ingress
@@ -49,7 +54,8 @@ async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch
             },
         },
     }
-    handled, toast = await im_ingress._handle_card_action(event)
+    rm = _FakeRunManager()
+    handled, toast = await im_ingress._handle_card_action(event, run_manager=rm)
     assert handled is True
     assert toast is None
     assert resume_calls == [
@@ -59,6 +65,7 @@ async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch
             "choice": "yes",
             "operator_open_id": "ou_user_1",
             "question_id": "q_1",
+            "run_manager": rm,
         }
     ]
 
@@ -98,8 +105,9 @@ async def test_card_action_token_replay_idempotent(
             "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
         },
     }
-    await im_ingress._handle_card_action(event)
-    await im_ingress._handle_card_action(event)
+    rm = _FakeRunManager()
+    await im_ingress._handle_card_action(event, run_manager=rm)
+    await im_ingress._handle_card_action(event, run_manager=rm)
     assert len(resume_calls) == 1  # second call no-op'd by token replay guard
 
 
@@ -132,19 +140,19 @@ async def test_card_action_responder_mismatch_returns_toast(
             "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
         },
     }
-    handled, toast = await im_ingress._handle_card_action(event)
+    handled, toast = await im_ingress._handle_card_action(event, run_manager=_FakeRunManager())
     assert handled is True
     assert toast == "这不是发给你的"
 
 
 @pytest.mark.asyncio
-async def test_card_action_resume_not_implemented_returns_friendly_toast(
+async def test_card_action_resume_exception_returns_friendly_toast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from cubebox.api.routes.v1 import im_ingress
 
     async def fake_resume(**_: Any) -> bool:
-        raise NotImplementedError
+        raise RuntimeError("boom")
 
     monkeypatch.setattr(im_ingress, "resume_paused_run", fake_resume)
 
@@ -166,9 +174,45 @@ async def test_card_action_resume_not_implemented_returns_friendly_toast(
             "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
         },
     }
-    handled, toast = await im_ingress._handle_card_action(event)
+    handled, toast = await im_ingress._handle_card_action(event, run_manager=_FakeRunManager())
     assert handled is True
     assert toast == "暂时无法响应"
+
+
+@pytest.mark.asyncio
+async def test_card_action_resume_returns_false_surfaces_ended_toast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When resume_paused_run returns False (run no longer pending) the
+    user sees the "会话已结束" toast rather than a generic error."""
+    from cubebox.api.routes.v1 import im_ingress
+
+    async def fake_resume(**_: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(im_ingress, "resume_paused_run", fake_resume)
+
+    redis_state = {"run:run_1:awaiting_responder": "ou_user_1"}
+
+    async def fake_get(k: str) -> str | None:
+        return redis_state.get(k)
+
+    async def fake_setnx(*_: Any, **__: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(im_ingress, "_redis_get", fake_get)
+    monkeypatch.setattr(im_ingress, "_redis_setnx", fake_setnx)
+
+    event = {
+        "header": {"event_type": "card.action.trigger", "token": "tok_e"},
+        "event": {
+            "operator": {"open_id": "ou_user_1"},
+            "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
+        },
+    }
+    handled, toast = await im_ingress._handle_card_action(event, run_manager=_FakeRunManager())
+    assert handled is True
+    assert toast == "会话已结束"
 
 
 @pytest.mark.asyncio
@@ -189,7 +233,7 @@ async def test_card_action_invalid_payload_returns_toast(
             "action": {"value": {"action": "weird", "run_id": "r", "choice": "c"}},
         },
     }
-    handled, toast = await im_ingress._handle_card_action(event)
+    handled, toast = await im_ingress._handle_card_action(event, run_manager=_FakeRunManager())
     assert handled is True
     assert toast == "未知操作"
 
@@ -205,6 +249,6 @@ async def test_card_action_missing_token_returns_toast() -> None:
             "action": {"value": {"action": "ask_user", "run_id": "r", "choice": "yes"}},
         },
     }
-    handled, toast = await im_ingress._handle_card_action(event)
+    handled, toast = await im_ingress._handle_card_action(event, run_manager=_FakeRunManager())
     assert handled is True
     assert toast == "缺少 token"
