@@ -61,6 +61,8 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
     artifact, citation, ask_user_request, sandbox_confirm_request,
     sub-agent routing via agent_id, done, error.
     """
+    if state.card_state.run_start_monotonic == 0.0:
+        state.card_state.run_start_monotonic = now
     etype = event.get("type")
     data = event.get("data") or {}
 
@@ -180,6 +182,91 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         if citation_id and url:
             state.card_state.citation_index[citation_id] = (url, title)
         return None
+
+    if etype == "ask_user_request":
+        from cubebox.im.feishu.card_model import PendingInput
+
+        question_id = str(data.get("question_id") or "")
+        questions_list = data.get("questions") or []
+        if questions_list and isinstance(questions_list, list):
+            first = questions_list[0] if isinstance(questions_list[0], dict) else {}
+        else:
+            first = {}
+        prompt = str(first.get("prompt") or "")
+        more = len(questions_list) - 1 if len(questions_list) > 1 else 0
+        if more > 0:
+            prompt = f"{prompt}\n\n_(+{more} more question{'s' if more > 1 else ''})_"
+        raw_options = first.get("options") or []
+        choices: list[tuple[str, str]] = []
+        if isinstance(raw_options, list):
+            for opt in raw_options:
+                if isinstance(opt, str) and opt:
+                    choices.append((opt, "default"))
+                elif isinstance(opt, dict):
+                    key = str(opt.get("key") or opt.get("label") or "")
+                    btn_type = str(opt.get("type") or "default")
+                    if key:
+                        choices.append((key, btn_type))
+        if not choices:
+            choices = [("ok", "primary")]
+        state.card_state.pending_input = PendingInput(
+            kind="ask_user",
+            run_id=state.run_id,
+            question=prompt,
+            choices=choices,
+            question_id=question_id,
+        )
+        state.last_patch_monotonic = now
+        return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
+
+    if etype == "sandbox_confirm_request":
+        from cubebox.im.feishu.card_model import PendingInput
+
+        question_id = str(data.get("question_id") or "")
+        command = str(data.get("command") or "")
+        prompt = "是否允许执行以下命令？"
+        if command:
+            prompt = f"{prompt}\n\n```bash\n{command}\n```"
+        state.card_state.pending_input = PendingInput(
+            kind="sandbox_confirm",
+            run_id=state.run_id,
+            question=prompt,
+            choices=[("approve", "primary"), ("deny", "danger")],
+            question_id=question_id,
+        )
+        state.last_patch_monotonic = now
+        return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
+
+    if etype in ("ask_user_resolved", "sandbox_confirm_resolved"):
+        pending = state.card_state.pending_input
+        if pending is None:
+            return None
+        if pending.question_id != str(data.get("question_id") or ""):
+            return None
+        cancelled = bool(data.get("cancelled"))
+        timed_out = bool(data.get("timed_out"))
+        if cancelled:
+            resolved = "cancelled"
+        elif timed_out:
+            resolved = "timed_out"
+        elif etype == "sandbox_confirm_resolved":
+            resolved = str(data.get("decision") or "")
+        else:
+            resolved = "answered"
+        pending.resolved_choice = resolved
+        state.last_patch_monotonic = now
+        return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
+
+    if etype == "done":
+        state.card_state.finalized = True
+        elapsed_ms = max(0, int((now - state.card_state.run_start_monotonic) * 1000))
+        state.card_state.elapsed_ms = elapsed_ms
+        return OutboundOp(kind="finalize", final=True)
+
+    if etype == "error":
+        state.card_state.finalized = True
+        state.card_state.error = str(data.get("message") or "the run failed")
+        return OutboundOp(kind="finalize", final=True)
 
     return None
 
