@@ -12,6 +12,7 @@ from cubebox.api.schemas.im_connector import (
     ConnectFeishuAccountIn,
     IMAccountListOut,
     IMAccountOut,
+    ImRuntimeStatus,
 )
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
@@ -48,6 +49,7 @@ def _to_out(account: IMConnectorAccount) -> IMAccountOut:
         acting_user_id=account.acting_user_id,
         delivery_mode=account.delivery_mode,
         enabled=account.enabled,
+        runtime=ImRuntimeStatus.unknown(),
     )
 
 

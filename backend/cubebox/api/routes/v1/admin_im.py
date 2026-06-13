@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.im_connector import IMAccountListOut, IMAccountOut
+from cubebox.api.schemas.im_connector import IMAccountListOut, IMAccountOut, ImRuntimeStatus
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.dependencies import (
     build_credential_service,
@@ -55,6 +55,7 @@ def _to_out(account: IMConnectorAccount) -> IMAccountOut:
         acting_user_id=account.acting_user_id,
         delivery_mode=account.delivery_mode,
         enabled=account.enabled,
+        runtime=ImRuntimeStatus.unknown(),
     )
 
 
