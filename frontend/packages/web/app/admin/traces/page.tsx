@@ -67,14 +67,23 @@ export default function AdminTracesPage() {
   }, [])
 
   useEffect(() => {
-    fetchPage(filters)
+    const timer = setTimeout(() => {
+      fetchPage(filters)
+    }, 300)
+    return () => clearTimeout(timer)
   }, [filters, fetchPage])
 
   const handleChange = (next: TraceFilterValues) => {
     setFilters(next)
     const usp = new URLSearchParams()
     for (const [k, v] of Object.entries(next)) {
-      if (v) usp.set(k, String(v))
+      if (
+        v !== undefined &&
+        v !== null &&
+        v !== '' &&
+        (typeof v !== 'number' || Number.isFinite(v))
+      )
+        usp.set(k, String(v))
     }
     router.replace(`/admin/traces${usp.toString() ? `?${usp.toString()}` : ''}`)
   }

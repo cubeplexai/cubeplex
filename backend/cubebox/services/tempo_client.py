@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json as _json
 import re
+import urllib.parse
 from datetime import UTC, datetime
 from typing import Any
 
@@ -299,6 +300,10 @@ class TempoQueryError(RuntimeError):
     """Raised when Tempo returns a non-2xx response."""
 
 
+class TempoTraceNotFoundError(TempoQueryError):
+    """Raised specifically when a trace id is unknown to Tempo (404)."""
+
+
 class TempoQueryValueError(ValueError):
     """Raised when a filter value would break TraceQL string escaping."""
 
@@ -331,6 +336,11 @@ class TempoClient:
     """
 
     def __init__(self, endpoint: str, timeout_seconds: int = 10) -> None:
+        parsed = urllib.parse.urlparse(endpoint)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError(f"Invalid Tempo endpoint: {endpoint!r}")
+        if timeout_seconds <= 0:
+            raise ValueError(f"Invalid Tempo timeout: {timeout_seconds}")
         self._endpoint = endpoint.rstrip("/")
         self._timeout = timeout_seconds
 
@@ -420,7 +430,7 @@ class TempoClient:
             except httpx.HTTPError as exc:
                 raise TempoQueryError(f"Tempo /api/traces/{trace_id} request failed") from exc
         if resp.status_code == 404:
-            raise TempoQueryError(f"Trace {trace_id} not found")
+            raise TempoTraceNotFoundError(f"Trace {trace_id} not found")
         if resp.status_code >= 400:
             raise TempoQueryError(f"Tempo /api/traces/{trace_id} returned {resp.status_code}")
         try:
@@ -442,7 +452,8 @@ class TempoClient:
             "q": '{ resource.service.name="cubebox" '
             f"&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }}",
         }
-        url = f"{self._endpoint}/api/v2/search/tag/span.{tag}/values"
+        quoted = urllib.parse.quote(tag, safe=".")
+        url = f"{self._endpoint}/api/v2/search/tag/span.{quoted}/values"
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             try:
                 resp = await http.get(url, params=params)
@@ -463,19 +474,26 @@ class TempoClient:
 
 
 def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
-    # Tempo surfaces select()-requested attrs on the matched spans inside
-    # spanSets (plural, documented v2 shape). Some Tempo versions also emit
-    # `spanSet` (singular legacy alias) — prefer the array, fall back to the alias.
-    sets = t.get("spanSets") or []
-    matched_set: dict[str, Any]
-    if sets and isinstance(sets, list):
-        matched_set = sets[0] if isinstance(sets[0], dict) else {}
-    else:
-        matched_set = t.get("spanSet") or {}
-    spans = matched_set.get("spans") or []
-    attrs_list = [
-        {a["key"]: _attr_value(a) for a in (span.get("attributes") or [])} for span in spans
-    ]
+    # Tempo returns one or more spanSets (plural, documented). Legacy versions
+    # also emit a singular `spanSet` alias with the same content as spanSets[0].
+    # Walk every spanset so attributes from sibling selectors (e.g. metadata
+    # vs. model selectors) are all surfaced.
+    sets: list[dict[str, Any]] = []
+    raw_sets = t.get("spanSets")
+    if isinstance(raw_sets, list):
+        sets.extend(s for s in raw_sets if isinstance(s, dict))
+    elif isinstance(t.get("spanSet"), dict):
+        sets.append(t["spanSet"])
+
+    attrs_list: list[dict[str, Any]] = []
+    total_matched = 0
+    for ss in sets:
+        total_matched += int(ss.get("matched") or 0)
+        for span in ss.get("spans") or []:
+            if isinstance(span, dict):
+                attrs_list.append(
+                    {a["key"]: _attr_value(a) for a in (span.get("attributes") or [])}
+                )
 
     def first(key: str) -> str | None:
         for attrs in attrs_list:
@@ -489,7 +507,7 @@ def _search_hit_to_summary(t: dict[str, Any]) -> TraceSummary:
         root_name=t.get("rootTraceName", ""),
         start_time=_ns_to_dt(t.get("startTimeUnixNano", "0")),
         duration_ms=int(t.get("durationMs", 0)),
-        span_count=int(matched_set.get("matched") or 0),
+        span_count=total_matched,
         workspace_id=first("cubepi.metadata.workspace_id"),
         user_id=first("cubepi.metadata.user_id"),
         conversation_id=first("cubepi.metadata.conversation_id"),
@@ -506,4 +524,10 @@ def get_tempo_client() -> TempoClient | None:
     if not endpoint:
         return None
     timeout = int(config.get("tracing.tempo.timeout_seconds", 10) or 10)
-    return TempoClient(endpoint=str(endpoint), timeout_seconds=timeout)
+    try:
+        return TempoClient(endpoint=str(endpoint), timeout_seconds=timeout)
+    except ValueError:
+        from loguru import logger
+
+        logger.warning("tracing.tempo config invalid: endpoint={!r} timeout={}", endpoint, timeout)
+        return None
