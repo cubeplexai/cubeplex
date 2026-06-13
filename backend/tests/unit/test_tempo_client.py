@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from cubebox.services.tempo_client import TempoClient, TempoQueryError
+from cubebox.services.tempo_client import TempoClient, TempoQueryError, TempoTraceNotFoundError
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tempo"
 
@@ -248,6 +248,77 @@ async def test_get_trace_wraps_transport_errors() -> None:
     respx.get("http://tempo.local/api/traces/abc").mock(side_effect=httpx.ReadTimeout("timed out"))
     with pytest.raises(TempoQueryError):
         await client.get_trace("abc")
+
+
+@respx.mock
+async def test_search_extracts_model_from_sibling_spanset() -> None:
+    """When the search has both metadata and model selectors, Tempo returns
+    multiple spanSets and the model attribute lives in the second one."""
+    payload = {
+        "traces": [
+            {
+                "traceID": "abc",
+                "rootTraceName": "invoke_agent",
+                "startTimeUnixNano": "1781164911000000000",
+                "durationMs": 8055,
+                "spanSets": [
+                    {
+                        "matched": 1,
+                        "spans": [
+                            {
+                                "spanID": "a1",
+                                "attributes": [
+                                    {
+                                        "key": "cubepi.metadata.workspace_id",
+                                        "value": {"stringValue": "ws-7"},
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "matched": 1,
+                        "spans": [
+                            {
+                                "spanID": "c1",
+                                "attributes": [
+                                    {
+                                        "key": "gen_ai.request.model",
+                                        "value": {"stringValue": "deepseek-v4-flash"},
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ],
+    }
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/search").mock(return_value=httpx.Response(200, json=payload))
+    [summary] = await client.search(org_id="org-1")
+    assert summary.workspace_id == "ws-7"
+    assert summary.model == "deepseek-v4-flash"
+    assert summary.span_count == 2  # both matched spans counted
+
+
+@respx.mock
+async def test_get_trace_raises_not_found_subclass() -> None:
+    client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
+    respx.get("http://tempo.local/api/traces/abc").mock(
+        return_value=httpx.Response(404, text="not found")
+    )
+    with pytest.raises(TempoTraceNotFoundError):
+        await client.get_trace("abc")
+
+
+def test_tempo_client_rejects_invalid_endpoint() -> None:
+    with pytest.raises(ValueError):
+        TempoClient(endpoint="http://", timeout_seconds=5)
+    with pytest.raises(ValueError):
+        TempoClient(endpoint="", timeout_seconds=5)
+    with pytest.raises(ValueError):
+        TempoClient(endpoint="http://tempo.local", timeout_seconds=0)
 
 
 @respx.mock

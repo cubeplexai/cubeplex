@@ -9,6 +9,7 @@ function toQuery(filters: TraceFilterValues): string {
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(filters)) {
     if (v === undefined || v === null || v === '') continue
+    if (typeof v === 'number' && !Number.isFinite(v)) continue
     params.set(k, String(v))
   }
   return params.toString()
@@ -37,6 +38,13 @@ export class AdminTracesDisabledError extends Error {
 
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, { credentials: 'include', signal })
+  if (res.status === 401) {
+    if (typeof window !== 'undefined') {
+      const next = encodeURIComponent(window.location.pathname + window.location.search)
+      window.location.assign(`/login?next=${next}`)
+    }
+    throw new Error('Session expired')
+  }
   if (res.status === 503) throw new AdminTracesDisabledError()
   if (!res.ok) throw new Error(await readApiError(res))
   return (await res.json()) as T
