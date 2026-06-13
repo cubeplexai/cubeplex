@@ -23,6 +23,7 @@ from typing import Any, Protocol
 
 from loguru import logger
 
+from cubebox.api.routes.v1.im_ingress import _handle_card_action
 from cubebox.im.feishu.connector import FeishuConnector
 
 try:
@@ -45,6 +46,54 @@ class _IngestCallable(Protocol):
 
 
 IngestCallable = Callable[..., Awaitable[Any]]
+
+
+async def _lc_handle_card_action(event: Any) -> Any:
+    """Glue: convert the SDK's P2CardActionTrigger event into the dict
+    envelope that ``_handle_card_action`` (the webhook ingress) accepts,
+    invoke it, and return a ``P2CardActionTriggerResponse`` carrying any toast.
+    """
+    from lark_oapi.event.callback.model.p2_card_action_trigger import (
+        CallBackToast,
+        P2CardActionTriggerResponse,
+    )
+
+    data = getattr(event, "event", None)
+    if data is None:
+        envelope: dict[str, Any] = {
+            "header": {"event_type": "card.action.trigger"},
+            "event": {},
+        }
+    else:
+        operator = getattr(data, "operator", None)
+        action = getattr(data, "action", None)
+        envelope = {
+            "header": {
+                "event_type": "card.action.trigger",
+                "token": str(getattr(data, "token", "") or ""),
+            },
+            "event": {
+                "operator": (
+                    {"open_id": str(getattr(operator, "open_id", "") or "")}
+                    if operator is not None
+                    else {}
+                ),
+                "action": (
+                    {"value": dict(getattr(action, "value", {}) or {})}
+                    if action is not None
+                    else {}
+                ),
+            },
+        }
+
+    _, toast = await _handle_card_action(envelope)
+    response = P2CardActionTriggerResponse()
+    if toast:
+        cb_toast = CallBackToast()
+        cb_toast.type = "info"
+        cb_toast.content = toast
+        response.toast = cb_toast
+    return response
 
 
 def build_event_handler(
@@ -135,9 +184,24 @@ def build_event_handler(
         future = asyncio.run_coroutine_threadsafe(_do_ingest(), loop)
         future.add_done_callback(_log_future)
 
+    def _on_card_action(data: Any) -> Any:
+        """SDK-side sync handler: bridge to the captured asyncio loop and
+        return a ``P2CardActionTriggerResponse`` synchronously."""
+        from lark_oapi.event.callback.model.p2_card_action_trigger import (
+            P2CardActionTriggerResponse,
+        )
+
+        future = asyncio.run_coroutine_threadsafe(_lc_handle_card_action(data), loop)
+        try:
+            return future.result(timeout=10)
+        except Exception as exc:
+            logger.warning("[Feishu LC] card.action handler raised: {}", exc)
+            return P2CardActionTriggerResponse()
+
     return (
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(_on_message)
+        .register_p2_card_action_trigger(_on_card_action)
         .build()
     )
 
