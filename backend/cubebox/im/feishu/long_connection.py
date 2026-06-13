@@ -48,6 +48,23 @@ class _IngestCallable(Protocol):
 IngestCallable = Callable[..., Awaitable[Any]]
 
 
+# Captured at app startup so the SDK-side handler (no Request, no app
+# state) can hand a real RunManager to ``_handle_card_action``. Set via
+# :func:`set_run_manager` from ``cubebox.api.app`` during ``_start_im_runtime``.
+_run_manager_ref: Any = None
+
+
+def set_run_manager(run_manager: Any) -> None:
+    """Register the process-wide RunManager for long-connection card actions.
+
+    The webhook ingress reaches ``run_manager`` via ``request.app.state``;
+    the long-connection handler runs on the SDK thread with no request
+    context, so it relies on this module-level binding instead.
+    """
+    global _run_manager_ref
+    _run_manager_ref = run_manager
+
+
 async def _lc_handle_card_action(event: Any) -> Any:
     """Glue: convert the SDK's P2CardActionTrigger event into the dict
     envelope that ``_handle_card_action`` (the webhook ingress) accepts,
@@ -86,7 +103,7 @@ async def _lc_handle_card_action(event: Any) -> Any:
             },
         }
 
-    _, toast = await _handle_card_action(envelope)
+    _, toast = await _handle_card_action(envelope, run_manager=_run_manager_ref)
     response = P2CardActionTriggerResponse()
     if toast:
         cb_toast = CallBackToast()
