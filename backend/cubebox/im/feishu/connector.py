@@ -445,6 +445,76 @@ class FeishuConnector:
             text,
         )
 
+    async def send_card_init_message(self, card_id: str) -> str | None:
+        """Send the first IM message that carries the just-created CardKit card.
+
+        Group / threaded send → ``im.v1.message.reply`` against
+        ``self._reply_to_id``. DM → ``im.v1.message.create``.
+
+        Returns the new bot message_id or None on failure.
+        """
+        if self._client is None:
+            return None
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+            ReplyMessageRequest,
+            ReplyMessageRequestBody,
+        )
+
+        payload = json.dumps(
+            {"type": "card", "data": {"card_id": card_id}},
+            ensure_ascii=False,
+        )
+        if self._reply_to_id is not None:
+            reply_body = (
+                ReplyMessageRequestBody.builder()
+                .content(payload)
+                .msg_type("interactive")
+                .reply_in_thread(False)
+                .build()
+            )
+            reply_req = (
+                ReplyMessageRequest.builder()
+                .message_id(self._reply_to_id)
+                .request_body(reply_body)
+                .build()
+            )
+            response = await asyncio.to_thread(self._client.im.v1.message.reply, reply_req)
+        else:
+            create_body = (
+                CreateMessageRequestBody.builder()
+                .receive_id(self._channel_id or "")
+                .msg_type("interactive")
+                .content(payload)
+                .build()
+            )
+            create_req = (
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(create_body)
+                .build()
+            )
+            response = await asyncio.to_thread(self._client.im.v1.message.create, create_req)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] send_card_init_message failed: code={} msg={}",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        message_id = getattr(data, "message_id", None) if data is not None else None
+        return str(message_id) if message_id else None
+
+    async def _send_emergency_text(self, text: str) -> str | None:
+        """v1 alias for the legacy text path — used only as CardKit fallback.
+
+        Renamed properly in Task 18; for now it delegates to send_text_message
+        to keep the diff scoped to Task 12.
+        """
+        return await self.send_text_message(text)
+
     async def upload_image(self, local_path: str) -> str | None:
         """Upload an image to Feishu; return the resulting ``image_key``."""
         if self._client is None:
