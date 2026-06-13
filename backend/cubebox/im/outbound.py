@@ -9,7 +9,6 @@ calls live in the connector, not here.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -32,15 +31,6 @@ _AWAITING_TTL_SECONDS = 600
 # patch still emits so the user sees a complete answer even on a hot
 # rate-limit run.
 _MAX_FLOOD_STRIKES = 3
-
-# Terminal-delivery retry schedule. The streaming patches during a run can be
-# dropped on flood-control (the user sees the prior partial), but the
-# terminal ``done`` / ``error`` patch MUST land or the user is stuck on a
-# stale card forever. Three tries with exponential backoff cover a typical
-# Feishu rate-limit window; if all three fail we fall back to a fresh
-# ``_send_emergency_text`` bubble (separate quota) so the user still sees
-# the final answer.
-_TERMINAL_RETRY_DELAYS = (0.5, 1.5, 4.0)
 
 
 OpKind = Literal[
@@ -85,7 +75,14 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         if now - state.last_stream_monotonic < state.stream_interval:
             return None
         state.last_stream_monotonic = now
-        return OutboundOp(kind="stream_text", element_id="streaming_content", text=delta)
+        # Send everything since the last successfully-streamed position, not
+        # just this event's delta — earlier throttled deltas update
+        # streaming_content but not card_state.streamed_to, so they would
+        # otherwise be lost on CardKit (stream_text is append-semantics).
+        pending_text = state.card_state.streaming_content[state.card_state.streamed_to :]
+        if not pending_text:
+            return None
+        return OutboundOp(kind="stream_text", element_id="streaming_content", text=pending_text)
 
     if etype == "tool_call":
         import json as _json
@@ -428,7 +425,12 @@ class OutboundRunTailer:
                         )
                     if op.final:
                         done = True
-                        if delivered:
+                        # Mark succeeded only when the terminal op landed
+                        # AND the run wasn't an error. Otherwise the
+                        # reaction lifecycle would clear ⏳ via
+                        # ``on_processing_complete`` (no ❌), making a
+                        # failed run indistinguishable from a healthy one.
+                        if delivered and self._state.card_state.error is None:
                             succeeded = True
                 if done:
                     return
@@ -448,13 +450,15 @@ class OutboundRunTailer:
         flip ``state.card_unavailable`` and fall back to emergency-text
         bubbles so the user still sees an answer. ``stream_text`` /
         ``patch_card`` flood signals collapse to a False return — the
-        next fold step rebuilds and the tailer retries.
+        next fold step rebuilds and the tailer retries. ``finalize``
+        owns its own retry budget inside CardKitClient; on exhaustion the
+        tailer surfaces the answer via emergency text as a last resort.
 
-        The ``_cardkit=None`` shim path used by ``app.py`` for the path-(a)
-        transition (Task 12 ↔ Task 17) short-circuits every op to False so
-        the legacy non-card path keeps working until CardKit is wired in.
+        The ``cardkit=None`` test path (used by legacy e2e fixtures that
+        still pass cardkit=None) short-circuits every op to False; the
+        production startup wires a real CardKitClient in app.py.
         """
-        _ = (is_terminal, _TERMINAL_RETRY_DELAYS, asyncio)
+        _ = is_terminal  # finalize owns its own retry; tailer doesn't differentiate.
         from cubebox.im.feishu.card_renderer import render
 
         state = self._state
@@ -480,12 +484,30 @@ class OutboundRunTailer:
                 return False
             state.card_id = card_id
             state.card_state.advance_seq()
+            # The initial render() folded all accumulated streaming_content
+            # into the markdown element, so the high-water mark for
+            # subsequent stream_text deltas starts at the full length.
+            state.card_state.streamed_to = len(state.card_state.streaming_content)
             try:
                 msg_id = await self._connector.send_card_init_message(card_id)
             except Exception:
                 logger.warning("[outbound] send_card_init_message raised", exc_info=True)
                 msg_id = None
             state.bot_message_id = msg_id
+            if msg_id is None:
+                # The CardKit entity exists but no IM bubble points at it —
+                # subsequent stream/patch ops would update an invisible card.
+                # Disable card path, fall back to emergency text so the user
+                # at least sees the partial answer.
+                logger.warning(
+                    "[outbound] send_card_init_message returned no message_id;"
+                    " engaging emergency text"
+                )
+                state.card_unavailable = True
+                await self._emergency_text("⚠️ 飞书富文本渲染暂时不可用，结果将以文本展示")
+                if state.card_state.streaming_content:
+                    await self._emergency_text(state.card_state.streaming_content[:4000])
+                return False
             return True
 
         if op.kind == "stream_text":
@@ -499,6 +521,10 @@ class OutboundRunTailer:
                     content=op.text,
                     sequence=seq,
                 )
+                # Advance the high-water mark only after the send lands —
+                # a flood-dropped delta will be replayed in the next
+                # stream_text op.
+                state.card_state.streamed_to += len(op.text)
                 note_edit_success(state)
                 return True
             except _FloodSignal:
@@ -521,7 +547,11 @@ class OutboundRunTailer:
                 note_edit_success(state)
                 return True
             except _FloodSignal:
-                # Coalesce — next event will rebuild and resend.
+                # Coalesce — next event will rebuild and resend. Count the
+                # strike so a sustained tool-heavy run that's getting
+                # throttled trips ``edits_disabled`` and stops hammering
+                # CardKit through 230020 responses.
+                note_flood_strike(state)
                 return False
             except Exception:
                 logger.warning("[outbound] patch_card failed", exc_info=True)
@@ -535,13 +565,28 @@ class OutboundRunTailer:
                     await self._emergency_text(state.card_state.streaming_content[:4000])
                 return False
             seq = state.card_state.advance_seq()
-            return bool(
+            delivered = bool(
                 await cardkit.finalize(
                     card_id=state.card_id,
                     card_json=render(state.card_state),
                     sequence=seq,
                 )
             )
+            if not delivered:
+                # CardKit finalize gave up after its retry budget (~2.5min).
+                # The card stays half-rendered without an answer; surface
+                # whatever we have as emergency text so the user at least
+                # sees the response.
+                logger.warning(
+                    "[outbound] CardKit finalize gave up for card_id={};"
+                    " surfacing answer via emergency text",
+                    state.card_id,
+                )
+                if state.card_state.error:
+                    await self._emergency_text(f"⚠️ {state.card_state.error}")
+                elif state.card_state.streaming_content:
+                    await self._emergency_text(state.card_state.streaming_content[:4000])
+            return delivered
 
         return False
 
