@@ -23,6 +23,13 @@ from cubebox.credentials.dependencies import (
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.engine import async_session_maker
 from cubebox.db.session import get_session
+from cubebox.im.feishu.card_action_router import (
+    InvalidAction,
+    parse_action_payload,
+)
+from cubebox.im.feishu.card_action_router import (
+    dispatch as dispatch_card_action,
+)
 from cubebox.im.feishu.connector import FeishuConnector
 from cubebox.im.feishu.signature import (
     FeishuSignatureError,
@@ -31,6 +38,7 @@ from cubebox.im.feishu.signature import (
     verify_verification_token,
 )
 from cubebox.im.inbound import ingest_inbound_event
+from cubebox.im.resume import resume_paused_run
 from cubebox.models.im_connector import IMConnectorAccount
 from cubebox.repositories.im_connector import get_account_by_external_id_unscoped
 
@@ -200,6 +208,20 @@ async def feishu_events(
         logger.warning("[Feishu ingress] verification token rejected: {}", exc)
         return Response(status_code=status.HTTP_401_UNAUTHORIZED)
 
+    # CardKit button-click event branch — handled separately from
+    # im.message.receive_v1 (no agent run kicked off, just a resume signal).
+    event_type = str(header.get("event_type") or "")
+    if event_type == "card.action.trigger":
+        handled, toast = await _handle_card_action(payload)
+        if handled:
+            body: dict[str, Any] = {}
+            if toast:
+                body = {"toast": {"type": "info", "content": toast}}
+            return Response(
+                content=json.dumps(body),
+                media_type="application/json",
+            )
+
     # url_verification challenge — only echo AFTER the token check passes,
     # so we never bounce attacker-supplied challenge data without auth.
     if payload.get("type") == "url_verification":
@@ -284,3 +306,72 @@ def _build_gate_connector(
         .build()
     )
     return FeishuConnector(bot_open_id=bot_open_id, client=client)
+
+
+async def _redis_get(key: str) -> str | None:
+    """Read a string from Redis, or None.
+
+    Uses the application's already-configured async Redis client.
+    """
+    from cubebox.cache import get_redis
+
+    client = get_redis()
+    value = await client.get(key)
+    if value is None:
+        return None
+    return value.decode() if isinstance(value, (bytes, bytearray)) else str(value)
+
+
+async def _redis_setnx(key: str, value: str, ex: int) -> bool:
+    """SETNX with TTL. Returns True iff the key was set (i.e., didn't pre-exist)."""
+    from cubebox.cache import get_redis
+
+    client = get_redis()
+    return bool(await client.set(key, value, ex=ex, nx=True))
+
+
+async def _handle_card_action(event: dict[str, Any]) -> tuple[bool, str | None]:
+    """Process a ``card.action.trigger`` event.
+
+    Returns ``(handled, toast)``. ``handled=True`` means we processed the
+    event and the route should reply 200; ``toast`` is an optional
+    user-visible message (Feishu shows it briefly above the card).
+    """
+    header = event.get("header") or {}
+    token = str(header.get("token") or "")
+    if not token:
+        return True, "缺少 token"
+    # Token replay guard — Feishu's interaction token is one-time / 30 minutes.
+    fresh = await _redis_setnx(f"cardkit:token:{token}", "1", 1800)
+    if not fresh:
+        return True, None  # idempotent no-op
+
+    try:
+        payload = parse_action_payload(event.get("event") or {})
+    except InvalidAction as exc:
+        logger.warning("[Feishu ingress] invalid card.action payload: {}", exc)
+        return True, "未知操作"
+
+    expected = await _redis_get(f"run:{payload.run_id}:awaiting_responder")
+    action = dispatch_card_action(payload, expected_responder_open_id=expected)
+    if action is None:
+        return True, "这不是发给你的"
+
+    try:
+        ok = await resume_paused_run(
+            run_id=action.run_id,
+            input_kind=action.input_kind,
+            choice=action.choice,
+            operator_open_id=action.operator_open_id,
+            question_id=action.question_id,
+        )
+    except NotImplementedError:
+        logger.warning("[Feishu ingress] resume_paused_run not implemented yet (Task 17)")
+        return True, "暂时无法响应"
+    except Exception:
+        logger.warning("[Feishu ingress] resume_paused_run raised", exc_info=True)
+        return True, "暂时无法响应"
+
+    if not ok:
+        return True, "会话已结束"
+    return True, None
