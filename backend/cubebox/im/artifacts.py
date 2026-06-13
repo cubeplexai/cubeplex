@@ -1,17 +1,14 @@
-"""IM-side artifact dispatcher.
+"""IM-side artifact dispatcher — updates CardState, no standalone messages.
 
-When the run emits an ``artifact`` event the tailer hands the artifact dict
-here. We decide:
-
-- ``image`` → fetch bytes from the artifact store, upload to Feishu (native
-  image message), no link needed.
-- Anything else → mint a public share token (via the same service the HTTP
-  route uses — no auth hop), post a short link message in the same thread.
+The dispatcher only mutates ``card_state.artifacts``. The tailer is
+responsible for the subsequent ``patch_card`` op that re-renders the
+card with the new artifact row.
 """
 
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,18 +16,16 @@ from typing import Any
 from botocore.exceptions import ClientError
 from loguru import logger
 
+from cubebox.im.feishu.card_model import ArtifactItem, CardState
 from cubebox.objectstore import get_objectstore_client
-from cubebox.services.artifact_share import mint_share_token
+from cubebox.services.artifact_share import mint_share_token as _default_mint
+
+MintShareToken = Callable[..., Awaitable[str]]
 
 
 @dataclass(slots=True)
 class IMArtifactDispatcher:
-    """Bound to one run's outbound conversation context.
-
-    Construction is cheap and per-run — the bound ``connector`` is the same
-    FeishuConnector instance the tailer drives, so image/file/share messages
-    all post into the right thread.
-    """
+    """Bound to one run's card_state + share-link minting context."""
 
     connector: Any
     redis: Any
@@ -39,41 +34,42 @@ class IMArtifactDispatcher:
     org_id: str
     workspace_id: str
     conversation_id: str
+    card_state: CardState
+    mint_share_token_fn: MintShareToken = _default_mint
 
     async def handle(self, artifact: dict[str, Any]) -> None:
-        atype = str(artifact.get("artifact_type") or "")
-        name = str(artifact.get("name") or "artifact")
         artifact_id = str(artifact.get("id") or "")
         if not artifact_id:
             return
+        atype = str(artifact.get("artifact_type") or "")
+        name = str(artifact.get("name") or "artifact")
+        item = next((a for a in self.card_state.artifacts if a.id == artifact_id), None)
+        if item is None:
+            item = ArtifactItem(id=artifact_id, artifact_type=atype, name=name)
+            self.card_state.artifacts.append(item)
 
         if atype == "image":
-            await self._send_image(artifact)
+            await self._fill_image_key(item, artifact)
             return
-        await self._send_share_link(artifact_id, name, atype, artifact)
+        await self._fill_share_url(item, artifact)
 
-    async def _send_image(self, artifact: dict[str, Any]) -> None:
-        """Download the image bytes from the artifact store and post a native image message."""
+    async def _fill_image_key(self, item: ArtifactItem, artifact: dict[str, Any]) -> None:
         version = int(artifact.get("version") or 1)
-        artifact_id = str(artifact.get("id") or "")
         entry = str(artifact.get("entry_file") or "")
         path = str(artifact.get("path") or "")
         filename = entry or path.rsplit("/", 1)[-1]
-        key = f"artifacts/{self.conversation_id}/{artifact_id}/v{version}/{filename}"
+        key = f"artifacts/{self.conversation_id}/{item.id}/v{version}/{filename}"
         try:
             store = get_objectstore_client()
             data, _ctype = await store.download_file(key)
-        except (ClientError, Exception):  # broad catch — fall back to link
+        except (ClientError, Exception):
             logger.warning(
-                "[IM artifacts] failed to download image artifact {}; falling back to share link",
-                artifact_id,
+                "[IM artifacts] download failed for {}; falling back to share link",
+                item.id,
                 exc_info=True,
             )
-            await self._send_share_link(
-                artifact_id, str(artifact.get("name") or ""), "image", artifact
-            )
+            await self._fill_share_url(item, artifact)
             return
-
         suffix = Path(filename).suffix or ".png"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(data)
@@ -82,66 +78,30 @@ class IMArtifactDispatcher:
             image_key = await self.connector.upload_image(tmp_path)
         finally:
             Path(tmp_path).unlink(missing_ok=True)
-        if not image_key:
-            await self._send_share_link(
-                artifact_id, str(artifact.get("name") or ""), "image", artifact
-            )
-            return
-        # ``send_image_message`` can still fail after upload (transient
-        # Feishu rejection, quota, network) and returns None / raises in
-        # that case. Without this fallback the user sees a tool_call line
-        # ("running image_gen…") but no rendered image and no share link —
-        # the artifact effectively disappears. Mirror the upload-failure
-        # branch above: post the share-link bubble so the file is still
-        # reachable.
-        try:
-            sent = await self.connector.send_image_message(image_key)
-        except Exception:
-            logger.warning(
-                "[IM artifacts] send_image_message raised for {}; falling back to share link",
-                artifact_id,
-                exc_info=True,
-            )
-            sent = None
-        if not sent:
-            await self._send_share_link(
-                artifact_id, str(artifact.get("name") or ""), "image", artifact
-            )
+        if image_key:
+            item.image_key = image_key
+        else:
+            await self._fill_share_url(item, artifact)
 
-    async def _send_share_link(
-        self,
-        artifact_id: str,
-        name: str,
-        atype: str,
-        artifact: dict[str, Any],
-    ) -> None:
-        # An absolute public URL is required: the background IM tailer has no
-        # FastAPI Request to derive a base URL from, so an empty
-        # ``public_base_url`` would produce a relative path the Feishu client
-        # can't open. Skip the share-link entirely and log loudly so the
-        # operator sees a config gap rather than a silently-broken bot.
+    async def _fill_share_url(self, item: ArtifactItem, artifact: dict[str, Any]) -> None:
         base = self.public_base_url.rstrip("/") if self.public_base_url else ""
         if not (base.startswith("http://") or base.startswith("https://")):
             logger.warning(
-                "[IM artifacts] cannot post share link for artifact {} — "
-                "api.public_url is not an absolute URL ({!r}); skipping link",
-                artifact_id,
-                self.public_base_url,
+                "[IM artifacts] cannot mint share link for {} — public_base_url not absolute",
+                item.id,
             )
             return
         version = int(artifact.get("version") or 1)
-        nonce = await mint_share_token(
+        nonce = await self.mint_share_token_fn(
             redis=self.redis,
             key_prefix=self.redis_key_prefix,
             org_id=self.org_id,
             workspace_id=self.workspace_id,
             conversation_id=self.conversation_id,
-            artifact_id=artifact_id,
+            artifact_id=item.id,
             version=version,
-            name=str(artifact.get("name") or "") or None,
-            artifact_type=str(artifact.get("artifact_type") or atype or "") or None,
+            name=item.name,
+            artifact_type=item.artifact_type,
             entry_file=str(artifact.get("entry_file") or "") or None,
         )
-        share_url = f"{base}/api/v1/public/artifacts/share/{nonce}"
-        label = atype or "artifact"
-        await self.connector.send_text_message(f"📎 {name} · {label} · view → {share_url}")
+        item.share_url = f"{base}/api/v1/public/artifacts/share/{nonce}"
