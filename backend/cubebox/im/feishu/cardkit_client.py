@@ -19,6 +19,7 @@ from cubebox.im.outbound import _FloodSignal
 
 _BASE_URL = "https://open.feishu.cn"
 _CREATE_RETRY_DELAYS = (0.2, 1.0, 3.0)
+_FINALIZE_RETRY_DELAYS = (0.2, 0.5, 1.0, 3.0, 10.0, 30.0, 30.0, 30.0, 30.0)
 # CardKit rate-limit response code (same as IM patch rate limit).
 _FLOOD_CODE = 230020
 
@@ -102,6 +103,101 @@ class CardKitClient:
                         continue
                     break
         raise CardKitCreateError(str(last_exc) if last_exc else "unknown")
+
+    async def stream_text(
+        self,
+        *,
+        card_id: str,
+        element_id: str,
+        content: str,
+        sequence: int,
+    ) -> None:
+        """PUT /open-apis/cardkit/v1/cards/{card_id}/elements/{element_id}/content.
+
+        Pushes an incremental text update to a streaming element. Raises
+        ``CardKitRateLimit`` on code 230020 so the caller can skip-merge
+        into the next stream attempt without counting it against retry.
+        """
+        url = f"{self._base_url}/open-apis/cardkit/v1/cards/{card_id}/elements/{element_id}/content"
+        payload = {
+            "content": content,
+            "sequence": sequence,
+            "uuid": f"{card_id}-{sequence}",
+        }
+        async with self._new_client() as http:
+            resp = await http.put(url, json=payload, headers=self._headers())
+            body = resp.json()
+            code = int(body.get("code", -1))
+            if code == _FLOOD_CODE:
+                raise CardKitRateLimit(f"stream_text flood (code={code})")
+            if code != 0:
+                raise CardKitError(f"stream_text code={code} msg={body.get('msg')}")
+
+    async def patch_card(
+        self,
+        *,
+        card_id: str,
+        card_json: dict[str, Any],
+        sequence: int,
+    ) -> None:
+        """PATCH /open-apis/cardkit/v1/cards/{card_id}.
+
+        Replaces the whole card JSON. Raises ``CardKitRateLimit`` on 230020;
+        caller coalesces.
+        """
+        url = f"{self._base_url}/open-apis/cardkit/v1/cards/{card_id}"
+        payload = {
+            "card": {"type": "card_json", "data": card_json},
+            "sequence": sequence,
+        }
+        async with self._new_client() as http:
+            resp = await http.patch(url, json=payload, headers=self._headers())
+            body = resp.json()
+            code = int(body.get("code", -1))
+            if code == _FLOOD_CODE:
+                raise CardKitRateLimit(f"patch_card flood (code={code})")
+            if code != 0:
+                raise CardKitError(f"patch_card code={code} msg={body.get('msg')}")
+
+    async def finalize(
+        self,
+        *,
+        card_id: str,
+        card_json: dict[str, Any],
+        sequence: int,
+    ) -> bool:
+        """Terminal patch. Idempotent, retried up to ~2.5 minutes total.
+
+        Returns True if the final patch landed; False if all retries
+        failed (caller logs + accepts half-locked state, sets ❌ reaction).
+        """
+        url = f"{self._base_url}/open-apis/cardkit/v1/cards/{card_id}"
+        payload = {
+            "card": {"type": "card_json", "data": card_json},
+            "sequence": sequence,
+        }
+        async with self._new_client() as http:
+            for attempt in range(len(_FINALIZE_RETRY_DELAYS) + 1):
+                try:
+                    resp = await http.patch(url, json=payload, headers=self._headers())
+                    if 500 <= resp.status_code < 600:
+                        raise CardKitError(f"finalize HTTP {resp.status_code}")
+                    body = resp.json()
+                    code = int(body.get("code", -1))
+                    if code == 0:
+                        return True
+                    if code == _FLOOD_CODE:
+                        # Throttle counts as transient; retry like 5xx.
+                        raise CardKitError(f"finalize flood (code={code})")
+                    raise CardKitError(f"finalize code={code} msg={body.get('msg')}")
+                except (httpx.HTTPError, CardKitError) as exc:
+                    logger.warning("[CardKit] finalize attempt {} failed: {}", attempt + 1, exc)
+                    if attempt < len(_FINALIZE_RETRY_DELAYS):
+                        await asyncio.sleep(_FINALIZE_RETRY_DELAYS[attempt])
+                        continue
+                    break
+        logger.error("[CardKit] finalize gave up for card_id={}", card_id)
+        return False
 
 
 __all__ = [
