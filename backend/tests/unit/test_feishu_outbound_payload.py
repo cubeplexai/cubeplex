@@ -113,7 +113,7 @@ async def test_processing_start_adds_reaction_to_inbound_message_id() -> None:
     c = _ReactionStub()
     st = RenderState(inbound_message_id="om_user_msg")
     await c.on_processing_start(st)
-    assert c.added == [("om_user_msg", "ThumbsUp")]
+    assert c.added == [("om_user_msg", "THUMBSUP")]
     assert st.reaction_in_progress_id == "r-1"
 
 

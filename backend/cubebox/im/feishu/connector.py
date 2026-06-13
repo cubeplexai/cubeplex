@@ -36,15 +36,14 @@ from cubebox.im.types import DM_SCOPE_KEY, InboundEvent, RenderState, make_parti
 # Matches Feishu inline mention markup: <at user_id="ou_xxx">name</at>
 _AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>", re.DOTALL)
 
-# Feishu reaction_type literals (no enum in the SDK).
-_REACTION_PROCESSING = "ThumbsUp"  # Feishu's "thinking" emoji is locale-dependent;
-# ThumbsUp ships universally and avoids surprising lookups. The hermes adapter
-# uses similar "in-progress" semantics; we choose a reliable emoji_type here
-# because Feishu rejects unknown literals with 1061002.
-_REACTION_FAILURE = "OK"  # Actual cross-mark variants are not in the universal
-# Feishu emoji_type set — "OK" intentionally signals "the run finished" with a
-# neutral marker so the user knows something ended even on failure; the inline
-# error message in the bot's reply text carries the actual error detail.
+# Feishu reaction_type literals (no enum in the SDK). Names are UPPERCASE
+# in Feishu's emoji_type set — mixed case (e.g. "ThumbsUp") is rejected with
+# code=231001 "reaction type is invalid".
+_REACTION_PROCESSING = "THUMBSUP"
+_REACTION_FAILURE = "OK"  # Cross-mark variants are not universally available;
+# "OK" intentionally signals "the run finished" with a neutral marker so the
+# user knows something ended even on failure; the inline error message in the
+# bot's reply text carries the actual error detail.
 
 # lark_oapi response codes that mean "rate limited / flood control".
 # These come from the official SDK docs / hermes prior art (1061045 = quota
@@ -429,7 +428,7 @@ class FeishuConnector:
         response = await asyncio.to_thread(self._client.im.v1.message_reaction.create, req)
         if not getattr(response, "success", lambda: False)():
             logger.warning(
-                "[Feishu] add_reaction failed: code=%s msg=%s",
+                "[Feishu] add_reaction failed: code={} msg={}",
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )
