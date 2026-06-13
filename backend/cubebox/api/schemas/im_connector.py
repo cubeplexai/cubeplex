@@ -1,4 +1,6 @@
-"""Pydantic schemas for the IM connector workspace + admin routes (Task 15)."""
+"""Pydantic schemas for the IM connector workspace + admin routes."""
+
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,8 +24,41 @@ class ConnectFeishuAccountIn(BaseModel):
     acting_user_id: str = Field(default="self", min_length=1)
 
 
+class ImRuntimeStatus(BaseModel):
+    """Runtime status snapshot embedded on every ``IMAccountOut``.
+
+    Computed per-request at list time — not persisted. ``connection_state``
+    is calculated from ``app.state.im_long_connections`` (long-connection
+    mode) or a recent-receipts window (webhook mode); the other fields are
+    cheap aggregate queries against existing IM tables. See spec §5 + §8.
+    """
+
+    connection_state: Literal["connected", "disconnected", "never_connected"]
+    last_inbound_at: str | None
+    bot_open_id: str | None
+    pending_queue: int
+    matched_24h: int
+    rejected_24h: int
+
+    @classmethod
+    def unknown(cls) -> "ImRuntimeStatus":
+        """Default placeholder. Used by single-account routes that return
+        an ``IMAccountOut`` without running the aggregate-query path
+        (POST /accounts, /disable, /enable) — the frontend's next list
+        poll repopulates the real values within seconds.
+        """
+        return cls(
+            connection_state="never_connected",
+            last_inbound_at=None,
+            bot_open_id=None,
+            pending_queue=0,
+            matched_24h=0,
+            rejected_24h=0,
+        )
+
+
 class IMAccountOut(BaseModel):
-    """Public projection of an ``IMConnectorAccount`` row."""
+    """Public projection of an ``IMConnectorAccount`` row + runtime status."""
 
     id: str
     platform: str
@@ -32,6 +67,7 @@ class IMAccountOut(BaseModel):
     acting_user_id: str
     delivery_mode: str
     enabled: bool
+    runtime: ImRuntimeStatus
 
 
 class IMAccountListOut(BaseModel):
