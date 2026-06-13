@@ -13,20 +13,10 @@ from cubebox.im.feishu.card_model import ArtifactItem, CardState
 class _FakeConnector:
     def __init__(self) -> None:
         self.uploaded: list[str] = []
-        self.text_sends: list[str] = []
-        self.image_sends: list[str] = []
 
     async def upload_image(self, local_path: str) -> str | None:
         self.uploaded.append(local_path)
         return "img_v1_uploaded"
-
-    async def send_text_message(self, text: str) -> str | None:
-        self.text_sends.append(text)
-        return "om_must_not_be_called"
-
-    async def send_image_message(self, image_key: str) -> str | None:
-        self.image_sends.append(image_key)
-        return "om_must_not_be_called"
 
 
 async def _fake_mint(**_: Any) -> str:
@@ -58,9 +48,6 @@ async def test_document_artifact_writes_share_url_to_card_state() -> None:
     assert art.share_url is not None
     assert "https://example.com" in art.share_url
     assert "nonce_1" in art.share_url
-    # And NOT sent as a standalone bubble.
-    assert conn.text_sends == []
-    assert conn.image_sends == []
 
 
 @pytest.mark.asyncio

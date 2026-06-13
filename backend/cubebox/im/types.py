@@ -71,8 +71,8 @@ class RenderState:
     Held by the tailer for one run from first event to terminal event.
     """
 
-    bot_name: str = ""
-    run_id: str = ""
+    bot_name: str
+    run_id: str
     card_state: CardState = field(init=False)
     card_id: str | None = None
     card_unavailable: bool = False
@@ -90,15 +90,6 @@ class RenderState:
     inbound_message_id: str | None = None
     bot_message_id: str | None = None
     """Feishu message_id of the bubble that carries the card."""
-
-    # TODO(task-8): remove the legacy text-path fields below once fold_event is
-    # rewritten to project events into ``card_state`` instead of free-form text.
-    message_id: str | None = None
-    text_buffer: str = ""
-    tool_lines: list[str] = field(default_factory=list)
-    last_edit_monotonic: float = 0.0
-    edit_interval: float = 0.8  # adaptive: doubles on flood up to 10s
-    posted_artifacts: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self.card_state = CardState(bot_name=self.bot_name, run_id=self.run_id)

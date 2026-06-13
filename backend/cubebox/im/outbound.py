@@ -2,8 +2,9 @@
 
 The render fold is platform-agnostic. The tailer talks to a connector
 through three lifecycle hooks (``on_processing_start`` / ``_complete`` /
-``_failed``) and two send/edit primitives (``post_placeholder`` / ``edit``);
-Feishu-vocabulary calls live in the connector, not here.
+``_failed``) plus the CardKit ``card_create`` / ``patch_card`` /
+``finalize`` ops dispatched via the ``CardKitClient``; Feishu-vocabulary
+calls live in the connector, not here.
 """
 
 from __future__ import annotations
@@ -19,19 +20,19 @@ from redis.asyncio import Redis
 from cubebox.im.types import RenderState
 from cubebox.streams.run_events import read_run_events_after
 
-# Edit-interval ceiling under adaptive backoff. The default (0.8s) lives on
-# ``RenderState.edit_interval`` itself so callers can override per-run; the
-# constants here only govern flood-handling.
-_EDIT_INTERVAL_MAX = 10.0
+# After this many consecutive flood-control responses we permanently disable
+# progressive patches for the rest of the run. The final ``done`` / ``error``
+# patch still emits so the user sees a complete answer even on a hot
+# rate-limit run.
 _MAX_FLOOD_STRIKES = 3
 
-# Terminal-delivery retry schedule. The streaming edits during a run can be
+# Terminal-delivery retry schedule. The streaming patches during a run can be
 # dropped on flood-control (the user sees the prior partial), but the
-# terminal ``done`` / ``error`` text MUST land or the user is stuck on a
-# stale bubble forever. Three tries with exponential backoff cover a
-# typical Feishu rate-limit window; if all three fail we fall back to a
-# fresh ``send_text_message`` (new bubble) which uses ``messages/create``
-# rather than ``messages/update`` and has its own quota.
+# terminal ``done`` / ``error`` patch MUST land or the user is stuck on a
+# stale card forever. Three tries with exponential backoff cover a typical
+# Feishu rate-limit window; if all three fail we fall back to a fresh
+# ``_send_emergency_text`` bubble (separate quota) so the user still sees
+# the final answer.
 _TERMINAL_RETRY_DELAYS = (0.5, 1.5, 4.0)
 
 
@@ -274,13 +275,12 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
 def note_flood_strike(state: RenderState) -> None:
     """Tailer-side hook: connector signaled a flood-control response.
 
-    Doubles the edit interval (up to 10s) and after ``_MAX_FLOOD_STRIKES``
-    consecutive strikes permanently disables progressive edits — the final
-    ``done`` / ``error`` op still emits one terminal post/edit so the user
-    sees a complete answer even on a hot rate-limit run.
+    After ``_MAX_FLOOD_STRIKES`` consecutive strikes we permanently disable
+    progressive patches — the final ``done`` / ``error`` op still emits one
+    terminal patch so the user sees a complete answer even on a hot
+    rate-limit run.
     """
     state.consecutive_flood_strikes += 1
-    state.edit_interval = min(state.edit_interval * 2, _EDIT_INTERVAL_MAX)
     if state.consecutive_flood_strikes >= _MAX_FLOOD_STRIKES:
         state.edits_disabled = True
 

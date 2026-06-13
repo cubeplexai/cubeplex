@@ -87,7 +87,7 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
     conversation_id = "conv-e2e"
 
     connector = _RecordingConnector()
-    state = RenderState(inbound_message_id="om_inbound_e2e")
+    state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_e2e")
     tailer = OutboundRunTailer(
         redis=_redis,
         key_prefix=prefix,
@@ -143,7 +143,7 @@ async def test_outbound_tailer_emits_failure_on_error_event(
     conversation_id = "conv-err"
 
     connector = _RecordingConnector()
-    state = RenderState(inbound_message_id="om_inbound_err")
+    state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_err")
     tailer = OutboundRunTailer(
         redis=_redis,
         key_prefix=prefix,
