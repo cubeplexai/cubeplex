@@ -1,0 +1,46 @@
+import type { ConnectFeishuAccountIn } from '@cubebox/core'
+import type { FC } from 'react'
+
+export type FormState = Record<string, string>
+
+export type FieldDef = {
+  key: string
+  labelKey: string
+  type: 'text' | 'password' | 'select'
+  required: boolean
+  showIf?: (form: FormState) => boolean
+  options?: { value: string; labelKey: string }[]
+  placeholder?: string
+}
+
+export type PrereqItem = {
+  key: string
+  labelKey: string
+  helpUrl?: (form: FormState) => string
+}
+
+export type WizardStepProps = {
+  descriptor: PlatformDescriptor
+  form: FormState
+  onChange: (patch: Partial<FormState>) => void
+  onNext: () => void
+}
+
+export type WizardStepDef = {
+  key: 'prereqs' | 'credentials' | 'verify' | 'oauth_redirect' | 'manifest' | string
+  labelKey: string
+  Component: FC<WizardStepProps & { busy?: boolean }>
+  canAdvance?: (form: FormState) => boolean
+}
+
+export type PlatformDescriptor = {
+  id: 'feishu' | 'slack' | 'teams'
+  labelKey: string
+  iconName: string
+  live: boolean
+  prereqs: PrereqItem[]
+  credentialFields: FieldDef[]
+  steps: WizardStepDef[]
+  buildPayload: (form: FormState) => ConnectFeishuAccountIn
+  scopeConsoleUrl: (appId: string) => string
+}
