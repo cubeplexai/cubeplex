@@ -22,6 +22,8 @@ from cubebox.credentials.dependencies import (
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
 from cubebox.models.im_connector import IMConnectorAccount
+from cubebox.models.membership import Role
+from cubebox.repositories.membership import MembershipRepository
 from cubebox.repositories.organization_membership import OrganizationMembershipRepository
 from cubebox.services.im_connector import IMConnectorService
 
@@ -66,34 +68,54 @@ async def connect_account(
             detail=f"unsupported platform: {body.platform}",
         )
     svc = _service(session, backend, ctx)
-    # acting_user_id must be the caller OR a member of the same ORG.
-    # Without this check, any member could create a connector acting as
-    # any cubebox user system-wide, causing every IM-triggered run for
-    # that account to execute under the impersonated user's RunContext.
-    # We require org-membership (not workspace-membership) on purpose:
-    # service identities and org admins routinely act in workspaces they
-    # don't personally belong to — the plan explicitly allows this.
+    # acting_user_id resolution.
+    #
+    # ``"self"`` is always allowed: the caller binds a bot that runs as
+    # themselves. Any other value is impersonation — the bound bot would
+    # run with someone else's permissions for every future IM-triggered
+    # message that isn't covered by the per-sender identity gate. We
+    # require **workspace admin** to grant that (the identity gate falls
+    # back to ``acting_user_id`` when the sender doesn't resolve to a
+    # workspace member, so an org-member-only check leaks privilege).
     if body.acting_user_id == "self":
         acting = ctx.user.id
     else:
+        caller_ws_role = await MembershipRepository(session).get_role(
+            user_id=ctx.user.id, workspace_id=ctx.workspace_id
+        )
+        if caller_ws_role != Role.ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="workspace admin required to impersonate another user",
+            )
+        # Target must still be an org member — otherwise the bot would
+        # run with a stale or external user's identity.
         om_repo = OrganizationMembershipRepository(session)
-        role = await om_repo.get_role(user_id=body.acting_user_id, org_id=ctx.org_id)
-        if role is None:
+        target_org_role = await om_repo.get_role(user_id=body.acting_user_id, org_id=ctx.org_id)
+        if target_org_role is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="acting_user_id is not a member of this organization",
             )
         acting = body.acting_user_id
-    account = await svc.connect_feishu(
-        workspace_id=ctx.workspace_id,
-        app_id=body.app_id,
-        app_secret=body.app_secret,
-        encrypt_key=body.encrypt_key,
-        verification_token=body.verification_token,
-        domain=body.domain,
-        delivery_mode=body.delivery_mode,
-        acting_user_id=acting,
-    )
+    try:
+        account = await svc.connect_feishu(
+            workspace_id=ctx.workspace_id,
+            app_id=body.app_id,
+            app_secret=body.app_secret,
+            encrypt_key=body.encrypt_key,
+            verification_token=body.verification_token,
+            domain=body.domain,
+            delivery_mode=body.delivery_mode,
+            acting_user_id=acting,
+        )
+    except ValueError as exc:
+        # Duplicate app_id (preflight uniqueness in the service raises
+        # ValueError). This is a normal client mistake — double-submit,
+        # retry, or two operators racing the same registration. Map to
+        # 409 Conflict so the caller can distinguish "already exists"
+        # from a real 500.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     # Start the long-connection NOW so the bot is live as soon as the API
     # returns 201; otherwise the WebSocket only opens on the next API
     # restart and operators see the account "connected" but silent.

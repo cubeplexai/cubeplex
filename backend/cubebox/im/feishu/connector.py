@@ -119,7 +119,25 @@ class FeishuConnector:
             content_obj = json.loads(message.get("content", "{}"))
         except json.JSONDecodeError:
             return None
-        text = _AT_TAG_RE.sub("", content_obj.get("text", "")).strip()
+        raw_text = content_obj.get("text", "")
+        # Feishu inbound text uses ``@_user_N`` placeholders + a separate
+        # ``mentions[]`` array (NOT inline ``<at>`` tags — those are the
+        # outbound shape). Drop the bot's own at-mention (so the LLM sees
+        # only the message body) and substitute remaining ``@_user_N`` with
+        # the mention's human-readable ``name`` (e.g. "@巩向锋") so the LLM
+        # gets a name it can actually reason about instead of a placeholder.
+        mentions = message.get("mentions") or []
+        for mention in mentions:
+            key = mention.get("key") or ""
+            if not key:
+                continue
+            mid = (mention.get("id") or {}).get("open_id")
+            name = mention.get("name") or ""
+            if mid and mid == self._bot_open_id:
+                raw_text = raw_text.replace(key, "")
+            elif name:
+                raw_text = raw_text.replace(key, f"@{name}")
+        text = _AT_TAG_RE.sub("", raw_text).strip()
         if not text:
             return None
 
@@ -290,7 +308,7 @@ class FeishuConnector:
         self._raise_for_flood(response, "post_placeholder")
         if not getattr(response, "success", lambda: False)():
             logger.warning(
-                "[Feishu] post_placeholder failed: code=%s msg=%s",
+                "[Feishu] post_placeholder failed: code={} msg={}",
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )
@@ -312,10 +330,93 @@ class FeishuConnector:
         self._raise_for_flood(response, "edit")
         if not getattr(response, "success", lambda: False)():
             logger.warning(
-                "[Feishu] edit failed: code=%s msg=%s",
+                "[Feishu] edit failed: code={} msg={}",
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )
+
+    async def resolve_email(self, open_id: str) -> str | None:
+        """Look up a Feishu user's email via ``contact/v3/users/{open_id}``.
+
+        Requires the app to have ``contact:user.email:readonly`` granted —
+        otherwise the SDK returns success but the response's ``user.email``
+        field is simply absent (we coerce that to None). Bot-side
+        ``Authorization`` is the tenant_access_token already on
+        ``self._client``.
+        """
+        if self._client is None or not open_id:
+            return None
+        from lark_oapi.api.contact.v3 import GetUserRequest
+
+        req = GetUserRequest.builder().user_id(open_id).user_id_type("open_id").build()
+        response = await asyncio.to_thread(self._client.contact.v3.user.get, req)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] resolve_email failed: code={} msg={}",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        user_obj = getattr(data, "user", None) if data is not None else None
+        if user_obj is None:
+            return None
+        # Prefer the corporate/SSO email; fall back to the user-set personal
+        # one. ``getattr`` with default works around the SDK exposing
+        # missing fields as None rather than raising.
+        email = getattr(user_obj, "enterprise_email", None) or getattr(user_obj, "email", None)
+        return str(email) if email else None
+
+    async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
+        """Send a one-off text message to a chat, optionally as a thread reply.
+
+        Used for out-of-band notifications (e.g. "you're not a workspace
+        member" rejection) that must not interact with the streaming
+        ``post_placeholder`` / ``edit`` lifecycle the run tailer owns.
+        """
+        if self._client is None or not chat_id:
+            return None
+        msg_type, payload = self._build_payload(text)
+
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+            ReplyMessageRequest,
+            ReplyMessageRequestBody,
+        )
+
+        if reply_to_id:
+            body = (
+                ReplyMessageRequestBody.builder()
+                .content(payload)
+                .msg_type(msg_type)
+                .reply_in_thread(False)
+                .build()
+            )
+            req = ReplyMessageRequest.builder().message_id(reply_to_id).request_body(body).build()
+            response = await asyncio.to_thread(self._client.im.v1.message.reply, req)
+        else:
+            body = (
+                CreateMessageRequestBody.builder()
+                .receive_id(chat_id)
+                .msg_type(msg_type)
+                .content(payload)
+                .build()
+            )
+            req = (
+                CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
+            )
+            response = await asyncio.to_thread(self._client.im.v1.message.create, req)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] send_to_chat failed: code={} msg={}",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        message_id = getattr(data, "message_id", None) if data is not None else None
+        return str(message_id) if message_id else None
 
     async def send_text_message(self, text: str) -> str | None:
         """Post a new (non-edit) bubble — used for share-link / artifact
@@ -337,7 +438,7 @@ class FeishuConnector:
         self._raise_for_flood(response, "send_text_message")
         if not getattr(response, "success", lambda: False)():
             logger.warning(
-                "[Feishu] send_text_message failed: code=%s msg=%s",
+                "[Feishu] send_text_message failed: code={} msg={}",
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )
@@ -363,7 +464,7 @@ class FeishuConnector:
         response = await asyncio.to_thread(_do_upload)
         if not getattr(response, "success", lambda: False)():
             logger.warning(
-                "[Feishu] upload_image failed: code=%s msg=%s",
+                "[Feishu] upload_image failed: code={} msg={}",
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )
@@ -390,7 +491,7 @@ class FeishuConnector:
         response = await asyncio.to_thread(self._client.im.v1.message.create, req)
         if not getattr(response, "success", lambda: False)():
             logger.warning(
-                "[Feishu] send_image_message failed: code=%s msg=%s",
+                "[Feishu] send_image_message failed: code={} msg={}",
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )
@@ -458,7 +559,7 @@ class FeishuConnector:
         response = await asyncio.to_thread(self._client.im.v1.message_reaction.delete, req)
         if not getattr(response, "success", lambda: False)():
             logger.warning(
-                "[Feishu] remove_reaction failed: code=%s msg=%s",
+                "[Feishu] remove_reaction failed: code={} msg={}",
                 getattr(response, "code", None),
                 getattr(response, "msg", None),
             )

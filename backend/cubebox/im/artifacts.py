@@ -87,7 +87,26 @@ class IMArtifactDispatcher:
                 artifact_id, str(artifact.get("name") or ""), "image", artifact
             )
             return
-        await self.connector.send_image_message(image_key)
+        # ``send_image_message`` can still fail after upload (transient
+        # Feishu rejection, quota, network) and returns None / raises in
+        # that case. Without this fallback the user sees a tool_call line
+        # ("running image_gen…") but no rendered image and no share link —
+        # the artifact effectively disappears. Mirror the upload-failure
+        # branch above: post the share-link bubble so the file is still
+        # reachable.
+        try:
+            sent = await self.connector.send_image_message(image_key)
+        except Exception:
+            logger.warning(
+                "[IM artifacts] send_image_message raised for {}; falling back to share link",
+                artifact_id,
+                exc_info=True,
+            )
+            sent = None
+        if not sent:
+            await self._send_share_link(
+                artifact_id, str(artifact.get("name") or ""), "image", artifact
+            )
 
     async def _send_share_link(
         self,
@@ -119,6 +138,9 @@ class IMArtifactDispatcher:
             conversation_id=self.conversation_id,
             artifact_id=artifact_id,
             version=version,
+            name=str(artifact.get("name") or "") or None,
+            artifact_type=str(artifact.get("artifact_type") or atype or "") or None,
+            entry_file=str(artifact.get("entry_file") or "") or None,
         )
         share_url = f"{base}/api/v1/public/artifacts/share/{nonce}"
         label = atype or "artifact"

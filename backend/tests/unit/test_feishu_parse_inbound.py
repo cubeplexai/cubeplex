@@ -217,6 +217,36 @@ def test_union_id_preferred_over_open_id_for_sender_ref() -> None:
     assert ev.sender_ref == "on_user"
 
 
+def test_at_placeholder_substitutes_bot_and_other_users() -> None:
+    """Inbound text uses ``@_user_N`` placeholders. The bot's own mention is
+    dropped; any other user-mention is rewritten to ``@<name>`` so the LLM
+    sees a human-readable name instead of the opaque placeholder."""
+    raw = {
+        "header": {"event_id": "ev_at", "event_type": "im.message.receive_v1"},
+        "event": {
+            "sender": {
+                "sender_id": {"open_id": "ou_user", "union_id": "on_user"},
+                "sender_type": "user",
+            },
+            "message": {
+                "message_id": "om_msg",
+                "chat_id": "oc_chat1",
+                "chat_type": "group",
+                "message_type": "text",
+                "content": json.dumps({"text": "@_user_1 帮 @_user_2 看看这个问题"}),
+                "mentions": [
+                    {"key": "@_user_1", "id": {"open_id": "ou_bot"}, "name": "moltbot"},
+                    {"key": "@_user_2", "id": {"open_id": "ou_alice"}, "name": "Alice"},
+                ],
+            },
+        },
+    }
+    c = FeishuConnector(bot_open_id="ou_bot")
+    ev = c.parse_inbound(raw)
+    assert ev is not None
+    assert ev.text == "帮 @Alice 看看这个问题"
+
+
 def test_open_id_fallback_when_union_id_missing() -> None:
     raw = {
         "header": {"event_id": "ev_o", "event_type": "im.message.receive_v1"},

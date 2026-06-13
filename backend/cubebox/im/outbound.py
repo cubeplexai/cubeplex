@@ -8,6 +8,7 @@ Feishu-vocabulary calls live in the connector, not here.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -23,6 +24,15 @@ from cubebox.streams.run_events import read_run_events_after
 # constants here only govern flood-handling.
 _EDIT_INTERVAL_MAX = 10.0
 _MAX_FLOOD_STRIKES = 3
+
+# Terminal-delivery retry schedule. The streaming edits during a run can be
+# dropped on flood-control (the user sees the prior partial), but the
+# terminal ``done`` / ``error`` text MUST land or the user is stuck on a
+# stale bubble forever. Three tries with exponential backoff cover a
+# typical Feishu rate-limit window; if all three fail we fall back to a
+# fresh ``send_text_message`` (new bubble) which uses ``messages/create``
+# rather than ``messages/update`` and has its own quota.
+_TERMINAL_RETRY_DELAYS = (0.5, 1.5, 4.0)
 
 
 @dataclass(slots=True)
@@ -186,37 +196,17 @@ class OutboundRunTailer:
                             except Exception:
                                 logger.warning("artifact dispatch failed", exc_info=True)
                         continue
-                    if op.kind == "post":
-                        # _FloodSignal MUST be caught before the broad
-                        # Exception clause — otherwise a rate-limited first
-                        # post leaves state.message_id=None and every
-                        # subsequent text_delta re-emits 'post' (because
-                        # fold_event branches on message_id), turning a hot
-                        # rate-limit into a tight loop of create attempts
-                        # instead of adaptive backoff.
-                        ts: str | None = None
-                        try:
-                            ts = await self._connector.post_placeholder(op.text)
-                        except _FloodSignal:
-                            note_flood_strike(self._state)
-                        except Exception:
-                            logger.warning("post_placeholder failed", exc_info=True)
-                        if ts:
-                            self._state.message_id = ts
-                            note_edit_success(self._state)
-                    elif op.kind == "edit":
-                        try:
-                            await self._connector.edit(self._state.message_id, op.text)
-                            note_edit_success(self._state)
-                        except _FloodSignal:
-                            note_flood_strike(self._state)
-                        except Exception:
-                            logger.warning("edit failed", exc_info=True)
+                    delivered = await self._dispatch_op(op, is_terminal=op.final)
                     if op.final:
                         done = True
                         # The error branch in fold_event prepends "⚠️" to the
-                        # text; success is "we never saw that marker".
-                        if not op.text.startswith("⚠️"):
+                        # text; success is "we never saw that marker AND the
+                        # terminal send actually landed". Without the
+                        # ``delivered`` half a flood-blocked final edit would
+                        # exit the loop with no visible answer but the
+                        # success-side hook (remove ⏳ reaction) would still
+                        # fire — misleading.
+                        if delivered and not op.text.startswith("⚠️"):
                             succeeded = True
                 if done:
                     return
@@ -228,6 +218,80 @@ class OutboundRunTailer:
                     await self._connector.on_processing_failed(self._state)
             except Exception:
                 logger.warning("on_processing_* hook raised", exc_info=True)
+
+    async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
+        """Dispatch one post/edit/artifact op. Returns True iff delivered.
+
+        - Streaming ops (non-terminal): single attempt; flood / failure
+          updates the run state but the bubble may visibly fall behind.
+        - Terminal ops: retry on ``_FloodSignal`` up to ``_TERMINAL_RETRY_DELAYS``
+          with exponential backoff, then fall back to ``send_text_message``
+          (a NEW bubble via ``messages/create``, separate quota from
+          ``messages/update``) so the user always sees the final answer
+          even if Feishu was rate-limiting edits when the run finished.
+        """
+        if op.kind == "artifact" and op.artifact is not None:
+            if self._artifact_dispatcher is not None:
+                try:
+                    await self._artifact_dispatcher.handle(op.artifact)
+                    return True
+                except Exception:
+                    logger.warning("artifact dispatch failed", exc_info=True)
+            return False
+
+        attempt_budget = len(_TERMINAL_RETRY_DELAYS) if is_terminal else 1
+        last_signal: Exception | None = None
+        for attempt in range(attempt_budget):
+            try:
+                if op.kind == "post":
+                    ts = await self._connector.post_placeholder(op.text)
+                    if ts:
+                        self._state.message_id = ts
+                        note_edit_success(self._state)
+                        return True
+                    # ``post_placeholder`` returned None — non-flood failure
+                    # already logged inside the connector.
+                    return False
+                if op.kind == "edit":
+                    if self._state.message_id is None:
+                        # No placeholder yet; a terminal that arrived
+                        # before any text_delta can land. Promote to post.
+                        ts = await self._connector.post_placeholder(op.text)
+                        if ts:
+                            self._state.message_id = ts
+                            note_edit_success(self._state)
+                            return True
+                        return False
+                    await self._connector.edit(self._state.message_id, op.text)
+                    note_edit_success(self._state)
+                    return True
+            except _FloodSignal as exc:
+                note_flood_strike(self._state)
+                last_signal = exc
+                if attempt + 1 < attempt_budget:
+                    await asyncio.sleep(_TERMINAL_RETRY_DELAYS[attempt])
+                    continue
+            except Exception:
+                logger.warning("[outbound] {} op failed", op.kind, exc_info=True)
+                return False
+
+        if is_terminal and last_signal is not None:
+            # Edits exhausted under flood. Fall back to a NEW bubble:
+            # ``messages/create`` has a separate quota from ``messages/update``
+            # so the final answer can still land. The user sees both the
+            # stale partial AND the final bubble — slightly noisy but the
+            # answer is preserved, which matters more.
+            try:
+                new_id = await self._connector.send_text_message(op.text)
+                if new_id:
+                    self._state.message_id = new_id
+                    note_edit_success(self._state)
+                    return True
+            except Exception:
+                logger.warning(
+                    "[outbound] terminal send_text_message fallback failed", exc_info=True
+                )
+        return False
 
 
 class _FloodSignal(Exception):

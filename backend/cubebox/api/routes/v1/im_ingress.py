@@ -237,10 +237,50 @@ async def feishu_events(
     # in the place we want — fill it from the account we just resolved.
     event.account_external_id = account.external_account_id
 
+    # Build a connector with a live lark Client for the identity gate
+    # (email lookup + rejection reply). Same credentials as the bot's
+    # webhook auth path; cheap to construct per request.
+    gate_connector = _build_gate_connector(account, secrets, bot_open_id)
+
     # Use the module-level session maker so ingest_inbound_event owns its
     # own transaction (the request's session is bound to FastAPI's
     # dependency lifetime and isn't safe to share across transactions).
     maker: async_sessionmaker[AsyncSession] = async_session_maker
-    result = await ingest_inbound_event(event, account=account, session_maker=maker)
+    result = await ingest_inbound_event(
+        event,
+        account=account,
+        session_maker=maker,
+        identity_resolver=gate_connector,
+        rejection_notifier=gate_connector,
+    )
     logger.info("[Feishu ingress] {} {}: {}", account.id, event.platform_event_id, result.outcome)
     return Response(status_code=status.HTTP_200_OK)
+
+
+def _build_gate_connector(
+    account: IMConnectorAccount,
+    secrets: dict[str, Any],
+    bot_open_id: str,
+) -> FeishuConnector | None:
+    """Construct a connector bound to a live lark Client for identity gating.
+
+    Returns None and logs if ``lark_oapi`` isn't installed (defensive — the
+    dep is required at runtime). The caller treats None as "skip the gate"
+    so ingest falls back to ``acting_user_id`` instead of breaking.
+    """
+    try:
+        import lark_oapi as _lark
+        from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+    except ImportError:
+        logger.warning("[Feishu ingress] lark_oapi missing; identity gate disabled")
+        return None
+    domain = LARK_DOMAIN if str(secrets.get("domain", "feishu")) == "lark" else FEISHU_DOMAIN
+    client = (
+        _lark.Client.builder()
+        .app_id(str(secrets["app_id"]))
+        .app_secret(str(secrets["app_secret"]))
+        .domain(domain)
+        .log_level(_lark.LogLevel.WARNING)
+        .build()
+    )
+    return FeishuConnector(bot_open_id=bot_open_id, client=client)

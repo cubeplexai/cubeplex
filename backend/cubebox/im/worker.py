@@ -25,7 +25,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from cubebox.models.im_connector import IMConnectorAccount, IMRunQueueItem
+from cubebox.models.im_connector import IMConnectorAccount, IMIdentityLink, IMRunQueueItem
 from cubebox.repositories.im_connector import (
     claim_pending_queue_item,
     mark_queue_item_completed,
@@ -69,6 +69,36 @@ async def process_one_queue_item(
                 )
             )
         ).scalar_one()
+        if not account.enabled:
+            # Account was disabled between enqueue and now. Park the queue
+            # row + receipt terminally so we don't drain start_run for a
+            # disabled connector (would still bill LLM tokens and send
+            # replies under credentials operators just turned off). The
+            # corresponding receipt moves to ``failed`` for observability.
+            logger.info(
+                "[IM worker] dropping queue item {} — account {} is disabled",
+                item.id,
+                account.id,
+            )
+            await mark_queue_item_completed(session, item_id=item.id)
+            await mark_receipt_failed(session, receipt_id=item.receipt_id)
+            await session.commit()
+            return True
+        # Look up the sender → cubebox user override. ``im_identity_links``
+        # is populated by the inbound gate when sender resolves to a
+        # workspace member; if missing we fall back to ``acting_user_id``.
+        effective_user_id: str = account.acting_user_id
+        if item.sender_im_user_id:
+            link = (
+                await session.execute(
+                    select(IMIdentityLink).where(
+                        IMIdentityLink.account_id == item.account_id,  # type: ignore[arg-type]
+                        IMIdentityLink.im_user_id == item.sender_im_user_id,  # type: ignore[arg-type]
+                    )
+                )
+            ).scalar_one_or_none()
+            if link is not None:
+                effective_user_id = link.user_id
         await session.commit()
         captured = {
             "conversation_id": item.conversation_id,
@@ -76,7 +106,7 @@ async def process_one_queue_item(
             "receipt_id": item.receipt_id,
             "org_id": account.org_id,
             "workspace_id": account.workspace_id,
-            "acting_user_id": account.acting_user_id,
+            "acting_user_id": effective_user_id,
         }
         captured_item = item
 
@@ -115,40 +145,34 @@ async def process_one_queue_item(
         # failed (thundering herd against a transient outage).
         return False
 
-    # Fire ``on_run_started`` BEFORE flipping the queue row to terminal
-    # state. The callback is what spawns the outbound tailer (and decrypts
-    # the connector's secrets, builds the lark_oapi client, etc.); if any
-    # of that fails AFTER we've marked 'completed', the run silently
-    # succeeds on the agent side but the user never receives any IM reply
-    # and there is no retry path. By letting an exception here flow into
-    # the retry/park branch, the run becomes claimable again and the next
-    # attempt's tailer setup gets a second chance.
-    if on_run_started is not None:
-        try:
-            await on_run_started(run_id, captured_item)
-        except Exception:
-            logger.warning(
-                "[IM worker] on_run_started callback raised for run {}; "
-                "treating as transient and leaving the row for re-claim",
-                run_id,
-                exc_info=True,
-            )
-            async with session_maker() as session:
-                parked = await mark_queue_item_for_retry_or_fail(session, item_id=captured_item.id)
-                if parked:
-                    await mark_receipt_failed(session, receipt_id=captured["receipt_id"])
-                await session.commit()
-            return False
-
-    # Mark BOTH the receipt AND the queue row terminal. Without flipping the
-    # queue row's status off 'started', claim_pending_queue_item would
-    # re-claim it via the lease-expiry branch and re-fire start_run up to
-    # max_attempts times — every accepted IM message would become 5
-    # duplicate runs ~5 min apart, billed N times.
+    # Mark the queue row + receipt terminal BEFORE invoking the
+    # ``on_run_started`` hook. ``start_run`` has already executed (LLM
+    # tokens billed, run row created), so requeuing on a tailer-setup
+    # failure would re-fire ``start_run`` and produce duplicate runs
+    # + duplicate billing for one inbound message. Keep the queue row
+    # at-most-once for ``start_run`` and treat tailer failures as a
+    # separate post-success failure mode (logged + best-effort error
+    # bubble; no requeue).
     async with session_maker() as session:
         await mark_receipt_completed(session, receipt_id=captured["receipt_id"])
         await mark_queue_item_completed(session, item_id=captured_item.id)
         await session.commit()
+
+    if on_run_started is not None:
+        try:
+            await on_run_started(run_id, captured_item)
+        except Exception:
+            # Tailer setup blew up after ``start_run`` already succeeded.
+            # The user will not see the streaming reply — that's a UX
+            # regression we cannot fix here (re-running would double-bill).
+            # Log loudly so operators can investigate and (optionally)
+            # tell the user via another channel.
+            logger.exception(
+                "[IM worker] on_run_started failed after start_run; "
+                "user will not see a streaming reply for run {} (queue item {})",
+                run_id,
+                captured_item.id,
+            )
     return True
 
 

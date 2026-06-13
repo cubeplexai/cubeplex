@@ -65,9 +65,30 @@ async def share_page(
             _expired_html("Artifact not found"), status_code=status.HTTP_404_NOT_FOUND
         )
 
-    name = artifact.name or "artifact"
-    artifact_type = artifact.artifact_type or "file"
-    entry_file = artifact.entry_file or artifact.path.rsplit("/", 1)[-1]
+    # Render metadata. When the token was minted with snapshotted fields
+    # AND the artifact has since been updated to a different version,
+    # prefer the snapshot — otherwise the page would advertise the new
+    # ``entry_file`` under the old ``v{version}`` storage prefix and 404
+    # the iframe / image src. New tokens always include these fields; old
+    # ones (minted before the snapshot fix) fall through to the artifact
+    # row, which still works as long as the artifact wasn't updated.
+    token_version = version
+    snapshot_name = payload.get("name") if isinstance(payload, dict) else None
+    snapshot_type = payload.get("artifact_type") if isinstance(payload, dict) else None
+    snapshot_entry = payload.get("entry_file") if isinstance(payload, dict) else None
+    use_snapshot = token_version != artifact.version
+    if use_snapshot and snapshot_name:
+        name = str(snapshot_name)
+    else:
+        name = artifact.name or "artifact"
+    if use_snapshot and snapshot_type:
+        artifact_type = str(snapshot_type)
+    else:
+        artifact_type = artifact.artifact_type or "file"
+    if use_snapshot and snapshot_entry:
+        entry_file = str(snapshot_entry)
+    else:
+        entry_file = artifact.entry_file or artifact.path.rsplit("/", 1)[-1]
 
     body = _render_body(
         nonce=nonce,
@@ -191,11 +212,23 @@ async def share_file(
 
     mime, _ = mimetypes.guess_type(target)
     media_type = mime or stored_content_type or "application/octet-stream"
+    # Sandbox served content. A shared artifact may be HTML the user
+    # uploaded (or an LLM emitted); without this header, navigating
+    # directly to the file URL runs that HTML same-origin with the API
+    # and lets the page's JS read non-HttpOnly cookies (CSRF token) +
+    # issue authenticated XHRs back to /api. ``sandbox`` strips all
+    # default capabilities; ``allow-scripts`` (no ``allow-same-origin``)
+    # keeps interactive previews working while severing the same-origin
+    # link. ``frame-ancestors 'none'`` blocks clickjacking embedding.
     return Response(
         content=data,
         media_type=media_type,
         headers={
             "Cache-Control": "public, max-age=3600",
             "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": (
+                "sandbox allow-scripts; frame-ancestors 'none'; default-src 'self'"
+            ),
+            "X-Frame-Options": "SAMEORIGIN",
         },
     )
