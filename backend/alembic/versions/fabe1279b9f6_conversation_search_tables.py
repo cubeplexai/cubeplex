@@ -1,7 +1,7 @@
 """conversation_search_tables
 
 Revision ID: fabe1279b9f6
-Revises: ab40489adff0
+Revises: c8bbfbf153b6
 Create Date: 2026-06-12 01:27:03.126207
 """
 
@@ -14,7 +14,7 @@ from pgvector.sqlalchemy import Vector
 from cubebox.config import config
 
 revision: str = "fabe1279b9f6"
-down_revision: str | None = "ab40489adff0"
+down_revision: str | None = "c8bbfbf153b6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
