@@ -6,7 +6,11 @@ lands. For Task 2, only `optimize_markdown_style` is implemented.
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 # Demote H1/H2 → H4/H5 (cardkit renders larger headings full-width and
 # breaks the card layout). H3–H6 all collapse to H5 to keep visual rhythm
@@ -96,4 +100,83 @@ def optimize_markdown_style(
     return body
 
 
-__all__ = ["optimize_markdown_style"]
+_ARG_SUMMARY_CAP = 80
+
+
+def _truncate(value: str, *, cap: int = _ARG_SUMMARY_CAP) -> str:
+    if len(value) <= cap:
+        return value
+    return value[: cap - 1] + "…"
+
+
+def summarize_args(args: dict[str, Any]) -> str:
+    """Default args summary: JSON-flatten and truncate."""
+    if not args:
+        return ""
+    try:
+        compact = json.dumps(args, ensure_ascii=False, separators=(", ", ": "))
+    except (TypeError, ValueError):
+        compact = str(args)
+    return _truncate(compact)
+
+
+@dataclass(slots=True, frozen=True)
+class ToolDisplay:
+    """Per-tool rendering hints."""
+
+    icon: str
+    summarize: Callable[[dict[str, Any]], str]
+
+
+def _default_summary(args: dict[str, Any]) -> str:
+    return summarize_args(args)
+
+
+def default_display(name: str) -> ToolDisplay:
+    """Display for unregistered tools — generic icon + JSON summary."""
+    _ = name  # accepted for future per-name fallback heuristics
+    return ToolDisplay(icon="⚙️", summarize=_default_summary)
+
+
+def _summary_read_file(args: dict[str, Any]) -> str:
+    return _truncate(str(args.get("path", "")))
+
+
+def _summary_write_file(args: dict[str, Any]) -> str:
+    return _truncate(str(args.get("path", "")))
+
+
+def _summary_bash(args: dict[str, Any]) -> str:
+    return _truncate(str(args.get("cmd") or args.get("command", "")))
+
+
+def _summary_web_fetch(args: dict[str, Any]) -> str:
+    return _truncate(str(args.get("url", "")))
+
+
+def _summary_update_memory(args: dict[str, Any]) -> str:
+    return _truncate(str(args.get("key", "")))
+
+
+def _summary_recall_memory(args: dict[str, Any]) -> str:
+    return _truncate(str(args.get("query") or args.get("key", "")))
+
+
+TOOL_DISPLAY: dict[str, ToolDisplay] = {
+    "read_file": ToolDisplay(icon="📄", summarize=_summary_read_file),
+    "write_file": ToolDisplay(icon="📝", summarize=_summary_write_file),
+    "bash": ToolDisplay(icon="🖥️", summarize=_summary_bash),
+    "web_fetch": ToolDisplay(icon="🌐", summarize=_summary_web_fetch),
+    "web_search": ToolDisplay(icon="🔎", summarize=_summary_web_fetch),
+    "update_memory": ToolDisplay(icon="🧠", summarize=_summary_update_memory),
+    "recall_memory": ToolDisplay(icon="🧠", summarize=_summary_recall_memory),
+}
+
+
+__all__ = [
+    "TOOL_DISPLAY",
+    "ToolDisplay",
+    "default_display",
+    "optimize_markdown_style",
+    "summarize_args",
+]
