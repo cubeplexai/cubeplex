@@ -10,6 +10,7 @@ it back from the stored credential.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from loguru import logger
@@ -17,8 +18,53 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.schemas.im_connector import ImRuntimeStatus
 from cubebox.models.im_connector import IMConnectorAccount
+from cubebox.repositories.im_connector import _RuntimeAgg
 from cubebox.services.credential import CredentialService
+from cubebox.utils.time import utc_isoformat
+
+_WEBHOOK_FRESHNESS_WINDOW = timedelta(minutes=60)
+
+
+def compute_runtime(
+    account: IMConnectorAccount,
+    *,
+    long_conns: dict[str, Any],
+    agg: _RuntimeAgg,
+    bot_open_id: str | None,
+) -> ImRuntimeStatus:
+    """Derive ``ImRuntimeStatus`` from raw aggregates + in-process LC table.
+
+    ``long_conns`` maps account_id → FeishuLongConnection (typed loosely
+    to keep the service free of the SDK class import). ``bot_open_id``
+    is decrypted upstream from the credential row.
+    """
+    state: str
+    if bot_open_id is None:
+        state = "never_connected"
+    elif account.delivery_mode == "long_connection":
+        lc = long_conns.get(account.id)
+        if lc is not None and getattr(lc, "is_open", lambda: False)():
+            state = "connected"
+        else:
+            state = "disconnected"
+    else:  # webhook
+        if (
+            agg.last_receipt_at is not None
+            and (datetime.now(UTC) - agg.last_receipt_at) < _WEBHOOK_FRESHNESS_WINDOW
+        ):
+            state = "connected"
+        else:
+            state = "disconnected"
+    return ImRuntimeStatus(
+        connection_state=state,  # type: ignore[arg-type]
+        last_inbound_at=utc_isoformat(agg.last_receipt_at) if agg.last_receipt_at else None,
+        bot_open_id=bot_open_id,
+        pending_queue=agg.pending_count,
+        matched_24h=agg.matched_24h,
+        rejected_24h=agg.rejected_24h,
+    )
 
 
 class IMConnectorService:
