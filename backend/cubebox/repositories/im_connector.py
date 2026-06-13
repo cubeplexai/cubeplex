@@ -10,9 +10,10 @@ Thread-link, identity-link, and queue helpers run inside the
 """
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.conversation import Conversation
@@ -22,6 +23,92 @@ from cubebox.models.im_connector import (
     IMThreadLink,
     IMWebhookReceipt,
 )
+
+
+@dataclass(slots=True)
+class _RuntimeAgg:
+    """Aggregate snapshot used by ``compute_runtime``.
+
+    Default-initialised so callers can keyerror-safe ``.get(account_id)``
+    and fall back to all-zeros for accounts with no IM activity yet.
+    """
+
+    last_receipt_at: datetime | None = None
+    pending_count: int = 0
+    matched_24h: int = 0
+    rejected_24h: int = 0
+
+
+async def collect_runtime_aggregates(
+    session: AsyncSession,
+    *,
+    account_ids: list[str],
+) -> dict[str, _RuntimeAgg]:
+    """Three batched aggregate queries against IM tables, keyed by account_id.
+
+    Q1: MAX(im_webhook_receipts.created_at) GROUP BY account_id
+    Q2: COUNT(im_run_queue) WHERE status IN ('pending', 'started') GROUP BY
+        account_id
+    Q3: COUNT(im_webhook_receipts) split by status IN ('completed','rejected')
+        within last 24h GROUP BY account_id
+
+    Returns an _RuntimeAgg per requested account_id; accounts with no rows
+    in any table still get a default-initialised entry so callers don't
+    KeyError on the join.
+    """
+    if not account_ids:
+        return {}
+
+    out: dict[str, _RuntimeAgg] = {aid: _RuntimeAgg() for aid in account_ids}
+
+    # Q1: last receipt timestamp per account
+    q1 = (
+        select(  # type: ignore[call-overload]
+            IMWebhookReceipt.account_id,
+            func.max(IMWebhookReceipt.created_at),
+        )
+        .where(IMWebhookReceipt.account_id.in_(account_ids))  # type: ignore[attr-defined]
+        .group_by(IMWebhookReceipt.account_id)
+    )
+    for aid, ts in (await session.execute(q1)).all():
+        out[aid].last_receipt_at = ts
+
+    # Q2: pending + started queue rows per account
+    q2 = (
+        select(  # type: ignore[call-overload]
+            IMRunQueueItem.account_id,
+            func.count(IMRunQueueItem.id),  # type: ignore[arg-type]
+        )
+        .where(
+            IMRunQueueItem.account_id.in_(account_ids),  # type: ignore[attr-defined]
+            IMRunQueueItem.status.in_(("pending", "started")),  # type: ignore[attr-defined]
+        )
+        .group_by(IMRunQueueItem.account_id)
+    )
+    for aid, count in (await session.execute(q2)).all():
+        out[aid].pending_count = int(count)
+
+    # Q3: 24h matched/rejected split per account
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
+    matched_expr = func.sum(case((IMWebhookReceipt.status == "completed", 1), else_=0))  # type: ignore[arg-type]
+    rejected_expr = func.sum(case((IMWebhookReceipt.status == "rejected", 1), else_=0))  # type: ignore[arg-type]
+    q3 = (
+        select(  # type: ignore[call-overload]
+            IMWebhookReceipt.account_id,
+            matched_expr.label("matched"),
+            rejected_expr.label("rejected"),
+        )
+        .where(
+            IMWebhookReceipt.account_id.in_(account_ids),  # type: ignore[attr-defined]
+            IMWebhookReceipt.created_at >= cutoff,
+        )
+        .group_by(IMWebhookReceipt.account_id)
+    )
+    for aid, matched, rejected in (await session.execute(q3)).all():
+        out[aid].matched_24h = int(matched or 0)
+        out[aid].rejected_24h = int(rejected or 0)
+
+    return out
 
 
 async def get_account_by_external_id_unscoped(
