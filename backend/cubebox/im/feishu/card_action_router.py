@@ -28,6 +28,8 @@ class ActionPayload:
     choice: str
     operator_open_id: str
     question_id: str = ""
+    answer_key: str = ""
+    """cubepi form-schema key the resume call uses to build {answer_key: choice}."""
 
 
 @dataclass(slots=True, frozen=True)
@@ -37,6 +39,7 @@ class ResumeAction:
     choice: str
     operator_open_id: str
     question_id: str = ""
+    answer_key: str = ""
 
 
 def parse_action_payload(event: dict[str, Any]) -> ActionPayload:
@@ -59,6 +62,7 @@ def parse_action_payload(event: dict[str, Any]) -> ActionPayload:
         choice=choice,
         operator_open_id=operator_open_id,
         question_id=str(value.get("question_id") or ""),
+        answer_key=str(value.get("answer_key") or ""),
     )
 
 
@@ -84,6 +88,7 @@ def dispatch(
         choice=payload.choice,
         operator_open_id=payload.operator_open_id,
         question_id=payload.question_id,
+        answer_key=payload.answer_key,
     )
 
 

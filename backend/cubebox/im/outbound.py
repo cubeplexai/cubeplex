@@ -201,6 +201,10 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         more = len(questions_list) - 1 if len(questions_list) > 1 else 0
         if more > 0:
             prompt = f"{prompt}\n\n_(+{more} more question{'s' if more > 1 else ''})_"
+        # cubepi expects the answer dict keyed by `questions[*].key`. v1
+        # captures questions[0].key so the resume path can rebuild the
+        # right shape; multi-question forms fall back to questions[0].
+        answer_key = str(first.get("key") or "") or None
         raw_options = first.get("options") or []
         choices: list[tuple[str, str]] = []
         if isinstance(raw_options, list):
@@ -220,6 +224,7 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
             question=prompt,
             choices=choices,
             question_id=question_id,
+            answer_key=answer_key,
         )
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
@@ -280,6 +285,7 @@ async def register_awaiting_responder(
     *,
     run_id: str,
     responder_open_id: str,
+    redis_key_prefix: str,
     set_fn: Callable[..., Awaitable[None]],
 ) -> None:
     """Bind which Feishu user is allowed to answer this run's AskUser /
@@ -287,15 +293,19 @@ async def register_awaiting_responder(
 
     Called by the tailer when it sees an ``ask_user_request`` /
     ``sandbox_confirm_request`` event. The webhook ingress reads the
-    same key (``run:{run_id}:awaiting_responder``) to gate the callback.
+    same key (``{redis_key_prefix}:run:{run_id}:awaiting_responder``)
+    to gate the callback — both sides MUST use the same prefix so two
+    cubebox envs sharing one Redis don't collide.
 
-    No-ops when either arg is empty (defensive — a missing
-    responder_open_id should not blank out a prior valid binding).
+    No-ops when ``run_id`` or ``responder_open_id`` is empty (defensive —
+    a missing responder_open_id should not blank out a prior valid
+    binding). ``redis_key_prefix`` defaults are NOT permitted: a missing
+    prefix would collide silently across envs.
     """
     if not run_id or not responder_open_id:
         return
     await set_fn(
-        f"run:{run_id}:awaiting_responder",
+        f"{redis_key_prefix}:run:{run_id}:awaiting_responder",
         responder_open_id,
         ex=_AWAITING_TTL_SECONDS,
     )
@@ -374,6 +384,7 @@ class OutboundRunTailer:
         await register_awaiting_responder(
             run_id=self._run_id,
             responder_open_id=self._responder_open_id,
+            redis_key_prefix=self._prefix,
             set_fn=_set,
         )
 
@@ -442,6 +453,15 @@ class OutboundRunTailer:
                     await self._connector.on_processing_failed(self._state)
             except Exception:
                 logger.warning("on_processing_* hook raised", exc_info=True)
+            # Release the CardKitClient's HTTP/2 connection pool. Idempotent
+            # and safe even when cardkit is a test fake (only called if
+            # the attribute exists).
+            aclose = getattr(self._cardkit, "aclose", None)
+            if callable(aclose):
+                try:
+                    await aclose()
+                except Exception:
+                    logger.warning("[outbound] cardkit.aclose() raised", exc_info=True)
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
         """Translate one OutboundOp into the matching CardKit call.

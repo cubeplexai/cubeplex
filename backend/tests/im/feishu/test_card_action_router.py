@@ -21,6 +21,7 @@ def test_parse_payload_extracts_fields() -> None:
                 "run_id": "run_1",
                 "choice": "yes",
                 "question_id": "q_1",
+                "answer_key": "approve_deploy",
             },
         },
     }
@@ -29,16 +30,18 @@ def test_parse_payload_extracts_fields() -> None:
     assert parsed.run_id == "run_1"
     assert parsed.choice == "yes"
     assert parsed.question_id == "q_1"
+    assert parsed.answer_key == "approve_deploy"
     assert parsed.operator_open_id == "ou_user_1"
 
 
-def test_parse_payload_question_id_optional() -> None:
+def test_parse_payload_question_id_and_answer_key_optional() -> None:
     event = {
         "operator": {"open_id": "ou_user_1"},
         "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
     }
     parsed = parse_action_payload(event)
     assert parsed.question_id == ""
+    assert parsed.answer_key == ""
 
 
 def test_parse_payload_rejects_missing_action() -> None:
@@ -82,6 +85,7 @@ def test_dispatch_ask_user_returns_resume_action() -> None:
         choice="yes",
         operator_open_id="ou_x",
         question_id="q_1",
+        answer_key="approve_deploy",
     )
     action = dispatch(payload, expected_responder_open_id="ou_x")
     assert isinstance(action, ResumeAction)
@@ -89,6 +93,7 @@ def test_dispatch_ask_user_returns_resume_action() -> None:
     assert action.input_kind == "ask_user"
     assert action.choice == "yes"
     assert action.question_id == "q_1"
+    assert action.answer_key == "approve_deploy"
     assert action.operator_open_id == "ou_x"
 
 

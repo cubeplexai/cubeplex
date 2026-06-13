@@ -375,6 +375,8 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
         }
         if pending.question_id:
             value_payload["question_id"] = pending.question_id
+        if pending.answer_key:
+            value_payload["answer_key"] = pending.answer_key
         columns.append(
             {
                 "tag": "column",

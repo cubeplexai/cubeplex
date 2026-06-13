@@ -213,7 +213,9 @@ async def feishu_events(
     event_type = str(header.get("event_type") or "")
     if event_type == "card.action.trigger":
         handled, toast = await _handle_card_action(
-            payload, run_manager=request.app.state.run_manager
+            payload,
+            run_manager=request.app.state.run_manager,
+            redis_key_prefix=request.app.state.redis_key_prefix,
         )
         if handled:
             body: dict[str, Any] = {}
@@ -333,7 +335,7 @@ async def _redis_setnx(key: str, value: str, ex: int) -> bool:
 
 
 async def _handle_card_action(
-    event: dict[str, Any], *, run_manager: Any
+    event: dict[str, Any], *, run_manager: Any, redis_key_prefix: str
 ) -> tuple[bool, str | None]:
     """Process a ``card.action.trigger`` event.
 
@@ -346,7 +348,7 @@ async def _handle_card_action(
     if not token:
         return True, "缺少 token"
     # Token replay guard — Feishu's interaction token is one-time / 30 minutes.
-    fresh = await _redis_setnx(f"cardkit:token:{token}", "1", 1800)
+    fresh = await _redis_setnx(f"{redis_key_prefix}:cardkit:token:{token}", "1", 1800)
     if not fresh:
         return True, None  # idempotent no-op
 
@@ -356,7 +358,7 @@ async def _handle_card_action(
         logger.warning("[Feishu ingress] invalid card.action payload: {}", exc)
         return True, "未知操作"
 
-    expected = await _redis_get(f"run:{payload.run_id}:awaiting_responder")
+    expected = await _redis_get(f"{redis_key_prefix}:run:{payload.run_id}:awaiting_responder")
     action = dispatch_card_action(payload, expected_responder_open_id=expected)
     if action is None:
         return True, "这不是发给你的"
@@ -368,6 +370,7 @@ async def _handle_card_action(
             choice=action.choice,
             operator_open_id=action.operator_open_id,
             question_id=action.question_id,
+            answer_key=action.answer_key,
             run_manager=run_manager,
         )
     except Exception:

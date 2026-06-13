@@ -48,24 +48,7 @@ class _IngestCallable(Protocol):
 IngestCallable = Callable[..., Awaitable[Any]]
 
 
-# Captured at app startup so the SDK-side handler (no Request, no app
-# state) can hand a real RunManager to ``_handle_card_action``. Set via
-# :func:`set_run_manager` from ``cubebox.api.app`` during ``_start_im_runtime``.
-_run_manager_ref: Any = None
-
-
-def set_run_manager(run_manager: Any) -> None:
-    """Register the process-wide RunManager for long-connection card actions.
-
-    The webhook ingress reaches ``run_manager`` via ``request.app.state``;
-    the long-connection handler runs on the SDK thread with no request
-    context, so it relies on this module-level binding instead.
-    """
-    global _run_manager_ref
-    _run_manager_ref = run_manager
-
-
-async def _lc_handle_card_action(event: Any) -> Any:
+async def _lc_handle_card_action(event: Any, *, run_manager: Any, redis_key_prefix: str) -> Any:
     """Glue: convert the SDK's P2CardActionTrigger event into the dict
     envelope that ``_handle_card_action`` (the webhook ingress) accepts,
     invoke it, and return a ``P2CardActionTriggerResponse`` carrying any toast.
@@ -103,7 +86,9 @@ async def _lc_handle_card_action(event: Any) -> Any:
             },
         }
 
-    _, toast = await _handle_card_action(envelope, run_manager=_run_manager_ref)
+    _, toast = await _handle_card_action(
+        envelope, run_manager=run_manager, redis_key_prefix=redis_key_prefix
+    )
     response = P2CardActionTriggerResponse()
     if toast:
         cb_toast = CallBackToast()
@@ -120,6 +105,8 @@ def build_event_handler(
     ingest: IngestCallable,
     session_maker: Any,
     loop: asyncio.AbstractEventLoop,
+    run_manager: Any,
+    redis_key_prefix: str,
     outbound_client: Any | None = None,
 ) -> Any:
     """Build a lark_oapi event dispatcher that routes events into ``ingest``.
@@ -208,7 +195,12 @@ def build_event_handler(
             P2CardActionTriggerResponse,
         )
 
-        future = asyncio.run_coroutine_threadsafe(_lc_handle_card_action(data), loop)
+        future = asyncio.run_coroutine_threadsafe(
+            _lc_handle_card_action(
+                data, run_manager=run_manager, redis_key_prefix=redis_key_prefix
+            ),
+            loop,
+        )
         try:
             return future.result(timeout=10)
         except Exception as exc:
@@ -235,6 +227,8 @@ class FeishuLongConnection:
         bot_open_id: str,
         ingest: IngestCallable,
         session_maker: Any,
+        run_manager: Any,
+        redis_key_prefix: str,
         domain: str = "feishu",
     ) -> None:
         if not LARK_AVAILABLE:
@@ -245,6 +239,8 @@ class FeishuLongConnection:
         self._bot_open_id = bot_open_id
         self._ingest = ingest
         self._session_maker = session_maker
+        self._run_manager = run_manager
+        self._redis_key_prefix = redis_key_prefix
         self._domain = domain
         self._ws_future: asyncio.Future[Any] | None = None
         self._client: Any = None
@@ -274,6 +270,8 @@ class FeishuLongConnection:
             ingest=self._ingest,
             session_maker=self._session_maker,
             loop=loop,
+            run_manager=self._run_manager,
+            redis_key_prefix=self._redis_key_prefix,
             outbound_client=outbound_client,
         )
         self._client = lark.ws.Client(

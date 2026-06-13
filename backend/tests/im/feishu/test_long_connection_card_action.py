@@ -22,7 +22,7 @@ async def test_lc_handler_builds_envelope_and_calls_ingress(
     seen: list[dict[str, Any]] = []
 
     async def fake_handler(
-        envelope: dict[str, Any], *, run_manager: Any = None
+        envelope: dict[str, Any], *, run_manager: Any = None, redis_key_prefix: str = ""
     ) -> tuple[bool, str | None]:
         seen.append(envelope)
         return True, None
@@ -49,7 +49,9 @@ async def test_lc_handler_builds_envelope_and_calls_ingress(
     class _Event:
         event = _Data()
 
-    response = await lc._lc_handle_card_action(_Event())
+    response = await lc._lc_handle_card_action(
+        _Event(), run_manager=None, redis_key_prefix="cubebox-dev"
+    )
     # No toast → response.toast is None or a CallBackToast with empty content
     assert response is not None
     assert seen == [
@@ -79,7 +81,7 @@ async def test_lc_handler_carries_toast_when_set(
     from cubebox.im.feishu import long_connection as lc
 
     async def fake_handler(
-        envelope: dict[str, Any], *, run_manager: Any = None
+        envelope: dict[str, Any], *, run_manager: Any = None, redis_key_prefix: str = ""
     ) -> tuple[bool, str | None]:
         return True, "这不是发给你的"
 
@@ -99,7 +101,9 @@ async def test_lc_handler_carries_toast_when_set(
     class _Event:
         event = _Data()
 
-    response = await lc._lc_handle_card_action(_Event())
+    response = await lc._lc_handle_card_action(
+        _Event(), run_manager=None, redis_key_prefix="cubebox-dev"
+    )
     assert response is not None
     assert response.toast is not None
     assert response.toast.content == "这不是发给你的"
@@ -116,7 +120,7 @@ async def test_lc_handler_tolerates_missing_event_data(
     called: list[Any] = []
 
     async def fake_handler(
-        envelope: dict[str, Any], *, run_manager: Any = None
+        envelope: dict[str, Any], *, run_manager: Any = None, redis_key_prefix: str = ""
     ) -> tuple[bool, str | None]:
         called.append(envelope)
         return True, "未知操作"
@@ -126,7 +130,9 @@ async def test_lc_handler_tolerates_missing_event_data(
     class _Event:
         event = None  # SDK passes None when the payload is missing
 
-    response = await lc._lc_handle_card_action(_Event())
+    response = await lc._lc_handle_card_action(
+        _Event(), run_manager=None, redis_key_prefix="cubebox-dev"
+    )
     # The handler is still invoked with an empty envelope; downstream
     # parse_action_payload raises InvalidAction → toast "未知操作".
     assert response is not None
