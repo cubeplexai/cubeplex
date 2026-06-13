@@ -247,6 +247,66 @@ which is a separate piece of work.
    we'll start consuming (`tool_call` with full args/result, artifact
    metadata) are already emitted; the tailer only uses a subset today.
 
+## Addendum 2026-06-14: cubepi event field audit (Plan Task 0)
+
+Verified against `backend/cubebox/streams/run_manager.py:303-449`
+(`cubepi_dict_to_agent_event`) and `backend/cubebox/agents/schemas.py`.
+The IM tailer consumes events in **cubebox's typed shape after
+translation**, not cubepi's raw `AgentEvent` shape. Every field below is
+authoritative — implementer agents must match these names.
+
+### Canonical Redis-stream event shapes
+
+| Type | `data` fields | Notes |
+|---|---|---|
+| `text_delta` | `content: str` | Plain text delta |
+| `reasoning` | `content: str` | Skip in v1 |
+| `tool_call` | `tool_call_id: str`, `name: str`, `arguments: str` | `arguments` is a JSON STRING — `json.loads()` before display |
+| `tool_call_delta` | `tool_call_id`, `name`, `args_delta`, `index` | Skip in v1 (we wait for full `tool_call`) |
+| `tool_result` | `tool_call_id: str`, `name: str`, `content: str`, `is_error: bool`, `details: Any` | **No `elapsed_ms`** — compute from event timestamps |
+| `artifact` | `action: "created"\|"updated"`, `artifact: {id, artifact_type, name, version, entry_file, path}` | |
+| `citation` | `citation_id: str`, `chunks: [{chunk_index, content}]`, `metadata: {url, title, source_type, ...}`, `tool_call_id: str` | **No flat `index/url/title`** — read from `metadata.*`. Visible marker is `【citation_id-chunk_index】` |
+| `ask_user_request` | `question_id`, `questions: list[{key, prompt, options, multi_select, required}]`, `timeout_seconds` | |
+| `ask_user_resolved` | `question_id`, `answers: dict\|None`, `cancelled: bool`, `timed_out: bool` | |
+| `sandbox_confirm_request` | `question_id`, `tool_call_id`, `command: str`, `matched_pattern: str\|None`, `timeout_seconds` | |
+| `sandbox_confirm_resolved` | `question_id`, `decision`, `cancelled`, `timed_out`, `reason` | |
+| `done` | `{}` | Terminal |
+| `error` | `error_code: str`, `message: str`, `details: Any` | Terminal |
+| `usage` / `status` / `model_failover` / `injected_message` | (various) | Skip in v1 IM render |
+
+### Sub-agent tracking — no dedicated events
+
+Every `AgentEvent` carries `agent_id: str | None` and `agent_name`:
+
+- `agent_id = None` → main agent.
+- `agent_id = "subagent:<tool_call_id>"` → that subagent.
+
+The IM renderer groups sub-agent activity by `agent_id`. v1 "light"
+treatment: a `tool_call` with non-null `agent_id` increments a
+`SubAgentRow.tool_count` keyed by `agent_id` and does NOT add a step to
+the main `tool_steps` list.
+
+### Plan field-name diff at a glance
+
+| Plan v0 assumption | Real cubebox-published shape |
+|---|---|
+| `tool_call.data.id` | `tool_call.data.tool_call_id` |
+| `tool_call.data.args` (dict) | `tool_call.data.arguments` (JSON string) |
+| `tool_result.data.id` | `tool_result.data.tool_call_id` |
+| `tool_result.data.result` | `tool_result.data.content` (str) |
+| `tool_result.data.error` | `tool_result.data.is_error: bool` |
+| `tool_result.data.elapsed_ms` | (not emitted; compute locally) |
+| `citation.data.{index, url, title}` | `citation.data.{citation_id, metadata.url, metadata.title}` |
+| `ask_user` event name | `ask_user_request` |
+| `sandbox_confirm` event name | `sandbox_confirm_request` |
+| `sub_agent_start` / `sub_agent_tool_call` events | (do not exist — use `event.agent_id`) |
+| `done.data.elapsed_ms` | (not emitted; compute from first event timestamp) |
+
+### Upstream-first follow-ups
+
+None. cubepi already emits everything we need; cubebox already
+translates it. Plan corrections live entirely in this branch.
+
 ## 7. Suggested next step
 
 If we want to act on this:

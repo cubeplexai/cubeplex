@@ -14,6 +14,55 @@
 
 ---
 
+## Event schema reference (binding for ALL event-handling code below)
+
+The Task 0 audit found mismatches between this plan's v0 field-name
+assumptions and the actual cubebox-published shape. The authoritative
+schema is in
+[docs/dev/notes/2026-06-13-feishu-richer-output-borrow-from-openclaw.md](../notes/2026-06-13-feishu-richer-output-borrow-from-openclaw.md)
+under "Addendum 2026-06-14".
+
+**Implementer must use these exact names:**
+
+- `text_delta.data.content: str`
+- `tool_call.data.{tool_call_id: str, name: str, arguments: str}` —
+  `arguments` is a **JSON string**, decode with `json.loads`. The
+  `ToolStep` model stores `args: dict`; the renderer caller decodes.
+- `tool_result.data.{tool_call_id: str, name: str, content: str, is_error: bool, details: Any}`
+  — **no `elapsed_ms` field**. Compute elapsed locally from event
+  timestamps if needed (store `start_monotonic` on the ToolStep when
+  `tool_call` arrives).
+- `artifact.data.{action: "created"|"updated", artifact: {...}}`
+- `citation.data.{citation_id: str, chunks: list, metadata: {url, title, ...}, tool_call_id: str}`
+  — index the renderer's citation_index by `citation_id`, not a flat
+  `index` field. URL comes from `metadata.url`, title from
+  `metadata.title`.
+- `ask_user_request.data.{question_id: str, questions: list[{key, prompt, options, multi_select, required}], timeout_seconds}`
+  — multi-question form. v1 renders the first question only; choices
+  come from `questions[0].options`; the button payload carries
+  `question_id` so the resume call can match it.
+- `ask_user_resolved.data.{question_id, answers, cancelled, timed_out}`
+  — flips the `pending_input` to resolved state.
+- `sandbox_confirm_request.data.{question_id: str, tool_call_id, command: str, matched_pattern, timeout_seconds}`
+- `sandbox_confirm_resolved.data.{question_id, decision, cancelled, timed_out, reason}`
+- `done.data == {}` — no elapsed_ms. Compute total elapsed from the
+  difference between this event's timestamp and the first event's
+  timestamp (the tailer can stash a `run_start_monotonic`).
+- `error.data.{error_code: str, message: str, details: Any}`
+
+**Sub-agent tracking:** there are NO `sub_agent_*` events. Every
+`AgentEvent` carries `agent_id: str | None` and `agent_name: str | None`
+at the top level (alongside `type`, `timestamp`, `data`). `agent_id`
+of None = main agent; `agent_id = "subagent:<tool_call_id>"` = sub.
+`fold_event` reads `event.get("agent_id")` and, when non-None,
+routes the `tool_call` to a `SubAgentRow` (creating one if absent)
+and bumps its `tool_count` instead of appending a regular `ToolStep`.
+
+Tasks 8–11 below use these exact field names. The `ToolStep`,
+`PendingInput`, and renderer code paths reflect them.
+
+---
+
 ## File structure
 
 **New:**
