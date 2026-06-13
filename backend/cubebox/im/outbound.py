@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -19,6 +20,12 @@ from redis.asyncio import Redis
 
 from cubebox.im.types import RenderState
 from cubebox.streams.run_events import read_run_events_after
+
+# AskUser / SandboxConfirm card-button gating: when the tailer emits a
+# pending_input op we bind the inbound sender's open_id to a Redis key so
+# the webhook ingress can reject clicks from anyone else. 600s matches the
+# 10-minute pending-input timeout window in the spec §6.5.
+_AWAITING_TTL_SECONDS = 600
 
 # After this many consecutive flood-control responses we permanently disable
 # progressive patches for the rest of the run. The final ``done`` / ``error``
@@ -272,6 +279,31 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
     return None
 
 
+async def register_awaiting_responder(
+    *,
+    run_id: str,
+    responder_open_id: str,
+    set_fn: Callable[..., Awaitable[None]],
+) -> None:
+    """Bind which Feishu user is allowed to answer this run's AskUser /
+    SandboxConfirm card.
+
+    Called by the tailer when it sees an ``ask_user_request`` /
+    ``sandbox_confirm_request`` event. The webhook ingress reads the
+    same key (``run:{run_id}:awaiting_responder``) to gate the callback.
+
+    No-ops when either arg is empty (defensive — a missing
+    responder_open_id should not blank out a prior valid binding).
+    """
+    if not run_id or not responder_open_id:
+        return
+    await set_fn(
+        f"run:{run_id}:awaiting_responder",
+        responder_open_id,
+        ex=_AWAITING_TTL_SECONDS,
+    )
+
+
 def note_flood_strike(state: RenderState) -> None:
     """Tailer-side hook: connector signaled a flood-control response.
 
@@ -311,6 +343,7 @@ class OutboundRunTailer:
         state: RenderState,
         cardkit: Any,
         artifact_dispatcher: Any | None = None,
+        responder_open_id: str | None = None,
         block_ms: int = 2000,
     ) -> None:
         self._redis = redis
@@ -320,7 +353,32 @@ class OutboundRunTailer:
         self._state = state
         self._cardkit = cardkit
         self._artifact_dispatcher = artifact_dispatcher
+        self._responder_open_id = responder_open_id
         self._block_ms = block_ms
+
+    async def maybe_register_awaiting_responder(self, *, ev_payload: dict[str, Any]) -> None:
+        """Register the awaiting_responder binding if the event is a pending input.
+
+        Called by the run loop AFTER fold_event has emitted the patch_card op
+        and after the dispatcher has run it. Idempotent — safe to call on
+        every event; only writes Redis when the event is the right shape.
+        """
+        etype = ev_payload.get("type")
+        if etype not in ("ask_user_request", "sandbox_confirm_request"):
+            return
+        if not self._responder_open_id:
+            return
+
+        async def _set(key: str, value: str, *, ex: int) -> None:
+            if self._redis is None:
+                return
+            await self._redis.set(key, value, ex=ex)
+
+        await register_awaiting_responder(
+            run_id=self._run_id,
+            responder_open_id=self._responder_open_id,
+            set_fn=_set,
+        )
 
     async def run(self) -> None:
         """Tail until a terminal event arrives or the loop is cancelled."""
@@ -362,6 +420,12 @@ class OutboundRunTailer:
                     # retries against the new op kinds (card_create /
                     # stream_text / patch_card / finalize).
                     delivered = await self._dispatch_op(op, is_terminal=op.final)
+                    try:
+                        await self.maybe_register_awaiting_responder(ev_payload=ev.payload)
+                    except Exception:
+                        logger.warning(
+                            "[outbound] register_awaiting_responder raised", exc_info=True
+                        )
                     if op.final:
                         done = True
                         if delivered:

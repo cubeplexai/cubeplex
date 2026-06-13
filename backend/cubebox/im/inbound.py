@@ -179,6 +179,7 @@ async def ingest_inbound_event(
             reply_to_id=event.reply_to_id,
             inbound_message_id=event.inbound_message_id,
             sender_im_user_id=event.sender_ref,
+            sender_open_id=event.sender_open_id,
         )
         session.add(item)
         try:
