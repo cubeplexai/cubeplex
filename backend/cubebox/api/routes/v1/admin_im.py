@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.routes.v1._im_runtime import build_im_list_out
 from cubebox.api.schemas.im_connector import IMAccountListOut, IMAccountOut, ImRuntimeStatus
 from cubebox.auth.context import RequestContext
 from cubebox.credentials.dependencies import (
@@ -61,12 +62,17 @@ def _to_out(account: IMConnectorAccount) -> IMAccountOut:
 
 @router.get("/accounts", response_model=IMAccountListOut)
 async def list_org_accounts(
+    request: Request,
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
 ) -> IMAccountListOut:
     svc = _service(session, backend, ctx)
-    return IMAccountListOut(accounts=[_to_out(a) for a in await svc.list_for_org()])
+    accounts = await svc.list_for_org()
+    long_conns = getattr(request.app.state, "im_long_connections", None) or {}
+    return await build_im_list_out(
+        svc=svc, session=session, long_conns=long_conns, accounts=accounts
+    )
 
 
 async def _disconnect_long_connection(request: Request, account_id: str) -> None:

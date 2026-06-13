@@ -67,6 +67,27 @@ def compute_runtime(
     )
 
 
+async def _load_bot_open_id_via_credentials(
+    creds: CredentialService, *, credential_id: str
+) -> str | None:
+    """Decrypt the IM bot's credential row and return ``bot_open_id``.
+
+    Returns None on any error — the runtime status path uses None as
+    the "never_connected" signal so a transient decrypt failure doesn't
+    flap pills.
+    """
+    try:
+        plaintext = await creds.get_decrypted(credential_id=credential_id, requesting_kind="im_bot")
+        return str(json.loads(plaintext).get("bot_open_id") or "") or None
+    except Exception:
+        logger.warning(
+            "[IM] could not load bot_open_id for credential {}; runtime shows never_connected",
+            credential_id,
+            exc_info=True,
+        )
+        return None
+
+
 class IMConnectorService:
     """Service backing the workspace + admin IM connector routes."""
 
@@ -202,6 +223,12 @@ class IMConnectorService:
             IMConnectorAccount.org_id == self._org_id  # type: ignore[arg-type]
         )
         return list((await self._session.execute(stmt)).scalars().all())
+
+    async def load_bot_open_id(self, account: IMConnectorAccount) -> str | None:
+        """Decrypt the account's credential and return ``bot_open_id``."""
+        return await _load_bot_open_id_via_credentials(
+            self._credentials, credential_id=account.credential_id
+        )
 
     async def get(
         self,
