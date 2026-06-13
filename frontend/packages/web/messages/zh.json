@@ -105,7 +105,8 @@
     "insights": "洞察",
     "members": "成员",
     "extensions": "扩展",
-    "traces": "Trace"
+    "traces": "Trace",
+    "im": "IM 连接器"
   },
   "adminTraces": {
     "title": "Traces",
@@ -915,7 +916,8 @@
       "deleteNamePlaceholder": "输入工作区名称",
       "deleteConfirmButton": "永久删除",
       "cancel": "取消"
-    }
+    },
+    "navIm": "IM"
   },
   "wsMembers": {
     "title": "成员",
@@ -1568,5 +1570,123 @@
     "message": "请验证您的邮箱地址。",
     "resend": "重新发送验证邮件",
     "sent": "验证邮件已发送。"
+  },
+  "im": {
+    "nav": {
+      "workspaceTab": "IM",
+      "adminItem": "IM 连接器"
+    },
+    "empty": {
+      "workspace": {
+        "headline": "把团队 IM 接到 cubebox",
+        "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 cubebox 用户。",
+        "cta": "连接一个 {platform} bot",
+        "comingNote": "Slack · Teams · DingTalk — 后续支持",
+        "guideLink": "查看部署指南"
+      },
+      "admin": {
+        "headline": "暂无 IM 连接器",
+        "description": "Workspace admin 自助绑定。这里会显示组织内所有已绑定的账号。",
+        "cta": "去我的 workspace"
+      }
+    },
+    "platform": {
+      "feishu": {
+        "label": "飞书"
+      },
+      "slack": {
+        "label": "Slack",
+        "coming": "即将支持"
+      },
+      "teams": {
+        "label": "Teams",
+        "coming": "即将支持"
+      }
+    },
+    "status": {
+      "connected": "已连接",
+      "disconnected": "未连接",
+      "never": "从未连接",
+      "disabled": "已禁用"
+    },
+    "action": {
+      "connect": "连接",
+      "disable": "禁用",
+      "enable": "启用",
+      "delete": "删除",
+      "deleteConfirm": "输入 {botName} 以确认",
+      "openWorkspace": "去 workspace 设置"
+    },
+    "wizard": {
+      "title": "连接 IM bot",
+      "step": {
+        "platform": "平台",
+        "prereqs": "前置条件",
+        "credentials": "凭据",
+        "verify": "验证"
+      },
+      "feishu": {
+        "prereq": {
+          "app": "在 open.feishu.cn 创建了内部应用",
+          "bot": "应用里启用了 bot",
+          "scopes": "已开通 scopes：im:message、contact:user.email:readonly、contact:user.id:readonly",
+          "published": "应用版本已发布到当前 tenant"
+        },
+        "field": {
+          "appId": "App ID",
+          "appSecret": "App Secret",
+          "deliveryMode": "投递方式",
+          "domain": "Domain",
+          "encryptKey": "Encrypt Key",
+          "verificationToken": "Verification Token"
+        },
+        "deliveryMode": {
+          "long_connection": "长连接 (WebSocket)",
+          "webhook": "Webhook"
+        },
+        "domain": {
+          "feishu": "飞书 (国内)",
+          "lark": "Lark (海外)"
+        },
+        "openConsole": "打开飞书开放平台"
+      }
+    },
+    "error": {
+      "field": {
+        "appIdFormat": "App ID 必须以 cli_ 开头",
+        "appSecretBad": "凭据有误，请从飞书后台重新复制。"
+      },
+      "banner": {
+        "duplicateApp": "这个飞书应用已经被绑定过了。",
+        "duplicateAppGoTo": "查看已有绑定",
+        "hydrationFailed": "无法验证 bot 身份。请确认应用版本已发布、bot 已启用。",
+        "retry": "重试",
+        "unknown": "出错了。Log id：{logId}"
+      },
+      "toast": {
+        "network": "网络错误，请重试。",
+        "disabled": "已禁用",
+        "enabled": "已启用",
+        "deleted": "已删除"
+      }
+    },
+    "success": {
+      "toast": {
+        "connected": "Bot 已连接"
+      }
+    },
+    "runtime": {
+      "lastInbound": "上次入站 {when}",
+      "pending": "队列待处理 {count}",
+      "gate": {
+        "matched": "{count} 命中",
+        "rejected": "{count} 拒绝"
+      }
+    },
+    "deleteDialog": {
+      "title": "删除这个 bot 绑定？",
+      "body": "会删除凭据并断开当前 long-connection。飞书侧的应用本身不动。",
+      "confirmGate": "输入 {botName} 以确认"
+    }
   }
 }
