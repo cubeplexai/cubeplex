@@ -77,6 +77,75 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         state.last_stream_monotonic = now
         return OutboundOp(kind="stream_text", element_id="streaming_content", text=delta)
 
+    if etype == "tool_call":
+        import json as _json
+
+        from cubebox.im.feishu.card_model import SubAgentRow, ToolStep
+
+        tool_id = str(data.get("tool_call_id") or "")
+        name = str(data.get("name") or "tool")
+        args_raw = data.get("arguments")
+        if isinstance(args_raw, str):
+            if not args_raw:
+                args: dict[str, Any] = {}
+            else:
+                try:
+                    decoded = _json.loads(args_raw)
+                    args = decoded if isinstance(decoded, dict) else {"raw": decoded}
+                except (ValueError, TypeError):
+                    args = {"raw": args_raw}
+        elif isinstance(args_raw, dict):
+            args = args_raw
+        else:
+            args = {}
+
+        agent_id = event.get("agent_id")
+        if agent_id:
+            # Sub-agent tool_call: route to SubAgentRow, do NOT add to main tool_steps.
+            row = state.card_state.find_sub_agent(str(agent_id))
+            if row is None:
+                state.card_state.sub_agents.append(
+                    SubAgentRow(
+                        agent_id=str(agent_id),
+                        name=str(event.get("agent_name") or "sub-agent"),
+                        tool_count=1,
+                    )
+                )
+            else:
+                row.tool_count += 1
+        else:
+            if tool_id and state.card_state.find_tool(tool_id) is None:
+                state.card_state.tool_steps.append(
+                    ToolStep(id=tool_id, name=name, args=args, start_monotonic=now)
+                )
+
+        if state.card_id is None:
+            return OutboundOp(kind="card_create")
+        # Structural change — bypass patch_interval throttle.
+        state.last_patch_monotonic = now
+        return OutboundOp(kind="patch_card")
+
+    if etype == "tool_result":
+        agent_id = event.get("agent_id")
+        if agent_id:
+            # Sub-agent tool_result is a no-op for v1.
+            return None
+        tool_id = str(data.get("tool_call_id") or "")
+        step = state.card_state.find_tool(tool_id)
+        if step is None:
+            return None
+        elapsed_ms = max(0, int((now - step.start_monotonic) * 1000))
+        is_error = bool(data.get("is_error"))
+        content = str(data.get("content") or "")
+        if is_error:
+            step.mark_failed(error=content, elapsed_ms=elapsed_ms)
+        else:
+            step.mark_succeeded(result=content, elapsed_ms=elapsed_ms)
+        if state.card_id is None:
+            return OutboundOp(kind="card_create")
+        state.last_patch_monotonic = now
+        return OutboundOp(kind="patch_card")
+
     return None
 
 
