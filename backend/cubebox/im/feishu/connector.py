@@ -1,4 +1,4 @@
-"""Feishu connector: inbound parse + outbound send/edit/react (lark_oapi).
+"""Feishu connector: inbound parse + outbound CardKit init + reactions (lark_oapi).
 
 All synchronous lark_oapi SDK calls are wrapped in ``asyncio.to_thread`` so
 they don't block the event loop the run-queue worker and other tailers
@@ -6,11 +6,13 @@ share. Hermes' prior art at ``~/hermes-agent/gateway/platforms/feishu.py``
 established this discipline.
 
 Outbound surface area:
-- ``post_placeholder(text)`` -> message_id
-- ``edit(message_id, text)``
-- ``send_text_message(text)`` (non-edit send for auxiliary bubbles)
+- ``send_card_init_message(card_id)`` -> message_id (CardKit init bubble)
+- ``_send_emergency_text(text)`` (private; only invoked when CardKit
+  ``create_entity`` fails, so the user still gets a reply)
+- ``send_to_chat(chat_id, reply_to_id, text)`` (implements the
+  ``RejectionNotifier`` protocol — out-of-band rejection bubbles from the
+  identity gate; deliberately bypasses the card lifecycle)
 - ``upload_image(local_path)`` -> image_key
-- ``send_image_message(image_key)``
 - ``add_reaction(message_id, reaction_type)`` -> reaction_id
 - ``remove_reaction(message_id, reaction_id)``
 
@@ -58,11 +60,6 @@ class FeishuRateLimitError(_FloodSignal):
     Subclasses ``_FloodSignal`` so the tailer's adaptive-backoff branch catches
     it generically; the tailer never imports a Feishu-specific exception.
     """
-
-
-# Markdown-table detection (very rough — must NOT false-positive on prose).
-_MARKDOWN_TABLE_RE = re.compile(r"^\s*\|[^|\n]+\|.*\n\s*\|[-:\s|]+\|", re.MULTILINE)
-_MARKDOWN_HINT_RE = re.compile(r"(?m)^\s*(#|\*|-|\d+\.)\s|`{1,3}|\*\*|__")
 
 
 class FeishuConnector:
@@ -225,19 +222,6 @@ class FeishuConnector:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_payload(content: str) -> tuple[str, str]:
-        """Choose msg_type + payload for outbound text.
-
-        v1 always emits ``text`` type — most reliable across Feishu clients,
-        no markdown-rendering quirks (Feishu ``post`` type does NOT render
-        markdown tables, which would silently blank the message). When a
-        future connector adds richer ``post`` rendering it MUST branch the
-        message type BEFORE this method or detect tables inside it; the
-        ``_MARKDOWN_TABLE_RE`` constant is kept for that future branch.
-        """
-        return "text", json.dumps({"text": content}, ensure_ascii=False)
-
-    @staticmethod
     def _response_code(response: Any) -> int | None:
         code = getattr(response, "code", None)
         if code is None:
@@ -252,99 +236,6 @@ class FeishuConnector:
         code = cls._response_code(response)
         if code in _FLOOD_CONTROL_CODES:
             raise FeishuRateLimitError(f"{op}: flood control (code={code})")
-
-    async def post_placeholder(self, text: str) -> str | None:
-        """Post the streaming reply's first message.
-
-        - Group / threaded send → ``im.v1.message.reply`` against
-          ``self._reply_to_id``.
-        - DM (or unthreaded) send → ``im.v1.message.create`` with
-          ``receive_id=self._channel_id``.
-
-        Returns the new message id, or None if Feishu rejected the call
-        (logged; the tailer will treat None as "no placeholder yet" and
-        the next text_delta will retry as a post).
-        """
-        if self._client is None:
-            logger.warning("[Feishu] post_placeholder called without a bound client")
-            return None
-        msg_type, payload = self._build_payload(text)
-
-        from lark_oapi.api.im.v1 import (
-            CreateMessageRequest,
-            CreateMessageRequestBody,
-            ReplyMessageRequest,
-            ReplyMessageRequestBody,
-        )
-
-        if self._reply_to_id is not None:
-            body = (
-                ReplyMessageRequestBody.builder()
-                .content(payload)
-                .msg_type(msg_type)
-                .reply_in_thread(False)
-                .build()
-            )
-            req = (
-                ReplyMessageRequest.builder()
-                .message_id(self._reply_to_id)
-                .request_body(body)
-                .build()
-            )
-            response = await asyncio.to_thread(self._client.im.v1.message.reply, req)
-        else:
-            body = (
-                CreateMessageRequestBody.builder()
-                .receive_id(self._channel_id or "")
-                .msg_type(msg_type)
-                .content(payload)
-                .build()
-            )
-            req = (
-                CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
-            )
-            response = await asyncio.to_thread(self._client.im.v1.message.create, req)
-
-        self._raise_for_flood(response, "post_placeholder")
-        if not getattr(response, "success", lambda: False)():
-            logger.warning(
-                "[Feishu] post_placeholder failed: code={} msg={}",
-                getattr(response, "code", None),
-                getattr(response, "msg", None),
-            )
-            return None
-        data = getattr(response, "data", None)
-        message_id = getattr(data, "message_id", None) if data is not None else None
-        return str(message_id) if message_id else None
-
-    async def edit(self, message_id: str | None, text: str) -> bool:
-        """Update an already-posted message's content. Returns True iff delivered.
-
-        Non-flood failures (e.g. message deleted by user, content too
-        large for an update, transient API rejection) used to be only
-        logged, which left ``OutboundRunTailer._dispatch_op`` thinking
-        the terminal edit succeeded and the fallback ``send_text_message``
-        path never ran — the user was stuck on a stale partial reply.
-        Now we return False on non-flood failures so the tailer can
-        decide whether to retry / fall back.
-        """
-        if self._client is None or not message_id:
-            return False
-        from lark_oapi.api.im.v1 import UpdateMessageRequest, UpdateMessageRequestBody
-
-        msg_type, payload = self._build_payload(text)
-        body = UpdateMessageRequestBody.builder().msg_type(msg_type).content(payload).build()
-        req = UpdateMessageRequest.builder().message_id(message_id).request_body(body).build()
-        response = await asyncio.to_thread(self._client.im.v1.message.update, req)
-        self._raise_for_flood(response, "edit")
-        if not getattr(response, "success", lambda: False)():
-            logger.warning(
-                "[Feishu] edit failed: code={} msg={}",
-                getattr(response, "code", None),
-                getattr(response, "msg", None),
-            )
-            return False
-        return True
 
     async def resolve_email(self, open_id: str) -> str | None:
         """Look up a Feishu user's email via ``contact/v3/users/{open_id}``.
@@ -379,16 +270,14 @@ class FeishuConnector:
         return str(email) if email else None
 
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
-        """Send a one-off text message to a chat, optionally as a thread reply.
+        """Send a one-off plain text bubble to a chat, optionally as a thread reply.
 
-        Used for out-of-band notifications (e.g. "you're not a workspace
-        member" rejection) that must not interact with the streaming
-        ``post_placeholder`` / ``edit`` lifecycle the run tailer owns.
+        Implements the ``cubebox.im.identity.RejectionNotifier`` protocol —
+        the identity gate uses it to deliver the "not a workspace member"
+        rejection out-of-band, deliberately outside the card lifecycle.
         """
         if self._client is None or not chat_id:
             return None
-        msg_type, payload = self._build_payload(text)
-
         from lark_oapi.api.im.v1 import (
             CreateMessageRequest,
             CreateMessageRequestBody,
@@ -396,11 +285,12 @@ class FeishuConnector:
             ReplyMessageRequestBody,
         )
 
+        payload = json.dumps({"text": text}, ensure_ascii=False)
         if reply_to_id:
             body = (
                 ReplyMessageRequestBody.builder()
                 .content(payload)
-                .msg_type(msg_type)
+                .msg_type("text")
                 .reply_in_thread(False)
                 .build()
             )
@@ -410,7 +300,7 @@ class FeishuConnector:
             body = (
                 CreateMessageRequestBody.builder()
                 .receive_id(chat_id)
-                .msg_type(msg_type)
+                .msg_type("text")
                 .content(payload)
                 .build()
             )
@@ -428,22 +318,6 @@ class FeishuConnector:
         data = getattr(response, "data", None)
         message_id = getattr(data, "message_id", None) if data is not None else None
         return str(message_id) if message_id else None
-
-    async def send_text_message(self, text: str) -> str | None:
-        """Post a new (non-edit) bubble — used for share-link / artifact
-        captions that should be a separate message from the streaming reply.
-
-        Threads when ``reply_to_id`` is bound on the connector (group
-        runs were triggered by an ``@mention`` that gave us a parent
-        message id to reply to). Without this, a follow-up share-link
-        bubble in a group chat would post as a top-level message,
-        visually orphaned from the rest of the reply.
-        """
-        return await self.send_to_chat(
-            self._channel_id or "",
-            self._reply_to_id,
-            text,
-        )
 
     async def send_card_init_message(self, card_id: str) -> str | None:
         """Send the first IM message that carries the just-created CardKit card.
@@ -508,12 +382,58 @@ class FeishuConnector:
         return str(message_id) if message_id else None
 
     async def _send_emergency_text(self, text: str) -> str | None:
-        """v1 alias for the legacy text path — used only as CardKit fallback.
+        """Send a plain text bubble — used ONLY when CardKit create_entity fails.
 
-        Renamed properly in Task 18; for now it delegates to send_text_message
-        to keep the diff scoped to Task 12.
+        Threads when ``self._reply_to_id`` is bound (group runs triggered by
+        an @mention); otherwise creates a top-level message.
         """
-        return await self.send_text_message(text)
+        if self._client is None or not self._channel_id:
+            return None
+        from lark_oapi.api.im.v1 import (
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+            ReplyMessageRequest,
+            ReplyMessageRequestBody,
+        )
+
+        payload = json.dumps({"text": text}, ensure_ascii=False)
+        if self._reply_to_id:
+            body = (
+                ReplyMessageRequestBody.builder()
+                .content(payload)
+                .msg_type("text")
+                .reply_in_thread(False)
+                .build()
+            )
+            req = (
+                ReplyMessageRequest.builder()
+                .message_id(self._reply_to_id)
+                .request_body(body)
+                .build()
+            )
+            response = await asyncio.to_thread(self._client.im.v1.message.reply, req)
+        else:
+            body = (
+                CreateMessageRequestBody.builder()
+                .receive_id(self._channel_id)
+                .msg_type("text")
+                .content(payload)
+                .build()
+            )
+            req = (
+                CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
+            )
+            response = await asyncio.to_thread(self._client.im.v1.message.create, req)
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] _send_emergency_text failed: code={} msg={}",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+            )
+            return None
+        data = getattr(response, "data", None)
+        message_id = getattr(data, "message_id", None) if data is not None else None
+        return str(message_id) if message_id else None
 
     async def upload_image(self, local_path: str) -> str | None:
         """Upload an image to Feishu; return the resulting ``image_key``."""
@@ -540,33 +460,6 @@ class FeishuConnector:
         data = getattr(response, "data", None)
         image_key = getattr(data, "image_key", None) if data is not None else None
         return str(image_key) if image_key else None
-
-    async def send_image_message(self, image_key: str) -> str | None:
-        """Send an image message in the bound channel."""
-        if self._client is None:
-            return None
-        from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
-
-        payload = json.dumps({"image_key": image_key}, ensure_ascii=False)
-        body = (
-            CreateMessageRequestBody.builder()
-            .receive_id(self._channel_id or "")
-            .msg_type("image")
-            .content(payload)
-            .build()
-        )
-        req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
-        response = await asyncio.to_thread(self._client.im.v1.message.create, req)
-        if not getattr(response, "success", lambda: False)():
-            logger.warning(
-                "[Feishu] send_image_message failed: code={} msg={}",
-                getattr(response, "code", None),
-                getattr(response, "msg", None),
-            )
-            return None
-        data = getattr(response, "data", None)
-        message_id = getattr(data, "message_id", None) if data is not None else None
-        return str(message_id) if message_id else None
 
     # ------------------------------------------------------------------
     # Reactions (Task 10)

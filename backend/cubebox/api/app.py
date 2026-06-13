@@ -135,6 +135,8 @@ async def _start_im_runtime(app: FastAPI, run_manager: Any) -> None:
             reply_to_id=item.reply_to_id,
         )
         state = RenderState(
+            bot_name="cubebox",
+            run_id=run_id,
             reply_to_id=item.reply_to_id,
             inbound_message_id=item.inbound_message_id,
         )
