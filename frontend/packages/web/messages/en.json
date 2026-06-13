@@ -105,7 +105,8 @@
     "insights": "Insights",
     "members": "Members",
     "extensions": "Extensions",
-    "traces": "Traces"
+    "traces": "Traces",
+    "im": "IM connectors"
   },
   "adminTraces": {
     "title": "Traces",
@@ -915,7 +916,8 @@
       "deleteNamePlaceholder": "Type workspace name",
       "deleteConfirmButton": "Delete permanently",
       "cancel": "Cancel"
-    }
+    },
+    "navIm": "IM"
   },
   "wsMembers": {
     "title": "Members",
@@ -1568,5 +1570,123 @@
     "message": "Please verify your email address.",
     "resend": "Resend verification email",
     "sent": "Verification email sent."
+  },
+  "im": {
+    "nav": {
+      "workspaceTab": "IM",
+      "adminItem": "IM connectors"
+    },
+    "empty": {
+      "workspace": {
+        "headline": "Connect your team's IM to cubebox",
+        "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right cubebox user by email.",
+        "cta": "Connect a {platform} bot",
+        "comingNote": "Slack · Teams · DingTalk — coming later",
+        "guideLink": "Setup guide"
+      },
+      "admin": {
+        "headline": "No IM connectors yet",
+        "description": "Workspace admins connect bots from their workspace settings. You'll see all org-wide accounts here.",
+        "cta": "Open my workspaces"
+      }
+    },
+    "platform": {
+      "feishu": {
+        "label": "Feishu"
+      },
+      "slack": {
+        "label": "Slack",
+        "coming": "Coming soon"
+      },
+      "teams": {
+        "label": "Teams",
+        "coming": "Coming soon"
+      }
+    },
+    "status": {
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "never": "Never connected",
+      "disabled": "Disabled"
+    },
+    "action": {
+      "connect": "Connect",
+      "disable": "Disable",
+      "enable": "Enable",
+      "delete": "Delete",
+      "deleteConfirm": "Type {botName} to confirm",
+      "openWorkspace": "Open workspace settings"
+    },
+    "wizard": {
+      "title": "Connect IM bot",
+      "step": {
+        "platform": "Platform",
+        "prereqs": "Prerequisites",
+        "credentials": "Credentials",
+        "verify": "Verify"
+      },
+      "feishu": {
+        "prereq": {
+          "app": "Internal app created on open.feishu.cn",
+          "bot": "Bot enabled in the app",
+          "scopes": "Scopes granted: im:message, contact:user.email:readonly, contact:user.id:readonly",
+          "published": "App version published to tenant"
+        },
+        "field": {
+          "appId": "App ID",
+          "appSecret": "App Secret",
+          "deliveryMode": "Delivery mode",
+          "domain": "Domain",
+          "encryptKey": "Encrypt Key",
+          "verificationToken": "Verification Token"
+        },
+        "deliveryMode": {
+          "long_connection": "Long connection (WebSocket)",
+          "webhook": "Webhook"
+        },
+        "domain": {
+          "feishu": "Feishu (China)",
+          "lark": "Lark (Global)"
+        },
+        "openConsole": "Open Feishu console"
+      }
+    },
+    "error": {
+      "field": {
+        "appIdFormat": "App ID must start with cli_",
+        "appSecretBad": "Bad credentials. Re-copy from the Feishu console."
+      },
+      "banner": {
+        "duplicateApp": "This Feishu app is already connected.",
+        "duplicateAppGoTo": "Go to existing",
+        "hydrationFailed": "Could not verify the bot identity. Make sure the app version is published and the bot is enabled in the Feishu console.",
+        "retry": "Retry",
+        "unknown": "Something went wrong. Log id: {logId}"
+      },
+      "toast": {
+        "network": "Network error. Check connection.",
+        "disabled": "Bot disabled",
+        "enabled": "Bot enabled",
+        "deleted": "Account deleted"
+      }
+    },
+    "success": {
+      "toast": {
+        "connected": "Bot connected"
+      }
+    },
+    "runtime": {
+      "lastInbound": "Last inbound {when}",
+      "pending": "{count} pending",
+      "gate": {
+        "matched": "{count} matched",
+        "rejected": "{count} rejected"
+      }
+    },
+    "deleteDialog": {
+      "title": "Delete this bot connection?",
+      "body": "This removes the credential and stops any active long-connection. The Feishu app itself is untouched.",
+      "confirmGate": "Type {botName} to confirm"
+    }
   }
 }
