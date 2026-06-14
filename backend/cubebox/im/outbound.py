@@ -136,6 +136,10 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
 
         if state.card_id is None:
             return OutboundOp(kind="card_create")
+        # Respect ``edits_disabled`` after repeated 230020 strikes; the
+        # accumulated tool_steps land on the final ``done`` finalize.
+        if state.edits_disabled:
+            return None
         # Structural change — bypass patch_interval throttle.
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card")
@@ -158,6 +162,14 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
             step.mark_succeeded(result=content, elapsed_ms=elapsed_ms)
         if state.card_id is None:
             return OutboundOp(kind="card_create")
+        # After repeated 230020 flood strikes ``note_flood_strike`` sets
+        # ``edits_disabled`` specifically to stop hammering CardKit.
+        # tool_result keeps mutating ``state.card_state`` so the eventual
+        # finalize carries the right state, but we suppress the per-result
+        # patch_card op so tool-heavy runs don't fight the throttle. The
+        # accumulated state lands when ``done`` triggers ``finalize``.
+        if state.edits_disabled:
+            return None
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card")
 
@@ -182,6 +194,8 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
             )
         if state.card_id is None:
             return OutboundOp(kind="card_create")
+        if state.edits_disabled:
+            return None
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card")
 
@@ -214,25 +228,40 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # right shape; multi-question forms fall back to questions[0].
         answer_key = str(first.get("key") or "") or None
         raw_options = first.get("options") or []
-        choices: list[tuple[str, str]] = []
+        # Each choice is (label, value, button_type):
+        # - label is what the user reads on the button (option's ``label``)
+        # - value is what cubepi receives back in the answer dict (option's
+        #   ``value`` — falling back to ``key`` for legacy fixtures, then
+        #   ``label`` if neither is set)
+        # - button_type is the Feishu styling hint
+        # Keeping label and value separate matters for {label:"Yes", value:"yes"}
+        # — sending "Yes" back would mismatch cubepi's schema.
+        choices: list[tuple[str, str, str]] = []
         if isinstance(raw_options, list):
             for opt in raw_options:
                 if isinstance(opt, str) and opt:
-                    choices.append((opt, "default"))
+                    # Bare-string options collapse: the same string is both
+                    # the human label and the schema value.
+                    choices.append((opt, opt, "default"))
                 elif isinstance(opt, dict):
-                    # cubepi's normal option shape is {label, value} — the value
-                    # is what cubepi expects back as the answer, and the label is
-                    # the human-visible button text. Older fixtures sometimes
-                    # use {key} as a combined field, so fall back to it for
-                    # compatibility. Falling back to ``label`` would send the
-                    # display string instead of the schema value (e.g. "Yes"
-                    # instead of "yes") and cubepi would reject the answer.
-                    key = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
+                    value = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
+                    label = str(opt.get("label") or opt.get("value") or opt.get("key") or "")
                     btn_type = str(opt.get("type") or "default")
-                    if key:
-                        choices.append((key, btn_type))
+                    if value:
+                        choices.append((label, value, btn_type))
+        # Free-form questions (no options) cannot be answered via card buttons.
+        # The old "OK" fallback was misleading: clicking it sent ``{key: "ok"}``
+        # which cubepi either rejected as a schema mismatch or silently treated
+        # as the wrong value for a path/filename/date prompt. v1 doesn't render
+        # text input via CardKit; append a notice and leave ``choices`` empty
+        # so the renderer surfaces the "(等待响应)" hint instead of a bogus
+        # button. The user will need to answer through the web client.
         if not choices:
-            choices = [("ok", "primary")]
+            prompt = (
+                f"{prompt}\n\n_(此问题需要文本输入；请在 cubebox 网页端继续。)_"
+                if prompt
+                else "_(此问题需要文本输入；请在 cubebox 网页端继续。)_"
+            )
         state.card_state.pending_input = PendingInput(
             kind="ask_user",
             run_id=state.run_id,
@@ -256,7 +285,7 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
             kind="sandbox_confirm",
             run_id=state.run_id,
             question=prompt,
-            choices=[("approve", "primary"), ("deny", "danger")],
+            choices=[("允许", "approve", "primary"), ("拒绝", "deny", "danger")],
             question_id=question_id,
         )
         state.last_patch_monotonic = now
@@ -283,6 +312,19 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
 
     if etype == "done":
+        # RunManager stamps ``data.paused=true`` on the DoneEvent when the
+        # final_status is ``paused_hitl`` (cubebox/streams/run_manager.py).
+        # That's a soft pause, not a terminal end — resume_run_with_answer
+        # appends more events to the same run_id stream after the user
+        # answers. If we treat it as terminal here the tailer exits and the
+        # resumed events fall on the floor; the user sees the card stuck on
+        # the pending question with no follow-up answer ever delivered.
+        # Render a patch (so any pending_input change lands) and keep going.
+        if bool(data.get("paused")):
+            if state.card_id is None:
+                return OutboundOp(kind="card_create")
+            state.last_patch_monotonic = now
+            return OutboundOp(kind="patch_card")
         state.card_state.finalized = True
         elapsed_ms = max(0, int((now - state.card_state.run_start_monotonic) * 1000))
         state.card_state.elapsed_ms = elapsed_ms
@@ -417,6 +459,17 @@ class OutboundRunTailer:
             ttl_seconds = 0
         if ttl_seconds <= 0:
             ttl_seconds = _AWAITING_TTL_DEFAULT_SECONDS
+
+        # Cap at the run-event TTL: the resume path resolves the conversation
+        # via the Redis ``RunMeta`` hash (set by RunManager with this TTL).
+        # A binding that outlives RunMeta surfaces "会话已结束" on a click that
+        # the responder gate would have accepted — confusing and worse UX
+        # than just refusing the click promptly.
+        from cubebox.config import config as _cfg
+
+        run_event_ttl = int(_cfg.get("streaming.run_event_ttl_seconds", 43200))
+        if run_event_ttl > 0:
+            ttl_seconds = min(ttl_seconds, run_event_ttl)
 
         await register_awaiting_responder(
             run_id=self._run_id,

@@ -141,6 +141,50 @@ def test_tool_result_error_marks_failed_and_keeps_message() -> None:
     assert step.elapsed_ms == 500
 
 
+def test_tool_call_after_edits_disabled_suppresses_patch() -> None:
+    """After CardKit returned enough 230020 flood codes to trip
+    ``edits_disabled``, tool_call must keep mutating state (so the final
+    finalize carries the right tools) but skip emitting patch_card so the
+    tailer stops hammering the throttled endpoint. The accumulated state
+    lands when ``done`` triggers ``finalize``.
+    """
+    state = _state_with_card()
+    state.edits_disabled = True
+    op = fold_event(
+        {
+            "type": "tool_call",
+            "data": {"tool_call_id": "tc_disabled", "name": "calc", "arguments": "{}"},
+        },
+        state,
+        now=0.0,
+    )
+    assert op is None
+    # State still mutated so finalize carries the right snapshot.
+    assert any(s.id == "tc_disabled" for s in state.card_state.tool_steps)
+
+
+def test_tool_result_after_edits_disabled_suppresses_patch() -> None:
+    state = _state_with_card()
+    fold_event(
+        {"type": "tool_call", "data": {"tool_call_id": "tc_d2", "name": "calc"}},
+        state,
+        now=0.0,
+    )
+    # Subsequent tool_results during the flood window must not patch.
+    state.edits_disabled = True
+    op = fold_event(
+        {
+            "type": "tool_result",
+            "data": {"tool_call_id": "tc_d2", "content": "42", "is_error": False},
+        },
+        state,
+        now=0.5,
+    )
+    assert op is None
+    step = state.card_state.tool_steps[0]
+    assert step.status == "succeeded"
+
+
 def test_tool_call_before_card_emits_card_create() -> None:
     state = RenderState(bot_name="cubebox", run_id="run_1")
     # state.card_id is None — no card yet
