@@ -22,9 +22,12 @@ from cubebox.streams.run_events import read_run_events_after
 
 # AskUser / SandboxConfirm card-button gating: when the tailer emits a
 # pending_input op we bind the inbound sender's open_id to a Redis key so
-# the webhook ingress can reject clicks from anyone else. 600s matches the
-# 10-minute pending-input timeout window in the spec §6.5.
-_AWAITING_TTL_SECONDS = 600
+# the webhook ingress can reject clicks from anyone else. The default
+# (10 minutes) matches the spec §6.5 pending-input window; per-event
+# overrides come from the cubepi event's ``timeout_seconds`` field, capped
+# at 24h so a malformed event can't pin a Redis key forever.
+_AWAITING_TTL_DEFAULT_SECONDS = 600
+_AWAITING_TTL_MAX_SECONDS = 24 * 60 * 60
 
 # After this many consecutive flood-control responses we permanently disable
 # progressive patches for the rest of the run. The final ``done`` / ``error``
@@ -217,7 +220,14 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
                 if isinstance(opt, str) and opt:
                     choices.append((opt, "default"))
                 elif isinstance(opt, dict):
-                    key = str(opt.get("key") or opt.get("label") or "")
+                    # cubepi's normal option shape is {label, value} — the value
+                    # is what cubepi expects back as the answer, and the label is
+                    # the human-visible button text. Older fixtures sometimes
+                    # use {key} as a combined field, so fall back to it for
+                    # compatibility. Falling back to ``label`` would send the
+                    # display string instead of the schema value (e.g. "Yes"
+                    # instead of "yes") and cubepi would reject the answer.
+                    key = str(opt.get("value") or opt.get("key") or opt.get("label") or "")
                     btn_type = str(opt.get("type") or "default")
                     if key:
                         choices.append((key, btn_type))
@@ -292,6 +302,7 @@ async def register_awaiting_responder(
     responder_open_id: str,
     redis_key_prefix: str,
     set_fn: Callable[..., Awaitable[None]],
+    ttl_seconds: int = _AWAITING_TTL_DEFAULT_SECONDS,
 ) -> None:
     """Bind which Feishu user is allowed to answer this run's AskUser /
     SandboxConfirm card.
@@ -302,6 +313,12 @@ async def register_awaiting_responder(
     to gate the callback — both sides MUST use the same prefix so two
     cubebox envs sharing one Redis don't collide.
 
+    ``ttl_seconds`` lets the caller honor the event's ``timeout_seconds``
+    field — answering 20 minutes into a 30-minute HITL window would
+    otherwise hit a dropped binding and surface "这不是发给你的". Clamped
+    to ``[1, _AWAITING_TTL_MAX_SECONDS]`` so a malformed event can't pin
+    a Redis key beyond a day or set ex=0.
+
     No-ops when ``run_id`` or ``responder_open_id`` is empty (defensive —
     a missing responder_open_id should not blank out a prior valid
     binding). ``redis_key_prefix`` defaults are NOT permitted: a missing
@@ -309,10 +326,11 @@ async def register_awaiting_responder(
     """
     if not run_id or not responder_open_id:
         return
+    ttl = max(1, min(int(ttl_seconds or _AWAITING_TTL_DEFAULT_SECONDS), _AWAITING_TTL_MAX_SECONDS))
     await set_fn(
         f"{redis_key_prefix}:run:{run_id}:awaiting_responder",
         responder_open_id,
-        ex=_AWAITING_TTL_SECONDS,
+        ex=ttl,
     )
 
 
@@ -374,6 +392,11 @@ class OutboundRunTailer:
         Called by the run loop AFTER fold_event has emitted the patch_card op
         and after the dispatcher has run it. Idempotent — safe to call on
         every event; only writes Redis when the event is the right shape.
+
+        The TTL is derived from the event's ``timeout_seconds`` (falling back
+        to the default when absent or non-positive) so a 30-minute HITL pause
+        doesn't outlive its responder binding and surface "这不是发给你的"
+        on a still-valid answer.
         """
         etype = ev_payload.get("type")
         if etype not in ("ask_user_request", "sandbox_confirm_request"):
@@ -386,11 +409,21 @@ class OutboundRunTailer:
                 return
             await self._redis.set(key, value, ex=ex)
 
+        data = ev_payload.get("data") or {}
+        timeout_raw = data.get("timeout_seconds")
+        try:
+            ttl_seconds = int(timeout_raw) if timeout_raw is not None else 0
+        except (TypeError, ValueError):
+            ttl_seconds = 0
+        if ttl_seconds <= 0:
+            ttl_seconds = _AWAITING_TTL_DEFAULT_SECONDS
+
         await register_awaiting_responder(
             run_id=self._run_id,
             responder_open_id=self._responder_open_id,
             redis_key_prefix=self._prefix,
             set_fn=_set,
+            ttl_seconds=ttl_seconds,
         )
 
     async def run(self) -> None:
@@ -535,11 +568,19 @@ class OutboundRunTailer:
             if state.card_id is None or state.card_unavailable:
                 return False
             seq = state.card_state.advance_seq()
+            # Apply the same markdown sanitation as the full-card render path so
+            # an incremental stream PUT never carries content CardKit would reject
+            # (URL/path image markdown, raw H1/H2 headings) or that renders
+            # inconsistently until the next finalize. See card_renderer.render —
+            # we are mirroring its streaming_content element formatting.
+            from cubebox.im.feishu.card_renderer import optimize_markdown_style as _optimize
+
+            sanitized = _optimize(op.text, citation_index=state.card_state.citation_index)
             try:
                 await cardkit.stream_text(
                     card_id=state.card_id,
                     element_id=op.element_id or "streaming_content",
-                    content=op.text,
+                    content=sanitized,
                     sequence=seq,
                 )
                 note_edit_success(state)

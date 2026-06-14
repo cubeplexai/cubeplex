@@ -54,10 +54,14 @@ async def test_lc_handler_builds_envelope_and_calls_ingress(
     )
     # No toast → response.toast is None or a CallBackToast with empty content
     assert response is not None
+    # The LC shim now mirrors the click token at event.token (where the HTTP
+    # webhook path reads it) and keeps a copy at header.token for legacy
+    # callers — the replay guard in _handle_card_action reads event.token.
     assert seen == [
         {
             "header": {"event_type": "card.action.trigger", "token": "tok_xyz"},
             "event": {
+                "token": "tok_xyz",
                 "operator": {"open_id": "ou_user_1"},
                 "action": {
                     "value": {
