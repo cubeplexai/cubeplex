@@ -84,6 +84,8 @@ async def test_handler_marshals_envelope_and_dispatches_ingest_via_threadsafe() 
         ingest=fake_ingest,
         session_maker=None,
         loop=loop,
+        run_manager=None,
+        redis_key_prefix="test",
     )
 
     # Reach into the dispatcher to find the registered receive_v1 callback.
@@ -131,6 +133,8 @@ async def test_handler_drops_event_when_parser_returns_none() -> None:
         ingest=fake_ingest,
         session_maker=None,
         loop=asyncio.get_running_loop(),
+        run_manager=None,
+        redis_key_prefix="test",
     )
     on_message = _find_p2_message_receive_handler(handler)
     assert on_message is not None
