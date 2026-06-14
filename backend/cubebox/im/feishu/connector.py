@@ -381,10 +381,17 @@ class FeishuConnector:
             )
             return self._client.im.v1.message.create(create_req)
 
-        # 230099 = "Failed to create card content"; sub-ErrCode 11310 = "cardid
-        # is invalid". Observed intermittently when the IM side races ahead of
-        # CardKit propagation. Retry a few times with backoff before giving up.
+        # Retry envelope:
+        # - 230099 / sub-code 11310 = "cardid is invalid" — IM races ahead of
+        #   CardKit propagation, recovers in ~300ms-1s.
+        # - 230020 = "rate limited" / flood control — bursty incoming traffic
+        #   tripped a per-bot quota; backing off gives the quota window time
+        #   to roll. Without this retry, a single quota-shaped strike falls
+        #   straight to _send_emergency_text (same IM-message quota path), so
+        #   the user loses the rich card AND we put more load on the same
+        #   throttled endpoint.
         _RETRY_DELAYS = (0.2, 0.5, 1.0)
+        _RETRYABLE_CODES = {230020, 230099}
         last_code: Any = None
         last_msg: Any = None
         last_logid: Any = None
@@ -413,9 +420,10 @@ class FeishuConnector:
             is_cardid_invalid = (
                 last_code == 230099 and isinstance(last_msg, str) and "11310" in last_msg
             )
+            is_retryable = last_code in _RETRYABLE_CODES or is_cardid_invalid
             logger.warning(
                 "[Feishu] send_card_init_message attempt {} failed: code={} msg={} logid={}"
-                " card_id={!r} path={} reply_to={!r} channel={!r}",
+                " card_id={!r} path={} reply_to={!r} channel={!r} retryable={}",
                 attempt + 1,
                 last_code,
                 last_msg,
@@ -424,8 +432,9 @@ class FeishuConnector:
                 _path,
                 self._reply_to_id,
                 self._channel_id,
+                is_retryable,
             )
-            if not is_cardid_invalid or attempt >= len(_RETRY_DELAYS):
+            if not is_retryable or attempt >= len(_RETRY_DELAYS):
                 break
             await asyncio.sleep(_RETRY_DELAYS[attempt])
         return None

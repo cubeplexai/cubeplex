@@ -54,8 +54,21 @@ class PendingInput:
     kind: Literal["ask_user", "sandbox_confirm"]
     run_id: str
     question: str
-    choices: list[tuple[str, str]] = field(default_factory=list)
-    """Pairs of (choice_key, button_type). button_type ∈ {"primary","default","danger"}."""
+    choices: list[tuple[str, str, str]] = field(default_factory=list)
+    """Tuples of ``(label, value, button_type)``.
+
+    - ``label`` is the human-visible button text (the cubepi option's
+      ``label`` field). What the user actually reads on the card.
+    - ``value`` is the schema key cubepi expects back in the answer dict
+      (the option's ``value`` / ``key`` field). What the resume call sends.
+    - ``button_type`` ∈ {"primary","default","danger"} — Feishu rendering
+      hint (the option's ``type`` field).
+
+    Keeping label and value separate matters: cubepi schemas commonly use
+    machine values like ``yes`` / ``no`` with human-readable labels like
+    ``Yes`` / ``No``. Rendering the value as button text would force the
+    user to choose between machine tokens.
+    """
     question_id: str | None = None
     """cubepi-side identifier for matching the resume call."""
     answer_key: str | None = None

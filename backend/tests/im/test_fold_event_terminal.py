@@ -39,7 +39,7 @@ def test_ask_user_request_populates_pending_input() -> None:
     assert pending.question == "Continue?"
     assert pending.question_id == "q_1"
     assert pending.answer_key == "choice"
-    assert pending.choices == [("yes", "default"), ("no", "default")]
+    assert pending.choices == [("yes", "yes", "default"), ("no", "no", "default")]
     assert op is not None and op.kind == "patch_card"
 
 
@@ -68,10 +68,13 @@ def test_ask_user_request_with_dict_options() -> None:
     )
     pending = state.card_state.pending_input
     assert pending is not None
+    # No ``value`` field on the options — the renderer mirrors ``key`` as the
+    # label (legacy fixture compatibility). When real cubepi emits
+    # {label, value}, the next test verifies label/value diverge correctly.
     assert pending.choices == [
-        ("a", "primary"),
-        ("b", "default"),
-        ("c", "danger"),
+        ("a", "a", "primary"),
+        ("b", "b", "default"),
+        ("c", "c", "danger"),
     ]
 
 
@@ -104,10 +107,20 @@ def test_ask_user_request_prefers_value_over_label_for_callback() -> None:
     )
     pending = state.card_state.pending_input
     assert pending is not None
-    assert pending.choices == [("yes", "primary"), ("no", "danger")]
+    # Button TEXT is the human-readable label; button VALUE is the schema key
+    # cubepi expects in the answer dict.
+    assert pending.choices == [
+        ("Yes", "yes", "primary"),
+        ("No", "no", "danger"),
+    ]
 
 
-def test_ask_user_request_with_no_options_falls_back_to_ok() -> None:
+def test_ask_user_request_with_no_options_renders_text_input_notice() -> None:
+    """Free-form questions (no options) cannot be answered via card buttons.
+    Instead of synthesizing a misleading "OK" button (which would send the
+    string "ok" back to cubepi and fail the schema), the renderer surfaces
+    a notice pointing the user to the web client.
+    """
     state = _state_with_card()
     fold_event(
         {
@@ -122,7 +135,8 @@ def test_ask_user_request_with_no_options_falls_back_to_ok() -> None:
     )
     pending = state.card_state.pending_input
     assert pending is not None
-    assert pending.choices == [("ok", "primary")]
+    assert pending.choices == []
+    assert "网页端" in pending.question
 
 
 def test_ask_user_request_multiple_questions_notes_count() -> None:
@@ -168,7 +182,7 @@ def test_sandbox_confirm_request_renders_command() -> None:
     assert pending.kind == "sandbox_confirm"
     assert "rm -rf /" in pending.question
     assert pending.question_id == "qsc_1"
-    assert pending.choices == [("approve", "primary"), ("deny", "danger")]
+    assert pending.choices == [("允许", "approve", "primary"), ("拒绝", "deny", "danger")]
     assert op is not None and op.kind == "patch_card"
 
 
@@ -276,6 +290,22 @@ def test_done_finalizes_with_elapsed_from_run_start() -> None:
     assert state.card_state.elapsed_ms == 2500
     assert op is not None and op.kind == "finalize"
     assert op.final is True
+
+
+def test_done_with_paused_true_does_not_finalize() -> None:
+    """When RunManager pauses for HITL it appends ``done`` with
+    ``data.paused=true``; resume_run_with_answer later appends more events
+    to the same stream. If we treat paused-done as terminal the tailer
+    exits and the resumed answer never reaches the user. Emit a patch_card
+    so any pending_input mutation lands, but DO NOT mark final.
+    """
+    state = _state_with_card()
+    fold_event({"type": "text_delta", "data": {"content": "."}}, state, now=10.0)
+    op = fold_event({"type": "done", "data": {"paused": True}}, state, now=11.0)
+    assert state.card_state.finalized is False
+    assert op is not None
+    assert op.kind == "patch_card"
+    assert op.final is False
 
 
 def test_error_finalizes_with_message() -> None:

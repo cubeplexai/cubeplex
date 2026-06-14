@@ -352,11 +352,16 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
             ],
         }
     columns: list[dict[str, Any]] = []
-    for choice_key, btn_type in pending.choices:
+    for label, value, btn_type in pending.choices:
+        # The button TEXT carries the human-readable label so the user picks
+        # by what the option means. The button VALUE carries the machine
+        # value (what cubepi expects in the answer dict). If we used the
+        # value for both, prompts where label/value diverge (e.g.
+        # "Yes" / "yes") would render opaque tokens like "yes" / "no".
         value_payload: dict[str, Any] = {
             "action": pending.kind,
             "run_id": pending.run_id,
-            "choice": choice_key,
+            "choice": value,
         }
         if pending.question_id:
             value_payload["question_id"] = pending.question_id
@@ -368,7 +373,7 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
                 "elements": [
                     {
                         "tag": "button",
-                        "text": {"tag": "plain_text", "content": choice_key},
+                        "text": {"tag": "plain_text", "content": label},
                         "type": btn_type,
                         "behaviors": [{"type": "callback"}],
                         "value": value_payload,
