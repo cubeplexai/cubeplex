@@ -326,6 +326,13 @@ class FeishuConnector:
         ``self._reply_to_id``. DM → ``im.v1.message.create``.
 
         Returns the new bot message_id or None on failure.
+
+        Built-in retry: code 230099 / 11310 "cardid is invalid" is
+        intermittent — observed in real-tenant runs even when the same
+        card_id is reachable via a direct SDK / curl call moments later.
+        We don't yet know if it's CardKit-to-IM eventual consistency or
+        Feishu-side caching. The retry pattern (sleep 200ms → 500ms → 1s)
+        cushions that latency without blocking the run beyond ~2s.
         """
         if self._client is None:
             return None
@@ -340,22 +347,25 @@ class FeishuConnector:
             {"type": "card", "data": {"card_id": card_id}},
             ensure_ascii=False,
         )
-        if self._reply_to_id is not None:
-            reply_body = (
-                ReplyMessageRequestBody.builder()
-                .content(payload)
-                .msg_type("interactive")
-                .reply_in_thread(False)
-                .build()
-            )
-            reply_req = (
-                ReplyMessageRequest.builder()
-                .message_id(self._reply_to_id)
-                .request_body(reply_body)
-                .build()
-            )
-            response = await asyncio.to_thread(self._client.im.v1.message.reply, reply_req)
-        else:
+
+        _path = "reply" if self._reply_to_id is not None else "create"
+
+        def _do_call() -> Any:
+            if self._reply_to_id is not None:
+                reply_body = (
+                    ReplyMessageRequestBody.builder()
+                    .content(payload)
+                    .msg_type("interactive")
+                    .reply_in_thread(False)
+                    .build()
+                )
+                reply_req = (
+                    ReplyMessageRequest.builder()
+                    .message_id(self._reply_to_id)
+                    .request_body(reply_body)
+                    .build()
+                )
+                return self._client.im.v1.message.reply(reply_req)
             create_body = (
                 CreateMessageRequestBody.builder()
                 .receive_id(self._channel_id or "")
@@ -369,17 +379,56 @@ class FeishuConnector:
                 .request_body(create_body)
                 .build()
             )
-            response = await asyncio.to_thread(self._client.im.v1.message.create, create_req)
-        if not getattr(response, "success", lambda: False)():
-            logger.warning(
-                "[Feishu] send_card_init_message failed: code={} msg={}",
-                getattr(response, "code", None),
-                getattr(response, "msg", None),
+            return self._client.im.v1.message.create(create_req)
+
+        # 230099 = "Failed to create card content"; sub-ErrCode 11310 = "cardid
+        # is invalid". Observed intermittently when the IM side races ahead of
+        # CardKit propagation. Retry a few times with backoff before giving up.
+        _RETRY_DELAYS = (0.2, 0.5, 1.0)
+        last_code: Any = None
+        last_msg: Any = None
+        last_logid: Any = None
+        for attempt in range(len(_RETRY_DELAYS) + 1):
+            response = await asyncio.to_thread(_do_call)
+            if getattr(response, "success", lambda: False)():
+                data = getattr(response, "data", None)
+                message_id = getattr(data, "message_id", None) if data is not None else None
+                if attempt > 0:
+                    logger.info(
+                        "[Feishu] send_card_init_message succeeded on attempt {} after"
+                        " transient cardid-invalid; card_id={!r} path={}",
+                        attempt + 1,
+                        card_id,
+                        _path,
+                    )
+                return str(message_id) if message_id else None
+            last_code = getattr(response, "code", None)
+            last_msg = getattr(response, "msg", None)
+            raw = getattr(response, "raw", None)
+            last_logid = (
+                (raw.headers.get("X-Tt-Logid") or raw.headers.get("x-tt-logid"))
+                if raw is not None and hasattr(raw, "headers")
+                else None
             )
-            return None
-        data = getattr(response, "data", None)
-        message_id = getattr(data, "message_id", None) if data is not None else None
-        return str(message_id) if message_id else None
+            is_cardid_invalid = (
+                last_code == 230099 and isinstance(last_msg, str) and "11310" in last_msg
+            )
+            logger.warning(
+                "[Feishu] send_card_init_message attempt {} failed: code={} msg={} logid={}"
+                " card_id={!r} path={} reply_to={!r} channel={!r}",
+                attempt + 1,
+                last_code,
+                last_msg,
+                last_logid,
+                card_id,
+                _path,
+                self._reply_to_id,
+                self._channel_id,
+            )
+            if not is_cardid_invalid or attempt >= len(_RETRY_DELAYS):
+                break
+            await asyncio.sleep(_RETRY_DELAYS[attempt])
+        return None
 
     async def _send_emergency_text(self, text: str) -> str | None:
         """Send a plain text bubble — used ONLY when CardKit create_entity fails.

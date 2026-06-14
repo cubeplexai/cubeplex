@@ -109,10 +109,29 @@ class CardKitClient:
                 code = int(body.get("code", -1))
                 if code == 0:
                     data = body.get("data") or {}
-                    card_id = str(data.get("card_id") or "")
+                    card_id_raw = data.get("card_id")
+                    card_id = str(card_id_raw or "")
                     if not card_id:
                         raise CardKitCreateError("create_entity returned no card_id")
+                    logger.debug(
+                        "[CardKit] create_entity OK card_id={!r} (raw type={}) http_resp_logid={}",
+                        card_id,
+                        type(card_id_raw).__name__,
+                        resp.headers.get("X-Tt-Logid") or resp.headers.get("x-tt-logid"),
+                    )
                     return card_id
+                # Non-zero code — log the FULL response body so we can see whether
+                # Feishu reported a partial / asynchronous create that returned a
+                # card_id that's not yet usable.
+                logger.warning(
+                    "[CardKit] create_entity non-zero code={} msg={!r} ext={!r} logid={}",
+                    code,
+                    body.get("msg"),
+                    body.get("error", {}).get("troubleshooter")
+                    if isinstance(body.get("error"), dict)
+                    else None,
+                    resp.headers.get("X-Tt-Logid") or resp.headers.get("x-tt-logid"),
+                )
                 raise CardKitError(f"create_entity code={code} msg={body.get('msg')}")
             except (httpx.HTTPError, CardKitError) as exc:
                 last_exc = exc
