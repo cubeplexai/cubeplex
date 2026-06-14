@@ -236,49 +236,28 @@ def _tool_panel_header_title(state: CardState) -> str:
     return f"已完成 · {step_count} step{duration}"
 
 
-def _format_result_block(step: ToolStep) -> str:
-    if step.status == "failed":
-        body = step.error or "(no error message)"
-        return f"```text\n{body[:2000]}\n```"
-    raw = step.result
-    if raw is None:
-        return ""
-    if isinstance(raw, (dict, list)):
-        try:
-            body = json.dumps(raw, ensure_ascii=False, indent=2)
-            return f"```json\n{body[:2000]}\n```"
-        except (TypeError, ValueError):
-            pass
-    return f"```text\n{str(raw)[:2000]}\n```"
-
-
 def _render_tool_step(step: ToolStep) -> list[dict[str, Any]]:
+    """One row per tool call: icon + name + args (one-liner) + optional duration.
+
+    v1 deliberately omits the tool result body — the LLM's natural-language
+    answer (in the streaming_content markdown block beneath) already
+    summarizes the result for the user, so duplicating the raw output just
+    inflates the card.
+    """
     display = TOOL_DISPLAY.get(step.name) or default_display(step.name)
     summary = display.summarize(step.args)
     title_md = f"{display.icon} **{step.name}**"
     if summary:
         title_md += f" · {summary}"
-    parts: list[dict[str, Any]] = [
-        {"tag": "div", "text": {"tag": "lark_md", "content": title_md}},
-    ]
     if step.elapsed_ms > 0:
-        parts.append(
-            {
-                "tag": "div",
-                "margin": "0px 0px 0px 22px",
-                "text": {"tag": "plain_text", "content": f"{step.elapsed_ms}ms"},
-            }
-        )
-    result_block = _format_result_block(step)
-    if result_block:
-        parts.append(
-            {
-                "tag": "div",
-                "margin": "0px 0px 0px 22px",
-                "text": {"tag": "lark_md", "content": result_block},
-            }
-        )
-    return parts
+        title_md += f"  _{step.elapsed_ms}ms_"
+    if step.status == "failed":
+        # Surface failures inline so the user knows the answer is
+        # incomplete; the LLM may or may not have woven the failure into
+        # streaming_content.
+        err = (step.error or "(no error message)").strip().splitlines()[0][:120]
+        title_md += f"  ❌ {err}"
+    return [{"tag": "div", "text": {"tag": "lark_md", "content": title_md}}]
 
 
 def _render_sub_agent_row(row: SubAgentRow) -> dict[str, Any]:
@@ -416,10 +395,18 @@ def render(state: CardState) -> dict[str, Any]:
 
     Empty panels are dropped so an in-progress run with no tools yet does
     not render an empty `tool_panel` slot.
+
+    Order matches the chat reading flow ("what was done → final answer"):
+    tool_panel → streaming_content → artifacts → pending_input. cubepi
+    folds ALL text deltas (intro + post-tool answer) into one
+    streaming_content buffer, so placing the tool_panel ABOVE the markdown
+    avoids the visual oddity of the model's final answer appearing before
+    the tool calls it ran to produce that answer.
     """
-    elements: list[dict[str, Any]] = [_markdown_element(state)]
+    elements: list[dict[str, Any]] = []
     if state.tool_steps or state.sub_agents:
         elements.append(_tool_panel(state))
+    elements.append(_markdown_element(state))
     if state.artifacts:
         elements.append(_artifacts_panel(state))
     if state.pending_input is not None:
