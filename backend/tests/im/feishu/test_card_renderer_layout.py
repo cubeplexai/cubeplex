@@ -155,8 +155,13 @@ def test_pending_input_button_text_is_label_value_carries_schema_key() -> None:
     # Button TEXT carries the human-readable Chinese labels.
     button_texts = [btn["text"]["content"] for btn in buttons]
     assert button_texts == ["批准", "拒绝"]
-    # Button VALUE.choice carries the machine value the resume call sends.
-    button_choices = [btn["value"]["choice"] for btn in buttons]
+    # CardKit 2.0: callback payload lives INSIDE the callback behavior, NOT
+    # as a sibling ``value``. With value at the wrong slot Feishu sends back
+    # an empty action.value and the resume call fails.
+    for btn in buttons:
+        assert "value" not in btn, "value must be inside behaviors[0], not at button root"
+        assert btn["behaviors"][0]["type"] == "callback"
+    button_choices = [btn["behaviors"][0]["value"]["choice"] for btn in buttons]
     assert button_choices == ["approve", "deny"]
 
 

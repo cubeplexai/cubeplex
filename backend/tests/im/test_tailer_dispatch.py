@@ -193,6 +193,67 @@ async def test_dispatch_card_create_failure_surfaces_pending_input() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_patch_card_failure_surfaces_pending_via_emergency() -> None:
+    """When patch_card carries an AskUser/SandboxConfirm prompt and fails
+    (flood, transient error), surface the prompt via emergency text so the
+    user isn't stranded — paused-HITL ``done`` is non-terminal now so no
+    finalize fallback runs.
+    """
+    from cubebox.im.feishu.card_model import PendingInput
+
+    state = RenderState(bot_name="cubebox", run_id="run_p")
+    state.card_id = "AAQA"
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run_p",
+        question="Continue?",
+        choices=[("Yes", "yes", "primary")],
+        question_id="q_pend",
+    )
+
+    class _BrokenPatchKit(_FakeCardKit):
+        async def patch_card(
+            self, *, card_id: str, card_json: dict[str, Any], sequence: int
+        ) -> None:
+            raise RuntimeError("CardKit 500")
+
+    cardkit = _BrokenPatchKit()
+    conn = _FakeConnector()
+    tailer = _new_tailer(state, cardkit, conn)
+    delivered = await tailer._dispatch_op(OutboundOp(kind="patch_card"), is_terminal=False)
+    assert delivered is False
+    assert any("Continue?" in t for t in conn.emergency_texts)
+    assert any("网页端" in t for t in conn.emergency_texts)
+    # Same prompt surfaced once: a flood-throttled HITL pause must not spam.
+    delivered2 = await tailer._dispatch_op(OutboundOp(kind="patch_card"), is_terminal=False)
+    assert delivered2 is False
+    # Still only the original two messages (kind label + body).
+    pending_emergencies = [t for t in conn.emergency_texts if "Continue?" in t]
+    assert len(pending_emergencies) == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_finalize_exception_falls_back_to_emergency_text() -> None:
+    """If cardkit.finalize raises (e.g. token-provider error in _headers),
+    the buffered final answer must still reach the user via emergency text.
+    """
+    state = RenderState(bot_name="cubebox", run_id="run_f")
+    state.card_id = "AAQA"
+    state.card_state.streaming_content = "Here is the final answer."
+
+    class _RaisingFinalizeKit(_FakeCardKit):
+        async def finalize(self, *, card_id: str, card_json: dict[str, Any], sequence: int) -> bool:
+            raise RuntimeError("token provider blew up")
+
+    cardkit = _RaisingFinalizeKit()
+    conn = _FakeConnector()
+    tailer = _new_tailer(state, cardkit, conn)
+    delivered = await tailer._dispatch_op(OutboundOp(kind="finalize", final=True), is_terminal=True)
+    assert delivered is False
+    assert any("Here is the final answer." in t for t in conn.emergency_texts)
+
+
+@pytest.mark.asyncio
 async def test_dispatch_with_card_unavailable_no_ops() -> None:
     state = RenderState(bot_name="cubebox", run_id="run_1")
     state.card_unavailable = True

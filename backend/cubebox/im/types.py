@@ -90,6 +90,12 @@ class RenderState:
     inbound_message_id: str | None = None
     bot_message_id: str | None = None
     """Feishu message_id of the bubble that carries the card."""
+    pending_prompt_emergency_sent_qid: str | None = None
+    """When patch_card fails for a pending_input event we surface the HITL
+    question via emergency text so the Feishu user isn't stranded (paused
+    HITL ``done`` is non-terminal — there's no finalize fallback). Tracks
+    the question_id we already surfaced so a long patch-throttled HITL
+    pause doesn't spam the same prompt on every event."""
 
     def __post_init__(self) -> None:
         self.card_state = CardState(bot_name=self.bot_name, run_id=self.run_id)
