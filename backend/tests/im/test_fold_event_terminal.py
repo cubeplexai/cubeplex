@@ -115,6 +115,36 @@ def test_ask_user_request_prefers_value_over_label_for_callback() -> None:
     ]
 
 
+def test_ask_user_multi_question_routes_to_web_client_notice() -> None:
+    """Multi-question asks (questions list has 2+ entries) can't be answered
+    with a single button row — the click would only submit questions[0].
+    Route to the web client.
+    """
+    state = _state_with_card()
+    fold_event(
+        {
+            "type": "ask_user_request",
+            "data": {
+                "question_id": "q_mq",
+                "questions": [
+                    {
+                        "key": "k1",
+                        "prompt": "First?",
+                        "options": [{"label": "Yes", "value": "yes"}],
+                    },
+                    {"key": "k2", "prompt": "Second?"},
+                ],
+            },
+        },
+        state,
+        now=0.0,
+    )
+    pending = state.card_state.pending_input
+    assert pending is not None
+    assert pending.choices == []
+    assert "网页端" in pending.question
+
+
 def test_ask_user_multi_select_routes_to_web_client_notice() -> None:
     """Multi-select questions need a list answer; a single card-button click
     can only ship one scalar. Treat them like the free-form case — surface

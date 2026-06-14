@@ -375,8 +375,14 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
                         "tag": "button",
                         "text": {"tag": "plain_text", "content": label},
                         "type": btn_type,
-                        "behaviors": [{"type": "callback"}],
-                        "value": value_payload,
+                        # CardKit 2.0 schema: the callback payload lives INSIDE
+                        # the callback behavior, not as a top-level ``value``
+                        # sibling. With value at the wrong slot Feishu sends
+                        # back an empty ``action.value`` on click, and
+                        # ``parse_action_payload`` rejects the button click as
+                        # malformed, so the user cannot resume the paused run.
+                        # https://github.com/larksuite/node-sdk/blob/main/docs/channel.md
+                        "behaviors": [{"type": "callback", "value": value_payload}],
                     }
                 ],
             }

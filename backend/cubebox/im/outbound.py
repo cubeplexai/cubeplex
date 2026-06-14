@@ -273,7 +273,13 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # parsing so the renderer shows the notice instead of buttons that
         # would only send one of the N required selections.
         multi_select = bool(first.get("multi_select"))
-        if isinstance(raw_options, list) and not multi_select:
+        # Multi-QUESTION forms (questions list has 2+ entries) also can't be
+        # answered via a single button row: the click would submit only
+        # questions[0]'s answer and cubepi would reject or mis-resume the
+        # incomplete form. Treat like free-form / multi-select and route to
+        # the web client.
+        multi_question = len(questions_list) > 1
+        if isinstance(raw_options, list) and not multi_select and not multi_question:
             for opt in raw_options:
                 if isinstance(opt, str) and opt:
                     # Bare-string options collapse: the same string is both
@@ -293,11 +299,12 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # leave ``choices`` empty so the renderer surfaces the "(等待响应)" hint
         # instead of a bogus button. The user answers through the web client.
         if not choices:
-            notice = (
-                "_(多选题需在 cubebox 网页端作答。)_"
-                if multi_select
-                else "_(此问题需要文本输入；请在 cubebox 网页端继续。)_"
-            )
+            if multi_question:
+                notice = "_(此问需多题作答，请在 cubebox 网页端继续。)_"
+            elif multi_select:
+                notice = "_(多选题需在 cubebox 网页端作答。)_"
+            else:
+                notice = "_(此问题需要文本输入；请在 cubebox 网页端继续。)_"
             prompt = f"{prompt}\n\n{notice}" if prompt else notice
         state.card_state.pending_input = PendingInput(
             kind="ask_user",
@@ -696,9 +703,11 @@ class OutboundRunTailer:
                 # throttled trips ``edits_disabled`` and stops hammering
                 # CardKit through 230020 responses.
                 note_flood_strike(state)
+                await self._maybe_surface_pending_via_emergency()
                 return False
             except Exception:
                 logger.warning("[outbound] patch_card failed", exc_info=True)
+                await self._maybe_surface_pending_via_emergency()
                 return False
 
         if op.kind == "finalize":
@@ -709,13 +718,27 @@ class OutboundRunTailer:
                     await self._emergency_text(state.card_state.streaming_content[:4000])
                 return False
             seq = state.card_state.advance_seq()
-            delivered = bool(
-                await cardkit.finalize(
-                    card_id=state.card_id,
-                    card_json=render(state.card_state),
-                    sequence=seq,
+            try:
+                delivered = bool(
+                    await cardkit.finalize(
+                        card_id=state.card_id,
+                        card_json=render(state.card_state),
+                        sequence=seq,
+                    )
                 )
-            )
+            except Exception:
+                # ``cardkit.finalize`` is contracted to return False on its own
+                # retry exhaustion, but a token-provider exception in
+                # ``_headers()`` or a JSON decode failure escapes that contract.
+                # Without this guard the tailer's lifecycle wrapper catches the
+                # exception and only fires the failed-hook reaction; the buffered
+                # final answer never reaches the user. Treat as
+                # delivered=False so the emergency-text fallback below runs.
+                logger.warning(
+                    "[outbound] cardkit.finalize raised; falling back to emergency text",
+                    exc_info=True,
+                )
+                delivered = False
             if not delivered:
                 # CardKit finalize gave up after its retry budget (~2.5min).
                 # The card stays half-rendered without an answer; surface
@@ -739,6 +762,31 @@ class OutboundRunTailer:
             await self._connector._send_emergency_text(text)
         except Exception:
             logger.warning("[outbound] emergency text send failed", exc_info=True)
+
+    async def _maybe_surface_pending_via_emergency(self) -> None:
+        """Surface the HITL prompt via emergency text when patch_card cannot
+        deliver it.
+
+        The Feishu user is stranded otherwise: paused-HITL ``done`` is now
+        non-terminal (round 2), so there is no later ``finalize`` to render
+        the question — the card stays at the pre-pending state forever.
+        Fires at most once per question_id so a long flood-throttled HITL
+        pause doesn't spam the same prompt with every retry.
+        """
+        state = self._state
+        pending = state.card_state.pending_input
+        if pending is None or pending.resolved_choice is not None:
+            return
+        qid = pending.question_id or ""
+        if not qid or state.pending_prompt_emergency_sent_qid == qid:
+            return
+        state.pending_prompt_emergency_sent_qid = qid
+        kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
+        await self._emergency_text(
+            f"{kind_label}\n\n{pending.question}\n\n_(卡片更新暂时不可用；请在 cubebox 网页端继续。)_"[
+                :4000
+            ]
+        )
 
     async def _emergency_card_create_fallback(self) -> None:
         """Best-effort plain-text rescue when CardKit create or card-init fails.
