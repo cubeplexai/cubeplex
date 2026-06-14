@@ -37,6 +37,41 @@ def test_streaming_content_uses_optimized_markdown() -> None:
     assert streaming["content"].startswith("#### H1 title")
 
 
+def test_tool_panel_renders_before_streaming_content() -> None:
+    """Reading order matches the chat flow: 'what was done → answer'.
+
+    cubepi folds every text delta (intro + post-tool answer) into one
+    streaming_content buffer, so placing tool_panel below the markdown
+    would surface the model's final answer above the tools it ran to
+    produce it. v1 fixes the visual oddity by emitting tool_panel first."""
+    state = _empty_state()
+    state.streaming_content = "result text"
+    state.tool_steps.append(ToolStep(id="tc_1", name="bash", args={"cmd": "ls"}))
+    card = render(state)
+    ids_in_order = [e.get("element_id") for e in card["body"]["elements"]]
+    assert ids_in_order.index("tool_panel") < ids_in_order.index("streaming_content")
+
+
+def test_tool_step_omits_result_body() -> None:
+    """v1 doesn't echo the tool result inside the card — the LLM's
+    natural-language answer in streaming_content already summarizes it,
+    so duplicating raw output just inflates the card and clashes with
+    Feishu's 'request user to upgrade' fallback on long elements."""
+    state = _empty_state()
+    succeeded = ToolStep(id="tc_1", name="bash", args={"cmd": "ls"})
+    succeeded.mark_succeeded(result='{"big":"json"}' * 100, elapsed_ms=42)
+    state.tool_steps.append(succeeded)
+    card = render(state)
+    panel = next(e for e in card["body"]["elements"] if e.get("element_id") == "tool_panel")
+    # The full result body must not appear anywhere inside the panel.
+    serialized = str(panel)
+    assert '"big":"json"' not in serialized
+    # But the tool name + args + duration are still present.
+    assert "bash" in serialized
+    assert "ls" in serialized
+    assert "42ms" in serialized
+
+
 def test_tool_panel_renders_running_step() -> None:
     state = _empty_state()
     state.tool_steps.append(ToolStep(id="tc_1", name="bash", args={"cmd": "ls"}))
