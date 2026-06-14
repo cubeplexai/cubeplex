@@ -35,7 +35,7 @@ export function StepCredentials({
                 onValueChange={(v) => onChange({ [f.key]: v ?? '' })}
               >
                 <SelectTrigger id={`cred-${f.key}`}>
-                  <SelectValue />
+                  <SelectValue placeholder="Select…" />
                 </SelectTrigger>
                 <SelectContent>
                   {f.options.map((o) => (

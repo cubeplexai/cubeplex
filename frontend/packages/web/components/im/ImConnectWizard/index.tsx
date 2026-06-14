@@ -27,16 +27,13 @@ export function ImConnectWizard({ wsId, open, onClose, onSuccess }: Props): Reac
   const client = useMemo(() => createApiClient(''), [])
   const [platform, setPlatform] = useState<PlatformDescriptor | null>(null)
   const [stepIdx, setStepIdx] = useState(0)
-  const [form, setForm] = useState<FormState>({
-    delivery_mode: 'long_connection',
-    domain: 'feishu',
-  })
+  const [form, setForm] = useState<FormState>({})
   const mut = useConnectMutation(client, wsId)
 
   function handleClose(): void {
     setPlatform(null)
     setStepIdx(0)
-    setForm({ delivery_mode: 'long_connection', domain: 'feishu' })
+    setForm({})
     onClose()
   }
 

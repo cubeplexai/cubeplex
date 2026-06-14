@@ -62,14 +62,15 @@ That hydration succeeded against the real Feishu API: `bot_open_id` came back po
 - Long-connection startup `connected to wss://msg-frontier.feishu.cn/...`
 - Subsequent `GET /api/v1/ws/{ws}/im/accounts` returned the new `runtime` block with `connection_state: "connected"`, `bot_open_id` populated, `pending_queue: 0`, `matched_24h: 0`, `rejected_24h: 0`
 
-## Known cosmetic gaps (deferred follow-up)
+## Known cosmetic gaps (fixed)
 
-- StepCredentials Select still shows raw enum values (`long_connection`, `feishu`) rather than the i18n-resolved labels. The `t(...)` call returns the key when the i18n entry isn't in the dictionary at the path I picked — likely a JSON path bug between `messages/en.json` and the `o.labelKey`. Not blocking the flow; will fix in a follow-up.
-- StepPlatform renders 3 columns but only 2 cards (Feishu + Slack stub); Teams is mentioned in copy but missing from `ALL_PLATFORMS`. Add `teams.stub.ts` mirroring the Slack stub.
-- No Playwright e2e committed yet — the smoke script lives at
-  `frontend/packages/web/smoke.mjs` for now (untracked). The plan's
-  Playwright specs (F8/F9) are still pending; will land alongside the
-  fixes above.
+- ~~StepCredentials Select showed raw enum values~~ — fixed: removed
+  pre-set default values from form state; Select now shows a "Select…"
+  placeholder until the user explicitly picks an option, at which point
+  Radix captures the translated label correctly.
+- ~~StepPlatform had 3 columns but only 2 cards~~ — fixed: added
+  `teams.stub.ts` (`live: false`) and included it in `ALL_PLATFORMS`.
+- No Playwright e2e committed yet — the smoke script was untracked.
 
 ## Status
 
