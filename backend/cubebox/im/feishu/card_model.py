@@ -100,12 +100,6 @@ class CardState:
     """Bumped on run abort; in-flight responses for a stale epoch are dropped."""
     run_start_monotonic: float = 0.0
     """Stashed on first event; used to compute elapsed_ms on done (cubepi done.data is empty)."""
-    streamed_to: int = 0
-    """High-water mark: number of streaming_content characters already sent via
-    CardKit stream_text. A throttled text_delta updates streaming_content but
-    not this counter, so the next un-throttled emit covers the gap (stream_text
-    is append-semantics — silently dropping a delta loses those characters
-    until the next full patch_card fires)."""
 
     def advance_seq(self) -> int:
         seq = self.next_seq
