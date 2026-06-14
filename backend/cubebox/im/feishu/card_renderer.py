@@ -161,6 +161,11 @@ def _summary_bash(args: dict[str, Any]) -> str:
     return _truncate(str(args.get("cmd") or args.get("command", "")))
 
 
+def _summary_execute(args: dict[str, Any]) -> str:
+    # cubepi's sandbox.execute tool takes `command` (shell) or `script` (script body).
+    return _truncate(str(args.get("command") or args.get("script") or args.get("cmd", "")))
+
+
 def _summary_web_fetch(args: dict[str, Any]) -> str:
     return _truncate(str(args.get("url", "")))
 
@@ -177,6 +182,7 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
     "read_file": ToolDisplay(icon="📄", summarize=_summary_read_file),
     "write_file": ToolDisplay(icon="📝", summarize=_summary_write_file),
     "bash": ToolDisplay(icon="🖥️", summarize=_summary_bash),
+    "execute": ToolDisplay(icon="🖥️", summarize=_summary_execute),
     "web_fetch": ToolDisplay(icon="🌐", summarize=_summary_web_fetch),
     "web_search": ToolDisplay(icon="🔎", summarize=_summary_web_fetch),
     "update_memory": ToolDisplay(icon="🧠", summarize=_summary_update_memory),
