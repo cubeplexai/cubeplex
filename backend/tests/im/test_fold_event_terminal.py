@@ -115,6 +115,36 @@ def test_ask_user_request_prefers_value_over_label_for_callback() -> None:
     ]
 
 
+def test_ask_user_multi_select_routes_to_web_client_notice() -> None:
+    """Multi-select questions need a list answer; a single card-button click
+    can only ship one scalar. Treat them like the free-form case — surface
+    a notice pointing to the web client and skip the buttons.
+    """
+    state = _state_with_card()
+    fold_event(
+        {
+            "type": "ask_user_request",
+            "data": {
+                "question_id": "q_multi",
+                "questions": [
+                    {
+                        "key": "tags",
+                        "prompt": "Pick all that apply",
+                        "options": [{"label": "A", "value": "a"}, {"label": "B", "value": "b"}],
+                        "multi_select": True,
+                    }
+                ],
+            },
+        },
+        state,
+        now=0.0,
+    )
+    pending = state.card_state.pending_input
+    assert pending is not None
+    assert pending.choices == []
+    assert "多选" in pending.question and "网页端" in pending.question
+
+
 def test_ask_user_request_with_no_options_renders_text_input_notice() -> None:
     """Free-form questions (no options) cannot be answered via card buttons.
     Instead of synthesizing a misleading "OK" button (which would send the

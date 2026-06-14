@@ -140,7 +140,15 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # accumulated tool_steps land on the final ``done`` finalize.
         if state.edits_disabled:
             return None
-        # Structural change — bypass patch_interval throttle.
+        # Throttle bursty tool_call patches via state.patch_interval (default
+        # 1.5s). A run with 20 concurrent tool calls would otherwise fire 20
+        # full-card patches in a tight burst — enough to trip 230020 flood
+        # control before ``edits_disabled`` engages. State still mutates so
+        # the final ``done`` finalize carries every tool step. The first
+        # tool_call after a quiet window passes through immediately so the
+        # spinner appears promptly.
+        if now - state.last_patch_monotonic < state.patch_interval:
+            return None
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card")
 
@@ -170,6 +178,13 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # accumulated state lands when ``done`` triggers ``finalize``.
         if state.edits_disabled:
             return None
+        # Throttle bursty tool_result patches via patch_interval (default 1.5s).
+        # Tool-heavy runs with results arriving milliseconds apart would
+        # otherwise emit one full-card patch per result, defeating the bucket
+        # and tripping flood control. State still mutates so the eventual
+        # finalize carries the full snapshot.
+        if now - state.last_patch_monotonic < state.patch_interval:
+            return None
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card")
 
@@ -181,20 +196,35 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         art_id = str(artifact.get("id") or "")
         if not art_id:
             return None
+        new_type = str(artifact.get("artifact_type") or "")
+        new_name = str(artifact.get("name") or art_id)
         existing = next((a for a in state.card_state.artifacts if a.id == art_id), None)
         if existing is not None and action == "created":
             return None
         if existing is None:
             state.card_state.artifacts.append(
-                ArtifactItem(
-                    id=art_id,
-                    artifact_type=str(artifact.get("artifact_type") or ""),
-                    name=str(artifact.get("name") or art_id),
-                )
+                ArtifactItem(id=art_id, artifact_type=new_type, name=new_name)
             )
+        else:
+            # action == "updated": refresh the row in-place. Stale name / type
+            # would mis-label the artifact; stale image_key would keep
+            # rendering the old image after an image→html switch; stale
+            # share_url would point at a token minted for the old type. Drop
+            # the post-create fields (share_url / image_key / description) so
+            # IMArtifactDispatcher can re-mint them for the new payload.
+            existing.artifact_type = new_type
+            existing.name = new_name
+            existing.share_url = None
+            existing.image_key = None
+            existing.description = None
         if state.card_id is None:
             return OutboundOp(kind="card_create")
         if state.edits_disabled:
+            return None
+        # Artifacts are usually emitted one at a time, but a batch creation
+        # (e.g. a single tool call produces several files) can still burst.
+        # Throttle on patch_interval like tool_call / tool_result.
+        if now - state.last_patch_monotonic < state.patch_interval:
             return None
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card")
@@ -237,7 +267,13 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         # Keeping label and value separate matters for {label:"Yes", value:"yes"}
         # — sending "Yes" back would mismatch cubepi's schema.
         choices: list[tuple[str, str, str]] = []
-        if isinstance(raw_options, list):
+        # multi_select=True questions need a list answer; a single Feishu card
+        # button can only ship one scalar. The free-form fallback below
+        # already routes to the web client — reuse it by skipping option
+        # parsing so the renderer shows the notice instead of buttons that
+        # would only send one of the N required selections.
+        multi_select = bool(first.get("multi_select"))
+        if isinstance(raw_options, list) and not multi_select:
             for opt in raw_options:
                 if isinstance(opt, str) and opt:
                     # Bare-string options collapse: the same string is both
@@ -249,19 +285,20 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
                     btn_type = str(opt.get("type") or "default")
                     if value:
                         choices.append((label, value, btn_type))
-        # Free-form questions (no options) cannot be answered via card buttons.
-        # The old "OK" fallback was misleading: clicking it sent ``{key: "ok"}``
-        # which cubepi either rejected as a schema mismatch or silently treated
-        # as the wrong value for a path/filename/date prompt. v1 doesn't render
-        # text input via CardKit; append a notice and leave ``choices`` empty
-        # so the renderer surfaces the "(等待响应)" hint instead of a bogus
-        # button. The user will need to answer through the web client.
+        # Free-form (no options) and multi-select questions cannot be answered
+        # via a single card button. The old "OK" fallback was misleading: clicking
+        # it sent ``{key: "ok"}`` which cubepi either rejected as a schema
+        # mismatch or silently treated as the wrong value for a path/filename/date
+        # prompt. v1 doesn't render text input via CardKit; append a notice and
+        # leave ``choices`` empty so the renderer surfaces the "(等待响应)" hint
+        # instead of a bogus button. The user answers through the web client.
         if not choices:
-            prompt = (
-                f"{prompt}\n\n_(此问题需要文本输入；请在 cubebox 网页端继续。)_"
-                if prompt
+            notice = (
+                "_(多选题需在 cubebox 网页端作答。)_"
+                if multi_select
                 else "_(此问题需要文本输入；请在 cubebox 网页端继续。)_"
             )
+            prompt = f"{prompt}\n\n{notice}" if prompt else notice
         state.card_state.pending_input = PendingInput(
             kind="ask_user",
             run_id=state.run_id,
@@ -589,9 +626,7 @@ class OutboundRunTailer:
                     exc_info=True,
                 )
                 state.card_unavailable = True
-                await self._emergency_text("⚠️ 飞书富文本渲染暂时不可用，结果将以文本展示")
-                if state.card_state.streaming_content:
-                    await self._emergency_text(state.card_state.streaming_content[:4000])
+                await self._emergency_card_create_fallback()
                 return False
             state.card_id = card_id
             state.card_state.advance_seq()
@@ -611,9 +646,7 @@ class OutboundRunTailer:
                     " engaging emergency text"
                 )
                 state.card_unavailable = True
-                await self._emergency_text("⚠️ 飞书富文本渲染暂时不可用，结果将以文本展示")
-                if state.card_state.streaming_content:
-                    await self._emergency_text(state.card_state.streaming_content[:4000])
+                await self._emergency_card_create_fallback()
                 return False
             return True
 
@@ -706,6 +739,33 @@ class OutboundRunTailer:
             await self._connector._send_emergency_text(text)
         except Exception:
             logger.warning("[outbound] emergency text send failed", exc_info=True)
+
+    async def _emergency_card_create_fallback(self) -> None:
+        """Best-effort plain-text rescue when CardKit create or card-init fails.
+
+        Always sends the generic unavailability notice; then surfaces whatever
+        meaningful state we already have so the user is not stranded:
+
+        - ``streaming_content``: partial model reply collected so far.
+        - ``pending_input``: an AskUser / SandboxConfirm prompt. Important
+          because paused-HITL ``done`` events are intentionally non-terminal
+          now — if CardKit was down at the moment the pending event arrived
+          there is no later finalize to surface the question, and without
+          this hook the Feishu user would never see what they were being
+          asked.
+        """
+        state = self._state.card_state
+        await self._emergency_text("⚠️ 飞书富文本渲染暂时不可用，结果将以文本展示")
+        if state.streaming_content:
+            await self._emergency_text(state.streaming_content[:4000])
+        pending = state.pending_input
+        if pending is not None and pending.resolved_choice is None:
+            # Reproduce roughly what the renderer would have shown so the user
+            # can answer through the cubebox web client.
+            kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
+            await self._emergency_text(
+                f"{kind_label}\n\n{pending.question}\n\n_(请在 cubebox 网页端继续。)_"[:4000]
+            )
 
 
 class _FloodSignal(Exception):
