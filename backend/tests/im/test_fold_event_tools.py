@@ -15,6 +15,11 @@ from cubebox.im.types import RenderState
 def _state_with_card() -> RenderState:
     s = RenderState(bot_name="cubebox", run_id="run_1")
     s.card_id = "AAQA"
+    # Park last_patch_monotonic far in the past so tests that don't care about
+    # throttle behavior see patch_card emitted on the first event without
+    # threading time bookkeeping through every assertion. Tests that DO care
+    # (e.g. coalescing) override last_patch_monotonic explicitly.
+    s.last_patch_monotonic = -1000.0
     return s
 
 
@@ -33,7 +38,6 @@ def test_tool_call_appends_running_step_and_emits_patch() -> None:
         now=0.0,
     )
     assert op is not None
-    # tool_call bypasses patch throttle on first appearance.
     assert op.kind == "patch_card"
     assert len(state.card_state.tool_steps) == 1
     step = state.card_state.tool_steps[0]

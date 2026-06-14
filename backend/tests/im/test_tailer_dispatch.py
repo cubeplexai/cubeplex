@@ -159,6 +159,40 @@ async def test_dispatch_card_create_failure_engages_emergency_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_card_create_failure_surfaces_pending_input() -> None:
+    """When CardKit create fails and the run is parked on AskUser /
+    SandboxConfirm, the emergency text MUST carry the pending question.
+    paused-HITL ``done`` events are non-terminal now, so without this
+    surfacing the Feishu user would never see what they were being asked.
+    """
+    from cubebox.im.feishu.card_model import PendingInput
+
+    state = RenderState(bot_name="cubebox", run_id="run_pending")
+    state.card_state.pending_input = PendingInput(
+        kind="ask_user",
+        run_id="run_pending",
+        question="Should we deploy to prod?",
+        choices=[("Yes", "yes", "primary"), ("No", "no", "danger")],
+        question_id="q_p",
+    )
+
+    class _BrokenCardKit(_FakeCardKit):
+        async def create_entity(self, card_json: dict[str, Any]) -> str:
+            raise RuntimeError("CardKit 500")
+
+    cardkit = _BrokenCardKit()
+    conn = _FakeConnector()
+    tailer = _new_tailer(state, cardkit, conn)
+    delivered = await tailer._dispatch_op(OutboundOp(kind="card_create"), is_terminal=False)
+    assert delivered is False
+    assert state.card_unavailable is True
+    # Generic notice + the pending question both reach the user.
+    assert any("飞书富文本渲染暂时不可用" in t for t in conn.emergency_texts)
+    assert any("Should we deploy to prod?" in t for t in conn.emergency_texts)
+    assert any("网页端" in t for t in conn.emergency_texts)
+
+
+@pytest.mark.asyncio
 async def test_dispatch_with_card_unavailable_no_ops() -> None:
     state = RenderState(bot_name="cubebox", run_id="run_1")
     state.card_unavailable = True

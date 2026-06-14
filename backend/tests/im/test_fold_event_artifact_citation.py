@@ -12,6 +12,9 @@ from cubebox.im.types import RenderState
 def _state_with_card() -> RenderState:
     s = RenderState(bot_name="cubebox", run_id="run_1")
     s.card_id = "AAQA"
+    # Park last_patch_monotonic far in the past so tests don't trip the
+    # patch_interval coalescer just by using small ``now=`` values.
+    s.last_patch_monotonic = -1000.0
     return s
 
 
@@ -82,6 +85,7 @@ def test_artifact_updated_emits_op_even_if_already_present() -> None:
         state,
         now=0.0,
     )
+    # Wait long enough to clear the patch_interval coalescer.
     op2 = fold_event(
         {
             "type": "artifact",
@@ -91,11 +95,95 @@ def test_artifact_updated_emits_op_even_if_already_present() -> None:
             },
         },
         state,
-        now=1.0,
+        now=10.0,
     )
     assert op2 is not None
     assert op2.kind == "patch_card"
     assert len(state.card_state.artifacts) == 1
+
+
+def test_artifact_updated_refreshes_name_type_and_clears_render_fields() -> None:
+    """Updates must overwrite the existing row. Stale name/type would mis-label
+    it; stale image_key would keep rendering the old image after an
+    image→html switch; stale share_url would point at a token minted for the
+    old type. The dispatcher re-mints those after the patch lands.
+    """
+    state = _state_with_card()
+    fold_event(
+        {
+            "type": "artifact",
+            "data": {
+                "action": "created",
+                "artifact": {"id": "art_1", "artifact_type": "image", "name": "old.png"},
+            },
+        },
+        state,
+        now=0.0,
+    )
+    # The dispatcher would normally fill these on the original create. Set them
+    # manually so we can prove they get cleared on update.
+    row = state.card_state.artifacts[0]
+    row.image_key = "img_old"
+    row.share_url = "https://example.com/old"
+    row.description = "old description"
+
+    op = fold_event(
+        {
+            "type": "artifact",
+            "data": {
+                "action": "updated",
+                "artifact": {
+                    "id": "art_1",
+                    "artifact_type": "html",
+                    "name": "new.html",
+                },
+            },
+        },
+        state,
+        now=10.0,
+    )
+    assert op is not None and op.kind == "patch_card"
+    assert len(state.card_state.artifacts) == 1
+    refreshed = state.card_state.artifacts[0]
+    assert refreshed.name == "new.html"
+    assert refreshed.artifact_type == "html"
+    # Render fields cleared so the dispatcher re-mints them for the new type.
+    assert refreshed.image_key is None
+    assert refreshed.share_url is None
+    assert refreshed.description is None
+
+
+def test_artifact_patch_coalesces_within_patch_interval() -> None:
+    """Two artifact events arriving within ``patch_interval`` only emit one
+    patch_card — the second collapses to None. The state still mutates so the
+    eventual finalize carries both rows.
+    """
+    state = _state_with_card()
+    fold_event(
+        {
+            "type": "artifact",
+            "data": {
+                "action": "created",
+                "artifact": {"id": "art_a", "artifact_type": "doc", "name": "a"},
+            },
+        },
+        state,
+        now=10.0,
+    )
+    # Arrives 0.5s later — well within the default 1.5s patch_interval.
+    op2 = fold_event(
+        {
+            "type": "artifact",
+            "data": {
+                "action": "created",
+                "artifact": {"id": "art_b", "artifact_type": "doc", "name": "b"},
+            },
+        },
+        state,
+        now=10.5,
+    )
+    assert op2 is None
+    assert len(state.card_state.artifacts) == 2
 
 
 def test_artifact_without_id_is_dropped() -> None:
