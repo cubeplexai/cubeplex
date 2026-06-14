@@ -41,8 +41,9 @@ async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(im_ingress, "_redis_setnx", fake_setnx)
 
     event = {
-        "header": {"event_type": "card.action.trigger", "token": "tok_abc"},
+        "header": {"event_type": "card.action.trigger"},
         "event": {
+            "token": "tok_abc",
             "operator": {"open_id": "ou_user_1"},
             "action": {
                 "value": {
@@ -103,8 +104,9 @@ async def test_card_action_token_replay_idempotent(
     monkeypatch.setattr(im_ingress, "_redis_setnx", fake_setnx)
 
     event = {
-        "header": {"event_type": "card.action.trigger", "token": "tok_dup"},
+        "header": {"event_type": "card.action.trigger"},
         "event": {
+            "token": "tok_dup",
             "operator": {"open_id": "ou_user_1"},
             "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
         },
@@ -138,8 +140,9 @@ async def test_card_action_responder_mismatch_returns_toast(
     monkeypatch.setattr(im_ingress, "_redis_setnx", fake_setnx)
 
     event = {
-        "header": {"event_type": "card.action.trigger", "token": "tok_3"},
+        "header": {"event_type": "card.action.trigger"},
         "event": {
+            "token": "tok_3",
             "operator": {"open_id": "ou_someone_else"},
             "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
         },
@@ -174,8 +177,9 @@ async def test_card_action_resume_exception_returns_friendly_toast(
     monkeypatch.setattr(im_ingress, "_redis_setnx", fake_setnx)
 
     event = {
-        "header": {"event_type": "card.action.trigger", "token": "tok_x"},
+        "header": {"event_type": "card.action.trigger"},
         "event": {
+            "token": "tok_x",
             "operator": {"open_id": "ou_user_1"},
             "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
         },
@@ -212,8 +216,9 @@ async def test_card_action_resume_returns_false_surfaces_ended_toast(
     monkeypatch.setattr(im_ingress, "_redis_setnx", fake_setnx)
 
     event = {
-        "header": {"event_type": "card.action.trigger", "token": "tok_e"},
+        "header": {"event_type": "card.action.trigger"},
         "event": {
+            "token": "tok_e",
             "operator": {"open_id": "ou_user_1"},
             "action": {"value": {"action": "ask_user", "run_id": "run_1", "choice": "yes"}},
         },
@@ -237,8 +242,9 @@ async def test_card_action_invalid_payload_returns_toast(
     monkeypatch.setattr(im_ingress, "_redis_setnx", fake_setnx)
 
     event = {
-        "header": {"event_type": "card.action.trigger", "token": "tok_q"},
+        "header": {"event_type": "card.action.trigger"},
         "event": {
+            "token": "tok_q",
             "operator": {"open_id": "ou_x"},
             "action": {"value": {"action": "weird", "run_id": "r", "choice": "c"}},
         },

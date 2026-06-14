@@ -208,6 +208,34 @@ async def feishu_events(
         logger.warning("[Feishu ingress] verification token rejected: {}", exc)
         return Response(status_code=status.HTTP_401_UNAUTHORIZED)
 
+    # url_verification challenge — only echo AFTER the token check passes,
+    # so we never bounce attacker-supplied challenge data without auth.
+    if payload.get("type") == "url_verification":
+        return Response(
+            content=json.dumps({"challenge": payload.get("challenge", "")}),
+            media_type="application/json",
+        )
+
+    # Signature verification (skipped when no encrypt_key configured — Feishu
+    # only sends the x-lark-signature header for encrypt-enabled apps; the
+    # verification_token above is the standalone safeguard for plain mode).
+    # MUST run before any state-changing event handling below; card.action.trigger
+    # in particular triggers a resume_paused_run call and was previously bypassing
+    # this check.
+    encrypt_key = str(secrets.get("encrypt_key") or "")
+    if encrypt_key:
+        try:
+            verify_feishu_signature(
+                encrypt_key=encrypt_key,
+                raw_body=raw_body,
+                timestamp=request.headers.get("x-lark-request-timestamp", ""),
+                nonce=request.headers.get("x-lark-request-nonce", ""),
+                signature=request.headers.get("x-lark-signature", ""),
+            )
+        except FeishuSignatureError as exc:
+            logger.warning("[Feishu ingress] signature rejected: {}", exc)
+            return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+
     # CardKit button-click event branch — handled separately from
     # im.message.receive_v1 (no agent run kicked off, just a resume signal).
     event_type = str(header.get("event_type") or "")
@@ -225,31 +253,6 @@ async def feishu_events(
                 content=json.dumps(body),
                 media_type="application/json",
             )
-
-    # url_verification challenge — only echo AFTER the token check passes,
-    # so we never bounce attacker-supplied challenge data without auth.
-    if payload.get("type") == "url_verification":
-        return Response(
-            content=json.dumps({"challenge": payload.get("challenge", "")}),
-            media_type="application/json",
-        )
-
-    # Signature verification (skipped when no encrypt_key configured — Feishu
-    # only sends the x-lark-signature header for encrypt-enabled apps; the
-    # verification_token above is the standalone safeguard for plain mode).
-    encrypt_key = str(secrets.get("encrypt_key") or "")
-    if encrypt_key:
-        try:
-            verify_feishu_signature(
-                encrypt_key=encrypt_key,
-                raw_body=raw_body,
-                timestamp=request.headers.get("x-lark-request-timestamp", ""),
-                nonce=request.headers.get("x-lark-request-nonce", ""),
-                signature=request.headers.get("x-lark-signature", ""),
-            )
-        except FeishuSignatureError as exc:
-            logger.warning("[Feishu ingress] signature rejected: {}", exc)
-            return Response(status_code=status.HTTP_401_UNAUTHORIZED)
 
     # Parse + ingest the message event. ``bot_open_id`` was already
     # checked at the top of this handler (early-out path).
@@ -343,8 +346,15 @@ async def _handle_card_action(
     event and the route should reply 200; ``toast`` is an optional
     user-visible message (Feishu shows it briefly above the card).
     """
-    header = event.get("header") or {}
-    token = str(header.get("token") or "")
+    # The replay guard MUST key off the per-click interaction token (event.token),
+    # not header.token. header.token is Feishu's static verification token —
+    # identical for every webhook event — so keying on it would lock out every
+    # later card click in a 30-minute window once the first click landed. The
+    # long-connection branch nests the click payload under event["event"] and
+    # passes event-level fields up at the top level via a shim, so accept either
+    # location.
+    event_body = event.get("event") or {}
+    token = str(event_body.get("token") or event.get("token") or "")
     if not token:
         return True, "缺少 token"
     # Token replay guard — Feishu's interaction token is one-time / 30 minutes.

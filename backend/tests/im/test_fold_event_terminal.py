@@ -75,6 +75,38 @@ def test_ask_user_request_with_dict_options() -> None:
     ]
 
 
+def test_ask_user_request_prefers_value_over_label_for_callback() -> None:
+    """cubepi's normal option shape is {label, value} — the button text is
+    ``label`` (human-visible) and the answer cubepi expects back is ``value``.
+    If we used ``label`` for both, an option like {label:"Yes", value:"yes"}
+    would send "Yes" to cubepi, which would reject the schema mismatch.
+    """
+    state = _state_with_card()
+    fold_event(
+        {
+            "type": "ask_user_request",
+            "data": {
+                "question_id": "q_v",
+                "questions": [
+                    {
+                        "key": "decide",
+                        "prompt": "Approve?",
+                        "options": [
+                            {"label": "Yes", "value": "yes", "type": "primary"},
+                            {"label": "No", "value": "no", "type": "danger"},
+                        ],
+                    }
+                ],
+            },
+        },
+        state,
+        now=0.0,
+    )
+    pending = state.card_state.pending_input
+    assert pending is not None
+    assert pending.choices == [("yes", "primary"), ("no", "danger")]
+
+
 def test_ask_user_request_with_no_options_falls_back_to_ok() -> None:
     state = _state_with_card()
     fold_event(

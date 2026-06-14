@@ -8,8 +8,9 @@ genuinely unsimulatable in CI:
 
 2. Outbound: this test seeds a synthetic run event stream into Redis (the
    same stream the real ``RunManager`` writes to), tails it with the real
-   ``OutboundRunTailer`` against a recording connector, and asserts the
-   render fold + reaction lifecycle behave end-to-end.
+   ``OutboundRunTailer`` against a recording connector + a recording
+   CardKit fake, and asserts the render fold + reaction lifecycle behave
+   end-to-end.
 """
 
 from __future__ import annotations
@@ -35,12 +36,12 @@ class _RecordingConnector:
     """Stand-in connector that records every call the tailer makes.
 
     Mirrors the FeishuConnector hook + send/edit surface — what the tailer
-    actually depends on. Used by Task 14 and by future per-platform tests.
+    actually depends on.
     """
 
     def __init__(self) -> None:
-        self.posts: list[str] = []
-        self.edits: list[str] = []
+        self.card_init_calls: list[str] = []
+        self.emergency_text: list[str] = []
         self.processing_started = False
         self.processing_completed = False
         self.processing_failed = False
@@ -54,12 +55,48 @@ class _RecordingConnector:
     async def on_processing_failed(self, state: RenderState) -> None:
         self.processing_failed = True
 
-    async def post_placeholder(self, text: str) -> str:
-        self.posts.append(text)
-        return f"om_reply_{len(self.posts)}"
+    async def send_card_init_message(self, card_id: str) -> str:
+        self.card_init_calls.append(card_id)
+        return f"om_card_msg_{len(self.card_init_calls)}"
 
-    async def edit(self, message_id: str | None, text: str) -> None:
-        self.edits.append(text)
+    async def _send_emergency_text(self, text: str) -> None:
+        self.emergency_text.append(text)
+
+
+class _RecordingCardKit:
+    """Stand-in CardKitClient that records every call the tailer makes.
+
+    Mirrors the four entry points the tailer drives — create_entity,
+    stream_text, patch_card, finalize — and exposes the recorded payloads
+    for assertion. No network. Each method returns the value
+    ``OutboundRunTailer._dispatch_op`` expects so the lifecycle proceeds.
+    """
+
+    def __init__(self) -> None:
+        self.created: list[dict[str, Any]] = []
+        self.streamed: list[tuple[str, str, str]] = []  # (card_id, element_id, content)
+        self.patched: list[dict[str, Any]] = []
+        self.finalized: list[dict[str, Any]] = []
+        self.aclose_called = False
+
+    async def create_entity(self, card_json: dict[str, Any]) -> str:
+        self.created.append(card_json)
+        return f"AAQA-{len(self.created)}"
+
+    async def stream_text(
+        self, *, card_id: str, element_id: str, content: str, sequence: int
+    ) -> None:
+        self.streamed.append((card_id, element_id, content))
+
+    async def patch_card(self, *, card_id: str, card_json: dict[str, Any], sequence: int) -> None:
+        self.patched.append(card_json)
+
+    async def finalize(self, *, card_id: str, card_json: dict[str, Any], sequence: int) -> bool:
+        self.finalized.append(card_json)
+        return True
+
+    async def aclose(self) -> None:
+        self.aclose_called = True
 
 
 @pytest_asyncio.fixture
@@ -79,14 +116,16 @@ async def _redis() -> AsyncIterator[Redis]:
 async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
     _redis: Redis,
 ) -> None:
-    """A short run streams text + a tool + done; the tailer must post once,
-    edit at least once, then complete the processing-start/complete lifecycle.
+    """A short run streams text + a tool + done; the tailer must create the
+    card, stream cumulative text, patch on tool_call, finalize on done, and
+    drive the processing-start/complete lifecycle.
     """
     prefix = f"e2e-im-{_secrets.token_hex(4)}"
     run_id = f"run-e2e-{_secrets.token_hex(4)}"
     conversation_id = "conv-e2e"
 
     connector = _RecordingConnector()
+    cardkit = _RecordingCardKit()
     state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_e2e")
     tailer = OutboundRunTailer(
         redis=_redis,
@@ -94,7 +133,7 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
         run_id=run_id,
         connector=connector,
         state=state,
-        cardkit=None,
+        cardkit=cardkit,
         block_ms=200,
     )
     tailer_task = asyncio.create_task(tailer.run())
@@ -107,18 +146,20 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
         "maxlen": 1000,
     }
 
-    # 1) First text_delta — placeholder posted.
+    # 1) First text_delta — card is created.
     await append_run_event(
         _redis, payload={"type": "text_delta", "data": {"content": "Hello"}}, **common
     )
-    # Force the debounce window to elapse so the next text_delta produces an edit op.
+    # Force the debounce window to elapse so the next text_delta produces a stream op.
     await asyncio.sleep(1.0)
     await append_run_event(
         _redis, payload={"type": "text_delta", "data": {"content": " world"}}, **common
     )
-    # 2) tool_call coalesced into a status line.
+    # 2) tool_call — triggers a patch_card.
     await append_run_event(
-        _redis, payload={"type": "tool_call", "data": {"name": "calc"}}, **common
+        _redis,
+        payload={"type": "tool_call", "data": {"tool_call_id": "t1", "name": "calc"}},
+        **common,
     )
     # 3) Terminal `done`.
     await append_run_event(_redis, payload={"type": "done", "data": {}}, **common)
@@ -128,11 +169,16 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
     assert connector.processing_started
     assert connector.processing_completed
     assert not connector.processing_failed
-    assert len(connector.posts) == 1, "expected exactly one placeholder post"
-    assert "Hello" in connector.posts[0]
-    # Final edit carries the full composite (tools + text).
-    assert any("Hello world" in t for t in connector.edits)
-    assert any("calc" in t for t in connector.edits)
+    assert len(cardkit.created) == 1, "expected exactly one card create"
+    assert connector.card_init_calls == ["AAQA-1"]
+    # Cumulative text gets streamed on the second un-throttled delta.
+    assert any(content == "Hello world" for _, _, content in cardkit.streamed)
+    # tool_call drove a patch.
+    assert len(cardkit.patched) >= 1
+    # done drove a finalize.
+    assert len(cardkit.finalized) == 1
+    # Tailer's finally-block released the CardKit HTTP pool.
+    assert cardkit.aclose_called
 
 
 async def test_outbound_tailer_emits_failure_on_error_event(
@@ -143,6 +189,7 @@ async def test_outbound_tailer_emits_failure_on_error_event(
     conversation_id = "conv-err"
 
     connector = _RecordingConnector()
+    cardkit = _RecordingCardKit()
     state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_err")
     tailer = OutboundRunTailer(
         redis=_redis,
@@ -150,7 +197,7 @@ async def test_outbound_tailer_emits_failure_on_error_event(
         run_id=run_id,
         connector=connector,
         state=state,
-        cardkit=None,
+        cardkit=cardkit,
         block_ms=200,
     )
     tailer_task = asyncio.create_task(tailer.run())
@@ -170,6 +217,6 @@ async def test_outbound_tailer_emits_failure_on_error_event(
     assert connector.processing_started
     assert connector.processing_failed
     assert not connector.processing_completed
-    # No text_delta arrived — the post-fallback for terminal events fires so
-    # the user sees the error notice.
-    assert any("boom" in t or "error" in t.lower() for t in connector.posts)
+    # No card was ever created (error event arrived without any text_delta first),
+    # so the tailer must surface the error via emergency text.
+    assert any("boom" in t for t in connector.emergency_text)

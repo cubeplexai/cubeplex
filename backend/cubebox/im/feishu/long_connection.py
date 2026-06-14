@@ -67,12 +67,22 @@ async def _lc_handle_card_action(event: Any, *, run_manager: Any, redis_key_pref
     else:
         operator = getattr(data, "operator", None)
         action = getattr(data, "action", None)
+        click_token = str(getattr(data, "token", "") or "")
         envelope = {
             "header": {
                 "event_type": "card.action.trigger",
-                "token": str(getattr(data, "token", "") or ""),
+                # Keep at header.token for backward compatibility with any
+                # caller that still reads from here; the canonical location
+                # for the replay guard is event.token below.
+                "token": click_token,
             },
             "event": {
+                # The per-click interaction token. The HTTP webhook path puts
+                # this at event.token (header.token in webhooks is Feishu's
+                # static verification_token), so mirror that location here so
+                # _handle_card_action's replay guard sees the click token on
+                # both transport paths.
+                "token": click_token,
                 "operator": (
                     {"open_id": str(getattr(operator, "open_id", "") or "")}
                     if operator is not None
