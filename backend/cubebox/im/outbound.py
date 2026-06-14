@@ -75,14 +75,19 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         if now - state.last_stream_monotonic < state.stream_interval:
             return None
         state.last_stream_monotonic = now
-        # Send everything since the last successfully-streamed position, not
-        # just this event's delta — earlier throttled deltas update
-        # streaming_content but not card_state.streamed_to, so they would
-        # otherwise be lost on CardKit (stream_text is append-semantics).
-        pending_text = state.card_state.streaming_content[state.card_state.streamed_to :]
-        if not pending_text:
+        if not state.card_state.streaming_content:
             return None
-        return OutboundOp(kind="stream_text", element_id="streaming_content", text=pending_text)
+        # Feishu's streaming_mode markdown element expects the FULL cumulative
+        # text on every PUT — the platform diffs it against the previous push
+        # and renders the typewriter increment client-side. Sending only the
+        # delta would REPLACE the rendered content with just the delta (the
+        # user would see the card cycle through tail fragments). See
+        # https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview
+        return OutboundOp(
+            kind="stream_text",
+            element_id="streaming_content",
+            text=state.card_state.streaming_content,
+        )
 
     if etype == "tool_call":
         import json as _json
@@ -504,10 +509,6 @@ class OutboundRunTailer:
                 return False
             state.card_id = card_id
             state.card_state.advance_seq()
-            # The initial render() folded all accumulated streaming_content
-            # into the markdown element, so the high-water mark for
-            # subsequent stream_text deltas starts at the full length.
-            state.card_state.streamed_to = len(state.card_state.streaming_content)
             try:
                 msg_id = await self._connector.send_card_init_message(card_id)
             except Exception:
@@ -541,10 +542,6 @@ class OutboundRunTailer:
                     content=op.text,
                     sequence=seq,
                 )
-                # Advance the high-water mark only after the send lands —
-                # a flood-dropped delta will be replayed in the next
-                # stream_text op.
-                state.card_state.streamed_to += len(op.text)
                 note_edit_success(state)
                 return True
             except _FloodSignal:
