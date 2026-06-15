@@ -927,6 +927,8 @@
     "navMemory": "Memory",
     "navSandboxEnv": "Sandbox Env",
     "memory": {
+      "title": "Memory",
+      "description": "Memories your AI assistant has built up over time in this workspace.",
       "tabPersonal": "Personal",
       "tabWorkspace": "Workspace",
       "tabOrg": "Organization",
@@ -1277,6 +1279,7 @@
     "loading": "Loading…",
     "notFound": "Trigger not found.",
     "backToList": "Back to triggers",
+    "close": "Close",
     "emptyTitle": "No triggers yet",
     "emptyHint": "Create a trigger to get an ingest URL, then paste it into your event source's webhook settings.",
     "colName": "Name",
@@ -1637,6 +1640,9 @@
     "nav": {
       "workspaceTab": "IM",
       "adminItem": "IM connectors"
+    },
+    "panel": {
+      "description": "Connect your team's IM platforms and manage bot accounts."
     },
     "empty": {
       "workspace": {

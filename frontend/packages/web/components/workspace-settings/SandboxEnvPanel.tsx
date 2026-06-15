@@ -17,6 +17,8 @@ import {
   type UpdateEntryIn,
 } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
+import { Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { EnvTable } from '@/components/sandbox-env/EnvTable'
 import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
 
@@ -126,19 +128,25 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
           </div>
           <div className="flex gap-2">
             {isAdmin && (
-              <button
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
                 onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'workspace' })}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
               >
-                + {t('addWorkspaceVar')}
-              </button>
+                <Plus className="size-3.5" />
+                {t('addWorkspaceVar')}
+              </Button>
             )}
-            <button
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
               onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'user' })}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
             >
-              + {t('addPersonalVar')}
-            </button>
+              <Plus className="size-3.5" />
+              {t('addPersonalVar')}
+            </Button>
           </div>
         </div>
       </header>

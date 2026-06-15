@@ -927,6 +927,8 @@
     "navMemory": "记忆",
     "navSandboxEnv": "沙盒环境变量",
     "memory": {
+      "title": "记忆",
+      "description": "AI 助手在本工作区积累的记忆。",
       "tabPersonal": "个人",
       "tabWorkspace": "工作区",
       "tabOrg": "组织",
@@ -1277,6 +1279,7 @@
     "loading": "加载中…",
     "notFound": "触发器不存在。",
     "backToList": "返回触发器列表",
+    "close": "收起",
     "emptyTitle": "暂无触发器",
     "emptyHint": "创建触发器后会生成接收 URL，把它粘贴到事件源的 Webhook 设置即可。",
     "colName": "名称",
@@ -1637,6 +1640,9 @@
     "nav": {
       "workspaceTab": "IM",
       "adminItem": "IM 连接器"
+    },
+    "panel": {
+      "description": "连接团队 IM 平台，管理 Bot 账号。"
     },
     "empty": {
       "workspace": {

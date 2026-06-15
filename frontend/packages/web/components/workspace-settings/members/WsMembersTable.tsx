@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useFormatter, useTranslations } from 'next-intl'
-import { LogOut, Plus, Trash2 } from 'lucide-react'
+import { LogOut, Trash2, Users } from 'lucide-react'
 import {
   createApiClient,
   useAuthStore,
@@ -12,6 +12,7 @@ import {
   type WsMember,
 } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/shared/EmptyState'
 import {
   Table,
   TableBody,
@@ -27,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { AddWsMemberDialog } from './AddWsMemberDialog'
 
 interface WsMembersTableProps {
   wsId: string
@@ -41,36 +41,15 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
   const currentUser = useAuthStore((s) => s.user)
   const wsName = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.name ?? wsId)
   const leaveFromStore = useWorkspaceStore((s) => s.leave)
-  const {
-    wsMembers,
-    wsLoading,
-    available,
-    loadWsMembers,
-    loadAvailable,
-    addWsMember,
-    updateWsMemberRole,
-    removeWsMember,
-  } = useMemberStore()
+  const { wsMembers, wsLoading, loadWsMembers, updateWsMemberRole, removeWsMember } =
+    useMemberStore()
 
-  const [addOpen, setAddOpen] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [leaving, setLeaving] = useState(false)
 
   useEffect(() => {
     void loadWsMembers(client, wsId)
   }, [client, wsId, loadWsMembers])
-
-  const handleOpenAdd = useCallback(async () => {
-    await loadAvailable(client, wsId)
-    setAddOpen(true)
-  }, [client, wsId, loadAvailable])
-
-  const handleAdd = useCallback(
-    async (userId: string, role: string) => {
-      await addWsMember(client, wsId, userId, role)
-    },
-    [client, wsId, addWsMember],
-  )
 
   const handleRoleChange = useCallback(
     async (userId: string, role: string) => {
@@ -102,29 +81,10 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
 
   return (
     <>
-      <header className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
-        </div>
-        <Button size="sm" className="gap-1.5" onClick={() => void handleOpenAdd()}>
-          <Plus className="size-3.5" />
-          {t('addMember')}
-        </Button>
-      </header>
-
       {wsLoading ? (
         <div className={'py-8 text-center text-xs text-muted-foreground'}>Loading...</div>
       ) : wsMembers.length === 0 ? (
-        <div
-          className={
-            'rounded-md border border-dashed border-border/60 ' +
-            'bg-muted/20 px-4 py-8 text-center text-xs ' +
-            'text-muted-foreground'
-          }
-        >
-          {t('empty')}
-        </div>
+        <EmptyState icon={Users} title={t('empty')} />
       ) : (
         <div className={'rounded-xl border border-border/70 ' + 'bg-card/40 shadow-sm'}>
           <Table>
@@ -160,13 +120,6 @@ export function WsMembersTable({ wsId }: WsMembersTableProps) {
           </Table>
         </div>
       )}
-
-      <AddWsMemberDialog
-        open={addOpen}
-        onOpenChange={setAddOpen}
-        available={available}
-        onAdd={handleAdd}
-      />
     </>
   )
 }
