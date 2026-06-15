@@ -125,9 +125,10 @@ async def list_sandbox_files(
     pattern: str = Query(default="*"),
 ) -> list[SandboxFileEntry]:
     """List direct children of a directory in the user's sandbox."""
-    if ".." in path:
+    normalized = posixpath.normpath(path)
+    if not normalized.startswith("/workspace"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="path traversal not allowed"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="path outside workspace"
         )
     manager = get_sandbox_manager()
     try:
@@ -138,7 +139,7 @@ async def list_sandbox_files(
         raw = sandbox._sandbox  # noqa: SLF001 — direct SDK access for filesystem
         from opensandbox.models.filesystem import SearchEntry
 
-        entries = await raw.files.search(SearchEntry(path=path, pattern=pattern))
+        entries = await raw.files.search(SearchEntry(path=normalized, pattern=pattern))
     except SandboxError as exc:
         logger.warning("sandbox file listing failed for workspace {}: {}", ctx.workspace_id, exc)
         raise HTTPException(
@@ -147,12 +148,11 @@ async def list_sandbox_files(
         ) from exc
 
     # Filter to direct children only (SDK search is recursive)
-    normalized = posixpath.normpath(path)
     children = [
         e for e in entries if posixpath.dirname(posixpath.normpath(e.path)) == normalized
     ]
     # Sort: directories first, then alphabetical by name
-    children.sort(key=lambda e: (not hasattr(e, 'mode') or e.size != 0, posixpath.basename(e.path).lower()))
+    children.sort(key=lambda e: ((e.mode & 0o40000) == 0, posixpath.basename(e.path).lower()))
 
     result: list[SandboxFileEntry] = []
     for e in children:
@@ -163,18 +163,12 @@ async def list_sandbox_files(
             SandboxFileEntry(
                 path=e.path,
                 name=name,
-                is_dir=e.size == 0 and not posixpath.splitext(name)[1],
+                is_dir=(e.mode & 0o40000) != 0,
                 size=e.size,
                 modified_at=utc_isoformat(e.modified_at),
             )
         )
     return result
-```
-
-Note: The `is_dir` heuristic above (size==0 + no extension) is fragile. A better approach is to check the file mode bits. The SDK `EntryInfo` includes `mode: int` — directories have mode starting with `4` (e.g. 40755). Refine during implementation:
-
-```python
-is_dir = (e.mode & 0o40000) != 0  # S_IFDIR bit
 ```
 
 - [ ] **Step 2: Verify endpoint manually**
@@ -216,9 +210,10 @@ async def get_sandbox_file_content(
     path: str = Query(...),
 ) -> SandboxFileContent:
     """Read a text file from the sandbox for inline preview."""
-    if ".." in path:
+    normalized = posixpath.normpath(path)
+    if not normalized.startswith("/workspace"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="path traversal not allowed"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="path outside workspace"
         )
     manager = get_sandbox_manager()
     try:
@@ -260,9 +255,10 @@ async def download_sandbox_file(
     path: str = Query(...),
 ) -> StreamingResponse:
     """Stream a file from the sandbox as a download."""
-    if ".." in path:
+    normalized = posixpath.normpath(path)
+    if not normalized.startswith("/workspace"):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="path traversal not allowed"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="path outside workspace"
         )
     manager = get_sandbox_manager()
     try:
@@ -270,7 +266,7 @@ async def download_sandbox_file(
             ctx.user.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id
         )
         raw = sandbox._sandbox  # noqa: SLF001
-        stream = raw.files.read_bytes_stream(path)
+        stream = await raw.files.read_bytes_stream(path)
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="file not found"
@@ -316,7 +312,8 @@ TERMINAL_PORT = 7681
 async def start_terminal(self) -> None:
     """Start the on-demand ttyd terminal inside the sandbox (idempotent)."""
     result = await self.execute(
-        "pgrep -x ttyd || ttyd -p 7681 -W bash", timeout=30
+        "pgrep -x ttyd || (nohup ttyd -p 7681 -W bash &>/dev/null &); sleep 1",
+        timeout=30,
     )
     if result.exit_code not in (0, None):
         raise RuntimeError(f"failed to start sandbox terminal: {result.output}")
@@ -552,7 +549,7 @@ async def sandbox_file_download(
         sandbox = await OpenSandbox.connect_or_resume(
             sandbox_id, conn_config=conn_config
         )
-        stream = sandbox._sandbox.files.read_bytes_stream(file_path)  # noqa: SLF001
+        stream = await sandbox._sandbox.files.read_bytes_stream(file_path)  # noqa: SLF001
     except Exception as exc:
         logger.warning("sandbox proxy download failed: {}", exc)
         raise HTTPException(
@@ -597,18 +594,17 @@ app.include_router(sandbox_share.router, prefix="/api/v1")
 
 - [ ] **Step 4: Gate the new sandbox endpoints behind sandbox.enabled**
 
-In `backend/cubebox/api/app.py`, the existing `ws_sandbox.router` is mounted unconditionally (line 563) because it only had `/status`. The new file/terminal endpoints also need the SandboxManager. Move `ws_sandbox.router` inside the `sandbox.enabled` gate alongside `ws_browser.router` (around line 582):
+In `backend/cubebox/api/app.py`, the existing `ws_sandbox.router` is mounted **unconditionally** (line 563) because it only has `/status`. Keep it unconditional — `SandboxStatusCard` on the workspace `/sandbox` page calls `/status` regardless of the `sandboxEnabled` flag, and the endpoint only touches `UserSandboxRepository` (a plain DB query, no SandboxManager needed).
+
+Add the new `sandbox_share.router` inside the `sandbox.enabled` gate alongside `ws_browser.router` (around line 582):
 
 ```python
 if _sandbox_config.get("sandbox.enabled", False):
     app.include_router(ws_browser.router, prefix="/api/v1")
-    app.include_router(ws_sandbox.router, prefix="/api/v1")  # moved inside gate
     app.include_router(sandbox_share.router, prefix="/api/v1")
 ```
 
-Remove the unconditional `app.include_router(ws_sandbox.router, ...)` from its current position (line 563).
-
-Note: The `/sandbox/status` endpoint also needs the SandboxManager (it queries UserSandboxRepository which exists regardless), so gating is fine — the frontend only shows sandbox UI when `sandboxEnabled` is true.
+The new file/terminal/preview-token endpoints live on the same `ws_sandbox.router` as `/status`, so they will also be unconditionally mounted. This is safe — each of those endpoints calls `get_sandbox_manager().get_or_create(...)` which raises `SandboxError` → 503 when the sandbox runtime is not configured. The frontend only shows the panel when `sandboxEnabled` is true, so users won't hit these endpoints when sandbox is off.
 
 - [ ] **Step 5: Commit**
 
@@ -1315,7 +1311,7 @@ Create `frontend/packages/web/components/panel/sandbox/SandboxFilePreview.tsx`:
 ```typescript
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Download, FileText } from 'lucide-react'
 import { csrfHeaders } from '@/lib/csrf'
 import { useSandboxFileContent } from '@/hooks/useSandboxFileContent'
@@ -1444,6 +1440,8 @@ function HtmlFilePreview({
   )
 }
 
+const OFFICE_LOAD_TIMEOUT_MS = 15_000
+
 function OfficeFilePreview({
   entry,
   workspaceId,
@@ -1453,6 +1451,9 @@ function OfficeFilePreview({
 }) {
   const [viewerUrl, setViewerUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [timedOut, setTimedOut] = useState(false)
+  const loadCountRef = useRef(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
     let cancelled = false
@@ -1475,16 +1476,54 @@ function OfficeFilePreview({
     }
   }, [workspaceId, entry.path])
 
+  useEffect(() => {
+    if (!viewerUrl) return
+    setTimedOut(false)
+    loadCountRef.current = 0
+    timerRef.current = setTimeout(() => setTimedOut(true), OFFICE_LOAD_TIMEOUT_MS)
+    return () => clearTimeout(timerRef.current)
+  }, [viewerUrl])
+
+  const handleIframeLoad = useCallback(() => {
+    loadCountRef.current += 1
+    if (loadCountRef.current > 1) {
+      clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  const handleRetry = useCallback(() => {
+    setTimedOut(false)
+    setViewerUrl(null)
+    setError(null)
+  }, [])
+
   if (error) {
     return <FallbackPreview entry={entry} workspaceId={workspaceId} />
   }
   if (!viewerUrl) return <PreviewLoading />
+
+  if (timedOut) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
+        <p className="text-sm text-muted-foreground">
+          Office preview timed out.
+        </p>
+        <button
+          onClick={handleRetry}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
 
   return (
     <iframe
       src={viewerUrl}
       className="h-full w-full border-0"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      onLoad={handleIframeLoad}
     />
   )
 }
@@ -1567,7 +1606,7 @@ export function SandboxFilesView({ workspaceId }: SandboxFilesViewProps) {
   )
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="h-full">
+    <ResizablePanelGroup direction="horizontal" className="h-full">
       <ResizablePanel
         defaultSize={selectedFile ? 30 : 100}
         minSize={20}
@@ -1613,35 +1652,15 @@ git commit -m "feat(sandbox): files view with tree + preview resizable split"
 
 ---
 
-## Task 12: Frontend — fix toolDetailStore backward-compat facade
+## Task 12: Frontend — verify no remaining openBrowser references
 
-**Files:**
-- Modify: `frontend/packages/core/src/stores/toolDetailStore.ts`
-
-The old `toolDetailStore.ts` is a facade over `panelStore` and references `openBrowser`. Since we renamed `openBrowser` → `openSandbox`, update the facade.
-
-- [ ] **Step 1: Check if toolDetailStore references openBrowser**
-
-```bash
-grep -n "openBrowser" frontend/packages/core/src/stores/toolDetailStore.ts
-```
-
-If it does, replace `openBrowser` with `openSandbox`. If it doesn't reference it, skip this task.
-
-- [ ] **Step 2: Search for any other references to openBrowser in the codebase**
+- [ ] **Step 1: Search for any remaining openBrowser references**
 
 ```bash
 grep -rn "openBrowser" frontend/
 ```
 
-Update all references to use `openSandbox` instead.
-
-- [ ] **Step 3: Commit if changes were made**
-
-```bash
-git add -u frontend/
-git commit -m "refactor(sandbox): rename openBrowser to openSandbox across codebase"
-```
+Task 5 already renamed `openBrowser` → `openSandbox` in `panelStore.ts` and `AppShell.tsx` (the only two call sites). This step confirms no references were missed. If the grep returns results, update them and commit. If empty, this task is done — no commit needed.
 
 ---
 
