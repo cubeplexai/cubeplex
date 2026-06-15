@@ -797,7 +797,7 @@
   "wsSettings": {
     "settingsLabel": "设置",
     "navWorkspace": "工作区设置",
-    "navPersona": "Persona",
+    "navPersona": "通用",
     "navModel": "模型",
     "navSkills": "技能",
     "navMembers": "成员",
@@ -808,9 +808,13 @@
     "workspaceNameSaved": "工作区名称已更新",
     "workspaceNameSave": "保存",
     "workspaceNameSaving": "保存中…",
+    "general": {
+      "title": "通用",
+      "description": "工作区名称、Agent 人设与工作区生命周期设置。"
+    },
     "persona": {
-      "title": "Persona",
-      "description": "为本工作区里的每一次对话设置 agent 人设，附加在基础 system prompt 之后。",
+      "title": "Agent 人设",
+      "description": "为本工作区的 AI 助手设定角色与行为风格，每次对话都会自动生效。",
       "loading": "加载中…",
       "placeholder": "比如：你是一名 Python 数据分析专家，回答时优先给出可运行的代码示例。",
       "charCount": "{count} / 8000 字符",

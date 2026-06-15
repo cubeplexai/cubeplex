@@ -17,6 +17,7 @@ interface PersonaEditorProps {
 
 export function PersonaEditor({ wsId }: PersonaEditorProps) {
   const t = useTranslations('wsSettings')
+  const tGeneral = useTranslations('wsSettings.general')
   const tPersona = useTranslations('wsSettings.persona')
   const { agentConfig, loading, loadAll, savePersona } = useWorkspaceSettingsStore()
   const [draft, setDraft] = useState('')
@@ -82,12 +83,12 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       <header className="border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">{tPersona('title')}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{tPersona('description')}</p>
+        <h2 className="text-lg font-semibold tracking-tight">{tGeneral('title')}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{tGeneral('description')}</p>
       </header>
 
       <div className="flex flex-1 overflow-y-auto">
-        <div className="flex w-full max-w-3xl flex-col gap-6 p-6">
+        <div className="flex w-full max-w-3xl flex-col gap-8 p-6">
           <div className="flex flex-col gap-2">
             <Label htmlFor="ws-name" className="text-sm font-medium">
               {t('workspaceName')}
@@ -113,31 +114,37 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
             </div>
           </div>
 
-          {loading && !agentConfig ? (
-            <p className="text-sm text-muted-foreground">{tPersona('loading')}</p>
-          ) : (
-            <>
-              <Textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={tPersona('placeholder')}
-                className="min-h-[260px] resize-y font-mono text-sm leading-relaxed"
-              />
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">
-                  {tPersona('charCount', { count: draft.length })}
-                </span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={handleReset} disabled={saving}>
-                    {tPersona('reset')}
-                  </Button>
-                  <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
-                    {saving ? tPersona('saving') : tPersona('save')}
-                  </Button>
+          <div className="flex flex-col gap-3">
+            <div>
+              <h3 className="text-sm font-medium">{tPersona('title')}</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">{tPersona('description')}</p>
+            </div>
+            {loading && !agentConfig ? (
+              <p className="text-sm text-muted-foreground">{tPersona('loading')}</p>
+            ) : (
+              <>
+                <Textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder={tPersona('placeholder')}
+                  className="min-h-[260px] resize-y font-mono text-sm leading-relaxed"
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">
+                    {tPersona('charCount', { count: draft.length })}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={handleReset} disabled={saving}>
+                      {tPersona('reset')}
+                    </Button>
+                    <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
+                      {saving ? tPersona('saving') : tPersona('save')}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
 
           <WorkspaceDangerZone wsId={wsId} />
         </div>
