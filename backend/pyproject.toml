@@ -49,6 +49,7 @@ dependencies = [
     "pgvector>=0.4.2",
     "tiktoken>=0.13.0",
     "lark-oapi>=1.6.8",
+    "discord-py>=2.7.1",
 ]
 
 [project.optional-dependencies]
