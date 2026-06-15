@@ -41,14 +41,16 @@ Discord requires a Gateway (WebSocket) connection to receive
 `MESSAGE_CREATE` events. HTTP Interactions only handle slash commands and
 component callbacks, not regular chat messages. The Feishu connector
 supports two delivery modes (long_connection and webhook); Discord supports
-only Gateway — the `delivery_mode` field is always `"gateway"`.
+only Gateway — the `delivery_mode` field is always `"gateway"`. The
+existing schema validation pattern (`^(long_connection|webhook)$`) must be
+extended to include `gateway`.
 
 The discord.py library handles the WebSocket lifecycle: connection,
 heartbeat, reconnect, resume, intent negotiation.
 
-Required privileged intents (enabled in Discord Developer Portal):
+Required Gateway intents:
 
-- `MESSAGE_CONTENT` — read message text
+- `MESSAGE_CONTENT` (privileged — requires Portal approval) — read message text
 - `GUILD_MESSAGES` — receive guild channel messages
 - `DIRECT_MESSAGES` — receive DM messages
 - `GUILD_MESSAGE_REACTIONS` — reaction support for processing indicators
@@ -118,7 +120,14 @@ The `scope_key` contract (opaque string in IMThreadLink unique index
 |----------|-----------|-----------|-----------|-------------|
 | DM | DM channel snowflake | `"dm"` | `dm` | None |
 | Guild @mention | channel snowflake | `"ch"` | `channel` | inbound message_id |
-| Thread | parent channel snowflake | `"t:{thread_id}"` | `thread` | inbound message_id |
+| Thread | thread channel snowflake | `"t:{thread_id}"` | `thread` | inbound message_id |
+
+In Discord, a thread IS a channel (has its own snowflake). `channel_id`
+stores the thread's own channel ID (what discord.py delivers as
+`message.channel.id`), not the parent's. Replies post to this channel_id
+so they land inside the thread. The parent channel ID is not stored — it's
+only used transiently during `parse_inbound` to detect thread-vs-channel
+context.
 
 Design rationale: both hermes-agent and openclaw treat the same channel as
 a shared conversation (all users see the same context). This matches
@@ -126,10 +135,11 @@ Discord's public-channel UX — unlike Feishu group chats where per-user
 isolation (`"u:{union_id}"`) is appropriate because @bot messages are
 contextually private.
 
-Guild channel scope_key is the fixed string `"ch"` rather than the
-channel_id itself — the `channel_id` column already distinguishes channels,
-so the scope_key only needs to differentiate session types within the same
-channel (regular vs thread).
+Guild channel scope_key uses the helper `make_channel_scope()` → `"ch"`
+(new in `im/types.py`, alongside `make_thread_scope` and
+`make_participant_scope`). The `channel_id` column already distinguishes
+channels, so the scope_key only differentiates session types within the
+same channel (regular vs thread).
 
 ## Identity Resolution
 
@@ -195,17 +205,30 @@ of `im/feishu/` into `im/`) or the fold logic needs to be parameterized
 per platform. The simplest path: lift `CardState` and its nested types
 into `im/card_model.py` as a shared accumulation model — both Feishu and
 Discord read from it, but only the dispatcher decides how to render it.
+This is a critical prerequisite for the Discord outbound path, not an
+optional cleanup.
 
 ### Discord Rendering Details
 
 **dispatch_create**: Send the first message with current accumulated text.
 Record `bot_message_id`. Add ⏳ reaction on the user's inbound message.
 
-**dispatch_stream**: Edit `bot_message_id` with the latest accumulated
-text. When text approaches 2000 chars (Discord limit), finalize the
-current message and send a new one (update `bot_message_id`). Split at
-line boundaries when possible, reserving ~100 chars for artifact links at
-finalize.
+**dispatch_stream**: Edit `bot_message_id` with the latest text for the
+current message segment. Discord's 2000-char limit requires splitting
+across multiple messages. The Discord render state tracks a
+`sent_char_offset` — the number of characters already finalized in
+previous messages. Each `dispatch_stream` call edits the current message
+with `streaming_content[sent_char_offset:]` (the unsent portion only).
+When the unsent portion approaches 1900 chars, the current message is
+finalized, `sent_char_offset` advances, and a new message starts.
+Split at line boundaries when possible.
+
+Discord's edit rate limit (5 edits per 5 seconds per channel) requires a
+longer stream interval than Feishu. `DiscordOpDispatcher` uses
+`stream_interval=1.2s` (well under the 5/5s ceiling). The existing
+`note_flood_strike` mechanism handles 429 responses — after 3 consecutive
+rate-limit hits, progressive edits are disabled and the full answer lands
+on `dispatch_finalize`.
 
 **dispatch_patch**: During tool calls, maintain typing indicator
 (`channel.typing()`). Tool steps are not rendered (unlike Feishu's
@@ -226,9 +249,9 @@ Discord uses a lighter render state than Feishu — no card_id,
 card_unavailable, streaming_mode sequence, or CardState. Key fields:
 
 - `bot_message_id`: the message currently being edited
+- `sent_char_offset`: characters already finalized in previous messages
 - `reaction_id`: processing indicator on the user's message
 - `button_message_id`: the AskUser/SandboxConfirm button message
-- `message_count`: for tracking splits across the 2000-char boundary
 
 This can be a Discord-specific dataclass alongside the existing
 `RenderState`, or a subclass — decided at implementation time.
@@ -242,8 +265,10 @@ This can be a Discord-specific dataclass alongside the existing
   background task
 - `stop(account_id)`: `await bot.close()`, cleanup references
 - Event handlers:
-  - `on_message` → parse_inbound → ingest
-  - `on_interaction` → Button callback → resume
+  - `on_message` → parse_inbound → ingest (gated on `bot.user` being set;
+    messages received before `on_ready` are dropped)
+  - `on_interaction` → route by interaction type: `application_command` →
+    slash command handler; `component` (button) → resume path
   - `on_ready` → sync slash commands, record bot user ID
 
 Connection status reported via `account.config["runtime_status"]`
@@ -270,7 +295,7 @@ shape as `feishu.ts`:
 **Prerequisites checklist:**
 1. Create application at discord.com/developers/applications
 2. Add Bot, copy token
-3. Enable privileged intents (MESSAGE_CONTENT, GUILD_MESSAGES, etc.)
+3. Enable MESSAGE_CONTENT privileged intent + standard gateway intents
 4. Invite bot to server with appropriate permissions
 
 **Credential fields:**
@@ -321,6 +346,7 @@ ID are stored in the credential vault at connect time.
 | File | Purpose |
 |------|---------|
 | `im/registry.py` | PlatformConnector protocol + registry |
+| `im/card_model.py` | Shared accumulation models (CardState, ToolStep, etc.) lifted from feishu |
 | `im/discord/__init__.py` | Register DiscordPlatform |
 | `im/discord/connector.py` | parse_inbound, send/edit message, reactions |
 | `im/discord/gateway.py` | discord.py Bot lifecycle |
@@ -336,8 +362,10 @@ ID are stored in the credential vault at connect time.
 |------|--------|
 | `im/runtime.py` | Registry-based startup + distributed lease |
 | `im/outbound.py` | Extract OpDispatcher protocol |
+| `im/types.py` | Add `make_channel_scope()` helper |
+| `im/feishu/card_model.py` | Re-export from shared `im/card_model.py` |
 | `api/routes/v1/ws_im.py` | Dispatch connect by platform |
-| `api/schemas/im_connector.py` | Add ConnectDiscordAccountIn |
+| `api/schemas/im_connector.py` | Add ConnectDiscordAccountIn, extend delivery_mode pattern |
 | `services/im_connector.py` | Add connect_discord() |
 | `frontend/.../platforms/types.ts` | Extend PlatformDescriptor.id, generalize buildPayload type |
 
