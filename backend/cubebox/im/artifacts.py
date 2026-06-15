@@ -16,7 +16,7 @@ from typing import Any
 from botocore.exceptions import ClientError
 from loguru import logger
 
-from cubebox.im.feishu.card_model import ArtifactItem, CardState
+from cubebox.im.card_model import ArtifactItem, CardState
 from cubebox.objectstore import get_objectstore_client
 from cubebox.services.artifact_share import mint_share_token as _default_mint
 
