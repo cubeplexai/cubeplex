@@ -797,7 +797,7 @@
   "wsSettings": {
     "settingsLabel": "Settings",
     "navWorkspace": "Workspace Settings",
-    "navPersona": "Persona",
+    "navPersona": "General",
     "navModel": "Model",
     "navSkills": "Skills",
     "navMembers": "Members",
@@ -808,9 +808,13 @@
     "workspaceNameSaved": "Workspace name updated",
     "workspaceNameSave": "Save",
     "workspaceNameSaving": "Saving…",
+    "general": {
+      "title": "General",
+      "description": "Workspace name, agent persona, and workspace lifecycle settings."
+    },
     "persona": {
-      "title": "Persona",
-      "description": "Defines the agent's persona for every conversation in this workspace. Appended after the base system prompt.",
+      "title": "Agent Persona",
+      "description": "Sets the personality and behavior of your AI assistant for every conversation in this workspace.",
       "loading": "Loading…",
       "placeholder": "e.g. You are a Python data analysis expert. Always provide runnable code examples.",
       "charCount": "{count} / 8000 characters",
