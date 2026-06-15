@@ -45,10 +45,12 @@
     "settings": "设置",
     "triggers": "触发器",
     "sandboxEnv": "沙盒环境变量",
+    "collapseSidebar": "收起侧边栏",
+    "expandSidebar": "展开侧边栏",
     "noRecentChats": "暂无会话",
     "search": {
-      "open": "搜索会话",
-      "placeholder": "搜索会话…",
+      "open": "搜索对话",
+      "placeholder": "搜索对话…",
       "loading": "搜索中…",
       "noMatches": "没有匹配的会话",
       "unavailable": "搜索暂不可用"
@@ -917,7 +919,9 @@
       "deleteConfirmButton": "永久删除",
       "cancel": "取消"
     },
-    "navIm": "IM"
+    "navIm": "IM",
+    "navMemory": "记忆",
+    "navSandboxEnv": "沙盒环境变量"
   },
   "wsMembers": {
     "title": "成员",

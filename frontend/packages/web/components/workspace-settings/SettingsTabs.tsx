@@ -11,9 +11,9 @@ interface SettingsTabsProps {
 
 const TABS = [
   { tab: 'workspace', labelKey: 'navPersona' },
-  { tab: 'skills', labelKey: 'navSkills' },
-  { tab: 'mcp', labelKey: 'navMcp' },
   { tab: 'im', labelKey: 'navIm' },
+  { tab: 'memory', labelKey: 'navMemory' },
+  { tab: 'sandboxEnv', labelKey: 'navSandboxEnv' },
   { tab: 'members', labelKey: 'navMembers' },
   { tab: 'shares', labelKey: 'navShares' },
 ] as const

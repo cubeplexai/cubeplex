@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
 // Direct import: useUserEvents is a client-only hook and must NOT be loaded
@@ -46,6 +46,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const openDrawer = useMobileMenu((s) => s.open)
   const hasAppShellHeader = routeOwnsHeader(pathname)
 
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+
   // Auto-close the mobile drawer on route change
   useEffect(() => {
     setDrawerOpen(false)
@@ -54,7 +56,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <div className="hidden md:flex">
-        <Sidebar />
+        <Sidebar
+          collapsed={!sidebarOpen}
+          onCollapse={() => setSidebarOpen(false)}
+          onExpand={() => setSidebarOpen(true)}
+        />
       </div>
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Mobile fallback strip ONLY for routes that don't render their own
