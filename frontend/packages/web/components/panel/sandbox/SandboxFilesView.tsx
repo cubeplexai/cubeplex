@@ -1,16 +1,39 @@
 'use client'
 
+import { useState } from 'react'
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
+import { SandboxFileTree } from './SandboxFileTree'
+import { SandboxFilePreview } from './SandboxFilePreview'
+import type { SandboxFileEntry } from '@/hooks/useSandboxFiles'
+
 interface SandboxFilesViewProps {
   workspaceId: string
 }
 
-export function SandboxFilesView({ workspaceId: _workspaceId }: SandboxFilesViewProps) {
+export function SandboxFilesView({ workspaceId }: SandboxFilesViewProps) {
+  const [selectedFile, setSelectedFile] = useState<SandboxFileEntry | null>(null)
+
   return (
-    <div
-      className="flex h-full items-center justify-center
-        text-sm text-muted-foreground"
-    >
-      File browser — coming next
-    </div>
+    <ResizablePanelGroup orientation="horizontal" className="h-full">
+      <ResizablePanel defaultSize={selectedFile ? 30 : 100} minSize={20}>
+        <SandboxFileTree
+          workspaceId={workspaceId}
+          onSelectFile={setSelectedFile}
+          selectedPath={selectedFile?.path ?? null}
+        />
+      </ResizablePanel>
+      {selectedFile && (
+        <>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={70} minSize={30}>
+            <SandboxFilePreview
+              key={selectedFile.path}
+              entry={selectedFile}
+              workspaceId={workspaceId}
+            />
+          </ResizablePanel>
+        </>
+      )}
+    </ResizablePanelGroup>
   )
 }
