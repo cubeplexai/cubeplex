@@ -12,17 +12,70 @@ export const feishuDescriptor: PlatformDescriptor = {
   prereqs: [
     {
       key: 'app',
-      labelKey: 'im.wizard.feishu.prereq.app',
-      helpUrl: () => 'https://open.feishu.cn/',
+      labelKey: (f) =>
+        f.domain === 'lark' ? 'im.wizard.feishu.prereq.app_lark' : 'im.wizard.feishu.prereq.app',
+      helpUrl: (f) =>
+        f.domain === 'lark' ? 'https://open.larksuite.com/' : 'https://open.feishu.cn/',
     },
     { key: 'bot', labelKey: 'im.wizard.feishu.prereq.bot' },
     {
       key: 'scopes',
       labelKey: 'im.wizard.feishu.prereq.scopes',
       helpUrl: (f) =>
-        `https://open.feishu.cn/app/${
-          f.app_id || ''
-        }/auth?q=contact:user.email:readonly,contact:user.id:readonly,im:message`,
+        f.domain === 'lark'
+          ? `https://open.larksuite.com/app/${f.app_id || ''}/auth`
+          : `https://open.feishu.cn/app/${f.app_id || ''}/auth`,
+      items: [
+        'im:message.p2p_msg:readonly',
+        'im:message.group_at_msg:readonly',
+        'im:message:send_as_bot',
+        'im:message:update',
+        'im:resource',
+        'contact:contact.base:readonly',
+        'cardkit:card:read',
+        'cardkit:card:write',
+        'im:message.reactions:read',
+        'im:message.reactions:write_only',
+      ],
+      copyJson: JSON.stringify(
+        {
+          scopes: {
+            tenant: [
+              'im:message.p2p_msg:readonly',
+              'im:message.group_at_msg:readonly',
+              'im:message:send_as_bot',
+              'im:message:update',
+              'im:resource',
+              'contact:contact.base:readonly',
+              'cardkit:card:read',
+              'cardkit:card:write',
+              'im:message.reactions:read',
+              'im:message.reactions:write_only',
+            ],
+            user: [],
+          },
+        },
+        null,
+        2,
+      ),
+    },
+    {
+      key: 'events',
+      labelKey: 'im.wizard.feishu.prereq.events',
+      helpUrl: (f) =>
+        f.domain === 'lark'
+          ? `https://open.larksuite.com/app/${f.app_id || ''}/event`
+          : `https://open.feishu.cn/app/${f.app_id || ''}/event`,
+      items: ['im.message.receive_v1'],
+    },
+    {
+      key: 'card_callback',
+      labelKey: 'im.wizard.feishu.prereq.card_callback',
+      helpUrl: (f) =>
+        f.domain === 'lark'
+          ? `https://open.larksuite.com/app/${f.app_id || ''}/event`
+          : `https://open.feishu.cn/app/${f.app_id || ''}/event`,
+      items: ['card.action.trigger'],
     },
     { key: 'published', labelKey: 'im.wizard.feishu.prereq.published' },
   ],
@@ -59,8 +112,8 @@ export const feishuDescriptor: PlatformDescriptor = {
       type: 'select',
       required: true,
       options: [
-        { value: 'feishu', labelKey: 'im.wizard.feishu.domain.feishu' },
         { value: 'lark', labelKey: 'im.wizard.feishu.domain.lark' },
+        { value: 'feishu', labelKey: 'im.wizard.feishu.domain.feishu' },
       ],
     },
     {
@@ -108,6 +161,5 @@ export const feishuDescriptor: PlatformDescriptor = {
     verification_token: f.verification_token || '',
     acting_user_id: 'self',
   }),
-  scopeConsoleUrl: (appId) =>
-    `https://open.feishu.cn/app/${appId}/auth?q=contact:user.email:readonly,contact:user.id:readonly,im:message`,
+  scopeConsoleUrl: (appId) => `https://open.feishu.cn/app/${appId}/auth`,
 }

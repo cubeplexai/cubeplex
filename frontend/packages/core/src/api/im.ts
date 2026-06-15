@@ -22,6 +22,8 @@ export interface ImAccount {
   delivery_mode: 'long_connection' | 'webhook'
   enabled: boolean
   runtime: ImRuntimeStatus
+  bot_app_name: string | null
+  bot_avatar_url: string | null
 }
 
 export interface ImAccountListOut {

@@ -1592,7 +1592,7 @@
     },
     "platform": {
       "feishu": {
-        "label": "Feishu"
+        "label": "Lark / Feishu"
       },
       "slack": {
         "label": "Slack",
@@ -1628,8 +1628,11 @@
       "feishu": {
         "prereq": {
           "app": "Internal app created on open.feishu.cn",
-          "bot": "Bot enabled in the app",
-          "scopes": "Scopes granted: im:message, contact:user.email:readonly, contact:user.id:readonly",
+          "app_lark": "Internal app created on open.larksuite.com",
+          "bot": "Bot capability enabled (Add features → Bot)",
+          "scopes": "App-identity permissions granted (Permissions & Scopes → Bot)",
+          "events": "Event subscribed: im.message.receive_v1, push method set to Long connection (WebSocket) — Events & Callbacks → Event configuration",
+          "card_callback": "Callback registered: card.action.trigger — Events & Callbacks → Callback configuration",
           "published": "App version published to tenant"
         },
         "field": {

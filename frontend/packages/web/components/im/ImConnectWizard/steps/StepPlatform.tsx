@@ -3,6 +3,7 @@
 import { useTranslations } from 'next-intl'
 
 import { cn } from '@/lib/utils'
+import { PlatformLogo } from '@/components/im/PlatformLogo'
 
 import { ALL_PLATFORMS } from '../platforms'
 import type { PlatformDescriptor } from '../platforms/types'
@@ -31,10 +32,13 @@ export function StepPlatform({ onPick }: Props): React.ReactElement {
           disabled={!p.live}
           onClick={() => p.live && onPick(p)}
           className={cn(
-            'flex flex-col items-center gap-1 rounded border p-4 text-sm',
-            p.live ? 'hover:border-primary' : 'opacity-40 cursor-not-allowed',
+            'flex flex-col items-center gap-2 rounded border p-4 text-sm transition-colors',
+            p.live
+              ? 'hover:border-primary hover:bg-accent/40 cursor-pointer'
+              : 'opacity-40 cursor-not-allowed',
           )}
         >
+          <PlatformLogo platform={p.id} className="h-10 w-10" />
           <span className="font-medium">{t(p.labelKey)}</span>
           {!p.live && <span className="text-xs text-muted-foreground">{comingLabel(t, p.id)}</span>}
         </button>
