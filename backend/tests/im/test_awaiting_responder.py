@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 
+from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
+
 
 @pytest.mark.asyncio
 async def test_register_awaiting_responder_writes_key_with_ttl() -> None:
@@ -80,13 +82,15 @@ async def test_tailer_registers_responder_after_ask_user_request() -> None:
             return None
 
     state = RenderState(bot_name="cubebox", run_id="run_1")
+    connector = _FakeConnector()
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
         redis=_FakeRedis(),
         key_prefix="cb-",
         run_id="run_1",
-        connector=_FakeConnector(),
+        connector=connector,
         state=state,
-        cardkit=_FakeCardKit(),
+        dispatcher=dispatcher,
         responder_open_id="ou_user_42",
     )
 
@@ -130,13 +134,15 @@ async def test_tailer_does_not_register_for_non_pending_events() -> None:
             return None
 
     state = RenderState(bot_name="cubebox", run_id="run_1")
+    connector = _FakeConnector()
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
         redis=_FakeRedis(),
         key_prefix="cb-",
         run_id="run_1",
-        connector=_FakeConnector(),
+        connector=connector,
         state=state,
-        cardkit=_FakeCardKit(),
+        dispatcher=dispatcher,
         responder_open_id="ou_user_42",
     )
     await tailer.maybe_register_awaiting_responder(
@@ -176,13 +182,15 @@ async def test_tailer_registers_for_sandbox_confirm_request() -> None:
             return None
 
     state = RenderState(bot_name="cubebox", run_id="run_1")
+    connector = _FakeConnector()
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
         redis=_FakeRedis(),
         key_prefix="cb-",
         run_id="run_1",
-        connector=_FakeConnector(),
+        connector=connector,
         state=state,
-        cardkit=_FakeCardKit(),
+        dispatcher=dispatcher,
         responder_open_id="ou_user_X",
     )
     await tailer.maybe_register_awaiting_responder(
@@ -226,13 +234,15 @@ async def test_tailer_uses_event_timeout_seconds_for_responder_ttl() -> None:
             return None
 
     state = RenderState(bot_name="cubebox", run_id="run_30m")
+    connector = _FakeConnector()
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=_FakeCardKit())
     tailer = OutboundRunTailer(
         redis=_FakeRedis(),
         key_prefix="cb-",
         run_id="run_30m",
-        connector=_FakeConnector(),
+        connector=connector,
         state=state,
-        cardkit=_FakeCardKit(),
+        dispatcher=dispatcher,
         responder_open_id="ou_user_Y",
     )
     await tailer.maybe_register_awaiting_responder(

@@ -25,6 +25,7 @@ import pytest_asyncio
 from redis.asyncio import Redis
 
 from cubebox.config import config as _cubebox_config
+from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
 from cubebox.im.outbound import OutboundRunTailer
 from cubebox.im.types import RenderState
 from cubebox.streams.run_events import append_run_event
@@ -127,13 +128,14 @@ async def test_outbound_tailer_consumes_real_redis_stream_to_completion(
     connector = _RecordingConnector()
     cardkit = _RecordingCardKit()
     state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_e2e")
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
     tailer = OutboundRunTailer(
         redis=_redis,
         key_prefix=prefix,
         run_id=run_id,
         connector=connector,
         state=state,
-        cardkit=cardkit,
+        dispatcher=dispatcher,
         block_ms=200,
     )
     tailer_task = asyncio.create_task(tailer.run())
@@ -191,13 +193,14 @@ async def test_outbound_tailer_emits_failure_on_error_event(
     connector = _RecordingConnector()
     cardkit = _RecordingCardKit()
     state = RenderState(bot_name="cubebox", run_id=run_id, inbound_message_id="om_inbound_err")
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
     tailer = OutboundRunTailer(
         redis=_redis,
         key_prefix=prefix,
         run_id=run_id,
         connector=connector,
         state=state,
-        cardkit=cardkit,
+        dispatcher=dispatcher,
         block_ms=200,
     )
     tailer_task = asyncio.create_task(tailer.run())
