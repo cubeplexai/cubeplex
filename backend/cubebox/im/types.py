@@ -28,6 +28,16 @@ def make_participant_scope(sender_ref: str) -> str:
     return f"u:{sender_ref}"
 
 
+def make_channel_scope() -> str:
+    """Channel-shared session (Discord guild channels, future public rooms).
+
+    All users in the same channel share one conversation. The channel_id
+    column already distinguishes channels, so scope_key only differentiates
+    session types within the same channel (regular vs thread).
+    """
+    return "ch"
+
+
 def make_thread_scope(thread_id: str) -> str:
     """Thread/topic-scoped session (Slack threads, Discord threads, Telegram forum topics)."""
     return f"t:{thread_id}"
