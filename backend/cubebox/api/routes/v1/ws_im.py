@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.routes.v1._im_runtime import build_im_list_out
 from cubebox.api.schemas.im_connector import (
+    ConnectDiscordAccountIn,
     ConnectFeishuAccountIn,
+    ConnectIMAccountIn,
     IMAccountListOut,
     IMAccountOut,
     ImRuntimeStatus,
@@ -57,25 +59,11 @@ def _to_out(account: IMConnectorAccount) -> IMAccountOut:
     )
 
 
-@router.post("/accounts", status_code=status.HTTP_201_CREATED, response_model=IMAccountOut)
-async def connect_account(
-    workspace_id: str,
-    body: ConnectFeishuAccountIn,
-    request: Request,
-    ctx: Annotated[RequestContext, Depends(require_member)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
-) -> IMAccountOut:
-    if workspace_id != ctx.workspace_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
-    if body.platform != "feishu":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"unsupported platform: {body.platform}",
-        )
-    svc = _service(session, backend, ctx)
-    # acting_user_id resolution.
-    #
+async def _resolve_acting_user(
+    acting_user_id: str,
+    ctx: RequestContext,
+    session: AsyncSession,
+) -> str:
     # ``"self"`` is always allowed: the caller binds a bot that runs as
     # themselves. Any other value is impersonation — the bound bot would
     # run with someone else's permissions for every future IM-triggered
@@ -83,27 +71,35 @@ async def connect_account(
     # require **workspace admin** to grant that (the identity gate falls
     # back to ``acting_user_id`` when the sender doesn't resolve to a
     # workspace member, so an org-member-only check leaks privilege).
-    if body.acting_user_id == "self":
-        acting = ctx.user.id
-    else:
-        caller_ws_role = await MembershipRepository(session).get_role(
-            user_id=ctx.user.id, workspace_id=ctx.workspace_id
+    if acting_user_id == "self":
+        return ctx.user.id
+    caller_ws_role = await MembershipRepository(session).get_role(
+        user_id=ctx.user.id, workspace_id=ctx.workspace_id
+    )
+    if caller_ws_role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace admin required to impersonate another user",
         )
-        if caller_ws_role != Role.ADMIN:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="workspace admin required to impersonate another user",
-            )
-        # Target must still be an org member — otherwise the bot would
-        # run with a stale or external user's identity.
-        om_repo = OrganizationMembershipRepository(session)
-        target_org_role = await om_repo.get_role(user_id=body.acting_user_id, org_id=ctx.org_id)
-        if target_org_role is None:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="acting_user_id is not a member of this organization",
-            )
-        acting = body.acting_user_id
+    om_repo = OrganizationMembershipRepository(session)
+    target_org_role = await om_repo.get_role(user_id=acting_user_id, org_id=ctx.org_id)
+    if target_org_role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="acting_user_id is not a member of this organization",
+        )
+    return acting_user_id
+
+
+async def _connect_feishu(
+    body: ConnectFeishuAccountIn,
+    request: Request,
+    ctx: RequestContext,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> IMAccountOut:
+    svc = _service(session, backend, ctx)
+    acting = await _resolve_acting_user(body.acting_user_id, ctx, session)
     try:
         account = await svc.connect_feishu(
             workspace_id=ctx.workspace_id,
@@ -116,15 +112,7 @@ async def connect_account(
             acting_user_id=acting,
         )
     except ValueError as exc:
-        # Duplicate app_id (preflight uniqueness in the service raises
-        # ValueError). This is a normal client mistake — double-submit,
-        # retry, or two operators racing the same registration. Map to
-        # 409 Conflict so the caller can distinguish "already exists"
-        # from a real 500.
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    # Start the long-connection NOW so the bot is live as soon as the API
-    # returns 201; otherwise the WebSocket only opens on the next API
-    # restart and operators see the account "connected" but silent.
     if account.delivery_mode == "long_connection" and account.enabled:
         starter = getattr(request.app.state, "im_connect_account", None)
         if starter is not None:
@@ -135,6 +123,58 @@ async def connect_account(
                     "[IM ws] long-connection startup failed for {}", account.id, exc_info=True
                 )
     return _to_out(account)
+
+
+async def _connect_discord(
+    body: ConnectDiscordAccountIn,
+    request: Request,
+    ctx: RequestContext,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> IMAccountOut:
+    svc = _service(session, backend, ctx)
+    acting = await _resolve_acting_user(body.acting_user_id, ctx, session)
+    try:
+        account = await svc.connect_discord(
+            workspace_id=ctx.workspace_id,
+            bot_token=body.bot_token,
+            application_id=body.application_id,
+            acting_user_id=acting,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    starter = getattr(request.app.state, "im_connect_account", None)
+    if starter is not None and account.enabled:
+        try:
+            await starter(account)
+        except Exception:
+            logger.warning(
+                "[IM ws] discord gateway startup failed for {}", account.id, exc_info=True
+            )
+    return _to_out(account)
+
+
+@router.post("/accounts", status_code=status.HTTP_201_CREATED, response_model=IMAccountOut)
+async def connect_account(
+    workspace_id: str,
+    body: ConnectIMAccountIn,
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> IMAccountOut:
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+
+    if isinstance(body, ConnectFeishuAccountIn):
+        return await _connect_feishu(body, request, ctx, session, backend)
+    elif isinstance(body, ConnectDiscordAccountIn):
+        return await _connect_discord(body, request, ctx, session, backend)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="unsupported platform",
+        )
 
 
 @router.get("/accounts", response_model=IMAccountListOut)
@@ -252,7 +292,7 @@ async def enable_workspace_account(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
     updated = await svc.set_enabled(account_id=account_id, enabled=True)
     assert updated is not None
-    if updated.delivery_mode == "long_connection":
+    if updated.delivery_mode in ("long_connection", "gateway"):
         starter = getattr(request.app.state, "im_connect_account", None)
         if starter is not None:
             try:
