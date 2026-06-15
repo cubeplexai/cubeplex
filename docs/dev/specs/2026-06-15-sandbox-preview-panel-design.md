@@ -133,7 +133,7 @@ nonce-download endpoint in `artifact_share.py`.
 Starts ttyd inside the sandbox (idempotent — checks if already running):
 
 ```bash
-pgrep -x ttyd || ttyd -p 7681 -W bash
+pgrep -x ttyd || (nohup ttyd -p 7681 -W bash &>/dev/null &); sleep 1
 ```
 
 Then calls `get_signed_endpoint(7681)` and returns `{ url: string }`.
