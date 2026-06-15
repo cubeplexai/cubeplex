@@ -1,5 +1,6 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { MemoryList } from '@/app/(app)/w/[wsId]/memory/components/MemoryList'
 
@@ -8,15 +9,16 @@ interface MemoryPanelProps {
 }
 
 export function MemoryPanel({ wsId }: MemoryPanelProps): React.ReactElement {
+  const t = useTranslations('wsSettings.memory')
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="flex flex-col gap-6 px-6 py-6 max-w-3xl">
         <Tabs defaultValue="personal">
           <TabsList variant="line" className="w-fit">
-            <TabsTrigger value="personal">Personal</TabsTrigger>
-            <TabsTrigger value="workspace">Workspace</TabsTrigger>
-            <TabsTrigger value="org">Organization</TabsTrigger>
-            <TabsTrigger value="archived">Archived</TabsTrigger>
+            <TabsTrigger value="personal">{t('tabPersonal')}</TabsTrigger>
+            <TabsTrigger value="workspace">{t('tabWorkspace')}</TabsTrigger>
+            <TabsTrigger value="org">{t('tabOrg')}</TabsTrigger>
+            <TabsTrigger value="archived">{t('tabArchived')}</TabsTrigger>
           </TabsList>
           <TabsContent value="personal" className="mt-4">
             <MemoryList wsId={wsId} scope="personal" status="active" />

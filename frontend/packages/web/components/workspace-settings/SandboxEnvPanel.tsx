@@ -16,6 +16,7 @@ import {
   type EnvEntryOut,
   type UpdateEntryIn,
 } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
 import { EnvTable } from '@/components/sandbox-env/EnvTable'
 import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
 
@@ -24,6 +25,7 @@ interface SandboxEnvPanelProps {
 }
 
 export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElement {
+  const t = useTranslations('wsSettings.sandboxEnv')
   const client = useMemo(() => createApiClient(''), [])
   const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
   const isAdmin = wsRole === 'admin'
@@ -99,7 +101,7 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
   }
 
   async function handleDelete(entry: EnvEntryOut) {
-    if (!confirm(`Delete ${entry.env_name}?`)) return
+    if (!confirm(t('deleteConfirm', { name: entry.env_name }))) return
     try {
       if (entry.scope === 'workspace') {
         await deleteWsEnvWorkspace(client, wsId, entry.id)
@@ -119,10 +121,8 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
       <header className="border-b border-border/70 px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">Sandbox environment variables</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Environment variables injected into your sandbox.
-            </p>
+            <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">{t('description')}</p>
           </div>
           <div className="flex gap-2">
             {isAdmin && (
@@ -130,14 +130,14 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
                 onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'workspace' })}
                 className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
               >
-                + Workspace variable
+                + {t('addWorkspaceVar')}
               </button>
             )}
             <button
               onClick={() => setModal({ kind: 'add-workspace', defaultScope: 'user' })}
               className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/70 bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
             >
-              + Personal variable
+              + {t('addPersonalVar')}
             </button>
           </div>
         </div>

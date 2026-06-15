@@ -1,7 +1,7 @@
-// frontend/packages/web/components/sandbox-env/EnvModal.tsx
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 import { X } from 'lucide-react'
 import { type CreateEnvIn, type EnvEntryOut, type UpdateEntryIn } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,7 @@ function hostsToRaw(hosts: string[] | null | undefined): string {
 }
 
 export function EnvModal({ mode, onSubmit, onClose }: Props) {
+  const t = useTranslations('wsSettings.sandboxEnv')
   const isEdit = mode.kind === 'edit'
   const entry = isEdit ? mode.entry : null
 
@@ -56,10 +57,9 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
   const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
   function validateName(v: string): string | null {
-    if (!v) return 'Name is required'
-    if (v.length > 128) return 'Max 128 characters'
-    if (!NAME_RE.test(v))
-      return 'Use letters, digits, or underscores; must start with a letter or underscore'
+    if (!v) return t('validNameRequired')
+    if (v.length > 128) return t('validNameMax')
+    if (!NAME_RE.test(v)) return t('validNameFormat')
     return null
   }
 
@@ -72,9 +72,9 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
   function validateHosts(raw: string): string | null {
     if (!isSecret) return null
     const hosts = parseHosts(raw)
-    if (hosts.length === 0) return 'At least one host is required for secrets'
+    if (hosts.length === 0) return t('validHostRequired')
     const invalid = hosts.filter((h) => !isValidHostPattern(h))
-    if (invalid.length > 0) return `Invalid host pattern: ${invalid[0]}`
+    if (invalid.length > 0) return t('validHostInvalid', { host: invalid[0] })
     return null
   }
 
@@ -83,7 +83,6 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
     setSubmitError(null)
 
     if (isEdit) {
-      // Edit mode: hosts required for secrets, value optional
       const hErr = isSecret ? validateHosts(hostsRaw) : null
       setHostsError(hErr)
       if (hErr) return
@@ -101,7 +100,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
       if (value) body.secret_value = value
 
       if (!body.hosts && !body.secret_value) {
-        setSubmitError('No changes to save')
+        setSubmitError(t('errorNoChanges'))
         return
       }
 
@@ -110,7 +109,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
         await onSubmit(body, entry!.id)
         onClose()
       } catch (err: unknown) {
-        setSubmitError(err instanceof Error ? err.message : 'An error occurred')
+        setSubmitError(err instanceof Error ? err.message : t('errorFallback'))
       } finally {
         setSaving(false)
       }
@@ -124,7 +123,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
     setHostsError(hErr)
     if (nErr || hErr) return
     if (!value) {
-      setSubmitError('Value is required')
+      setSubmitError(t('validNameRequired'))
       return
     }
 
@@ -141,7 +140,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
       await onSubmit(body, undefined, finalScope)
       onClose()
     } catch (err: unknown) {
-      setSubmitError(err instanceof Error ? err.message : 'An error occurred')
+      setSubmitError(err instanceof Error ? err.message : t('errorFallback'))
     } finally {
       setSaving(false)
     }
@@ -158,14 +157,14 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
         </button>
 
         <h2 className="mb-5 text-base font-semibold">
-          {isEdit ? 'Edit environment variable' : 'Add environment variable'}
+          {isEdit ? t('modalEditTitle') : t('modalAddTitle')}
         </h2>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* NAME — read-only in edit, editable in add */}
+          {/* NAME */}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="env-name" className="text-xs font-medium">
-              Name
+              {t('fieldName')}
             </Label>
             {isEdit ? (
               <div className="rounded-md border border-border bg-muted/30 px-3 py-2 font-mono text-sm text-muted-foreground">
@@ -187,10 +186,10 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             )}
           </div>
 
-          {/* SCOPE — only for workspace-admin add */}
+          {/* SCOPE */}
           {mode.kind === 'add-workspace' && (
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium">Scope</Label>
+              <Label className="text-xs font-medium">{t('fieldScope')}</Label>
               <div className="flex gap-3">
                 {(['workspace', 'user'] as const).map((s) => (
                   <label key={s} className="flex cursor-pointer items-center gap-1.5 text-sm">
@@ -201,24 +200,24 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
                       checked={scope === s}
                       onChange={() => setScope(s)}
                     />
-                    {s === 'workspace' ? 'Workspace' : 'Personal'}
+                    {s === 'workspace' ? t('scopeWorkspace') : t('scopePersonal')}
                   </label>
                 ))}
               </div>
             </div>
           )}
 
-          {/* TYPE — read-only in edit, selectable in add */}
+          {/* TYPE */}
           {isEdit ? (
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium">Type</Label>
+              <Label className="text-xs font-medium">{t('fieldType')}</Label>
               <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                {entry!.is_secret ? 'Secret token' : 'Env value'}
+                {entry!.is_secret ? t('typeSecretLabel') : t('typeEnvLabel')}
               </div>
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs font-medium">Type</Label>
+              <Label className="text-xs font-medium">{t('fieldType')}</Label>
               <div className="flex flex-col gap-2.5">
                 <label className="flex cursor-pointer items-start gap-2.5">
                   <input
@@ -232,11 +231,8 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
                     }}
                   />
                   <div>
-                    <div className="text-sm font-medium">Secret token</div>
-                    <div className="text-xs text-muted-foreground">
-                      Injected as a placeholder. The egress proxy substitutes the real value into
-                      outbound HTTP request headers at runtime. Requires allowed hosts.
-                    </div>
+                    <div className="text-sm font-medium">{t('typeSecretLabel')}</div>
+                    <div className="text-xs text-muted-foreground">{t('typeSecretDesc')}</div>
                   </div>
                 </label>
                 <label className="flex cursor-pointer items-start gap-2.5">
@@ -251,25 +247,20 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
                     }}
                   />
                   <div>
-                    <div className="text-sm font-medium">Env value</div>
-                    <div className="text-xs text-muted-foreground">
-                      The actual value is injected directly into the sandbox env var. Encrypted at
-                      rest.
-                    </div>
+                    <div className="text-sm font-medium">{t('typeEnvLabel')}</div>
+                    <div className="text-xs text-muted-foreground">{t('typeEnvDesc')}</div>
                   </div>
                 </label>
               </div>
             </div>
           )}
 
-          {/* HOSTS — for secrets */}
+          {/* HOSTS */}
           {isSecret && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="env-hosts" className="text-xs font-medium">
-                Allowed hosts{' '}
-                <span className="font-normal text-muted-foreground">
-                  (space or comma separated)
-                </span>
+                {t('fieldHosts')}{' '}
+                <span className="font-normal text-muted-foreground">{t('fieldHostsHint')}</span>
               </Label>
               <Input
                 id="env-hosts"
@@ -283,13 +274,13 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             </div>
           )}
 
-          {/* HEADER NAMES — optional, for secrets in edit mode */}
+          {/* HEADER NAMES */}
           {isSecret && isEdit && (
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="env-header-names" className="text-xs font-medium">
-                Allowed header names{' '}
+                {t('fieldHeaderNames')}{' '}
                 <span className="font-normal text-muted-foreground">
-                  (optional; leave blank for any header)
+                  {t('fieldHeaderNamesHint')}
                 </span>
               </Label>
               <Input
@@ -305,7 +296,7 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
           {/* VALUE */}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="env-value" className="text-xs font-medium">
-              {isEdit ? 'New value (leave blank to keep current)' : 'Value'}
+              {isEdit ? t('fieldValueEdit') : t('fieldValue')}
             </Label>
             <Input
               id="env-value"
@@ -319,20 +310,18 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             />
           </div>
 
-          {/* Submit error */}
           {submitError && (
             <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {submitError}
             </p>
           )}
 
-          {/* Footer */}
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={saving}>
-              Cancel
+              {t('btnCancel')}
             </Button>
             <Button type="submit" size="sm" disabled={saving}>
-              {saving ? 'Saving…' : isEdit ? 'Save' : 'Add'}
+              {saving ? t('btnSaving') : isEdit ? t('btnSave') : t('btnAdd')}
             </Button>
           </div>
         </form>
