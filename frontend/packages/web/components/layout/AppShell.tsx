@@ -7,7 +7,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/componen
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
 import { AttachmentPreviewView } from '@/components/panel/AttachmentPreviewView'
-import { BrowserView } from '@/components/panel/BrowserView'
+import { SandboxPanel } from '@/components/panel/sandbox/SandboxPanel'
 import { SkillCandidatePanel } from '@/components/panel/SkillCandidatePanel'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -25,12 +25,13 @@ interface AppShellProps {
 
 export function AppShell({ children, headerTitle, conversationId }: AppShellProps) {
   const view = usePanelStore((s) => s.view)
-  const openBrowser = usePanelStore((s) => s.openBrowser)
+  const openSandbox = usePanelStore((s) => s.openSandbox)
   const { workspaceId } = useWorkspaceContext()
   // Only offer the browser panel where the backend actually mounts /browser/*
   // (sandbox support enabled); otherwise the button opens a panel that 404s.
   const { sandboxEnabled } = useDeploymentMode()
   const panelOpen = view.type !== 'closed'
+  const isSandboxPanel = view.type === 'sandbox'
   // Desktop-first SSR fallback: most users are on desktop, so the mobile
   // overlay branch should not be the first paint on a 1440px session.
   const isDesktop = useMediaQuery('(min-width: 768px)', true)
@@ -78,8 +79,8 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
       <ArtifactPanel />
     ) : view.type === 'attachment' ? (
       <AttachmentPreviewView info={view.info} />
-    ) : view.type === 'browser' ? (
-      <BrowserView workspaceId={workspaceId} />
+    ) : view.type === 'sandbox' ? (
+      <SandboxPanel workspaceId={workspaceId} />
     ) : view.type === 'skill-candidate' ? (
       <SkillCandidatePanel
         candidateId={view.candidateId}
@@ -106,10 +107,10 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         {workspaceId && sandboxEnabled && (
           <button
             type="button"
-            onClick={openBrowser}
+            onClick={openSandbox}
             className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
-            aria-label="Open sandbox browser"
-            title="Open sandbox browser"
+            aria-label="Open sandbox"
+            title="Open sandbox"
           >
             <Monitor className="h-4 w-4" />
           </button>
@@ -151,14 +152,17 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
       className={cn('h-full', dragging && 'panel-dragging')}
       elementRef={groupRef}
     >
-      <ResizablePanel defaultSize={panelOpen ? 50 : 100} minSize={30}>
+      <ResizablePanel
+        defaultSize={panelOpen ? (isSandboxPanel ? 25 : 50) : 100}
+        minSize={isSandboxPanel ? 20 : 30}
+      >
         {main}
       </ResizablePanel>
 
       {panelOpen && (
         <>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={50} minSize={25}>
+          <ResizablePanel defaultSize={isSandboxPanel ? 75 : 50} minSize={25}>
             {panelContent}
           </ResizablePanel>
         </>

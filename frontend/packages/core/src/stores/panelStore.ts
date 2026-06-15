@@ -56,7 +56,7 @@ export type PanelView =
       type: 'attachment'
       info: AttachmentPanelInfo
     }
-  | { type: 'browser' }
+  | { type: 'sandbox' }
   | { type: 'skill-candidate'; candidateId: string; repo: string | null; sourceName: string }
 
 export interface PanelStore {
@@ -75,7 +75,7 @@ export interface PanelStore {
 
   openAttachment: (info: AttachmentPanelInfo) => void
 
-  openBrowser: () => void
+  openSandbox: () => void
 
   openSkillCandidate: (candidateId: string, repo: string | null, sourceName: string) => void
 
@@ -111,7 +111,7 @@ export const usePanelStore = create<PanelStore>((set) => ({
       view: { type: 'attachment', info },
     }),
 
-  openBrowser: () => set({ view: { type: 'browser' } }),
+  openSandbox: () => set({ view: { type: 'sandbox' } }),
 
   openSkillCandidate: (candidateId, repo, sourceName) =>
     set({ view: { type: 'skill-candidate', candidateId, repo, sourceName } }),
