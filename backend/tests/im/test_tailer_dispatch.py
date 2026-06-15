@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
 from cubebox.im.outbound import OutboundOp, OutboundRunTailer
 from cubebox.im.types import RenderState
 
@@ -64,13 +65,14 @@ class _FakeConnector:
 def _new_tailer(
     state: RenderState, cardkit: _FakeCardKit, connector: _FakeConnector
 ) -> OutboundRunTailer:
+    dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
     return OutboundRunTailer(
         redis=None,
         key_prefix="cb-",
         run_id="run_1",
         connector=connector,
         state=state,
-        cardkit=cardkit,
+        dispatcher=dispatcher,
     )
 
 

@@ -119,13 +119,16 @@ async def start(app: FastAPI, run_manager: Any) -> None:
             card_state=state.card_state,
         )
         cardkit = _build_cardkit_client(client, secrets)
+        from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
+
+        op_dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
         tailer = OutboundRunTailer(
             redis=app.state.redis,
             key_prefix=app.state.redis_key_prefix,
             run_id=run_id,
             connector=connector,
             state=state,
-            cardkit=cardkit,
+            dispatcher=op_dispatcher,
             artifact_dispatcher=dispatcher,
             responder_open_id=item.sender_open_id,
         )

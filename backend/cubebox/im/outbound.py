@@ -2,9 +2,10 @@
 
 The render fold is platform-agnostic. The tailer talks to a connector
 through three lifecycle hooks (``on_processing_start`` / ``_complete`` /
-``_failed``) plus the CardKit ``card_create`` / ``patch_card`` /
-``finalize`` ops dispatched via the ``CardKitClient``; Feishu-vocabulary
-calls live in the connector, not here.
+``_failed``) and delegates outbound ops (``card_create`` / ``stream_text``
+/ ``patch_card`` / ``finalize``) to an injected ``OpDispatcher``;
+platform-specific rendering lives in the dispatcher implementation
+(e.g. ``FeishuOpDispatcher``), not here.
 """
 
 from __future__ import annotations
@@ -442,8 +443,8 @@ class OutboundRunTailer:
     """Tail a run's Redis event stream and emit ops via the connector.
 
     Lifecycle calls go through the connector's ``on_processing_start /
-    _complete / _failed`` hooks — Feishu-specific reactions live in
-    FeishuConnector, not here.
+    _complete / _failed`` hooks — platform-specific rendering lives in
+    the injected ``OpDispatcher``, not here.
 
     The tailer also dispatches ``OutboundOp(kind="artifact")`` events to an
     optional artifact dispatcher; if none is given the events are dropped.
@@ -457,7 +458,7 @@ class OutboundRunTailer:
         run_id: str,
         connector: Any,
         state: RenderState,
-        cardkit: Any,
+        dispatcher: Any | None = None,
         artifact_dispatcher: Any | None = None,
         responder_open_id: str | None = None,
         block_ms: int = 2000,
@@ -467,7 +468,7 @@ class OutboundRunTailer:
         self._run_id = run_id
         self._connector = connector
         self._state = state
-        self._cardkit = cardkit
+        self._dispatcher = dispatcher
         self._artifact_dispatcher = artifact_dispatcher
         self._responder_open_id = responder_open_id
         self._block_ms = block_ms
@@ -558,10 +559,6 @@ class OutboundRunTailer:
                             logger.warning("artifact dispatch failed", exc_info=True)
                     if op is None:
                         continue
-                    # Task 8: dispatch is a no-op stub. Task 12 rewires this to
-                    # the cardkit client and re-introduces terminal-delivery
-                    # retries against the new op kinds (card_create /
-                    # stream_text / patch_card / finalize).
                     delivered = await self._dispatch_op(op, is_terminal=op.final)
                     try:
                         await self.maybe_register_awaiting_responder(ev_payload=ev.payload)
@@ -588,232 +585,33 @@ class OutboundRunTailer:
                     await self._connector.on_processing_failed(self._state)
             except Exception:
                 logger.warning("on_processing_* hook raised", exc_info=True)
-            # Release the CardKitClient's HTTP/2 connection pool. Idempotent
-            # and safe even when cardkit is a test fake (only called if
-            # the attribute exists).
-            aclose = getattr(self._cardkit, "aclose", None)
-            if callable(aclose):
+            # Release the dispatcher's platform resources. Idempotent and
+            # safe even when dispatcher is a test fake.
+            if self._dispatcher is not None:
                 try:
-                    await aclose()
+                    await self._dispatcher.aclose()
                 except Exception:
-                    logger.warning("[outbound] cardkit.aclose() raised", exc_info=True)
+                    logger.warning("[outbound] dispatcher.aclose() raised", exc_info=True)
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
-        """Translate one OutboundOp into the matching CardKit call.
+        """Delegate one OutboundOp to the injected OpDispatcher.
 
-        Returns True iff the op was delivered. ``card_create`` failures
-        flip ``state.card_unavailable`` and fall back to emergency-text
-        bubbles so the user still sees an answer. ``stream_text`` /
-        ``patch_card`` flood signals collapse to a False return — the
-        next fold step rebuilds and the tailer retries. ``finalize``
-        owns its own retry budget inside CardKitClient; on exhaustion the
-        tailer surfaces the answer via emergency text as a last resort.
-
-        The ``cardkit=None`` test path (used by legacy e2e fixtures that
-        still pass cardkit=None) short-circuits every op to False; the
-        production startup wires a real CardKitClient in app.py.
+        Returns True iff the op was delivered. When no dispatcher is
+        injected (``dispatcher=None``), every op short-circuits to False.
         """
-        _ = is_terminal  # finalize owns its own retry; tailer doesn't differentiate.
-        from cubebox.im.feishu.card_renderer import render
-
-        state = self._state
-        cardkit = self._cardkit
-        if cardkit is None:
+        _ = is_terminal
+        if self._dispatcher is None:
             return False
-
-        if op.kind == "card_create":
-            if state.card_unavailable:
-                return False
-            card_json = render(state.card_state)
-            try:
-                card_id = await cardkit.create_entity(card_json)
-            except Exception:
-                logger.warning(
-                    "[outbound] CardKit create_entity failed; engaging emergency text",
-                    exc_info=True,
-                )
-                state.card_unavailable = True
-                await self._emergency_card_create_fallback()
-                return False
-            state.card_id = card_id
-            state.card_state.advance_seq()
-            try:
-                msg_id = await self._connector.send_card_init_message(card_id)
-            except Exception:
-                logger.warning("[outbound] send_card_init_message raised", exc_info=True)
-                msg_id = None
-            state.bot_message_id = msg_id
-            if msg_id is None:
-                # The CardKit entity exists but no IM bubble points at it —
-                # subsequent stream/patch ops would update an invisible card.
-                # Disable card path, fall back to emergency text so the user
-                # at least sees the partial answer.
-                logger.warning(
-                    "[outbound] send_card_init_message returned no message_id;"
-                    " engaging emergency text"
-                )
-                state.card_unavailable = True
-                await self._emergency_card_create_fallback()
-                return False
-            return True
-
-        if op.kind == "stream_text":
-            if state.card_id is None or state.card_unavailable:
-                return False
-            seq = state.card_state.advance_seq()
-            # Apply the same markdown sanitation as the full-card render path so
-            # an incremental stream PUT never carries content CardKit would reject
-            # (URL/path image markdown, raw H1/H2 headings) or that renders
-            # inconsistently until the next finalize. See card_renderer.render —
-            # we are mirroring its streaming_content element formatting.
-            from cubebox.im.feishu.card_renderer import optimize_markdown_style as _optimize
-
-            sanitized = _optimize(op.text, citation_index=state.card_state.citation_index)
-            try:
-                await cardkit.stream_text(
-                    card_id=state.card_id,
-                    element_id=op.element_id or "streaming_content",
-                    content=sanitized,
-                    sequence=seq,
-                )
-                note_edit_success(state)
-                return True
-            except _FloodSignal:
-                note_flood_strike(state)
-                return False
-            except Exception:
-                logger.warning("[outbound] stream_text failed", exc_info=True)
-                return False
-
-        if op.kind == "patch_card":
-            if state.card_id is None or state.card_unavailable:
-                return False
-            seq = state.card_state.advance_seq()
-            try:
-                await cardkit.patch_card(
-                    card_id=state.card_id,
-                    card_json=render(state.card_state),
-                    sequence=seq,
-                )
-                note_edit_success(state)
-                return True
-            except _FloodSignal:
-                # Coalesce — next event will rebuild and resend. Count the
-                # strike so a sustained tool-heavy run that's getting
-                # throttled trips ``edits_disabled`` and stops hammering
-                # CardKit through 230020 responses.
-                note_flood_strike(state)
-                await self._maybe_surface_pending_via_emergency()
-                return False
-            except Exception:
-                logger.warning("[outbound] patch_card failed", exc_info=True)
-                await self._maybe_surface_pending_via_emergency()
-                return False
-
-        if op.kind == "finalize":
-            if state.card_id is None or state.card_unavailable:
-                if state.card_state.error:
-                    await self._emergency_text(f"⚠️ {state.card_state.error}")
-                elif state.card_state.streaming_content:
-                    await self._emergency_text(state.card_state.streaming_content[:4000])
-                return False
-            seq = state.card_state.advance_seq()
-            try:
-                delivered = bool(
-                    await cardkit.finalize(
-                        card_id=state.card_id,
-                        card_json=render(state.card_state),
-                        sequence=seq,
-                    )
-                )
-            except Exception:
-                # ``cardkit.finalize`` is contracted to return False on its own
-                # retry exhaustion, but a token-provider exception in
-                # ``_headers()`` or a JSON decode failure escapes that contract.
-                # Without this guard the tailer's lifecycle wrapper catches the
-                # exception and only fires the failed-hook reaction; the buffered
-                # final answer never reaches the user. Treat as
-                # delivered=False so the emergency-text fallback below runs.
-                logger.warning(
-                    "[outbound] cardkit.finalize raised; falling back to emergency text",
-                    exc_info=True,
-                )
-                delivered = False
-            if not delivered:
-                # CardKit finalize gave up after its retry budget (~2.5min).
-                # The card stays half-rendered without an answer; surface
-                # whatever we have as emergency text so the user at least
-                # sees the response.
-                logger.warning(
-                    "[outbound] CardKit finalize gave up for card_id={};"
-                    " surfacing answer via emergency text",
-                    state.card_id,
-                )
-                if state.card_state.error:
-                    await self._emergency_text(f"⚠️ {state.card_state.error}")
-                elif state.card_state.streaming_content:
-                    await self._emergency_text(state.card_state.streaming_content[:4000])
-            return delivered
-
-        return False
-
-    async def _emergency_text(self, text: str) -> None:
-        try:
-            await self._connector._send_emergency_text(text)
-        except Exception:
-            logger.warning("[outbound] emergency text send failed", exc_info=True)
-
-    async def _maybe_surface_pending_via_emergency(self) -> None:
-        """Surface the HITL prompt via emergency text when patch_card cannot
-        deliver it.
-
-        The Feishu user is stranded otherwise: paused-HITL ``done`` is now
-        non-terminal (round 2), so there is no later ``finalize`` to render
-        the question — the card stays at the pre-pending state forever.
-        Fires at most once per question_id so a long flood-throttled HITL
-        pause doesn't spam the same prompt with every retry.
-        """
         state = self._state
-        pending = state.card_state.pending_input
-        if pending is None or pending.resolved_choice is not None:
-            return
-        qid = pending.question_id or ""
-        if not qid or state.pending_prompt_emergency_sent_qid == qid:
-            return
-        state.pending_prompt_emergency_sent_qid = qid
-        kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
-        await self._emergency_text(
-            f"{kind_label}\n\n{pending.question}\n\n_(卡片更新暂时不可用；请在 cubebox 网页端继续。)_"[
-                :4000
-            ]
-        )
-
-    async def _emergency_card_create_fallback(self) -> None:
-        """Best-effort plain-text rescue when CardKit create or card-init fails.
-
-        Always sends the generic unavailability notice; then surfaces whatever
-        meaningful state we already have so the user is not stranded:
-
-        - ``streaming_content``: partial model reply collected so far.
-        - ``pending_input``: an AskUser / SandboxConfirm prompt. Important
-          because paused-HITL ``done`` events are intentionally non-terminal
-          now — if CardKit was down at the moment the pending event arrived
-          there is no later finalize to surface the question, and without
-          this hook the Feishu user would never see what they were being
-          asked.
-        """
-        state = self._state.card_state
-        await self._emergency_text("⚠️ 飞书富文本渲染暂时不可用，结果将以文本展示")
-        if state.streaming_content:
-            await self._emergency_text(state.streaming_content[:4000])
-        pending = state.pending_input
-        if pending is not None and pending.resolved_choice is None:
-            # Reproduce roughly what the renderer would have shown so the user
-            # can answer through the cubebox web client.
-            kind_label = "❓ 待用户输入" if pending.kind == "ask_user" else "❓ 待沙箱操作确认"
-            await self._emergency_text(
-                f"{kind_label}\n\n{pending.question}\n\n_(请在 cubebox 网页端继续。)_"[:4000]
-            )
+        if op.kind == "card_create":
+            return bool(await self._dispatcher.dispatch_create(state))
+        if op.kind == "stream_text":
+            return bool(await self._dispatcher.dispatch_stream(state, op.text))
+        if op.kind == "patch_card":
+            return bool(await self._dispatcher.dispatch_patch(state))
+        if op.kind == "finalize":
+            return bool(await self._dispatcher.dispatch_finalize(state))
+        return False
 
 
 class _FloodSignal(Exception):
