@@ -42,11 +42,7 @@ export function SandboxPanel({ workspaceId }: SandboxPanelProps) {
         }}
         onClose={close}
       />
-      <div
-        className={cn(
-          'flex border-b border-border bg-card shrink-0',
-        )}
-      >
+      <div className={cn('flex border-b border-border bg-card shrink-0')}>
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
@@ -66,15 +62,9 @@ export function SandboxPanel({ workspaceId }: SandboxPanelProps) {
         ))}
       </div>
       <div className="flex-1 overflow-hidden">
-        {activeTab === 'files' && (
-          <SandboxFilesView workspaceId={workspaceId} />
-        )}
-        {activeTab === 'browser' && (
-          <BrowserView workspaceId={workspaceId} />
-        )}
-        {activeTab === 'terminal' && (
-          <SandboxTerminalView workspaceId={workspaceId} />
-        )}
+        {activeTab === 'files' && <SandboxFilesView workspaceId={workspaceId} />}
+        {activeTab === 'browser' && <BrowserView workspaceId={workspaceId} />}
+        {activeTab === 'terminal' && <SandboxTerminalView workspaceId={workspaceId} />}
       </div>
     </div>
   )

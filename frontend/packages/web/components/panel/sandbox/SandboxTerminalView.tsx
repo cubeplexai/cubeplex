@@ -12,23 +12,17 @@ interface SandboxTerminalViewProps {
   workspaceId: string
 }
 
-export function SandboxTerminalView(
-  { workspaceId }: SandboxTerminalViewProps,
-) {
-  const { url, loading, error, refresh } =
-    useSandboxTerminal(workspaceId)
+export function SandboxTerminalView({ workspaceId }: SandboxTerminalViewProps) {
+  const { url, loading, error, refresh } = useSandboxTerminal(workspaceId)
 
   useEffect(() => {
     if (!url) return
     const ping = () => {
-      void fetch(
-        `/api/v1/ws/${workspaceId}/browser/keepalive`,
-        {
-          method: 'POST',
-          credentials: 'include',
-          headers: csrfHeaders(),
-        },
-      ).catch(() => {})
+      void fetch(`/api/v1/ws/${workspaceId}/browser/keepalive`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: csrfHeaders(),
+      }).catch(() => {})
     }
     const id = setInterval(ping, KEEPALIVE_MS)
     return () => clearInterval(id)
@@ -51,9 +45,7 @@ export function SandboxTerminalView(
         className="flex h-full flex-col items-center
           justify-center gap-3 text-sm"
       >
-        <p className="text-destructive">
-          Could not start terminal. {error.message}
-        </p>
+        <p className="text-destructive">Could not start terminal. {error.message}</p>
         <button
           type="button"
           onClick={() => refresh()}
