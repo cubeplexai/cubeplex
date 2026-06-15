@@ -580,7 +580,10 @@ def create_app(
     from cubebox.config import config as _sandbox_config
 
     if _sandbox_config.get("sandbox.enabled", False):
+        from cubebox.api.routes.v1 import sandbox_share
+
         app.include_router(ws_browser.router, prefix="/api/v1")
+        app.include_router(sandbox_share.router, prefix="/api/v1")
 
     from cubebox.api.routes.health import router as health_router
 

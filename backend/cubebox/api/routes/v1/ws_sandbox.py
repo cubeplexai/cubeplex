@@ -4,6 +4,7 @@
 - ``/files`` — list direct children of a sandbox directory.
 - ``/files/content`` — read a text file for inline preview.
 - ``/files/download`` — stream a file as a download.
+- ``/files/preview-token`` — issue nonce for Office Online Viewer.
 - ``/terminal`` — start ttyd and return a signed URL.
 
 Scope-isolated: no admin counterpart — admins see fleet-wide info via a
@@ -12,9 +13,12 @@ different surface.
 
 import mimetypes
 import posixpath
+import secrets
 from typing import Annotated, cast
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import orjson
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -26,6 +30,7 @@ from cubebox.api.schemas.sandbox_policy import (
 )
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
+from cubebox.cache import RedisHandle, redis_dep
 from cubebox.db.session import get_session
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox import SandboxError
@@ -238,6 +243,71 @@ async def download_sandbox_file(
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )
+
+
+# ── Office preview token ───────────────────────────────────────────
+
+SANDBOX_OTK_TTL_SECONDS = 300  # 5 minutes
+OFFICE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
+
+
+class SandboxPreviewTokenResponse(BaseModel):
+    download_url: str
+    viewer_url: str
+
+
+@router.post(
+    "/files/preview-token",
+    response_model=SandboxPreviewTokenResponse,
+)
+async def create_sandbox_preview_token(
+    request: Request,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rh: Annotated[RedisHandle, Depends(redis_dep)],
+    path: str = Query(...),
+) -> SandboxPreviewTokenResponse:
+    """Issue a one-time nonce for Office Online Viewer."""
+    filename = posixpath.basename(path)
+    ext = filename[filename.rfind(".") :].lower() if "." in filename else ""
+    if ext not in OFFICE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(f"Office preview not supported for extension '{ext}'"),
+        )
+
+    manager = get_sandbox_manager()
+    try:
+        sandbox = await manager.get_or_create(
+            ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+    except SandboxError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox unavailable",
+        ) from exc
+
+    nonce = secrets.token_hex(32)
+    payload = orjson.dumps(
+        {
+            "sandbox_id": sandbox.id,
+            "file_path": path,
+            "org_id": ctx.org_id,
+            "workspace_id": ctx.workspace_id,
+            "user_id": str(ctx.user.id),
+        }
+    )
+    key = f"{rh.key_prefix}:sandbox_otk:{nonce}"
+    await rh.client.set(key, payload, ex=SANDBOX_OTK_TTL_SECONDS)
+
+    from cubebox.config import config
+
+    public_url = config.get("api.public_url", "")
+    base = str(public_url).rstrip("/") if public_url else str(request.base_url).rstrip("/")
+    dl_url = f"{base}/api/v1/public/sandbox/dl/{nonce}/{filename}"
+    viewer_url = f"https://view.officeapps.live.com/op/embed.aspx?src={quote(dl_url, safe='')}"
+    return SandboxPreviewTokenResponse(download_url=dl_url, viewer_url=viewer_url)
 
 
 # ── Terminal ─────────────────────────────────────────────────────────
