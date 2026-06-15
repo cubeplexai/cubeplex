@@ -95,7 +95,7 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
     if etype == "tool_call":
         import json as _json
 
-        from cubebox.im.feishu.card_model import SubAgentRow, ToolStep
+        from cubebox.im.card_model import SubAgentRow, ToolStep
 
         tool_id = str(data.get("tool_call_id") or "")
         name = str(data.get("name") or "tool")
@@ -189,7 +189,7 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return OutboundOp(kind="patch_card")
 
     if etype == "artifact":
-        from cubebox.im.feishu.card_model import ArtifactItem
+        from cubebox.im.card_model import ArtifactItem
 
         action = str(data.get("action") or "created")
         artifact = data.get("artifact") or {}
@@ -241,7 +241,7 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return None
 
     if etype == "ask_user_request":
-        from cubebox.im.feishu.card_model import PendingInput
+        from cubebox.im.card_model import PendingInput
 
         question_id = str(data.get("question_id") or "")
         questions_list = data.get("questions") or []
@@ -318,7 +318,7 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
 
     if etype == "sandbox_confirm_request":
-        from cubebox.im.feishu.card_model import PendingInput
+        from cubebox.im.card_model import PendingInput
 
         question_id = str(data.get("question_id") or "")
         command = str(data.get("command") or "")

@@ -12,7 +12,7 @@ See docs/dev/plans/2026-06-11-im-connectors-feishu.md
 
 from dataclasses import dataclass, field
 
-from cubebox.im.feishu.card_model import CardState
+from cubebox.im.card_model import CardState
 
 DM_SCOPE_KEY = "dm"
 
