@@ -17,6 +17,12 @@
 
 ## File Map
 
+### Sandbox image
+
+| File | Action | Responsibility |
+|------|--------|----------------|
+| `misc/sandbox-image/Dockerfile` | Modify | Add `ttyd` package for web terminal |
+
 ### Backend — new/modified
 
 | File | Action | Responsibility |
@@ -42,6 +48,43 @@
 | `frontend/packages/web/hooks/useSandboxFiles.ts` | Create | SWR hook for file listing |
 | `frontend/packages/web/hooks/useSandboxFileContent.ts` | Create | SWR hook for file content |
 | `frontend/packages/web/hooks/useSandboxTerminal.ts` | Create | SWR hook for terminal URL |
+
+---
+
+## Task 0: Sandbox image — install ttyd
+
+**Files:**
+- Modify: `misc/sandbox-image/Dockerfile`
+
+- [ ] **Step 1: Add ttyd to the Neko/browser apt-get layer**
+
+In the Neko browser-takeover stack section (the `apt-get install` block around line 158), add `ttyd` to the package list:
+
+```dockerfile
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        xserver-xorg-core xserver-xorg-video-dummy x11-xserver-utils xauth \
+        openbox pulseaudio dbus-x11 supervisor xclip \
+        libgtk-3-0 libxtst6 libxcvt0 \
+        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 \
+        gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+        gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+        libnss3-tools \
+        ttyd \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+```
+
+ttyd is not started at container boot — the backend starts it on demand via `pgrep -x ttyd || ttyd -p 7681 -W bash`.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add misc/sandbox-image/Dockerfile
+git commit -m "feat(sandbox-image): install ttyd for web terminal support"
+```
+
+Note: After merging, a new sandbox image must be built and pushed to the registry. The image tag in `config.sandbox.image` must be updated to point to the new image.
 
 ---
 
