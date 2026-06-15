@@ -9,6 +9,7 @@ temp storage.
 from __future__ import annotations
 
 import mimetypes
+import posixpath
 from typing import Annotated
 
 import orjson
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/public/sandbox", tags=["sandbox-share"])
 @router.get("/dl/{nonce}/{filename}")
 async def sandbox_file_download(
     nonce: str,
-    filename: str,
+    filename: str,  # noqa: ARG001  — URL-visible; actual name comes from token
     rh: Annotated[RedisHandle, Depends(redis_dep)],
 ) -> StreamingResponse:
     """Proxy a sandbox file to Microsoft Office Online Viewer."""
@@ -57,12 +58,13 @@ async def sandbox_file_download(
             detail="sandbox unavailable",
         ) from exc
 
-    mime, _ = mimetypes.guess_type(filename)
+    stored_filename = posixpath.basename(file_path)
+    mime, _ = mimetypes.guess_type(stored_filename)
     return StreamingResponse(
         stream,
         media_type=mime or "application/octet-stream",
         headers={
-            "Content-Disposition": (f'inline; filename="{filename}"'),
+            "Content-Disposition": (f'inline; filename="{stored_filename}"'),
             "Cache-Control": "no-store",
         },
     )

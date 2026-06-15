@@ -17,6 +17,8 @@ interface BrowserViewProps {
   workspaceId: string | null
   /** Only fetch/connect when the live view is actually needed. */
   enabled?: boolean
+  /** Hide the PanelHeader when embedded in another panel (e.g. SandboxPanel). */
+  hideHeader?: boolean
 }
 
 /**
@@ -28,7 +30,7 @@ interface BrowserViewProps {
  *   user cannot disrupt the agent while it drives.
  * - takeover: the lock is lifted and the user can click/type (login, OAuth, …).
  */
-export function BrowserView({ workspaceId, enabled = true }: BrowserViewProps) {
+export function BrowserView({ workspaceId, enabled = true, hideHeader }: BrowserViewProps) {
   const { url, loading, error, refresh } = useBrowserLiveView(workspaceId, enabled)
   const close = usePanelStore((s) => s.close)
   const [takeover, setTakeover] = useState(false)
@@ -58,39 +60,56 @@ export function BrowserView({ workspaceId, enabled = true }: BrowserViewProps) {
 
   if (!workspaceId) return null
 
+  const actionButtons = (
+    <>
+      <button
+        type="button"
+        onClick={() => refresh()}
+        className="p-1 rounded-xs text-muted-foreground hover:bg-accent transition-colors duration-fast"
+        aria-label="Refresh live view"
+      >
+        <RefreshCw className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={() => setTakeover((v) => !v)}
+        className="rounded bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity duration-fast"
+      >
+        {takeover ? 'Hand back to agent' : 'Take over'}
+      </button>
+    </>
+  )
+
   return (
     <div className="flex h-full w-full flex-col">
-      <PanelHeader
-        source={{
-          kind: 'plain',
-          icon: takeover ? (
+      {hideHeader ? (
+        <div className="flex items-center gap-2 border-b border-border bg-card px-3 py-1.5 shrink-0">
+          {takeover ? (
             <Hand className="size-3.5 text-warning-fg shrink-0" />
           ) : (
             <Eye className="size-3.5 text-muted-foreground shrink-0" />
-          ),
-          title: takeover ? 'You are in control' : 'Watching agent',
-        }}
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={() => refresh()}
-              className="p-1 rounded-xs text-muted-foreground hover:bg-accent transition-colors duration-fast"
-              aria-label="Refresh live view"
-            >
-              <RefreshCw className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setTakeover((v) => !v)}
-              className="rounded bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity duration-fast"
-            >
-              {takeover ? 'Hand back to agent' : 'Take over'}
-            </button>
-          </>
-        }
-        onClose={close}
-      />
+          )}
+          <span className="text-xs font-medium text-muted-foreground">
+            {takeover ? 'You are in control' : 'Watching agent'}
+          </span>
+          <span className="flex-1" />
+          {actionButtons}
+        </div>
+      ) : (
+        <PanelHeader
+          source={{
+            kind: 'plain',
+            icon: takeover ? (
+              <Hand className="size-3.5 text-warning-fg shrink-0" />
+            ) : (
+              <Eye className="size-3.5 text-muted-foreground shrink-0" />
+            ),
+            title: takeover ? 'You are in control' : 'Watching agent',
+          }}
+          actions={actionButtons}
+          onClose={close}
+        />
+      )}
 
       <div className="relative flex-1 overflow-hidden">
         {loading && (

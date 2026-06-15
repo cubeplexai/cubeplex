@@ -84,7 +84,7 @@ async def list_sandbox_files(
 ) -> list[SandboxFileEntry]:
     """List direct children of a directory in the sandbox."""
     normalized = posixpath.normpath(path)
-    if not normalized.startswith("/workspace"):
+    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="path outside workspace",
@@ -101,8 +101,8 @@ async def list_sandbox_files(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        # Direct SDK access for filesystem operations
-        assert isinstance(sandbox, OpenSandbox)
+        if not isinstance(sandbox, OpenSandbox):
+            raise SandboxError("filesystem operations require OpenSandbox backend")
         raw = sandbox._sandbox  # noqa: SLF001
         from opensandbox.models.filesystem import SearchEntry
 
@@ -162,7 +162,7 @@ async def get_sandbox_file_content(
 ) -> SandboxFileContent:
     """Read a text file from the sandbox for inline preview."""
     normalized = posixpath.normpath(path)
-    if not normalized.startswith("/workspace"):
+    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="path outside workspace",
@@ -174,16 +174,17 @@ async def get_sandbox_file_content(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        assert isinstance(sandbox, OpenSandbox)
+        if not isinstance(sandbox, OpenSandbox):
+            raise SandboxError("filesystem operations require OpenSandbox backend")
         raw = sandbox._sandbox  # noqa: SLF001
-        info_map = await raw.files.get_file_info([path])
-        info = info_map.get(path)
+        info_map = await raw.files.get_file_info([normalized])
+        info = info_map.get(normalized)
         if info and info.size > MAX_PREVIEW_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail="file too large for preview; use download instead",
             )
-        content = await raw.files.read_file(path)
+        content = await raw.files.read_file(normalized)
     except HTTPException:
         raise
     except FileNotFoundError:
@@ -197,7 +198,7 @@ async def get_sandbox_file_content(
             detail="sandbox unavailable",
         ) from exc
 
-    mime, _ = mimetypes.guess_type(path)
+    mime, _ = mimetypes.guess_type(normalized)
     return SandboxFileContent(content=content, mime_type=mime or "text/plain")
 
 
@@ -208,7 +209,7 @@ async def download_sandbox_file(
 ) -> StreamingResponse:
     """Stream a file from the sandbox as a download."""
     normalized = posixpath.normpath(path)
-    if not normalized.startswith("/workspace"):
+    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="path outside workspace",
@@ -220,9 +221,10 @@ async def download_sandbox_file(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
-        assert isinstance(sandbox, OpenSandbox)
+        if not isinstance(sandbox, OpenSandbox):
+            raise SandboxError("filesystem operations require OpenSandbox backend")
         raw = sandbox._sandbox  # noqa: SLF001
-        stream = await raw.files.read_bytes_stream(path)
+        stream = await raw.files.read_bytes_stream(normalized)
     except FileNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -234,7 +236,7 @@ async def download_sandbox_file(
             detail="sandbox unavailable",
         ) from exc
 
-    filename = posixpath.basename(path)
+    filename = posixpath.basename(normalized)
     mime, _ = mimetypes.guess_type(filename)
     return StreamingResponse(
         stream,
