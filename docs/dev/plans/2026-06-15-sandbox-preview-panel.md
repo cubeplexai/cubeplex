@@ -312,7 +312,10 @@ TERMINAL_PORT = 7681
 async def start_terminal(self) -> None:
     """Start the on-demand ttyd terminal inside the sandbox (idempotent)."""
     result = await self.execute(
-        "pgrep -x ttyd || (nohup ttyd -p 7681 -W bash &>/dev/null &); sleep 1",
+        "start-stop-daemon --start --background"
+        " --make-pidfile --pidfile /tmp/ttyd.pid"
+        " --exec /usr/bin/ttyd -- -p 7681 -W bash"
+        " && sleep 1",
         timeout=30,
     )
     if result.exit_code not in (0, None):
