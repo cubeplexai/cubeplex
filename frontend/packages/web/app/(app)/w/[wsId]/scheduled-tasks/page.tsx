@@ -2,7 +2,7 @@
 
 import { use, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { CalendarClock, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import type { ScheduledTaskOut } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { ScheduledTasksList } from './components/ScheduledTasksList'
@@ -36,39 +36,29 @@ export default function ScheduledTasksPage({
   }
 
   return (
-    <div className="flex flex-col gap-6 px-6 py-6 max-w-5xl">
-      {/* Page header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <CalendarClock className="size-4.5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold leading-tight">{t('pageTitle')}</h1>
-            <p className="text-sm text-muted-foreground">{t('pageSubtitle')}</p>
-          </div>
+    <div className="flex h-full flex-col">
+      <header className="flex shrink-0 items-center justify-between border-b border-border/70 px-6 py-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">{t('pageTitle')}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t('pageSubtitle')}</p>
         </div>
-
-        <Button
-          size="sm"
-          className="gap-1.5 shrink-0"
-          onClick={openCreate}
-          data-testid="new-task-button"
-        >
+        <Button size="sm" className="gap-1.5" onClick={openCreate} data-testid="new-task-button">
           <Plus className="size-3.5" />
           {t('newTask')}
         </Button>
+      </header>
+
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto max-w-4xl">
+          <ScheduledTasksList
+            wsId={wsId}
+            onEdit={openEdit}
+            onCreate={openCreate}
+            refreshKey={refreshKey}
+          />
+        </div>
       </div>
 
-      {/* Task list */}
-      <ScheduledTasksList
-        wsId={wsId}
-        onEdit={openEdit}
-        onCreate={openCreate}
-        refreshKey={refreshKey}
-      />
-
-      {/* Create / edit dialog */}
       <ScheduledTaskFormDialog
         wsId={wsId}
         open={dialogOpen}

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createApiClient, archiveMemory, listMemory } from '@cubebox/core'
 import type { MemoryItem, MemoryScope, MemoryStatus } from '@cubebox/core'
+import { Brain } from 'lucide-react'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { MemoryItemCard } from './MemoryItemCard'
 
 interface MemoryListProps {
@@ -79,12 +81,11 @@ export function MemoryList({
 
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
-        <p className="text-sm font-medium text-muted-foreground">No memories yet</p>
-        <p className="text-xs text-muted-foreground/60">
-          Memories are saved automatically as you chat.
-        </p>
-      </div>
+      <EmptyState
+        icon={Brain}
+        title="No memories yet"
+        description="Memories are saved automatically as you chat."
+      />
     )
   }
 

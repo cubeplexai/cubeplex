@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, RotateCcw } from 'lucide-react'
+import { ArrowLeft, RotateCcw, X } from 'lucide-react'
 import Link from 'next/link'
 import { createApiClient, useTriggerStore, type TriggerEvent } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
@@ -23,9 +23,10 @@ import { SecretRevealAndRotate } from './SecretRevealAndRotate'
 interface TriggerDetailPanelProps {
   wsId: string
   triggerId: string
+  onClose?: () => void
 }
 
-export function TriggerDetailPanel({ wsId, triggerId }: TriggerDetailPanelProps) {
+export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPanelProps) {
   const t = useTranslations('triggers')
   const router = useRouter()
   const client = useMemo(() => createApiClient(''), [])
@@ -74,8 +75,12 @@ export function TriggerDetailPanel({ wsId, triggerId }: TriggerDetailPanelProps)
 
   const handleDelete = useCallback(async () => {
     await remove(client, wsId, triggerId)
-    router.push(`/w/${wsId}/triggers`)
-  }, [client, wsId, triggerId, remove, router])
+    if (onClose) {
+      onClose()
+    } else {
+      router.push(`/w/${wsId}/triggers`)
+    }
+  }, [client, wsId, triggerId, remove, router, onClose])
 
   const handleReplay = useCallback(
     async (eventId: string) => {
@@ -133,14 +138,24 @@ export function TriggerDetailPanel({ wsId, triggerId }: TriggerDetailPanelProps)
   return (
     <div className="flex h-full flex-col overflow-y-auto px-6 py-6">
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        {/* Back link */}
-        <Link
-          href={`/w/${wsId}/triggers`}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground w-fit"
-        >
-          <ArrowLeft className="size-3.5" />
-          {t('backToList')}
-        </Link>
+        {/* Back link or close button */}
+        {onClose ? (
+          <button
+            onClick={onClose}
+            className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-3.5" />
+            {t('close')}
+          </button>
+        ) : (
+          <Link
+            href={`/w/${wsId}/triggers`}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground w-fit"
+          >
+            <ArrowLeft className="size-3.5" />
+            {t('backToList')}
+          </Link>
+        )}
 
         {/* Header */}
         <div className="flex items-start justify-between gap-4">

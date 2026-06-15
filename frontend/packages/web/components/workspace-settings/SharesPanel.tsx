@@ -1,12 +1,13 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, Copy, Loader2 } from 'lucide-react'
+import { Check, Copy, Loader2, Share2 } from 'lucide-react'
 import { useTranslations, useFormatter } from 'next-intl'
 import { createApiClient, listShares, revokeShare } from '@cubebox/core'
 import type { ConversationShare } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/shared/EmptyState'
 import {
   Table,
   TableBody,
@@ -66,97 +67,96 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
   }, [])
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-6 py-6">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
-        {/* Header */}
-        <div>
-          <h2 className="text-base font-semibold">{t('title')}</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">{t('subtitle')}</p>
-        </div>
+    <div className="flex h-full flex-col">
+      <header className="shrink-0 border-b border-border/70 px-6 py-4">
+        <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
+      </header>
 
-        {/* Body */}
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-          </div>
-        ) : shares.length === 0 ? (
-          <div className="flex items-center justify-center rounded-md border border-dashed border-border/70 py-16">
-            <p className="text-sm text-muted-foreground">{t('empty')}</p>
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('conversation')}</TableHead>
-                <TableHead>{t('sharedDate')}</TableHead>
-                <TableHead>{t('scope')}</TableHead>
-                <TableHead>{t('status')}</TableHead>
-                <TableHead className="w-[120px]" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {shares.map((share) => (
-                <TableRow key={share.id}>
-                  <TableCell className="max-w-[220px] truncate font-medium">
-                    {share.title || share.conversation_id}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {fmt.dateTime(new Date(share.created_at), {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{share.scope}</TableCell>
-                  <TableCell>
-                    <span
-                      className={cn(
-                        'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
-                        share.is_active
-                          ? 'bg-success/15 text-success'
-                          : 'bg-muted text-muted-foreground',
-                      )}
-                    >
-                      {share.is_active ? t('active') : t('revoked')}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-1">
-                      {share.is_active && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7"
-                            title={t('copyLink')}
-                            onClick={() => handleCopy(share)}
-                          >
-                            {copiedId === share.id ? (
-                              <Check className="h-3.5 w-3.5 text-success" />
-                            ) : (
-                              <Copy className="h-3.5 w-3.5" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                            onClick={() => void handleRevoke(share.id)}
-                          >
-                            {t('revoke')}
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </TableCell>
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+          {/* Body */}
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : shares.length === 0 ? (
+            <EmptyState icon={Share2} title={t('empty')} />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t('conversation')}</TableHead>
+                  <TableHead>{t('sharedDate')}</TableHead>
+                  <TableHead>{t('scope')}</TableHead>
+                  <TableHead>{t('status')}</TableHead>
+                  <TableHead className="w-[120px]" />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+              </TableHeader>
+              <TableBody>
+                {shares.map((share) => (
+                  <TableRow key={share.id}>
+                    <TableCell className="max-w-[220px] truncate font-medium">
+                      {share.title || share.conversation_id}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {fmt.dateTime(new Date(share.created_at), {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{share.scope}</TableCell>
+                    <TableCell>
+                      <span
+                        className={cn(
+                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium',
+                          share.is_active
+                            ? 'bg-success/15 text-success'
+                            : 'bg-muted text-muted-foreground',
+                        )}
+                      >
+                        {share.is_active ? t('active') : t('revoked')}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {share.is_active && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              title={t('copyLink')}
+                              onClick={() => handleCopy(share)}
+                            >
+                              {copiedId === share.id ? (
+                                <Check className="h-3.5 w-3.5 text-success" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                              onClick={() => void handleRevoke(share.id)}
+                            >
+                              {t('revoke')}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
 
-        {/* Footer count */}
-        {!loading && total > 0 && <p className="text-xs text-muted-foreground">{total} total</p>}
+          {/* Footer count */}
+          {!loading && total > 0 && <p className="text-xs text-muted-foreground">{total} total</p>}
+        </div>
       </div>
     </div>
   )

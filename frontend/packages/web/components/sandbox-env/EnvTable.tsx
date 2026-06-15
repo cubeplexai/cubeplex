@@ -1,9 +1,11 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
+import { Variable } from 'lucide-react'
 import { type EnvEntryOut } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { WarningCell } from './WarningCell'
 
 export type TableMode = 'org' | 'workspace-admin' | 'workspace-member'
@@ -53,11 +55,7 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
   }
 
   if (entries.length === 0) {
-    return (
-      <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center text-xs text-muted-foreground">
-        {t('empty')}
-      </div>
-    )
+    return <EmptyState icon={Variable} title={t('empty')} />
   }
 
   return (
