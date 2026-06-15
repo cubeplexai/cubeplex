@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import discord
 from loguru import logger
 
 from cubebox.im.outbound import _FloodSignal
@@ -173,9 +174,12 @@ class DiscordConnector:
             msg = await channel.fetch_message(int(message_id))
             await msg.edit(content=text)
             return True
-        except Exception as exc:
-            if "429" in str(exc) or "rate limit" in str(exc).lower():
+        except discord.HTTPException as exc:
+            if exc.status == 429:
                 raise DiscordRateLimitError(f"edit rate limited: {exc}") from exc
+            logger.warning("[Discord] edit_message failed", exc_info=True)
+            return False
+        except Exception:
             logger.warning("[Discord] edit_message failed", exc_info=True)
             return False
 

@@ -31,14 +31,15 @@ def compute_runtime(
     account: IMConnectorAccount,
     *,
     long_conns: dict[str, Any],
+    gateways: dict[str, Any] | None = None,
     agg: _RuntimeAgg,
     bot_open_id: str | None,
 ) -> ImRuntimeStatus:
-    """Derive ``ImRuntimeStatus`` from raw aggregates + in-process LC table.
+    """Derive ``ImRuntimeStatus`` from raw aggregates + in-process state.
 
-    ``long_conns`` maps account_id → FeishuLongConnection (typed loosely
-    to keep the service free of the SDK class import). ``bot_open_id``
-    is decrypted upstream from the credential row.
+    ``long_conns`` maps account_id → FeishuLongConnection.
+    ``gateways`` maps account_id → DiscordGateway.
+    ``bot_open_id`` is decrypted upstream from the credential row.
     """
     state: str
     if bot_open_id is None:
@@ -46,6 +47,13 @@ def compute_runtime(
     elif account.delivery_mode == "long_connection":
         lc = long_conns.get(account.id)
         if lc is not None and getattr(lc, "is_open", lambda: False)():
+            state = "connected"
+        else:
+            state = "disconnected"
+    elif account.delivery_mode == "gateway":
+        gws = gateways or {}
+        gw = gws.get(account.id)
+        if gw is not None and getattr(gw, "is_open", lambda: False)():
             state = "connected"
         else:
             state = "disconnected"
@@ -229,6 +237,7 @@ class IMConnectorService:
         existing = (
             await self._session.execute(
                 select(IMConnectorAccount).where(
+                    IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
                     IMConnectorAccount.platform == "discord",  # type: ignore[arg-type]
                     IMConnectorAccount.external_account_id == application_id,  # type: ignore[arg-type]
                 )
@@ -240,12 +249,13 @@ class IMConnectorService:
                 f" (id={existing.id})"
             )
 
-        bot_username, bot_avatar_url = await self._hydrate_discord_bot_info(bot_token)
+        bot_user_id, bot_username, bot_avatar_url = await self._hydrate_discord_bot_info(bot_token)
 
         secret_payload = json.dumps(
             {
                 "bot_token": bot_token,
                 "application_id": application_id,
+                "bot_open_id": bot_user_id,
             }
         )
         try:
@@ -293,10 +303,10 @@ class IMConnectorService:
     async def _hydrate_discord_bot_info(
         self,
         bot_token: str,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str]:
         """Validate bot token via Discord API ``GET /users/@me``.
 
-        Returns ``(username, avatar_url)``. Both are empty strings on failure.
+        Returns ``(bot_user_id, username, avatar_url)``. All empty on failure.
         """
         import httpx
 
@@ -317,13 +327,13 @@ class IMConnectorService:
                         f"Discord bot token validation failed (HTTP {resp.status_code})"
                     )
                 data = resp.json()
+                user_id = str(data.get("id") or "")
                 username = str(data.get("username") or "")
                 avatar_hash = str(data.get("avatar") or "")
-                user_id = str(data.get("id") or "")
                 avatar_url = ""
                 if avatar_hash and user_id:
                     avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png"
-                return username, avatar_url
+                return user_id, username, avatar_url
         except ValueError:
             raise
         except Exception:

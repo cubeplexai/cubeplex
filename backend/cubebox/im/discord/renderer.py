@@ -36,6 +36,7 @@ class DiscordOpDispatcher:
         self._connector = connector
         self._state = state
         self.sent_char_offset: int = 0
+        self._pending_input_sent_id: str | None = None
 
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
@@ -90,8 +91,15 @@ class DiscordOpDispatcher:
         s = self._state
         # Render AskUser/SandboxConfirm buttons when pending_input is set.
         pending = s.card_state.pending_input
-        if pending is not None and pending.resolved_choice is None and pending.choices:
+        pending_id = f"{pending.kind}:{pending.run_id}" if pending else None
+        if (
+            pending is not None
+            and pending.resolved_choice is None
+            and pending.choices
+            and pending_id != self._pending_input_sent_id
+        ):
             await self._send_pending_input_buttons(pending)
+            self._pending_input_sent_id = pending_id
         # Send typing indicator during tool calls.
         if getattr(self._connector, "_bot", None) is not None and s.bot_message_id is not None:
             try:

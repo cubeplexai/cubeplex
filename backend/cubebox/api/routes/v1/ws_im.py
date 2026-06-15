@@ -190,8 +190,9 @@ async def list_accounts(
     svc = _service(session, backend, ctx)
     accounts = await svc.list_for_workspace(workspace_id=ctx.workspace_id)
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
     return await build_im_list_out(
-        svc=svc, session=session, long_conns=long_conns, accounts=accounts
+        svc=svc, session=session, long_conns=long_conns, gateways=gateways, accounts=accounts
     )
 
 
@@ -210,8 +211,8 @@ async def delete_account(
     # Pass workspace_id so a member of workspace A cannot delete an account
     # that lives in workspace B within the same org.
     await svc.delete(account_id=account_id, workspace_id=ctx.workspace_id)
-    # Tear down any live long-connection client so a deleted account stops
-    # accepting events immediately, not after the next API restart.
+    # Tear down any live connection so a deleted account stops accepting
+    # events immediately, not after the next API restart.
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     lc = long_conns.pop(account_id, None)
     if lc is not None:
@@ -220,6 +221,17 @@ async def delete_account(
         except Exception:
             logger.warning(
                 "[IM ws] long-connection disconnect failed on delete for {}",
+                account_id,
+                exc_info=True,
+            )
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
+    gw = gateways.pop(account_id, None)
+    if gw is not None:
+        try:
+            await gw.stop()
+        except Exception:
+            logger.warning(
+                "[IM ws] gateway stop failed on delete for {}",
                 account_id,
                 exc_info=True,
             )
@@ -251,7 +263,7 @@ async def disable_workspace_account(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
     updated = await svc.set_enabled(account_id=account_id, enabled=False)
     assert updated is not None
-    # Drop any live long-conn so the bot stops responding immediately.
+    # Drop any live connection so the bot stops responding immediately.
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     lc = long_conns.pop(account_id, None)
     if lc is not None:
@@ -260,6 +272,17 @@ async def disable_workspace_account(
         except Exception:
             logger.warning(
                 "[IM ws] long-conn disconnect failed on disable for {}",
+                account_id,
+                exc_info=True,
+            )
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
+    gw = gateways.pop(account_id, None)
+    if gw is not None:
+        try:
+            await gw.stop()
+        except Exception:
+            logger.warning(
+                "[IM ws] gateway stop failed on disable for {}",
                 account_id,
                 exc_info=True,
             )

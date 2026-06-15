@@ -23,6 +23,7 @@ async def build_im_list_out(
     svc: IMConnectorService,
     session: AsyncSession,
     long_conns: dict[str, Any],
+    gateways: dict[str, Any] | None = None,
     accounts: list[IMConnectorAccount],
 ) -> IMAccountListOut:
     """Populate ``runtime`` on every IMAccountOut.
@@ -39,6 +40,7 @@ async def build_im_list_out(
         rt = compute_runtime(
             a,
             long_conns=long_conns,
+            gateways=gateways or {},
             agg=aggs.get(a.id) or _RuntimeAgg(),
             bot_open_id=bot_open_id,
         )
