@@ -24,7 +24,7 @@
     "geist": "^1.7.2",
     "katex": "^0.16.45",
     "lucide-react": "^1.6.0",
-    "next": "16.2.1",
+    "next": "16.2.6",
     "next-intl": "^4.9.2",
     "next-themes": "^0.4.6",
     "react": "19.2.4",
