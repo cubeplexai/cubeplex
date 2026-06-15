@@ -217,6 +217,119 @@ class IMConnectorService:
                 )
             raise
 
+    async def connect_discord(
+        self,
+        *,
+        workspace_id: str,
+        bot_token: str,
+        application_id: str,
+        acting_user_id: str,
+    ) -> IMConnectorAccount:
+        """Bind one Discord bot: validate token, store credential, return account."""
+        existing = (
+            await self._session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.platform == "discord",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id == application_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(
+                f"discord account already exists for application_id={application_id}"
+                f" (id={existing.id})"
+            )
+
+        bot_username, bot_avatar_url = await self._hydrate_discord_bot_info(bot_token)
+
+        secret_payload = json.dumps(
+            {
+                "bot_token": bot_token,
+                "application_id": application_id,
+            }
+        )
+        try:
+            credential_id = await self._credentials.create(
+                kind="im_bot",
+                name=f"discord:{application_id}",
+                plaintext=secret_payload,
+            )
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ValueError(
+                f"discord account already exists for application_id={application_id}"
+                " (credential race)"
+            ) from exc
+        try:
+            account = IMConnectorAccount(
+                org_id=self._org_id,
+                workspace_id=workspace_id,
+                platform="discord",
+                external_account_id=application_id,
+                acting_user_id=acting_user_id,
+                credential_id=credential_id,
+                delivery_mode="gateway",
+                config={
+                    "bot_app_name": bot_username or None,
+                    "bot_avatar_url": bot_avatar_url or None,
+                },
+            )
+            self._session.add(account)
+            await self._session.commit()
+            await self._session.refresh(account)
+            return account
+        except Exception:
+            await self._session.rollback()
+            try:
+                await self._credentials.delete(credential_id=credential_id)
+            except Exception:
+                logger.warning(
+                    "[IM] orphan credential {} could not be rolled back",
+                    credential_id,
+                    exc_info=True,
+                )
+            raise
+
+    async def _hydrate_discord_bot_info(
+        self,
+        bot_token: str,
+    ) -> tuple[str, str]:
+        """Validate bot token via Discord API ``GET /users/@me``.
+
+        Returns ``(username, avatar_url)``. Both are empty strings on failure.
+        """
+        import httpx
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://discord.com/api/v10/users/@me",
+                    headers={"Authorization": f"Bot {bot_token}"},
+                    timeout=10.0,
+                )
+                if resp.status_code != 200:
+                    logger.warning(
+                        "[IM] Discord /users/@me returned {}: {}",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                    raise ValueError(
+                        f"Discord bot token validation failed (HTTP {resp.status_code})"
+                    )
+                data = resp.json()
+                username = str(data.get("username") or "")
+                avatar_hash = str(data.get("avatar") or "")
+                user_id = str(data.get("id") or "")
+                avatar_url = ""
+                if avatar_hash and user_id:
+                    avatar_url = f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png"
+                return username, avatar_url
+        except ValueError:
+            raise
+        except Exception:
+            logger.exception("[IM] Discord /users/@me probe failed")
+            raise ValueError("could not validate Discord bot token") from None
+
     async def list_for_workspace(self, *, workspace_id: str) -> list[IMConnectorAccount]:
         stmt = select(IMConnectorAccount).where(
             IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
