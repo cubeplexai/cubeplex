@@ -1,4 +1,4 @@
-import type { ConnectFeishuAccountIn } from '@cubebox/core'
+import type { ConnectImAccountIn } from '@cubebox/core'
 import type { FC } from 'react'
 
 export type FormState = Record<string, string>
@@ -39,13 +39,13 @@ export type WizardStepDef = {
 }
 
 export type PlatformDescriptor = {
-  id: 'feishu' | 'slack' | 'teams'
+  id: 'feishu' | 'discord' | 'slack' | 'teams'
   labelKey: string
   iconName: string
   live: boolean
   prereqs: PrereqItem[]
   credentialFields: FieldDef[]
   steps: WizardStepDef[]
-  buildPayload: (form: FormState) => ConnectFeishuAccountIn
+  buildPayload: (form: FormState) => ConnectImAccountIn
   scopeConsoleUrl: (appId: string) => string
 }

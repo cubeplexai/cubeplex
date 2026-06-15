@@ -6,7 +6,7 @@ import {
   ApiError,
   createApiClient,
   wsConnectImAccount,
-  type ConnectFeishuAccountIn,
+  type ConnectImAccountIn,
   type ImAccount,
 } from '@cubebox/core'
 
@@ -48,7 +48,7 @@ export function useConnectMutation(client: ApiClient, wsId: string) {
   const [error, setError] = useState<ConnectError | null>(null)
   const [result, setResult] = useState<ImAccount | null>(null)
 
-  async function submit(body: ConnectFeishuAccountIn): Promise<ImAccount | null> {
+  async function submit(body: ConnectImAccountIn): Promise<ImAccount | null> {
     setBusy(true)
     setError(null)
     try {
