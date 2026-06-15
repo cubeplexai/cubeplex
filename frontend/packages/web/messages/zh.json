@@ -1680,6 +1680,9 @@
         "label": "Slack",
         "coming": "即将支持"
       },
+      "discord": {
+        "label": "Discord"
+      },
       "teams": {
         "label": "Teams",
         "coming": "即将支持"
@@ -1734,6 +1737,18 @@
           "lark": "Lark (海外)"
         },
         "openConsole": "打开飞书开放平台"
+      },
+      "discord": {
+        "prereq": {
+          "app": "在 discord.com/developers/applications 创建 Discord 应用",
+          "bot": "添加 Bot，复制 Bot Token",
+          "intents": "在 Bot 设置中启用以下 Gateway Intents",
+          "invite": "使用适当权限将 Bot 邀请到服务器"
+        },
+        "field": {
+          "botToken": "Bot Token",
+          "applicationId": "Application ID"
+        }
       }
     },
     "error": {

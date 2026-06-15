@@ -1680,6 +1680,9 @@
         "label": "Slack",
         "coming": "Coming soon"
       },
+      "discord": {
+        "label": "Discord"
+      },
       "teams": {
         "label": "Teams",
         "coming": "Coming soon"
@@ -1734,6 +1737,18 @@
           "lark": "Lark (Global)"
         },
         "openConsole": "Open Feishu console"
+      },
+      "discord": {
+        "prereq": {
+          "app": "Create a Discord application at discord.com/developers/applications",
+          "bot": "Add a Bot to the application and copy the bot token",
+          "intents": "Enable these Gateway intents in the Bot settings",
+          "invite": "Invite the bot to your server with appropriate permissions"
+        },
+        "field": {
+          "botToken": "Bot Token",
+          "applicationId": "Application ID"
+        }
       }
     },
     "error": {
