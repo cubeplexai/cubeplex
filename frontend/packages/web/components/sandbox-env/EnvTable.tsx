@@ -1,6 +1,6 @@
-// frontend/packages/web/components/sandbox-env/EnvTable.tsx
 'use client'
 
+import { useTranslations } from 'next-intl'
 import { type EnvEntryOut } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -33,12 +33,13 @@ function ScopeBadge({ scope }: { scope: 'workspace' | 'user' }) {
 }
 
 export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Props) {
+  const t = useTranslations('wsSettings.sandboxEnv')
   const showScope = mode !== 'org'
 
   if (loading) {
     return (
       <div className="rounded-xl border border-border/70 bg-card/40 p-5 text-xs text-muted-foreground">
-        Loading…
+        {t('loading')}
       </div>
     )
   }
@@ -46,7 +47,7 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
   if (error) {
     return (
       <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-xs text-destructive">
-        Failed to load: {error}
+        {t('loadError', { error })}
       </div>
     )
   }
@@ -54,7 +55,7 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
   if (entries.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 p-6 text-center text-xs text-muted-foreground">
-        No environment variables yet. Add a secret or plain value to inject it into your sandbox.
+        {t('empty')}
       </div>
     )
   }
@@ -66,24 +67,24 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
           <thead>
             <tr className="border-b border-border/70 bg-muted/40">
               <th className="px-4 py-2.5 text-left font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
-                Name
+                {t('colName')}
               </th>
               {showScope && (
                 <th className="px-4 py-2.5 text-left font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
-                  Scope
+                  {t('colScope')}
                 </th>
               )}
               <th className="px-4 py-2.5 text-left font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
-                Type
+                {t('colType')}
               </th>
               <th className="px-4 py-2.5 text-left font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
-                Hosts
+                {t('colHosts')}
               </th>
               <th className="px-4 py-2.5 text-left font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
-                Warnings
+                {t('colWarnings')}
               </th>
               <th className="px-4 py-2.5 text-right font-medium text-muted-foreground uppercase tracking-wide text-[10px]">
-                Actions
+                {t('colActions')}
               </th>
             </tr>
           </thead>
@@ -103,7 +104,7 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
                   </td>
                 )}
                 <td className="px-4 py-2.5 text-muted-foreground">
-                  {entry.is_secret ? 'secret token' : 'env value'}
+                  {entry.is_secret ? t('typeSecret') : t('typeEnvValue')}
                 </td>
                 <td className="px-4 py-2.5 text-muted-foreground">
                   {entry.hosts && entry.hosts.length > 0 ? entry.hosts.join(', ') : '—'}
@@ -117,13 +118,13 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
                       onClick={() => onEdit(entry)}
                       className="text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      edit
+                      {t('actionEdit')}
                     </button>
                     <button
                       onClick={() => onDelete(entry)}
                       className="text-muted-foreground hover:text-destructive transition-colors"
                     >
-                      delete
+                      {t('actionDelete')}
                     </button>
                   </div>
                 </td>
