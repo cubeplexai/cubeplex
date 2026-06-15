@@ -2,6 +2,7 @@
 
 - ``/status`` — read-only sandbox status for the workspace sandbox page.
 - ``/files`` — list direct children of a sandbox directory.
+- ``/terminal`` — start ttyd and return a signed URL.
 
 Scope-isolated: no admin counterpart — admins see fleet-wide info via a
 different surface.
@@ -25,11 +26,10 @@ from cubebox.db.session import get_session
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox import SandboxError
 from cubebox.sandbox.manager import get_sandbox_manager
+from cubebox.sandbox.opensandbox import OpenSandbox
 from cubebox.utils.time import utc_isoformat
 
-router = APIRouter(
-    prefix="/ws/{workspace_id}/sandbox", tags=["ws-sandbox"]
-)
+router = APIRouter(prefix="/ws/{workspace_id}/sandbox", tags=["ws-sandbox"])
 
 
 @router.get("/status", response_model=SandboxStatusOut)
@@ -38,12 +38,8 @@ async def get_sandbox_status(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> SandboxStatusOut:
-    """Return the caller's active sandbox row, or absent."""
-    repo = UserSandboxRepository(
-        session,
-        org_id=ctx.org_id,
-        workspace_id=workspace_id,
-    )
+    """Return the caller's active sandbox row in this workspace, or absent."""
+    repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     row = await repo.get_active_by_user(ctx.user.id)
     if row is None:
         return SandboxStatusOut(
@@ -97,12 +93,11 @@ async def list_sandbox_files(
             workspace_id=ctx.workspace_id,
         )
         # Direct SDK access for filesystem operations
+        assert isinstance(sandbox, OpenSandbox)
         raw = sandbox._sandbox  # noqa: SLF001
         from opensandbox.models.filesystem import SearchEntry
 
-        entries = await raw.files.search(
-            SearchEntry(path=normalized, pattern=pattern)
-        )
+        entries = await raw.files.search(SearchEntry(path=normalized, pattern=pattern))
     except SandboxError as exc:
         logger.warning(
             "sandbox file listing failed for ws {}: {}",
@@ -115,12 +110,7 @@ async def list_sandbox_files(
         ) from exc
 
     # Filter to direct children (SDK search is recursive)
-    children = [
-        e
-        for e in entries
-        if posixpath.dirname(posixpath.normpath(e.path))
-        == normalized
-    ]
+    children = [e for e in entries if posixpath.dirname(posixpath.normpath(e.path)) == normalized]
     # Sort: directories first, then alphabetical
     children.sort(
         key=lambda e: (
@@ -144,3 +134,52 @@ async def list_sandbox_files(
             )
         )
     return result
+
+
+# ── Terminal ─────────────────────────────────────────────────────────
+
+
+class SandboxTerminalResponse(BaseModel):
+    url: str
+
+
+@router.get("/terminal", response_model=SandboxTerminalResponse)
+async def get_terminal(
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> SandboxTerminalResponse:
+    """Start ttyd in the sandbox and return a signed URL."""
+    manager = get_sandbox_manager()
+    try:
+        sandbox = await manager.get_or_create(
+            ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        await sandbox.start_terminal()
+        await manager.touch(
+            sandbox.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        await manager.renew_lease(
+            sandbox.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        endpoint = await sandbox.get_terminal_endpoint()
+    except SandboxError as exc:
+        logger.warning(
+            "terminal unavailable for workspace {}: {}",
+            ctx.workspace_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox unavailable; please retry",
+        ) from exc
+    if endpoint.headers:
+        raise HTTPException(
+            status_code=501,
+            detail=("terminal endpoint requires header auth; not yet supported"),
+        )
+    return SandboxTerminalResponse(url=endpoint.url)

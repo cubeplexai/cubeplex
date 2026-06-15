@@ -127,6 +127,27 @@ class OpenSandbox(Sandbox):
             }
             return BrowserEndpoint(url=url, headers=headers)
 
+    async def get_terminal_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
+        with _as_sandbox_error():
+            expires = int(time.time()) + expires_in
+            endpoint = await self._sandbox.get_signed_endpoint(self.TERMINAL_PORT, expires)
+            url = endpoint.endpoint
+            if not url.startswith(("http://", "https://")):
+                protocol = getattr(
+                    self._sandbox.connection_config,
+                    "protocol",
+                    "http",
+                )
+                url = f"{protocol}://{url}"
+            if not url.endswith("/"):
+                url += "/"
+            headers = {
+                k: v
+                for k, v in (endpoint.headers or {}).items()
+                if k.lower() not in self._BROWSER_IRRELEVANT_HEADERS
+            }
+            return BrowserEndpoint(url=url, headers=headers)
+
     async def close(self) -> None:
         pass
 
