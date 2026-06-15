@@ -14,7 +14,7 @@ class ConnectFeishuAccountIn(BaseModel):
     accepts the sentinel ``"self"`` which the route maps to ``ctx.user.id``.
     """
 
-    platform: str = Field(pattern="^feishu$")
+    platform: Literal["feishu"] = "feishu"
     app_id: str = Field(min_length=1, max_length=128)
     app_secret: str = Field(min_length=1)
     encrypt_key: str = ""
@@ -27,7 +27,7 @@ class ConnectFeishuAccountIn(BaseModel):
 class ConnectDiscordAccountIn(BaseModel):
     """Payload for ``POST /ws/{ws}/im/accounts`` when ``platform == 'discord'``."""
 
-    platform: str = Field(pattern="^discord$")
+    platform: Literal["discord"] = "discord"
     bot_token: str = Field(min_length=1)
     application_id: str = Field(min_length=1, max_length=128)
     acting_user_id: str = Field(default="self", min_length=1)
