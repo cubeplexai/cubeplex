@@ -19,7 +19,7 @@ export interface ImAccount {
   external_account_id: string
   workspace_id: string
   acting_user_id: string
-  delivery_mode: 'long_connection' | 'webhook'
+  delivery_mode: 'long_connection' | 'webhook' | 'gateway'
   enabled: boolean
   runtime: ImRuntimeStatus
   bot_app_name: string | null
@@ -41,6 +41,15 @@ export interface ConnectFeishuAccountIn {
   acting_user_id?: string
 }
 
+export interface ConnectDiscordAccountIn {
+  platform: 'discord'
+  bot_token: string
+  application_id: string
+  acting_user_id?: string
+}
+
+export type ConnectImAccountIn = ConnectFeishuAccountIn | ConnectDiscordAccountIn
+
 // ── Workspace scope ──────────────────────────────────────────────────────────
 
 export async function wsListImAccounts(client: ApiClient, wsId: string): Promise<ImAccountListOut> {
@@ -52,7 +61,7 @@ export async function wsListImAccounts(client: ApiClient, wsId: string): Promise
 export async function wsConnectImAccount(
   client: ApiClient,
   wsId: string,
-  body: ConnectFeishuAccountIn,
+  body: ConnectImAccountIn,
 ): Promise<ImAccount> {
   const res = await client.post(`/api/v1/ws/${wsId}/im/accounts`, body)
   if (!res.ok) throw await toApiError(res)
