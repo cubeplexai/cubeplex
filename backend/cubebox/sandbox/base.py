@@ -127,6 +127,9 @@ class Sandbox(ABC):
     # Container port the Neko browser live view is served on.
     BROWSER_PORT = 8080
 
+    # Container port the ttyd web terminal is served on.
+    TERMINAL_PORT = 7681
+
     async def start_browser(self) -> None:
         """Start the on-demand Neko browser stack inside the sandbox (idempotent).
 
@@ -136,6 +139,26 @@ class Sandbox(ABC):
         result = await self.execute("/usr/local/bin/start-browser.sh", timeout=120)
         if result.exit_code not in (0, None):
             raise RuntimeError(f"failed to start sandbox browser: {result.output}")
+
+    async def start_terminal(self) -> None:
+        """Start the on-demand ttyd terminal inside the sandbox (idempotent)."""
+        result = await self.execute(
+            "start-stop-daemon --start --background"
+            " --make-pidfile --pidfile /tmp/ttyd.pid"
+            " --exec /usr/bin/ttyd -- -p 7681 -W bash"
+            " && sleep 1",
+            timeout=30,
+        )
+        if result.exit_code not in (0, None):
+            raise RuntimeError(f"failed to start sandbox terminal: {result.output}")
+
+    async def get_terminal_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
+        """Return a reachable endpoint for the ttyd terminal.
+
+        Backends that can expose an in-sandbox port override this; the
+        default signals the capability is unavailable.
+        """
+        raise NotImplementedError("terminal is not supported by this sandbox backend")
 
     async def get_browser_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
         """Return a reachable endpoint for the Neko browser live view.
