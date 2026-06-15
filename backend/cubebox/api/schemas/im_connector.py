@@ -1,8 +1,8 @@
 """Pydantic schemas for the IM connector workspace + admin routes."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Discriminator, Field, Tag
 
 
 class ConnectFeishuAccountIn(BaseModel):
@@ -21,6 +21,15 @@ class ConnectFeishuAccountIn(BaseModel):
     verification_token: str = ""
     domain: str = Field(default="feishu", pattern="^(feishu|lark)$")
     delivery_mode: str = Field(default="long_connection", pattern="^(long_connection|webhook)$")
+    acting_user_id: str = Field(default="self", min_length=1)
+
+
+class ConnectDiscordAccountIn(BaseModel):
+    """Payload for ``POST /ws/{ws}/im/accounts`` when ``platform == 'discord'``."""
+
+    platform: str = Field(pattern="^discord$")
+    bot_token: str = Field(min_length=1)
+    application_id: str = Field(min_length=1, max_length=128)
     acting_user_id: str = Field(default="self", min_length=1)
 
 
@@ -74,3 +83,10 @@ class IMAccountOut(BaseModel):
 
 class IMAccountListOut(BaseModel):
     accounts: list[IMAccountOut]
+
+
+ConnectIMAccountIn = Annotated[
+    Annotated[ConnectFeishuAccountIn, Tag("feishu")]
+    | Annotated[ConnectDiscordAccountIn, Tag("discord")],
+    Discriminator("platform"),
+]
