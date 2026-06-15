@@ -143,14 +143,14 @@ class Sandbox(ABC):
     async def start_terminal(self) -> None:
         """Start the on-demand ttyd terminal inside the sandbox (idempotent)."""
         result = await self.execute(
-            "start-stop-daemon --start --background"
+            "start-stop-daemon --start --oknodo --background"
             " --make-pidfile --pidfile /tmp/ttyd.pid"
             " --exec /usr/bin/ttyd -- -p 7681 -W bash"
             " && sleep 1",
             timeout=30,
         )
         if result.exit_code not in (0, None):
-            raise RuntimeError(f"failed to start sandbox terminal: {result.output}")
+            raise SandboxError(f"failed to start sandbox terminal: {result.output}")
 
     async def get_terminal_endpoint(self, *, expires_in: int = 3600) -> BrowserEndpoint:
         """Return a reachable endpoint for the ttyd terminal.

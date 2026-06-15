@@ -195,9 +195,7 @@ function OfficeFilePreview({
 
   const handleIframeLoad = useCallback(() => {
     loadCountRef.current += 1
-    if (loadCountRef.current > 1) {
-      clearTimeout(timerRef.current)
-    }
+    clearTimeout(timerRef.current)
   }, [])
 
   const handleRetry = useCallback(() => {

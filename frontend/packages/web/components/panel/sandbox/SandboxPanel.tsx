@@ -63,7 +63,7 @@ export function SandboxPanel({ workspaceId }: SandboxPanelProps) {
       </div>
       <div className="flex-1 overflow-hidden">
         {activeTab === 'files' && <SandboxFilesView workspaceId={workspaceId} />}
-        {activeTab === 'browser' && <BrowserView workspaceId={workspaceId} />}
+        {activeTab === 'browser' && <BrowserView workspaceId={workspaceId} hideHeader />}
         {activeTab === 'terminal' && <SandboxTerminalView workspaceId={workspaceId} />}
       </div>
     </div>
