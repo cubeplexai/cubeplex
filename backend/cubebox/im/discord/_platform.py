@@ -27,10 +27,24 @@ class DiscordPlatform:
 
         app = kwargs["app"]
         gateways: dict[str, Any] = kwargs.get("gateways", {})
+        load_secrets = kwargs.get("load_secrets")
 
         gw = gateways.get(account.id)
         bot = gw.bot if gw else None
-        bot_user_id = gw.bot_user_id if gw else 0
+
+        # Read bot_user_id from credential (stable) instead of gateway
+        # runtime state which may be None before on_ready fires.
+        bot_user_id: int = 0
+        if load_secrets is not None:
+            secrets = await load_secrets(account)
+            raw_id = secrets.get("bot_open_id", "")
+            if raw_id:
+                try:
+                    bot_user_id = int(raw_id)
+                except (ValueError, TypeError):
+                    pass
+        if not bot_user_id and gw is not None:
+            bot_user_id = gw.bot_user_id or 0
 
         dc = DiscordConnector(
             bot_user_id=bot_user_id or 0,
@@ -38,8 +52,9 @@ class DiscordPlatform:
             channel_id=queue_item.channel_id,
             reply_to_id=queue_item.reply_to_id,
         )
+        cfg = account.config or {}
         state = RenderState(
-            bot_name="cubebox",
+            bot_name=cfg.get("bot_app_name") or "cubebox",
             run_id=run_id,
             reply_to_id=queue_item.reply_to_id,
             inbound_message_id=queue_item.inbound_message_id,

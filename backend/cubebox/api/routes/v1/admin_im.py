@@ -73,34 +73,42 @@ async def list_org_accounts(
     svc = _service(session, backend, ctx)
     accounts = await svc.list_for_org()
     long_conns = getattr(request.app.state, "im_long_connections", None) or {}
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
     return await build_im_list_out(
-        svc=svc, session=session, long_conns=long_conns, accounts=accounts
+        svc=svc, session=session, long_conns=long_conns, gateways=gateways, accounts=accounts
     )
 
 
-async def _disconnect_long_connection(request: Request, account_id: str) -> None:
-    """Tear down a live long-connection client for ``account_id`` if one exists.
+async def _disconnect_account(request: Request, account_id: str) -> None:
+    """Tear down a live connection (long-connection or gateway) if one exists.
 
-    Disabling/deleting an account must stop the long-connection in process
+    Disabling/deleting an account must stop the connection in process
     state; otherwise the captured account object continues feeding events
     into ``ingest_inbound_event`` and the bot keeps responding until the
-    next API restart. The webhook path drops disabled accounts on lookup,
-    so this is specifically for the long-connection branch.
+    next API restart.
     """
-    long_conns = getattr(request.app.state, "im_long_connections", None)
-    if not long_conns:
-        return
+    long_conns = getattr(request.app.state, "im_long_connections", None) or {}
     lc = long_conns.pop(account_id, None)
-    if lc is None:
-        return
-    try:
-        await lc.disconnect()
-    except Exception:
-        logger.warning(
-            "[IM admin] failed to disconnect long-connection for {} on disable",
-            account_id,
-            exc_info=True,
-        )
+    if lc is not None:
+        try:
+            await lc.disconnect()
+        except Exception:
+            logger.warning(
+                "[IM admin] failed to disconnect long-connection for {}",
+                account_id,
+                exc_info=True,
+            )
+    gateways = getattr(request.app.state, "im_gateways", None) or {}
+    gw = gateways.pop(account_id, None)
+    if gw is not None:
+        try:
+            await gw.stop()
+        except Exception:
+            logger.warning(
+                "[IM admin] failed to stop gateway for {}",
+                account_id,
+                exc_info=True,
+            )
 
 
 @router.post("/accounts/{account_id}/disable", response_model=IMAccountOut)
@@ -115,7 +123,7 @@ async def disable_account(
     account = await svc.set_enabled(account_id=account_id, enabled=False)
     if account is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
-    await _disconnect_long_connection(request, account_id)
+    await _disconnect_account(request, account_id)
     return _to_out(account)
 
 
