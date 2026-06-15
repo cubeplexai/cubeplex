@@ -10,9 +10,15 @@ import { SearchResultRow } from '@/components/sidebar/SearchResultRow'
 
 interface Props {
   wsId: string | null
+  listItem?: boolean
+  railItem?: boolean
 }
 
-export function ConversationSearch({ wsId }: Props): React.ReactElement {
+export function ConversationSearch({
+  wsId,
+  listItem = false,
+  railItem = false,
+}: Props): React.ReactElement {
   const t = useTranslations('sidebar.search')
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -78,9 +84,16 @@ export function ConversationSearch({ wsId }: Props): React.ReactElement {
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label={t('open')}
-        className="ml-auto p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+        className={
+          listItem
+            ? 'w-full flex items-center gap-2 rounded px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-fast'
+            : railItem
+              ? 'flex items-center justify-center w-full px-2 py-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-fast'
+              : 'ml-auto p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors'
+        }
       >
-        <Search className="size-3.5" />
+        <Search className="size-3.5 shrink-0" />
+        {listItem && <span>{t('open')}</span>}
       </PopoverTrigger>
       <PopoverContent
         side="right"

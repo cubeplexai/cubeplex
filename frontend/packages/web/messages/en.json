@@ -45,10 +45,12 @@
     "settings": "Settings",
     "triggers": "Triggers",
     "sandboxEnv": "Sandbox env",
+    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand sidebar",
     "noRecentChats": "No conversations yet",
     "search": {
-      "open": "Search conversations",
-      "placeholder": "Search conversations…",
+      "open": "Search chats",
+      "placeholder": "Search chats…",
       "loading": "Searching…",
       "noMatches": "No matches",
       "unavailable": "Search unavailable"
@@ -917,7 +919,9 @@
       "deleteConfirmButton": "Delete permanently",
       "cancel": "Cancel"
     },
-    "navIm": "IM"
+    "navIm": "IM",
+    "navMemory": "Memory",
+    "navSandboxEnv": "Sandbox Env"
   },
   "wsMembers": {
     "title": "Members",

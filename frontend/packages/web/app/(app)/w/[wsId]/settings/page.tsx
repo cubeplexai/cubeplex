@@ -1,11 +1,11 @@
 import { use } from 'react'
 import { ImPanel } from '@/components/workspace-settings/ImPanel'
+import { MemoryPanel } from '@/components/workspace-settings/MemoryPanel'
 import { MembersPanel } from '@/components/workspace-settings/MembersPanel'
 import { PersonaEditor } from '@/components/workspace-settings/PersonaEditor'
+import { SandboxEnvPanel } from '@/components/workspace-settings/SandboxEnvPanel'
 import { SettingsTabs } from '@/components/workspace-settings/SettingsTabs'
 import { SharesPanel } from '@/components/workspace-settings/SharesPanel'
-import { SkillsPanel } from '@/components/workspace-settings/SkillsPanel'
-import { McpPanel } from '@/components/workspace-settings/McpPanel'
 
 interface SettingsPageProps {
   params: Promise<{ wsId: string }>
@@ -24,9 +24,9 @@ export default function WorkspaceSettingsPage({
       <SettingsTabs wsId={wsId} active={tab} />
       <div className="flex flex-1 overflow-hidden">
         {tab === 'workspace' && <PersonaEditor wsId={wsId} />}
-        {tab === 'skills' && <SkillsPanel wsId={wsId} />}
-        {tab === 'mcp' && <McpPanel wsId={wsId} />}
         {tab === 'im' && <ImPanel wsId={wsId} />}
+        {tab === 'memory' && <MemoryPanel wsId={wsId} />}
+        {tab === 'sandboxEnv' && <SandboxEnvPanel wsId={wsId} />}
         {tab === 'members' && <MembersPanel wsId={wsId} />}
         {tab === 'shares' && <SharesPanel wsId={wsId} />}
       </div>

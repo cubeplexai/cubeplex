@@ -4,13 +4,9 @@ import Link from 'next/link'
 import { Suspense, useEffect, useRef, useState } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import {
-  type Conversation,
-  createApiClient,
-  useConversationStore,
-  useWorkspaceStore,
-} from '@cubebox/core'
-import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import { Tooltip as BaseTooltip } from '@base-ui/react'
+import { type Conversation, createApiClient, useConversationStore } from '@cubebox/core'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,23 +17,22 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
-import { WorkspacesSection } from '@/components/sidebar/WorkspacesSection'
+import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
+import { VscMcp } from 'react-icons/vsc'
 import {
   Box,
-  Brain,
   CalendarClock,
   type LucideIcon,
-  KeyRound,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Pin,
   PinOff,
-  Plug,
   Plus,
   Settings,
   Sparkles,
   Trash2,
-  Users,
   Webhook,
 } from 'lucide-react'
 
@@ -211,41 +206,56 @@ function ConversationRow({
   )
 }
 
+// Portal-based tooltip — unaffected by the sidebar's overflow-hidden.
+function RailTooltip({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}): React.ReactElement {
+  return (
+    <BaseTooltip.Root>
+      <BaseTooltip.Trigger render={<div />}>{children}</BaseTooltip.Trigger>
+      <BaseTooltip.Portal>
+        <BaseTooltip.Positioner side="right" sideOffset={8}>
+          <BaseTooltip.Popup className="z-50 w-fit rounded-md bg-foreground px-2.5 py-1 text-xs text-background shadow-md whitespace-nowrap">
+            {label}
+          </BaseTooltip.Popup>
+        </BaseTooltip.Positioner>
+      </BaseTooltip.Portal>
+    </BaseTooltip.Root>
+  )
+}
+
 interface WorkspaceNavEntry {
   key: string
-  labelKey:
-    | 'skills'
-    | 'mcp'
-    | 'memory'
-    | 'scheduledTasks'
-    | 'members'
-    | 'settings'
-    | 'triggers'
-    | 'sandboxEnv'
-  icon: LucideIcon
+  labelKey: 'skills' | 'mcp' | 'scheduledTasks' | 'settings' | 'triggers'
+  icon: LucideIcon | React.ComponentType<{ className?: string }>
   href: string
   isActive: boolean
 }
 
-function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
+function WorkspaceNav({
+  wsId,
+  collapsed,
+}: {
+  wsId: string
+  collapsed?: boolean
+}): React.ReactElement {
   const tSidebar = useTranslations('sidebar')
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const wsRole = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.role)
-  const isAdmin = wsRole === 'admin'
-
   const settingsPrefix = `/w/${wsId}/settings`
-  const memoryPrefix = `/w/${wsId}/memory`
   const scheduledTasksPrefix = `/w/${wsId}/scheduled-tasks`
   const triggersPrefix = `/w/${wsId}/triggers`
   const skillsPrefix = `/w/${wsId}/skills`
-  const sandboxEnvPrefix = `/w/${wsId}/sandbox-env`
+  const mcpPrefix = `/w/${wsId}/mcp`
   const onSettings = pathname?.startsWith(settingsPrefix) ?? false
-  const onMemory = pathname?.startsWith(memoryPrefix) ?? false
   const onScheduledTasks = pathname?.startsWith(scheduledTasksPrefix) ?? false
   const onTriggers = pathname?.startsWith(triggersPrefix) ?? false
   const onSkills = pathname?.startsWith(skillsPrefix) ?? false
-  const onSandboxEnv = pathname?.startsWith(sandboxEnvPrefix) ?? false
+  const onMcp = pathname?.startsWith(mcpPrefix) ?? false
   const currentTab = searchParams.get('tab') ?? 'workspace'
 
   const entries: WorkspaceNavEntry[] = [
@@ -259,16 +269,9 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
     {
       key: 'mcp',
       labelKey: 'mcp',
-      icon: Plug,
-      href: `${settingsPrefix}?tab=mcp`,
-      isActive: onSettings && currentTab === 'mcp',
-    },
-    {
-      key: 'memory',
-      labelKey: 'memory',
-      icon: Brain,
-      href: memoryPrefix,
-      isActive: onMemory,
+      icon: VscMcp,
+      href: mcpPrefix,
+      isActive: onMcp,
     },
     {
       key: 'scheduledTasks',
@@ -284,23 +287,7 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
       href: triggersPrefix,
       isActive: onTriggers,
     },
-    {
-      key: 'sandboxEnv',
-      labelKey: 'sandboxEnv',
-      icon: KeyRound,
-      href: sandboxEnvPrefix,
-      isActive: onSandboxEnv,
-    },
   ]
-  if (isAdmin) {
-    entries.push({
-      key: 'members',
-      labelKey: 'members',
-      icon: Users,
-      href: `${settingsPrefix}?tab=members`,
-      isActive: onSettings && currentTab === 'members',
-    })
-  }
   entries.push({
     key: 'settings',
     labelKey: 'settings',
@@ -313,30 +300,43 @@ function WorkspaceNav({ wsId }: { wsId: string }): React.ReactElement {
     <nav className="px-2 pt-1 pb-1 space-y-0.5">
       {entries.map((entry) => {
         const Icon = entry.icon
-        return (
+        const label = tSidebar(entry.labelKey)
+        const link = (
           <Link
-            key={entry.key}
             href={entry.href}
-            className={`group relative flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors duration-fast ${
+            className={cn(
+              'relative flex items-center px-2 py-1.5 rounded text-xs transition-colors duration-fast',
+              collapsed ? 'justify-center' : 'gap-2',
               entry.isActive
                 ? 'text-foreground bg-accent font-medium'
-                : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-            }`}
-            aria-label={tSidebar(entry.labelKey)}
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+            )}
+            aria-label={label}
           >
             {entry.isActive && (
               <div className="absolute left-0 top-[22%] bottom-[22%] w-0.5 bg-primary rounded-r" />
             )}
             <Icon className="size-3.5 shrink-0" />
-            <span>{tSidebar(entry.labelKey)}</span>
+            {!collapsed && <span className="whitespace-nowrap">{label}</span>}
           </Link>
+        )
+        return (
+          <div key={entry.key}>
+            {collapsed ? <RailTooltip label={label}>{link}</RailTooltip> : link}
+          </div>
         )
       })}
     </nav>
   )
 }
 
-export function Sidebar(): React.ReactElement {
+interface SidebarProps {
+  onCollapse?: () => void
+  onExpand?: () => void
+  collapsed?: boolean
+}
+
+export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): React.ReactElement {
   const tSidebar = useTranslations('sidebar')
   const tShell = useTranslations('shellLayout')
   const { conversations, activeId } = useConversationStore()
@@ -350,37 +350,116 @@ export function Sidebar(): React.ReactElement {
   return (
     <aside
       aria-label={tShell('sidebar')}
-      className="w-56 bg-card border-r border-border flex flex-col h-screen shrink-0"
+      className={cn(
+        'bg-card border-r border-border flex flex-col h-screen shrink-0 overflow-hidden',
+        'transition-[width] duration-200 ease-in-out',
+        collapsed ? 'w-12' : 'w-56',
+      )}
     >
-      {/* Brand + new chat */}
-      <div className="px-4 pt-4 pb-3 border-b border-border">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
-            <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
+      {/* Brand — shows logo + "cubebox" + collapse button when expanded;
+          logo only (centered) when collapsed. */}
+      <div
+        className={cn('border-b border-border', collapsed ? 'px-2 pt-3 pb-2.5' : 'px-3 pt-4 pb-3')}
+      >
+        <div className={cn('flex items-center mb-3', collapsed ? 'justify-center' : 'px-0.5')}>
+          <div className={cn('flex items-center gap-2 min-w-0', !collapsed && 'flex-1')}>
+            <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
+              <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
+            </div>
+            <span
+              className={cn(
+                'text-sm font-semibold tracking-tight whitespace-nowrap overflow-hidden transition-all duration-200',
+                collapsed ? 'max-w-0 opacity-0' : 'max-w-full opacity-100',
+              )}
+            >
+              cubebox
+            </span>
           </div>
-          <span className="text-sm font-semibold tracking-tight">cubebox</span>
-          <ConversationSearch wsId={currentWsId} />
+          {/* Collapse button — only shown when expanded */}
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              className="grid size-6 place-items-center rounded text-muted-foreground hover:bg-accent transition-colors duration-fast shrink-0"
+              aria-label={tSidebar('collapseSidebar')}
+            >
+              <PanelLeftClose className="size-3.5" />
+            </button>
+          )}
         </div>
-        <Link href={newChatHref}>
-          <Button variant="outline" size="sm" className="w-full h-7 text-xs gap-1.5">
-            <Plus className="size-3" />
-            {tSidebar('newChat')}
-          </Button>
-        </Link>
+        {/* WorkspaceSelector fades out before width transition completes */}
+        <div
+          className={cn(
+            'overflow-hidden transition-all duration-150',
+            collapsed ? 'max-h-0 opacity-0' : 'max-h-24 opacity-100',
+          )}
+        >
+          <WorkspaceSelector />
+        </div>
       </div>
 
-      {/* Workspaces */}
-      <WorkspacesSection />
+      {/* Expand button — rail mode only, same px-2 structure as nav items */}
+      {collapsed && (
+        <div className="px-2 pt-1.5 pb-0.5">
+          <RailTooltip label={tSidebar('expandSidebar')}>
+            <button
+              type="button"
+              onClick={onExpand}
+              className="flex items-center justify-center w-full py-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors duration-fast"
+              aria-label={tSidebar('expandSidebar')}
+            >
+              <PanelLeftOpen className="size-3.5" />
+            </button>
+          </RailTooltip>
+        </div>
+      )}
 
-      {/* Workspace nav: skills, mcp, memory, members, settings */}
+      {/* Primary actions: new chat + search */}
+      <div className="px-2 pt-1.5 pb-1 space-y-0.5">
+        {/* New chat */}
+        {(() => {
+          const newChatLink = (
+            <Link
+              href={newChatHref}
+              className={cn(
+                'flex items-center px-2 py-1.5 rounded transition-colors duration-fast text-xs text-muted-foreground hover:text-foreground hover:bg-accent',
+                collapsed ? 'justify-center' : 'gap-2',
+              )}
+            >
+              <Plus className="size-3.5 shrink-0" />
+              {!collapsed && <span className="whitespace-nowrap">{tSidebar('newChat')}</span>}
+            </Link>
+          )
+          return collapsed ? (
+            <RailTooltip label={tSidebar('newChat')}>{newChatLink}</RailTooltip>
+          ) : (
+            newChatLink
+          )
+        })()}
+        {/* Search */}
+        {collapsed ? (
+          <RailTooltip label={tSidebar('search.open')}>
+            <ConversationSearch wsId={currentWsId} railItem />
+          </RailTooltip>
+        ) : (
+          <ConversationSearch wsId={currentWsId} listItem />
+        )}
+      </div>
+
+      {/* Workspace nav */}
       {currentWsId && (
         <Suspense>
-          <WorkspaceNav wsId={currentWsId} />
+          <WorkspaceNav wsId={currentWsId} collapsed={collapsed} />
         </Suspense>
       )}
 
-      {/* Recent conversations — flex-1 so it stretches to the footer. */}
-      <div className="flex-1 flex flex-col min-h-0">
+      {/* Recent conversations — flex-1 when expanded, hidden in rail */}
+      <div
+        className={cn(
+          'flex flex-col min-h-0 overflow-hidden transition-all duration-150',
+          collapsed ? 'max-h-0 opacity-0 flex-none' : 'flex-1 opacity-100',
+        )}
+      >
         <div className="px-2 pt-2 pb-1">
           <p className="px-2 text-2xs font-medium uppercase tracking-wider text-faint">
             {tSidebar('recentChats')}
@@ -404,11 +483,9 @@ export function Sidebar(): React.ReactElement {
         </ScrollArea>
       </div>
 
-      {/* Footer: avatar popover */}
-      <div className="border-t border-border p-2 flex items-center gap-1">
-        <div className="min-w-0 flex-1">
-          <AvatarPopover />
-        </div>
+      {/* Footer: avatar */}
+      <div className="mt-auto border-t border-border p-2">
+        <AvatarPopover collapsed={collapsed} />
       </div>
     </aside>
   )
