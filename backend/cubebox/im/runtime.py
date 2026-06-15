@@ -1,10 +1,14 @@
-"""IM runtime wiring: queue worker + per-account long-connection clients.
+"""IM runtime wiring: queue worker + per-account connection clients.
 
-Moved out of ``cubebox/api/app.py`` so that the FastAPI factory only knows
-how to start/stop the IM subsystem; everything about how IM is wired —
-credential cache, lark client cache, CardKit token plumbing,
-``OutboundRunTailer`` construction, ``FeishuLongConnection`` bootstrap —
-lives here.
+Platform-agnostic entry point that dispatches to registered
+``PlatformConnector`` implementations (Feishu, Discord, …) via the
+platform registry. Each platform handles its own tailer construction,
+connection lifecycle, and credential interpretation.
+
+Distributed ownership is managed via a Redis lease: each API instance
+generates a unique ``instance_id`` and uses ``try_acquire_lease`` /
+``renew_lease`` to claim accounts. A periodic sweep re-acquires orphan
+leases so that a crashed instance's accounts are picked up by a survivor.
 
 The two entry points are ``start(app, run_manager)`` and ``stop(app)``;
 ``app.state`` carries the dependencies (encryption backend, Redis, prefix).
@@ -14,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from typing import Any
 
 from fastapi import FastAPI
@@ -23,33 +28,95 @@ from sqlalchemy import select
 from cubebox.config import config as _config
 from cubebox.credentials.dependencies import build_credential_service
 from cubebox.db.engine import async_session_maker
-from cubebox.im.artifacts import IMArtifactDispatcher
 from cubebox.im.feishu.cardkit_client import CardKitClient
-from cubebox.im.feishu.connector import FeishuConnector
-from cubebox.im.feishu.long_connection import FeishuLongConnection
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.outbound import OutboundRunTailer
-from cubebox.im.types import RenderState
 from cubebox.im.worker import IMRunQueueWorker
 from cubebox.models.im_connector import IMConnectorAccount
 
+# ---------------------------------------------------------------------------
+# Distributed lease constants
+# ---------------------------------------------------------------------------
+LEASE_TTL = 30
+SWEEP_INTERVAL = 15
+
+
+# ---------------------------------------------------------------------------
+# Distributed lease helpers (module-level, tested independently)
+# ---------------------------------------------------------------------------
+
+
+async def try_acquire_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> bool:
+    """Attempt to claim ownership of *account_id* in Redis (NX + TTL)."""
+    key = f"{prefix}:im:gateway:{account_id}:owner"
+    return bool(await redis.set(key, instance_id, nx=True, ex=LEASE_TTL))
+
+
+async def release_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> None:
+    """Release lease only if we still own it (compare-and-delete)."""
+    key = f"{prefix}:im:gateway:{account_id}:owner"
+    current = await redis.get(key)
+    if current is not None:
+        decoded = current.decode() if isinstance(current, bytes) else current
+        if decoded == instance_id:
+            await redis.delete(key)
+
+
+async def renew_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> bool:
+    """Extend the TTL on a lease we own. Returns False if we lost it."""
+    key = f"{prefix}:im:gateway:{account_id}:owner"
+    current = await redis.get(key)
+    if current is not None:
+        decoded = current.decode() if isinstance(current, bytes) else current
+        if decoded == instance_id:
+            await redis.expire(key, LEASE_TTL)
+            return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Feishu-specific helpers (kept at module level so FeishuPlatform can import)
+# ---------------------------------------------------------------------------
+
+
+def _build_cardkit_client(client: Any, secrets: dict[str, Any]) -> CardKitClient:
+    """Construct a CardKitClient bound to the same Feishu/Lark domain + token
+    cache as the lark_oapi client.
+
+    ``TokenManager`` caches tenant_access_token in process memory (LocalCache),
+    so the provider closure is effectively free after the first call.
+    """
+    from lark_oapi.core.const import LARK_DOMAIN as _LARK_DOMAIN
+    from lark_oapi.core.token.manager import TokenManager as _TokenManager
+
+    client_config = client.config
+    client_domain = str(secrets.get("domain", "feishu"))
+    base_url = _LARK_DOMAIN if client_domain == "lark" else "https://open.feishu.cn"
+
+    def _token_provider() -> str:
+        return str(_TokenManager.get_self_tenant_token(client_config))
+
+    return CardKitClient(token_provider=_token_provider, base_url=base_url)
+
+
+# ---------------------------------------------------------------------------
+# start / stop
+# ---------------------------------------------------------------------------
+
 
 async def start(app: FastAPI, run_manager: Any) -> None:
-    """Start the IM queue worker + per-account long-connection clients.
+    """Start the IM queue worker + per-account connection clients.
 
     Connect-each calls run concurrently via ``asyncio.gather`` so one slow
     or broken account does not stall startup. Failures are logged with full
-    tracebacks; affected accounts simply won't receive long-connection
-    traffic (webhook-mode accounts continue to work either way).
+    tracebacks; affected accounts simply won't receive connection traffic.
     """
-    # Per-account decrypted-secret cache so we don't pay KDF + Feishu client
-    # construction per turn. Keyed by (account_id, credential_id) — today
-    # the only supported rotation path is delete-and-re-create the account
-    # (CredentialService.create raises on the (org_id, kind, name) unique
-    # index), which produces a new account_id; the credential_id leg of
-    # the cache key is forward-looking for when ``upsert_by_kind_name`` is
-    # wired through to ``connect_feishu``. Until then, restart the API to
-    # flush a rotated credential.
+    # Trigger platform registrations
+    import cubebox.im.discord  # noqa: F401
+    import cubebox.im.feishu  # noqa: F401
+
+    instance_id = str(uuid.uuid4())
+
+    # Per-account decrypted-secret cache so we don't pay KDF + client
+    # construction per turn.
     secret_cache: dict[tuple[str, str], dict[str, Any]] = {}
     client_cache: dict[tuple[str, str], Any] = {}
 
@@ -59,7 +126,10 @@ async def start(app: FastAPI, run_manager: Any) -> None:
             return secret_cache[key]
         async with async_session_maker() as s:
             svc = build_credential_service(
-                s, app.state.encryption_backend, org_id=account.org_id, actor_user_id=None
+                s,
+                app.state.encryption_backend,
+                org_id=account.org_id,
+                actor_user_id=None,
             )
             plaintext = await svc.get_decrypted(
                 credential_id=account.credential_id, requesting_kind="im_bot"
@@ -86,53 +156,44 @@ async def start(app: FastAPI, run_manager: Any) -> None:
         client_cache[account_key] = client
         return client
 
+    # Dict of account_id → gateway object (Discord) or long-connection (Feishu)
+    gateways: dict[str, Any] = {}
+
     async def _on_run_started(run_id: str, item: Any) -> None:
+        from cubebox.im.registry import get_platform
+
         async with async_session_maker() as s:
             account = (
                 await s.execute(
                     select(IMConnectorAccount).where(IMConnectorAccount.id == item.account_id)
                 )
             ).scalar_one()
-        secrets = await _load_secrets(account)
-        client = _client_for((account.id, account.credential_id), secrets)
-        connector = FeishuConnector(
-            bot_open_id=str(secrets.get("bot_open_id") or "") or None,
-            client=client,
-            channel_id=item.channel_id,
-            reply_to_id=item.reply_to_id,
-        )
-        state = RenderState(
-            bot_name="cubebox",
-            run_id=run_id,
-            reply_to_id=item.reply_to_id,
-            inbound_message_id=item.inbound_message_id,
-        )
-        public_base = str(_config.get("api.public_url", "") or "")
-        dispatcher = IMArtifactDispatcher(
-            connector=connector,
-            redis=app.state.redis,
-            redis_key_prefix=app.state.redis_key_prefix,
-            public_base_url=public_base,
-            org_id=account.org_id,
-            workspace_id=account.workspace_id,
-            conversation_id=item.conversation_id,
-            card_state=state.card_state,
-        )
-        cardkit = _build_cardkit_client(client, secrets)
-        from cubebox.im.feishu.op_dispatcher import FeishuOpDispatcher
 
-        op_dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
-        tailer = OutboundRunTailer(
+        try:
+            platform = get_platform(account.platform)
+        except KeyError:
+            logger.warning(
+                "[IM] unsupported platform {} for run {}",
+                account.platform,
+                run_id,
+            )
+            return
+
+        await platform.build_tailer(
+            run_id=run_id,
+            queue_item=item,
+            account=account,
             redis=app.state.redis,
             key_prefix=app.state.redis_key_prefix,
-            run_id=run_id,
-            connector=connector,
-            state=state,
-            dispatcher=op_dispatcher,
-            artifact_dispatcher=dispatcher,
-            responder_open_id=item.sender_open_id,
+            session_maker=async_session_maker,
+            run_manager=run_manager,
+            secret_cache=secret_cache,
+            client_cache=client_cache,
+            load_secrets=_load_secrets,
+            config=_config,
+            gateways=gateways,
+            app=app,
         )
-        asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 
     worker = IMRunQueueWorker(
         session_maker=async_session_maker,
@@ -146,45 +207,52 @@ async def start(app: FastAPI, run_manager: Any) -> None:
     app.state.im_long_connections = {}
 
     async def _connect_one(account: IMConnectorAccount) -> None:
+        from cubebox.im.registry import get_platform
+
         try:
             secrets = await _load_secrets(account)
-            bot_open_id = str(secrets.get("bot_open_id") or "")
-            if not bot_open_id:
-                # Hydration failed at connect_feishu time. Without it the
-                # parser's defense-in-depth mention gate falls through and
-                # every group message becomes a run; AND the bot-echo guard
-                # cannot recognize the bot's own outbound replies, looping
-                # the agent on itself. Refuse to open the WebSocket.
-                logger.warning(
-                    "[IM] skipping long-connection for {} — bot_open_id not hydrated;"
-                    " re-run connect_feishu to fix",
+            platform = get_platform(account.platform)
+
+            acquired = await try_acquire_lease(
+                app.state.redis,
+                account_id=account.id,
+                instance_id=instance_id,
+                prefix=app.state.redis_key_prefix,
+            )
+            if not acquired:
+                logger.debug(
+                    "[IM] lease for {} owned by another instance, skipping",
                     account.id,
                 )
                 return
-            lc = FeishuLongConnection(
-                account=account,
-                app_id=str(secrets["app_id"]),
-                app_secret=str(secrets["app_secret"]),
-                bot_open_id=bot_open_id,
-                ingest=ingest_inbound_event,
+
+            await platform.on_account_enabled(
+                account,
+                secrets=secrets,
+                gateways=gateways,
                 session_maker=async_session_maker,
                 run_manager=run_manager,
                 redis_key_prefix=app.state.redis_key_prefix,
-                domain=str(secrets.get("domain", "feishu")),
+                long_connections=app.state.im_long_connections,
+                app=app,
             )
-            await lc.connect()
-            app.state.im_long_connections[account.id] = lc
         except Exception:
-            logger.exception("[IM] long-connection startup failed for account {}", account.id)
+            logger.exception(
+                "[IM] connection startup failed for account {} ({})",
+                account.id,
+                account.platform,
+            )
 
+    # Query all enabled accounts with connection-based delivery
     async with async_session_maker() as s:
         accounts = (
             (
                 await s.execute(
                     select(IMConnectorAccount).where(
-                        IMConnectorAccount.platform == "feishu",  # type: ignore[arg-type]
-                        IMConnectorAccount.delivery_mode == "long_connection",  # type: ignore[arg-type]
                         IMConnectorAccount.enabled == True,  # type: ignore[arg-type]  # noqa: E712
+                        IMConnectorAccount.delivery_mode.in_(  # type: ignore[attr-defined]
+                            ["long_connection", "gateway"]
+                        ),
                     )
                 )
             )
@@ -195,40 +263,86 @@ async def start(app: FastAPI, run_manager: Any) -> None:
         await asyncio.gather(*(_connect_one(a) for a in accounts), return_exceptions=True)
 
     # Expose the connector so the workspace POST /im/accounts route can
-    # spin up the WebSocket inline instead of waiting for the next API
-    # restart. Without this, creating an account via the API leaves it
-    # dormant until a restart re-runs the bulk loop above.
+    # spin up the connection inline instead of waiting for the next restart.
     app.state.im_connect_account = _connect_one
+    app.state.im_gateways = gateways
 
+    # ----- Lease sweep task: renew owned leases, claim orphans -----
+    async def _sweep() -> None:
+        while True:
+            await asyncio.sleep(SWEEP_INTERVAL)
+            try:
+                async with async_session_maker() as s:
+                    all_accounts = (
+                        (
+                            await s.execute(
+                                select(IMConnectorAccount).where(
+                                    IMConnectorAccount.enabled == True,  # type: ignore[arg-type]  # noqa: E712
+                                    IMConnectorAccount.delivery_mode.in_(  # type: ignore[attr-defined]
+                                        ["long_connection", "gateway"]
+                                    ),
+                                )
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                for acct in all_accounts:
+                    owned = await renew_lease(
+                        app.state.redis,
+                        account_id=acct.id,
+                        instance_id=instance_id,
+                        prefix=app.state.redis_key_prefix,
+                    )
+                    if not owned:
+                        acquired = await try_acquire_lease(
+                            app.state.redis,
+                            account_id=acct.id,
+                            instance_id=instance_id,
+                            prefix=app.state.redis_key_prefix,
+                        )
+                        if acquired:
+                            logger.info(
+                                "[IM] claimed orphan lease for {} ({})",
+                                acct.id,
+                                acct.platform,
+                            )
+                            await _connect_one(acct)
+            except Exception:
+                logger.warning("[IM] lease sweep failed", exc_info=True)
 
-def _build_cardkit_client(client: Any, secrets: dict[str, Any]) -> CardKitClient:
-    """Construct a CardKitClient bound to the same Feishu/Lark domain + token
-    cache as the lark_oapi client.
-
-    ``TokenManager`` caches tenant_access_token in process memory (LocalCache),
-    so the provider closure is effectively free after the first call.
-    """
-    from lark_oapi.core.const import LARK_DOMAIN as _LARK_DOMAIN
-    from lark_oapi.core.token.manager import TokenManager as _TokenManager
-
-    client_config = client.config
-    client_domain = str(secrets.get("domain", "feishu"))
-    base_url = _LARK_DOMAIN if client_domain == "lark" else "https://open.feishu.cn"
-
-    def _token_provider() -> str:
-        return str(_TokenManager.get_self_tenant_token(client_config))
-
-    return CardKitClient(token_provider=_token_provider, base_url=base_url)
+    sweep_task = asyncio.create_task(_sweep(), name="im-lease-sweep")
+    app.state.im_lease_sweep = sweep_task
 
 
 async def stop(app: FastAPI) -> None:
-    """Stop IM long-connection clients then the queue worker."""
+    """Stop IM gateway/long-connection clients, sweep task, then the queue worker."""
+    # Stop sweep
+    sweep = getattr(app.state, "im_lease_sweep", None)
+    if sweep is not None:
+        sweep.cancel()
+        try:
+            await sweep
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    # Stop long-connections (Feishu)
     long_conns = getattr(app.state, "im_long_connections", None) or {}
     for lc in long_conns.values():
         try:
             await lc.disconnect()
         except Exception:
             logger.warning("[IM] long-connection disconnect failed", exc_info=True)
+
+    # Stop gateways (Discord)
+    gws = getattr(app.state, "im_gateways", None) or {}
+    for gw in gws.values():
+        try:
+            await gw.stop()
+        except Exception:
+            logger.warning("[IM] gateway stop failed", exc_info=True)
+
+    # Stop worker
     worker = getattr(app.state, "im_run_queue_worker", None)
     if worker is not None:
         try:
@@ -237,4 +351,11 @@ async def stop(app: FastAPI) -> None:
             logger.warning("[IM] queue worker stop failed", exc_info=True)
 
 
-__all__ = ["start", "stop"]
+__all__ = [
+    "start",
+    "stop",
+    "try_acquire_lease",
+    "release_lease",
+    "renew_lease",
+    "LEASE_TTL",
+]
