@@ -42,6 +42,7 @@ async def build_im_list_out(
             agg=aggs.get(a.id) or _RuntimeAgg(),
             bot_open_id=bot_open_id,
         )
+        cfg = a.config or {}
         out_rows.append(
             IMAccountOut(
                 id=a.id,
@@ -52,6 +53,8 @@ async def build_im_list_out(
                 delivery_mode=a.delivery_mode,
                 enabled=a.enabled,
                 runtime=rt,
+                bot_app_name=cfg.get("bot_app_name") or None,
+                bot_avatar_url=cfg.get("bot_avatar_url") or None,
             )
         )
     return IMAccountListOut(accounts=out_rows)

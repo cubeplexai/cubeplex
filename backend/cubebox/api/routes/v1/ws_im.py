@@ -42,6 +42,7 @@ def _service(
 
 
 def _to_out(account: IMConnectorAccount) -> IMAccountOut:
+    cfg = account.config or {}
     return IMAccountOut(
         id=account.id,
         platform=account.platform,
@@ -51,6 +52,8 @@ def _to_out(account: IMConnectorAccount) -> IMAccountOut:
         delivery_mode=account.delivery_mode,
         enabled=account.enabled,
         runtime=ImRuntimeStatus.unknown(),
+        bot_app_name=cfg.get("bot_app_name") or None,
+        bot_avatar_url=cfg.get("bot_avatar_url") or None,
     )
 
 

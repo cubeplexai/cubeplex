@@ -68,6 +68,8 @@ class IMAccountOut(BaseModel):
     delivery_mode: str
     enabled: bool
     runtime: ImRuntimeStatus
+    bot_app_name: str | None = None
+    bot_avatar_url: str | None = None
 
 
 class IMAccountListOut(BaseModel):

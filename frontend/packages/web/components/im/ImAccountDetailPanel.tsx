@@ -31,8 +31,26 @@ export function ImAccountDetailPanel({
   const t = useTranslations('im')
   return (
     <aside className="flex w-72 flex-col gap-4 p-4 text-sm">
-      <header className="flex items-center justify-between">
-        <strong>{account.external_account_id}</strong>
+      <header className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {account.bot_avatar_url ? (
+            <img
+              src={account.bot_avatar_url}
+              alt={account.bot_app_name ?? account.external_account_id}
+              className="h-8 w-8 shrink-0 rounded-full object-cover"
+            />
+          ) : null}
+          <div className="min-w-0">
+            <strong className="block truncate">
+              {account.bot_app_name ?? account.external_account_id}
+            </strong>
+            {account.bot_app_name ? (
+              <span className="block truncate text-xs text-muted-foreground">
+                {account.external_account_id}
+              </span>
+            ) : null}
+          </div>
+        </div>
         <ImAccountStatusPill
           connectionState={account.runtime.connection_state}
           enabled={account.enabled}

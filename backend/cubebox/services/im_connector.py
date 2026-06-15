@@ -2,7 +2,7 @@
 
 Both scopes share the same CRUD plumbing here; the routes only differ in
 the auth dependency they take. ``connect_feishu`` is the single place
-``bot_open_id`` gets hydrated (via ``/open-apis/bot/v3/info``) so both the
+bot metadata gets hydrated (via ``/open-apis/bot/v3/info``) so both the
 webhook ingress and the long-connection startup glue can rely on reading
 it back from the stored credential.
 """
@@ -143,7 +143,9 @@ class IMConnectorService:
                 f"feishu account already exists for app_id={app_id} (id={existing.id})"
             )
 
-        bot_open_id = await self._hydrate_bot_open_id(app_id, app_secret, domain)
+        bot_open_id, bot_app_name, bot_avatar_url = await self._hydrate_bot_info(
+            app_id, app_secret, domain
+        )
         if not bot_open_id:
             # Without ``bot_open_id`` the long-connection / webhook startup
             # would refuse to bind this account (the mention gate + bot-echo
@@ -194,6 +196,10 @@ class IMConnectorService:
                 acting_user_id=acting_user_id,
                 credential_id=credential_id,
                 delivery_mode=delivery_mode,
+                config={
+                    "bot_app_name": bot_app_name or None,
+                    "bot_avatar_url": bot_avatar_url or None,
+                },
             )
             self._session.add(account)
             await self._session.commit()
@@ -286,15 +292,17 @@ class IMConnectorService:
         await self._session.refresh(account)
         return account
 
-    async def _hydrate_bot_open_id(
+    async def _hydrate_bot_info(
         self,
         app_id: str,
         app_secret: str,
         domain: str,
-    ) -> str:
+    ) -> tuple[str, str, str]:
         """Probe ``/open-apis/bot/v3/info`` with the tenant access token.
 
-        Returns the bot's own open_id, or an empty string on failure.
+        Returns ``(open_id, app_name, avatar_url)``. All three are empty
+        strings on failure; the caller should treat an empty ``open_id``
+        as a fatal credential error.
         """
         try:
             import asyncio
@@ -328,7 +336,7 @@ class IMConnectorService:
             raw = getattr(getattr(resp, "raw", None), "content", None)
             if not raw:
                 logger.warning("[IM] /bot/v3/info probe returned no content for app_id={}", app_id)
-                return ""
+                return "", "", ""
             data = json.loads(raw)
             bot = data.get("bot") or {}
             open_id = str(bot.get("open_id") or "")
@@ -338,7 +346,9 @@ class IMConnectorService:
                     app_id,
                     data,
                 )
-            return open_id
+            app_name = str(bot.get("app_name") or "")
+            avatar_url = str(bot.get("avatar_url") or "")
+            return open_id, app_name, avatar_url
         except Exception:
             logger.exception("[IM] /bot/v3/info probe failed for app_id={}", app_id)
-            return ""
+            return "", "", ""

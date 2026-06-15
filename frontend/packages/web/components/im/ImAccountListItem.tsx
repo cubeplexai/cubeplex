@@ -1,24 +1,10 @@
 'use client'
 
-import { useTranslations } from 'next-intl'
-
 import type { ImAccount } from '@cubebox/core'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 import { ImAccountStatusPill } from './ImAccountStatusPill'
-
-// Map a platform id to its labelKey via a static record — keeps the
-// pre-commit "no cast-to-MessageKey" rule satisfied while still being
-// extensible when Slack/Teams land.
-function platformLabel(
-  t: (key: 'platform.feishu.label' | 'platform.slack.label' | 'platform.teams.label') => string,
-  platform: string,
-): string {
-  if (platform === 'slack') return t('platform.slack.label')
-  if (platform === 'teams') return t('platform.teams.label')
-  return t('platform.feishu.label')
-}
+import { PlatformLogo } from './PlatformLogo'
 
 interface Props {
   account: ImAccount
@@ -54,7 +40,6 @@ export function ImAccountListItem({
   showWorkspaceColumn,
   onSelect,
 }: Props): React.ReactElement {
-  const t = useTranslations('im')
   const last = relativeFromIso(account.runtime.last_inbound_at)
   return (
     <button
@@ -67,14 +52,23 @@ export function ImAccountListItem({
         selected ? 'bg-accent' : 'hover:bg-accent/50',
       )}
     >
+      {account.bot_avatar_url ? (
+        <img
+          src={account.bot_avatar_url}
+          alt={account.bot_app_name ?? account.external_account_id}
+          className="h-6 w-6 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <PlatformLogo platform={account.platform} className="h-5 w-5 shrink-0" />
+      )}
       <ImAccountStatusPill
         connectionState={account.runtime.connection_state}
         enabled={account.enabled}
       />
-      <Badge variant="secondary" className="text-[10px]">
-        {platformLabel(t, account.platform)}
-      </Badge>
-      <span className="font-medium">{account.external_account_id}</span>
+      <span className="font-medium">{account.bot_app_name ?? account.external_account_id}</span>
+      {account.bot_app_name ? (
+        <span className="text-xs text-muted-foreground">{account.external_account_id}</span>
+      ) : null}
       {showWorkspaceColumn && (
         <span className="text-xs text-muted-foreground">{account.workspace_id}</span>
       )}

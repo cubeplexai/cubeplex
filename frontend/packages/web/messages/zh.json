@@ -1592,7 +1592,7 @@
     },
     "platform": {
       "feishu": {
-        "label": "飞书"
+        "label": "Lark / 飞书"
       },
       "slack": {
         "label": "Slack",
@@ -1628,8 +1628,11 @@
       "feishu": {
         "prereq": {
           "app": "在 open.feishu.cn 创建了内部应用",
-          "bot": "应用里启用了 bot",
-          "scopes": "已开通 scopes：im:message、contact:user.email:readonly、contact:user.id:readonly",
+          "app_lark": "在 open.larksuite.com 创建了内部应用",
+          "bot": "应用里启用了 bot（添加应用能力 → 机器人）",
+          "scopes": "以应用身份开通权限（权限管理 → 机器人）",
+          "events": "订阅 im.message.receive_v1，推送方式选「长链接」（事件与回调 → 事件配置）",
+          "card_callback": "添加 card.action.trigger 卡片回传行为（事件与回调 → 回调配置）",
           "published": "应用版本已发布到当前 tenant"
         },
         "field": {
