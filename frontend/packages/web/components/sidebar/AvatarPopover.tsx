@@ -4,7 +4,7 @@ import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
-import { useTranslations } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
 import {
   createApiClient,
   logoutUser,
@@ -17,6 +17,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useAdminAccess } from '@/hooks/useAdminAccess'
 import {
   ArrowLeft,
+  Check,
+  ChevronDown,
   Languages,
   LogOut,
   Moon,
@@ -28,7 +30,7 @@ import {
 } from 'lucide-react'
 import { clearAllPresetSelectionStores } from '@/lib/stores/preset-selection'
 
-export function AvatarPopover() {
+export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
   const t = useTranslations('avatar')
   const tShell = useTranslations('shellLayout')
   const router = useRouter()
@@ -38,6 +40,8 @@ export function AvatarPopover() {
   const { isAdmin } = useAdminAccess()
   const { theme, resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
+  const [langOpen, setLangOpen] = useState(false)
+  const currentLocale = useLocale()
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -70,24 +74,29 @@ export function AvatarPopover() {
       const client = createApiClient('')
       await updateLanguage(client, lang)
     }
+    // eslint-disable-next-line react-hooks/immutability
     document.cookie = `NEXT_LOCALE=${lang}; path=/; SameSite=Lax`
     router.refresh()
   }
-
-  const currentLocale = user?.language ?? 'en'
 
   return (
     <Popover>
       <PopoverTrigger
         aria-label={tShell('accountMenu')}
-        className="w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent transition-colors duration-fast group"
+        className={
+          collapsed
+            ? 'flex items-center justify-center w-full rounded hover:bg-accent transition-colors duration-fast py-1'
+            : 'w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent transition-colors duration-fast group'
+        }
       >
         <div className="size-7 rounded bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-2xs font-semibold shrink-0">
           {initials}
         </div>
-        <span className="text-xs truncate flex-1 text-left text-foreground">
-          {displayName ?? user?.email ?? '...'}
-        </span>
+        {!collapsed && (
+          <span className="text-xs truncate flex-1 text-left text-foreground">
+            {displayName ?? user?.email ?? '...'}
+          </span>
+        )}
       </PopoverTrigger>
       <PopoverContent
         side="top"
@@ -181,34 +190,51 @@ export function AvatarPopover() {
             )
           })()}
 
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px]">
-          <Languages className="size-3.5 text-muted-foreground shrink-0" />
-          <span className="text-muted-foreground">{t('language')}</span>
-          <div className="ml-auto flex gap-1">
-            <button
-              type="button"
-              onClick={() => onLanguageChange('zh')}
-              className={`px-1.5 py-0.5 rounded text-[11px] transition-colors ${
-                currentLocale === 'zh'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-accent/60 text-muted-foreground'
-              }`}
-            >
-              中文
-            </button>
-            <button
-              type="button"
-              onClick={() => onLanguageChange('en')}
-              className={`px-1.5 py-0.5 rounded text-[11px] transition-colors ${
-                currentLocale === 'en'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'hover:bg-accent/60 text-muted-foreground'
-              }`}
-            >
-              EN
-            </button>
-          </div>
-        </div>
+        {(() => {
+          const languages = [
+            { code: 'zh', label: '中文' },
+            { code: 'en', label: 'English' },
+          ] as const
+          const currentLabel = languages.find((l) => l.code === currentLocale)?.label
+          return (
+            <div className="mt-1 pt-1 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setLangOpen((v) => !v)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
+              >
+                <Languages className="size-3.5 text-muted-foreground shrink-0" />
+                <span>{t('language')}</span>
+                <span className="ml-auto text-[11px] text-muted-foreground">{currentLabel}</span>
+                <ChevronDown
+                  className={`size-3 text-muted-foreground transition-transform duration-fast ${langOpen ? '' : '-rotate-90'}`}
+                />
+              </button>
+              {langOpen &&
+                languages.map(({ code, label }) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => void onLanguageChange(code)}
+                    className="w-full flex items-center gap-2 pl-8 pr-2 py-1.5 rounded-sm text-[12.5px] hover:bg-accent/60 transition-colors"
+                  >
+                    <span
+                      className={
+                        currentLocale === code
+                          ? 'text-foreground font-medium'
+                          : 'text-muted-foreground'
+                      }
+                    >
+                      {label}
+                    </span>
+                    {currentLocale === code && (
+                      <Check className="size-3.5 text-primary ml-auto shrink-0" />
+                    )}
+                  </button>
+                ))}
+            </div>
+          )
+        })()}
 
         <button
           type="button"
