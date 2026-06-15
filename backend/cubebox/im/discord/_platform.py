@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
+
+from loguru import logger
 
 
 class DiscordPlatform:
@@ -17,10 +20,73 @@ class DiscordPlatform:
     async def build_tailer(
         self, *, run_id: str, queue_item: Any, account: Any, **kwargs: Any
     ) -> Any:
-        pass  # Wired in Task 15
+        from cubebox.im.discord.connector import DiscordConnector
+        from cubebox.im.discord.renderer import DiscordOpDispatcher
+        from cubebox.im.outbound import OutboundRunTailer
+        from cubebox.im.types import RenderState
+
+        app = kwargs["app"]
+        gateways: dict[str, Any] = kwargs.get("gateways", {})
+
+        gw = gateways.get(account.id)
+        bot = gw.bot if gw else None
+        bot_user_id = gw.bot_user_id if gw else 0
+
+        dc = DiscordConnector(
+            bot_user_id=bot_user_id or 0,
+            bot=bot,
+            channel_id=queue_item.channel_id,
+            reply_to_id=queue_item.reply_to_id,
+        )
+        state = RenderState(
+            bot_name="cubebox",
+            run_id=run_id,
+            reply_to_id=queue_item.reply_to_id,
+            inbound_message_id=queue_item.inbound_message_id,
+            stream_interval=1.2,
+        )
+        op_dispatcher = DiscordOpDispatcher(connector=dc, state=state)
+        tailer = OutboundRunTailer(
+            redis=app.state.redis,
+            key_prefix=app.state.redis_key_prefix,
+            run_id=run_id,
+            connector=dc,
+            state=state,
+            dispatcher=op_dispatcher,
+            responder_open_id=queue_item.sender_open_id,
+        )
+        asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 
     async def on_account_enabled(self, account: Any, **kwargs: Any) -> None:
-        pass  # Wired in Task 15
+        from cubebox.im.discord.gateway import DiscordGateway
+        from cubebox.im.inbound import ingest_inbound_event
+
+        secrets: dict[str, Any] = kwargs.get("secrets", {})
+        gateways: dict[str, Any] = kwargs.get("gateways", {})
+        session_maker = kwargs.get("session_maker")
+        run_manager = kwargs.get("run_manager")
+        redis_key_prefix: str = kwargs.get("redis_key_prefix", "")
+
+        bot_token = str(secrets.get("bot_token") or "")
+        application_id = str(secrets.get("application_id") or "")
+        if not bot_token:
+            logger.warning("[Discord] skipping account {} — no bot_token", account.id)
+            return
+
+        gw = DiscordGateway(
+            account=account,
+            bot_token=bot_token,
+            application_id=application_id,
+            ingest=ingest_inbound_event,
+            session_maker=session_maker,
+            run_manager=run_manager,
+            redis_key_prefix=redis_key_prefix,
+        )
+        await gw.start()
+        gateways[account.id] = gw
 
     async def on_account_disabled(self, account: Any, **kwargs: Any) -> None:
-        pass  # Wired in Task 15
+        gateways: dict[str, Any] = kwargs.get("gateways", {})
+        gw = gateways.pop(account.id, None)
+        if gw is not None:
+            await gw.stop()
