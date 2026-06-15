@@ -2,16 +2,20 @@
 
 - ``/status`` — read-only sandbox status for the workspace sandbox page.
 - ``/files`` — list direct children of a sandbox directory.
+- ``/files/content`` — read a text file for inline preview.
+- ``/files/download`` — stream a file as a download.
 - ``/terminal`` — start ttyd and return a signed URL.
 
 Scope-isolated: no admin counterpart — admins see fleet-wide info via a
 different surface.
 """
 
+import mimetypes
 import posixpath
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,6 +138,106 @@ async def list_sandbox_files(
             )
         )
     return result
+
+
+# ── File content & download ────────────────────────────────────────
+
+MAX_PREVIEW_BYTES = 1_048_576  # 1 MB
+
+
+class SandboxFileContent(BaseModel):
+    content: str
+    mime_type: str
+
+
+@router.get("/files/content", response_model=SandboxFileContent)
+async def get_sandbox_file_content(
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    path: str = Query(...),
+) -> SandboxFileContent:
+    """Read a text file from the sandbox for inline preview."""
+    normalized = posixpath.normpath(path)
+    if not normalized.startswith("/workspace"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="path outside workspace",
+        )
+    manager = get_sandbox_manager()
+    try:
+        sandbox = await manager.get_or_create(
+            ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        assert isinstance(sandbox, OpenSandbox)
+        raw = sandbox._sandbox  # noqa: SLF001
+        info_map = await raw.files.get_file_info([path])
+        info = info_map.get(path)
+        if info and info.size > MAX_PREVIEW_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="file too large for preview; use download instead",
+            )
+        content = await raw.files.read_file(path)
+    except HTTPException:
+        raise
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="file not found",
+        ) from None
+    except SandboxError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox unavailable",
+        ) from exc
+
+    mime, _ = mimetypes.guess_type(path)
+    return SandboxFileContent(content=content, mime_type=mime or "text/plain")
+
+
+@router.get("/files/download")
+async def download_sandbox_file(
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    path: str = Query(...),
+) -> StreamingResponse:
+    """Stream a file from the sandbox as a download."""
+    normalized = posixpath.normpath(path)
+    if not normalized.startswith("/workspace"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="path outside workspace",
+        )
+    manager = get_sandbox_manager()
+    try:
+        sandbox = await manager.get_or_create(
+            ctx.user.id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        assert isinstance(sandbox, OpenSandbox)
+        raw = sandbox._sandbox  # noqa: SLF001
+        stream = await raw.files.read_bytes_stream(path)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="file not found",
+        ) from None
+    except SandboxError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox unavailable",
+        ) from exc
+
+    filename = posixpath.basename(path)
+    mime, _ = mimetypes.guess_type(filename)
+    return StreamingResponse(
+        stream,
+        media_type=mime or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
 
 
 # ── Terminal ─────────────────────────────────────────────────────────
