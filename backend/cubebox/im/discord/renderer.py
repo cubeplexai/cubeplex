@@ -120,16 +120,21 @@ class DiscordOpDispatcher:
             return
 
         view = discord.ui.View(timeout=600)
+        qid = pending.question_id or ""
+        akey = pending.answer_key or ""
         for label, value, btn_type in pending.choices:
             style = discord.ButtonStyle.primary
             if btn_type == "danger":
                 style = discord.ButtonStyle.danger
             elif btn_type == "default":
                 style = discord.ButtonStyle.secondary
+            cid = f"im:{pending.kind}:{pending.run_id}:{qid}:{akey}:{value}"
+            if len(cid) > 100:
+                cid = cid[:100]
             button: discord.ui.Button[discord.ui.View] = discord.ui.Button(
                 label=label,
                 style=style,
-                custom_id=f"im:{pending.kind}:{pending.run_id}:{value}",
+                custom_id=cid,
             )
             view.add_item(button)
         text = pending.question or "请选择："

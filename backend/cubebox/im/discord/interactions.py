@@ -25,12 +25,12 @@ async def handle_component_interaction(
     if not custom_id.startswith("im:"):
         return
 
-    parts = custom_id.split(":", 3)
-    if len(parts) < 4:
+    parts = custom_id.split(":", 5)
+    if len(parts) < 6:
         await interaction.response.send_message("Invalid button.", ephemeral=True)
         return
 
-    _, kind, run_id, value = parts
+    _, kind, run_id, question_id, answer_key, value = parts
 
     from cubebox.im.resume import resume_paused_run
 
@@ -40,6 +40,8 @@ async def handle_component_interaction(
             input_kind=kind,
             choice=value,
             operator_open_id="",
+            question_id=question_id,
+            answer_key=answer_key,
             run_manager=run_manager,
         )
         if result:
