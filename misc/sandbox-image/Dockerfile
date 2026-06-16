@@ -114,6 +114,11 @@ set hlsearch\n\
 set termencoding=utf-8\n\
 set fileencodings=utf8\n' > /etc/vimrc
 
+# Enable colored ls/grep for all interactive shells (ttyd runs non-login bash).
+# Set TERM fallback so dircolors can generate LS_COLORS even when the parent
+# process (start-stop-daemon) hasn't set it yet.
+RUN printf 'export TERM="${TERM:-xterm-256color}"\neval "$(dircolors -b)"\nalias ls="ls --color=auto"\nalias grep="grep --color=auto"\n' >> /etc/bash.bashrc
+
 # Create virtual environment and install common Python packages
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
