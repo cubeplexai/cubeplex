@@ -1742,8 +1742,9 @@
         "prereq": {
           "app": "在 discord.com/developers/applications 创建 Discord 应用",
           "bot": "添加 Bot，复制 Bot Token",
-          "intents": "在 Bot 设置中启用以下 Gateway Intents",
-          "invite": "使用适当权限将 Bot 邀请到服务器"
+          "intents": "在 Bot 设置页开启以下 Privileged Gateway Intent",
+          "invite": "通过 OAuth2 URL Generator 将 Bot 邀请到服务器",
+          "permissions": "生成邀请链接时勾选以下 Bot Permissions"
         },
         "field": {
           "botToken": "Bot Token",
