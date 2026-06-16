@@ -38,10 +38,13 @@ function SheetOverlay({ className, ...props }: DialogPrimitive.Backdrop.Props) {
 function SheetContent({
   className,
   side = 'right',
+  hideClose = false,
   children,
   ...props
 }: DialogPrimitive.Popup.Props & {
   side?: 'right' | 'left'
+  /** Hide the built-in close X (e.g. when the content provides its own). */
+  hideClose?: boolean
 }) {
   return (
     <SheetPortal>
@@ -60,13 +63,15 @@ function SheetContent({
         {...props}
       >
         {children}
-        <DialogPrimitive.Close
-          data-slot="sheet-close-x"
-          className="absolute top-3 right-3 grid size-7 place-items-center rounded text-muted-foreground transition-colors duration-fast hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          aria-label="Close"
-        >
-          <X className="size-4" />
-        </DialogPrimitive.Close>
+        {!hideClose && (
+          <DialogPrimitive.Close
+            data-slot="sheet-close-x"
+            className="absolute top-3 right-3 grid size-7 place-items-center rounded text-muted-foreground transition-colors duration-fast hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            aria-label="Close"
+          >
+            <X className="size-4" />
+          </DialogPrimitive.Close>
+        )}
       </DialogPrimitive.Popup>
     </SheetPortal>
   )

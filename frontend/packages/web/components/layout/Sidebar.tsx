@@ -351,7 +351,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
     <aside
       aria-label={tShell('sidebar')}
       className={cn(
-        'bg-card border-r border-border flex flex-col h-screen shrink-0 overflow-hidden',
+        'bg-card border-r border-border flex flex-col h-full shrink-0 overflow-hidden',
         'transition-[width] duration-200 ease-in-out',
         collapsed ? 'w-12' : 'w-56',
       )}
@@ -375,8 +375,10 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
               cubebox
             </span>
           </div>
-          {/* Collapse button — only shown when expanded */}
-          {!collapsed && (
+          {/* Collapse button — desktop only (onCollapse provided). In the
+              mobile drawer there's no collapse handler and the Sheet renders
+              its own close X, so showing this would be a dead, overlapping icon. */}
+          {!collapsed && onCollapse && (
             <button
               type="button"
               onClick={onCollapse}
