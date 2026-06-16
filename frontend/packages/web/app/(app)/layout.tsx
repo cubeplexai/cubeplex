@@ -90,12 +90,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <Sheet open={drawerOpen} onOpenChange={(open) => setDrawerOpen(open)}>
-        <SheetContent side="left" className="w-56 max-w-[80vw] p-0">
+        <SheetContent side="left" hideClose className="w-56 max-w-[80vw] p-0">
           <SheetTitle className="sr-only">Navigation menu</SheetTitle>
           <SheetDescription className="sr-only">
             Workspace, recent conversations, and account
           </SheetDescription>
-          <Sidebar />
+          <Sidebar onCollapse={() => setDrawerOpen(false)} />
         </SheetContent>
       </Sheet>
     </div>
