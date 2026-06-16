@@ -142,10 +142,9 @@ async def process_one_queue_item(
                 await rewind_queue_item_no_attempt_charge(session, item_id=captured_item.id)
                 await session.commit()
             return False
-        logger.warning(
+        logger.opt(exception=True).warning(
             "[IM worker] start_run failed for queue item {}; leaving for re-claim",
             captured_item.id,
-            exc_info=True,
         )
         # Honor max_attempts: rewind to 'pending' for transient errors,
         # park as 'failed' only when the attempt cap is reached. When the
