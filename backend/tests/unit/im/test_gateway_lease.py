@@ -47,6 +47,15 @@ async def test_acquire_lease_already_owned() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reacquire_lease_same_instance() -> None:
+    """Same instance acquiring twice returns True (idempotent)."""
+    redis = FakeRedis()
+    await try_acquire_lease(redis, account_id="a1", instance_id="inst1", prefix="test")
+    acquired = await try_acquire_lease(redis, account_id="a1", instance_id="inst1", prefix="test")
+    assert acquired is True
+
+
+@pytest.mark.asyncio
 async def test_release_lease() -> None:
     redis = FakeRedis()
     await try_acquire_lease(redis, account_id="a1", instance_id="inst1", prefix="test")
