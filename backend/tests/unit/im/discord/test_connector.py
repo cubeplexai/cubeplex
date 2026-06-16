@@ -16,6 +16,7 @@ def _make_message(
     guild_id: int | None = 444,
     is_dm: bool = False,
     mentions_bot: bool = True,
+    mentions_bot_role: bool = False,
     bot_user_id: int = 999,
     thread_id: int | None = None,
 ) -> MagicMock:
@@ -37,15 +38,22 @@ def _make_message(
     if thread_id is not None:
         msg.channel.type.value = 11  # PUBLIC_THREAD
         msg.channel.parent_id = channel_id
-    # Mentions
-    bot_user = MagicMock()
-    bot_user.id = bot_user_id
+    # User mentions
     if mentions_bot:
         mention = MagicMock()
         mention.id = bot_user_id
         msg.mentions = [mention]
     else:
         msg.mentions = []
+    # Role mentions (bot's managed role)
+    if mentions_bot_role:
+        role = MagicMock()
+        role.id = 888
+        role.tags = MagicMock()
+        role.tags.bot_id = bot_user_id
+        msg.role_mentions = [role]
+    else:
+        msg.role_mentions = []
     return msg
 
 
@@ -102,8 +110,29 @@ class TestDiscordConnectorParseInbound:
         assert event.scope_kind == "thread"
         assert event.channel_id == "555"
 
+    def test_role_mention_triggers_bot(self) -> None:
+        msg = _make_message(
+            content="<@&888> what is 2+2?",
+            mentions_bot=False,
+            mentions_bot_role=True,
+        )
+        event = self.connector.parse_inbound(msg)
+        assert event is not None
+        assert event.text == "what is 2+2?"
+        assert event.scope_key == "u:111"
+
     def test_mention_stripped_from_text(self) -> None:
         msg = _make_message(content="<@999> what is 2+2?", mentions_bot=True)
         event = self.connector.parse_inbound(msg)
         assert event is not None
         assert event.text == "what is 2+2?"
+
+    def test_role_mention_stripped_from_text(self) -> None:
+        msg = _make_message(
+            content="<@&888> hello there",
+            mentions_bot=False,
+            mentions_bot_role=True,
+        )
+        event = self.connector.parse_inbound(msg)
+        assert event is not None
+        assert event.text == "hello there"
