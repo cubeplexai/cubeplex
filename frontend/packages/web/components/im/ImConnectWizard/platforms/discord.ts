@@ -25,9 +25,14 @@ export const discordDescriptor: PlatformDescriptor = {
       items: ['Message Content Intent'],
     },
     {
-      key: 'invite',
-      labelKey: 'im.wizard.discord.prereq.invite',
+      key: 'scopes',
+      labelKey: 'im.wizard.discord.prereq.scopes',
       helpUrl: () => 'https://discord.com/developers/applications',
+      items: ['bot', 'applications.commands'],
+    },
+    {
+      key: 'permissions',
+      labelKey: 'im.wizard.discord.prereq.permissions',
       items: [
         'View Channels',
         'Send Messages',
@@ -37,6 +42,10 @@ export const discordDescriptor: PlatformDescriptor = {
         'Embed Links',
         'Use Slash Commands',
       ],
+    },
+    {
+      key: 'invite',
+      labelKey: 'im.wizard.discord.prereq.invite',
     },
   ],
   credentialFields: [
