@@ -59,6 +59,20 @@ class TestDiscordDispatchCreate:
         assert len(conn.sent) == 1
         assert conn.sent[0] == "Hello"
         assert state.bot_message_id == "msg_1"
+        assert state.card_id == "msg_1"
+
+    @pytest.mark.asyncio
+    async def test_create_then_stream_edits(self) -> None:
+        """After dispatch_create, dispatch_stream should edit not send."""
+        d, state, conn = _make_dispatcher()
+        state.card_state.streaming_content = "Hello"
+        await d.dispatch_create(state)
+        state.card_state.streaming_content = "Hello world"
+        result = await d.dispatch_stream(state, "Hello world")
+        assert result is True
+        assert len(conn.sent) == 1
+        assert len(conn.edited) == 1
+        assert conn.edited[0] == ("msg_1", "Hello world")
 
 
 class TestDiscordDispatchStream:

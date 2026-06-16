@@ -53,6 +53,7 @@ class DiscordOpDispatcher:
         msg_id = await self._connector.send_message(send_text)
         if msg_id is None:
             return False
+        s.card_id = msg_id
         s.bot_message_id = msg_id
         return True
 
@@ -75,6 +76,7 @@ class DiscordOpDispatcher:
             if remaining:
                 msg_id = await self._connector.send_message(remaining[:_SPLIT_THRESHOLD])
                 if msg_id:
+                    s.card_id = msg_id
                     s.bot_message_id = msg_id
             note_edit_success(s)
             return True
