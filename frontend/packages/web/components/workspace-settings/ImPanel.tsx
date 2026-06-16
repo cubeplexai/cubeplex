@@ -14,7 +14,7 @@ import {
   type ImAccount,
 } from '@cubebox/core'
 
-import { Plus } from 'lucide-react'
+import { MessagesSquare, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -24,12 +24,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { EmptyState } from '@/components/shared/EmptyState'
+import { PANE_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
 import { ImAccountDetailPanel } from '@/components/im/ImAccountDetailPanel'
 import { ImAccountListItem } from '@/components/im/ImAccountListItem'
-import { ImAccountToolbar } from '@/components/im/ImAccountToolbar'
 import { ImConnectWizard } from '@/components/im/ImConnectWizard'
 import { PlatformLogo } from '@/components/im/PlatformLogo'
 import { ALL_PLATFORMS } from '@/components/im/ImConnectWizard/platforms'
+import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
+import { cn } from '@/lib/utils'
 
 interface Props {
   wsId: string
@@ -63,7 +66,7 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
     return () => window.clearInterval(id)
   }, [load])
 
-  const selected = accounts.find((a) => a.id === selectedId) ?? accounts[0] ?? null
+  const selected = selectedId ? (accounts.find((a) => a.id === selectedId) ?? null) : null
 
   function updateUrl(patch: Record<string, string | null>): void {
     const params = new URLSearchParams(search?.toString())
@@ -76,100 +79,109 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between border-b border-border/70 px-6 py-4">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">{t('nav.workspaceTab')}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('panel.description')}</p>
-        </div>
-        <Button size="sm" className="gap-1.5" onClick={() => updateUrl({ action: 'connect' })}>
-          <Plus className="size-3.5" />
-          {t('action.connect')}
-        </Button>
-      </header>
+      <SectionHeader
+        title={t('nav.workspaceTab')}
+        description={t('panel.description')}
+        action={
+          <Button size="sm" className="gap-1.5" onClick={() => updateUrl({ action: 'connect' })}>
+            <Plus className="size-3.5" />
+            {t('action.connect')}
+          </Button>
+        }
+      />
 
       {loading ? (
         <div className="flex-1 p-6 text-sm text-muted-foreground">Loading…</div>
       ) : accounts.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-6 px-12 py-16 text-center">
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-sm font-medium text-muted-foreground">
-              {t('empty.workspace.description')}
-            </p>
-            <p className="text-xs text-muted-foreground/70">{t('empty.workspace.comingNote')}</p>
-          </div>
-          <div className="flex gap-3">
-            {ALL_PLATFORMS.map((platform) => (
-              <button
-                key={platform.id}
-                disabled={!platform.live}
-                onClick={() => platform.live && updateUrl({ action: 'connect' })}
-                className={[
-                  'flex flex-col items-center gap-2 rounded-xl border px-5 py-4 transition-colors',
-                  platform.live
-                    ? 'border-border/70 bg-card/60 shadow-sm hover:bg-accent cursor-pointer'
-                    : 'border-border/40 bg-muted/20 opacity-50 cursor-not-allowed',
-                ].join(' ')}
-              >
-                <PlatformLogo
-                  platform={platform.id as 'feishu' | 'slack' | 'teams'}
-                  className="size-8"
-                />
-                <span className="text-xs font-medium text-muted-foreground">
-                  {platform.id === 'feishu'
-                    ? t('platform.feishu.label')
-                    : platform.id === 'slack'
-                      ? t('platform.slack.label')
-                      : t('platform.teams.label')}
-                </span>
-                {!platform.live && (
-                  <span className="text-[10px] text-muted-foreground/60">Coming soon</span>
-                )}
-              </button>
-            ))}
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className={PANE_CONTENT_WIDTH}>
+            <EmptyState
+              icon={MessagesSquare}
+              title={t('empty.workspace.headline')}
+              description={t('empty.workspace.description')}
+              action={
+                <div className="flex flex-wrap justify-center gap-3">
+                  {ALL_PLATFORMS.map((platform) => {
+                    const label =
+                      platform.id === 'feishu'
+                        ? t('platform.feishu.label')
+                        : platform.id === 'slack'
+                          ? t('platform.slack.label')
+                          : t('platform.teams.label')
+                    const coming =
+                      platform.id === 'slack'
+                        ? t('platform.slack.coming')
+                        : t('platform.teams.coming')
+                    return (
+                      <button
+                        key={platform.id}
+                        disabled={!platform.live}
+                        onClick={() => platform.live && updateUrl({ action: 'connect' })}
+                        className={cn(
+                          'flex w-28 flex-col items-center gap-2 rounded-xl border px-5 py-4 transition-all',
+                          platform.live
+                            ? 'cursor-pointer border-border/70 bg-card/60 shadow-sm hover:border-primary/40 hover:bg-accent hover:shadow-md active:scale-[0.98]'
+                            : 'cursor-not-allowed border-border/40 bg-muted/20 opacity-60',
+                        )}
+                      >
+                        <PlatformLogo
+                          platform={platform.id as 'feishu' | 'slack' | 'teams'}
+                          className="size-8"
+                        />
+                        <span className="text-xs font-medium text-foreground">{label}</span>
+                        {!platform.live && (
+                          <span className="text-[10px] text-muted-foreground/60">{coming}</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              }
+            />
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex-1 border-r">
-            <ImAccountToolbar
-              showConnect={false}
-              onConnect={() => updateUrl({ action: 'connect' })}
-              count={accounts.length}
-            />
-            <ul role="listbox" className="flex flex-col">
+        <ListDetailLayout
+          selected={selected !== null}
+          list={
+            <div className="flex flex-col gap-2">
               {accounts.map((a) => (
-                <li key={a.id}>
-                  <ImAccountListItem
-                    account={a}
-                    selected={selected?.id === a.id}
-                    showWorkspaceColumn={false}
-                    onSelect={(id) => updateUrl({ account: id })}
-                  />
-                </li>
+                <ImAccountListItem
+                  key={a.id}
+                  account={a}
+                  selected={selected?.id === a.id}
+                  showWorkspaceColumn={false}
+                  onSelect={(id) => updateUrl({ account: id })}
+                />
               ))}
-            </ul>
-          </div>
-          {selected && (
-            <ImAccountDetailPanel
-              account={selected}
-              scope="workspace"
-              onDisable={async () => {
-                await wsDisableImAccount(client, wsId, selected.id)
-                toast.success(t('error.toast.disabled'))
-                void load()
-              }}
-              onEnable={async () => {
-                await wsEnableImAccount(client, wsId, selected.id)
-                toast.success(t('error.toast.enabled'))
-                void load()
-              }}
-              onDelete={() => {
-                setDeleteCandidate(selected)
-                setDeleteText('')
-              }}
-            />
-          )}
-        </div>
+            </div>
+          }
+          detail={
+            selected ? (
+              <ImAccountDetailPanel
+                account={selected}
+                scope="workspace"
+                backLabel={t('back')}
+                onBack={() => updateUrl({ account: null })}
+                onDisable={async () => {
+                  await wsDisableImAccount(client, wsId, selected.id)
+                  toast.success(t('error.toast.disabled'))
+                  void load()
+                }}
+                onEnable={async () => {
+                  await wsEnableImAccount(client, wsId, selected.id)
+                  toast.success(t('error.toast.enabled'))
+                  void load()
+                }}
+                onDelete={() => {
+                  setDeleteCandidate(selected)
+                  setDeleteText('')
+                }}
+              />
+            ) : null
+          }
+          placeholder={t('selectHint')}
+        />
       )}
 
       {wizardOpen && (

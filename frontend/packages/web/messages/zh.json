@@ -932,7 +932,9 @@
       "tabPersonal": "个人",
       "tabWorkspace": "工作区",
       "tabOrg": "组织",
-      "tabArchived": "已归档"
+      "tabArchived": "已归档",
+      "emptyTitle": "还没有记忆",
+      "emptyHint": "聊天过程中会自动保存记忆。"
     },
     "sandboxEnv": {
       "title": "沙盒环境变量",
@@ -943,6 +945,8 @@
       "loading": "加载中…",
       "loadError": "加载失败：{error}",
       "empty": "暂无环境变量。添加后将注入到沙盒运行环境。",
+      "emptyTitle": "暂无环境变量",
+      "emptyHint": "添加后将注入到沙盒运行环境。",
       "colName": "名称",
       "colScope": "范围",
       "colType": "类型",
@@ -1282,6 +1286,8 @@
     "close": "收起",
     "emptyTitle": "暂无触发器",
     "emptyHint": "创建触发器后会生成接收 URL，把它粘贴到事件源的 Webhook 设置即可。",
+    "selectHint": "选择一个触发器查看详情。",
+    "cardEvents": "{count} 个事件",
     "colName": "名称",
     "colStatus": "状态",
     "colSource": "来源",
@@ -1502,6 +1508,12 @@
     "newTask": "新建任务",
     "emptyTitle": "暂无定时任务",
     "emptyHint": "创建任务后，提示词将按计划自动运行。",
+    "selectHint": "选择一个任务查看运行历史。",
+    "back": "返回",
+    "runHistory": "运行历史",
+    "refresh": "刷新",
+    "noRuns": "暂无运行记录",
+    "deleteConfirm": "删除“{name}”？此操作不可撤销。",
     "loadFailed": "加载定时任务失败",
     "dialogEditTitle": "编辑定时任务",
     "dialogNewTitle": "新建定时任务",
@@ -1637,6 +1649,8 @@
     "sent": "验证邮件已发送。"
   },
   "im": {
+    "back": "返回",
+    "selectHint": "选择一个机器人查看详情。",
     "nav": {
       "workspaceTab": "IM",
       "adminItem": "IM 连接器"

@@ -5,6 +5,8 @@ import { useTranslations } from 'next-intl'
 import { Plus } from 'lucide-react'
 import { createApiClient, useTriggerStore, type CreateTriggerBody } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
+import { PANE_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
+import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
 import { TriggersList } from './TriggersList'
 import { TriggerDetailPanel } from './TriggerDetailPanel'
 import { TriggerForm } from './TriggerForm'
@@ -58,64 +60,63 @@ export function TriggersPanel({ wsId }: TriggersPanelProps) {
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )
 
-  const isDetailOpen = selectedTriggerId !== null
-
   return (
     <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between border-b border-border/70 px-6 py-4">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
-        </div>
-        <Button
-          size="sm"
-          className="gap-1.5"
-          onClick={() => setCreateOpen(true)}
-          data-testid="create-trigger-btn"
-        >
-          <Plus className="size-3.5" />
-          {t('createTrigger')}
-        </Button>
-      </header>
+      <SectionHeader
+        title={t('title')}
+        description={t('subtitle')}
+        action={
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setCreateOpen(true)}
+            data-testid="create-trigger-btn"
+          >
+            <Plus className="size-3.5" />
+            {t('createTrigger')}
+          </Button>
+        }
+      />
 
-      {isDetailOpen ? (
-        <div className="flex flex-1 overflow-hidden">
-          <div className="w-[380px] shrink-0 overflow-y-auto border-r border-border/70 px-4 py-4">
+      {sorted.length === 0 ? (
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className={PANE_CONTENT_WIDTH}>
             <TriggersList
-              wsId={wsId}
               triggers={sorted}
               loading={loading}
               onToggleEnabled={handleToggleEnabled}
               onDelete={setDeletingId}
               onCreate={() => setCreateOpen(true)}
-              selectedId={selectedTriggerId}
-              onSelect={setSelectedTriggerId}
-              compact
-            />
-          </div>
-          <div className="flex-1 overflow-hidden">
-            <TriggerDetailPanel
-              wsId={wsId}
-              triggerId={selectedTriggerId}
-              onClose={() => setSelectedTriggerId(null)}
             />
           </div>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="mx-auto max-w-4xl">
+        <ListDetailLayout
+          selected={selectedTriggerId !== null}
+          list={
             <TriggersList
-              wsId={wsId}
               triggers={sorted}
-              loading={loading}
+              // Rail only renders when triggers exist; never collapse it to a
+              // loading state during the detail panel's background refetch.
+              loading={false}
               onToggleEnabled={handleToggleEnabled}
               onDelete={setDeletingId}
               onCreate={() => setCreateOpen(true)}
               selectedId={selectedTriggerId}
               onSelect={setSelectedTriggerId}
             />
-          </div>
-        </div>
+          }
+          detail={
+            selectedTriggerId ? (
+              <TriggerDetailPanel
+                wsId={wsId}
+                triggerId={selectedTriggerId}
+                onClose={() => setSelectedTriggerId(null)}
+              />
+            ) : null
+          }
+          placeholder={t('selectHint')}
+        />
       )}
 
       {deletingId && (

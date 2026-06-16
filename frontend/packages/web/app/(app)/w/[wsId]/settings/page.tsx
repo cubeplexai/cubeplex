@@ -22,7 +22,7 @@ export default function WorkspaceSettingsPage({
   return (
     <div className="flex flex-1 flex-col overflow-hidden h-full">
       <SettingsTabs wsId={wsId} active={tab} />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden">
         {tab === 'workspace' && <PersonaEditor wsId={wsId} />}
         {tab === 'im' && <ImPanel wsId={wsId} />}
         {tab === 'memory' && <MemoryPanel wsId={wsId} />}

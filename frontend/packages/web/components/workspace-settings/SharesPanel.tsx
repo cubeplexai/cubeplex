@@ -8,6 +8,7 @@ import type { ConversationShare } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/shared/EmptyState'
+import { SETTINGS_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
 import {
   Table,
   TableBody,
@@ -68,13 +69,14 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="shrink-0 border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{t('subtitle')}</p>
-      </header>
+      <SectionHeader
+        title={t('title')}
+        description={t('subtitle')}
+        contained={SETTINGS_CONTENT_WIDTH}
+      />
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <div className={cn('flex w-full flex-col gap-6', SETTINGS_CONTENT_WIDTH)}>
           {/* Body */}
           {loading ? (
             <div className="flex items-center justify-center py-16 text-muted-foreground">

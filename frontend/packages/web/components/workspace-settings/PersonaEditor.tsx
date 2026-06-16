@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { SETTINGS_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
+import { cn } from '@/lib/utils'
 import { WorkspaceDangerZone } from './WorkspaceDangerZone'
 
 interface PersonaEditorProps {
@@ -82,13 +84,14 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
-      <header className="border-b border-border/70 px-6 py-4">
-        <h2 className="text-lg font-semibold tracking-tight">{tGeneral('title')}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{tGeneral('description')}</p>
-      </header>
+      <SectionHeader
+        title={tGeneral('title')}
+        description={tGeneral('description')}
+        contained={SETTINGS_CONTENT_WIDTH}
+      />
 
-      <div className="flex flex-1 overflow-y-auto">
-        <div className="flex w-full max-w-3xl flex-col gap-8 p-6">
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className={cn('flex w-full flex-col gap-8', SETTINGS_CONTENT_WIDTH)}>
           <div className="flex flex-col gap-2">
             <Label htmlFor="ws-name" className="text-sm font-medium">
               {t('workspaceName')}

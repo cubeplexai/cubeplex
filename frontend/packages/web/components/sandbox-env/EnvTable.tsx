@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl'
 import { Variable } from 'lucide-react'
 import { type EnvEntryOut } from '@cubebox/core'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { WarningCell } from './WarningCell'
@@ -55,7 +56,7 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
   }
 
   if (entries.length === 0) {
-    return <EmptyState icon={Variable} title={t('empty')} />
+    return <EmptyState icon={Variable} title={t('emptyTitle')} description={t('emptyHint')} />
   }
 
   return (
@@ -111,19 +112,23 @@ export function EnvTable({ mode, entries, loading, error, onEdit, onDelete }: Pr
                   <WarningCell warnings={entry.warnings} />
                 </td>
                 <td className="px-4 py-2.5 text-right">
-                  <div className="flex items-center justify-end gap-3">
-                    <button
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
                       onClick={() => onEdit(entry)}
-                      className="text-muted-foreground hover:text-foreground transition-colors"
                     >
                       {t('actionEdit')}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
                       onClick={() => onDelete(entry)}
-                      className="text-muted-foreground hover:text-destructive transition-colors"
                     >
                       {t('actionDelete')}
-                    </button>
+                    </Button>
                   </div>
                 </td>
               </tr>

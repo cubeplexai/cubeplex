@@ -15,7 +15,7 @@ import {
 
 import { ImAccountDetailPanel } from '@/components/im/ImAccountDetailPanel'
 import { ImAccountListItem } from '@/components/im/ImAccountListItem'
-import { ImAccountToolbar } from '@/components/im/ImAccountToolbar'
+import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
 
 const POLL_MS = 5000
 
@@ -42,7 +42,7 @@ export default function AdminImPage(): React.ReactElement {
     return () => window.clearInterval(id)
   }, [load])
 
-  const selected = accounts.find((a) => a.id === selectedId) ?? accounts[0] ?? null
+  const selected = selectedId ? (accounts.find((a) => a.id === selectedId) ?? null) : null
 
   function updateUrl(patch: Record<string, string | null>): void {
     const params = new URLSearchParams(search?.toString())
@@ -71,39 +71,45 @@ export default function AdminImPage(): React.ReactElement {
   }
 
   return (
-    <div className="flex">
-      <div className="flex-1 border-r">
-        <ImAccountToolbar showConnect={false} onConnect={() => {}} count={accounts.length} />
-        <ul role="listbox" className="flex flex-col">
-          {accounts.map((a) => (
-            <li key={a.id}>
+    <div className="flex h-full flex-col overflow-hidden">
+      <ListDetailLayout
+        selected={selected !== null}
+        list={
+          <div className="flex flex-col gap-2">
+            {accounts.map((a) => (
               <ImAccountListItem
+                key={a.id}
                 account={a}
                 selected={selected?.id === a.id}
                 showWorkspaceColumn={true}
                 onSelect={(id) => updateUrl({ account: id })}
               />
-            </li>
-          ))}
-        </ul>
-      </div>
-      {selected && (
-        <ImAccountDetailPanel
-          account={selected}
-          scope="admin"
-          onDisable={async () => {
-            await adminDisableImAccount(client, selected.id)
-            toast.success(t('error.toast.disabled'))
-            void load()
-          }}
-          onEnable={async () => {
-            await adminEnableImAccount(client, selected.id)
-            toast.success(t('error.toast.enabled'))
-            void load()
-          }}
-          onDelete={() => {}}
-        />
-      )}
+            ))}
+          </div>
+        }
+        detail={
+          selected ? (
+            <ImAccountDetailPanel
+              account={selected}
+              scope="admin"
+              backLabel={t('back')}
+              onBack={() => updateUrl({ account: null })}
+              onDisable={async () => {
+                await adminDisableImAccount(client, selected.id)
+                toast.success(t('error.toast.disabled'))
+                void load()
+              }}
+              onEnable={async () => {
+                await adminEnableImAccount(client, selected.id)
+                toast.success(t('error.toast.enabled'))
+                void load()
+              }}
+              onDelete={() => {}}
+            />
+          ) : null
+        }
+        placeholder={t('selectHint')}
+      />
     </div>
   )
 }

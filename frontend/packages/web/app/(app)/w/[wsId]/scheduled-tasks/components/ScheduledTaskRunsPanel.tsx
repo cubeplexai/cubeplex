@@ -1,10 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCw, ExternalLink } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+import { History, RefreshCw, ExternalLink } from 'lucide-react'
 import { createApiClient, listScheduledTaskRuns } from '@cubebox/core'
 import type { ScheduledTaskRunOut, ScheduledTaskRunState } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/shared/EmptyState'
 import { cn } from '@/lib/utils'
 
 interface ScheduledTaskRunsPanelProps {
@@ -74,6 +76,7 @@ export function ScheduledTaskRunsPanel({
   wsId,
   taskId,
 }: ScheduledTaskRunsPanelProps): React.ReactElement {
+  const t = useTranslations('scheduledTasks')
   const [runs, setRuns] = useState<ScheduledTaskRunOut[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -110,7 +113,7 @@ export function ScheduledTaskRunsPanel({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Run history</h3>
+        <h3 className="text-sm font-semibold">{t('runHistory')}</h3>
         <Button
           variant="ghost"
           size="sm"
@@ -118,7 +121,7 @@ export function ScheduledTaskRunsPanel({
           onClick={() => void fetchRuns()}
         >
           <RefreshCw className="size-3" />
-          Refresh
+          {t('refresh')}
         </Button>
       </div>
 
@@ -140,9 +143,7 @@ export function ScheduledTaskRunsPanel({
       )}
 
       {!loading && !error && runs.length === 0 && (
-        <div className="flex items-center justify-center rounded-lg border border-dashed border-border py-10 text-center">
-          <p className="text-sm text-muted-foreground">No runs yet</p>
-        </div>
+        <EmptyState size="sm" icon={History} title={t('noRuns')} />
       )}
 
       {!loading && !error && runs.length > 0 && (

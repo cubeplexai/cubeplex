@@ -9,7 +9,7 @@ export default function TriggersPage({ params }: TriggersPageProps): React.React
   const { wsId } = use(params)
 
   return (
-    <div className="flex flex-1 overflow-hidden h-full">
+    <div className="flex h-full flex-col overflow-hidden">
       <TriggersPanel wsId={wsId} />
     </div>
   )

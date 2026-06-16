@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl'
 import type { ImAccount } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
+import { DetailPanel } from '@/components/shared/DetailPanel'
 
 import { ImAccountStatusPill } from './ImAccountStatusPill'
 
@@ -14,6 +15,8 @@ interface Props {
   onDisable: () => void
   onEnable: () => void
   onDelete: () => void
+  onBack?: () => void
+  backLabel?: string
 }
 
 /**
@@ -27,77 +30,65 @@ export function ImAccountDetailPanel({
   onDisable,
   onEnable,
   onDelete,
+  onBack,
+  backLabel,
 }: Props): React.ReactElement {
   const t = useTranslations('im')
   return (
-    <aside className="flex w-72 flex-col gap-4 p-4 text-sm">
-      <header className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          {account.bot_avatar_url ? (
-            <img
-              src={account.bot_avatar_url}
-              alt={account.bot_app_name ?? account.external_account_id}
-              className="h-8 w-8 shrink-0 rounded-full object-cover"
-            />
-          ) : null}
-          <div className="min-w-0">
-            <strong className="block truncate">
-              {account.bot_app_name ?? account.external_account_id}
-            </strong>
-            {account.bot_app_name ? (
-              <span className="block truncate text-xs text-muted-foreground">
-                {account.external_account_id}
-              </span>
-            ) : null}
-          </div>
-        </div>
+    <DetailPanel
+      onBack={onBack}
+      backLabel={backLabel}
+      title={account.bot_app_name ?? account.external_account_id}
+      badge={
         <ImAccountStatusPill
           connectionState={account.runtime.connection_state}
           enabled={account.enabled}
         />
-      </header>
+      }
+      subtitle={account.bot_app_name ? account.external_account_id : undefined}
+      actions={
+        <>
+          {account.enabled ? (
+            <Button variant="outline" size="sm" onClick={onDisable}>
+              {t('action.disable')}
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={onEnable}>
+              {t('action.enable')}
+            </Button>
+          )}
+          {scope === 'workspace' && (
+            <Button variant="destructive" size="sm" onClick={onDelete}>
+              {t('action.delete')}
+            </Button>
+          )}
+        </>
+      }
+    >
+      <div className="flex max-w-2xl flex-col gap-4 text-sm">
+        <section>
+          <h3 className="mb-2 text-xs uppercase text-muted-foreground">Identity</h3>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-xs">
+            <dt className="text-muted-foreground">Acting as</dt>
+            <dd>{account.acting_user_id}</dd>
+            <dt className="text-muted-foreground">Bot open_id</dt>
+            <dd className="truncate">{account.runtime.bot_open_id ?? '—'}</dd>
+            <dt className="text-muted-foreground">Mode</dt>
+            <dd>{account.delivery_mode}</dd>
+          </dl>
+        </section>
 
-      <section>
-        <h3 className="mb-2 text-xs uppercase text-muted-foreground">Identity</h3>
-        <dl className="grid grid-cols-2 gap-y-1 text-xs">
-          <dt className="text-muted-foreground">Acting as</dt>
-          <dd>{account.acting_user_id}</dd>
-          <dt className="text-muted-foreground">Bot open_id</dt>
-          <dd className="truncate">{account.runtime.bot_open_id ?? '—'}</dd>
-          <dt className="text-muted-foreground">Mode</dt>
-          <dd>{account.delivery_mode}</dd>
-        </dl>
-      </section>
+        <Separator />
 
-      <Separator />
-
-      <section>
-        <h3 className="mb-2 text-xs uppercase text-muted-foreground">Identity gate (24h)</h3>
-        <p className="text-xs">
-          {t('runtime.gate.matched', { count: account.runtime.matched_24h })}
-          {' · '}
-          {t('runtime.gate.rejected', { count: account.runtime.rejected_24h })}
-        </p>
-      </section>
-
-      <Separator />
-
-      <section className="mt-auto flex flex-col gap-2">
-        {account.enabled ? (
-          <Button variant="outline" size="sm" onClick={onDisable}>
-            {t('action.disable')}
-          </Button>
-        ) : (
-          <Button variant="outline" size="sm" onClick={onEnable}>
-            {t('action.enable')}
-          </Button>
-        )}
-        {scope === 'workspace' && (
-          <Button variant="destructive" size="sm" onClick={onDelete}>
-            {t('action.delete')}
-          </Button>
-        )}
-      </section>
-    </aside>
+        <section>
+          <h3 className="mb-2 text-xs uppercase text-muted-foreground">Identity gate (24h)</h3>
+          <p className="text-xs">
+            {t('runtime.gate.matched', { count: account.runtime.matched_24h })}
+            {' · '}
+            {t('runtime.gate.rejected', { count: account.runtime.rejected_24h })}
+          </p>
+        </section>
+      </div>
+    </DetailPanel>
   )
 }
