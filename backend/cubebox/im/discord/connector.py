@@ -16,8 +16,8 @@ from cubebox.im.outbound import _FloodSignal
 from cubebox.im.types import (
     DM_SCOPE_KEY,
     InboundEvent,
-    make_channel_scope,
-    make_thread_scope,
+    make_participant_scope,
+    make_thread_participant_scope,
 )
 
 _USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
@@ -118,7 +118,7 @@ class DiscordConnector:
                 account_external_id="",
                 platform_event_id=message_id,
                 channel_id=thread_id,
-                scope_key=make_thread_scope(thread_id),
+                scope_key=make_thread_participant_scope(sender_ref, thread_id),
                 scope_kind="thread",
                 reply_to_id=message_id,
                 inbound_message_id=message_id,
@@ -132,7 +132,7 @@ class DiscordConnector:
             account_external_id="",
             platform_event_id=message_id,
             channel_id=str(channel.id),
-            scope_key=make_channel_scope(),
+            scope_key=make_participant_scope(sender_ref),
             scope_kind="channel",
             reply_to_id=message_id,
             inbound_message_id=message_id,

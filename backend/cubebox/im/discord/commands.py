@@ -29,7 +29,11 @@ async def register_commands(bot: commands.Bot) -> None:
 async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bot) -> None:
     """Delete the IMThreadLink for the current channel/scope so the next
     message starts a fresh conversation."""
-    from cubebox.im.types import DM_SCOPE_KEY, make_channel_scope, make_thread_scope
+    from cubebox.im.types import (
+        DM_SCOPE_KEY,
+        make_participant_scope,
+        make_thread_participant_scope,
+    )
 
     channel = interaction.channel
     if channel is None:
@@ -41,13 +45,14 @@ async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bo
     is_dm = channel_type_value == 1
     is_thread = channel_type_value in (11, 12)
 
+    sender_ref = str(interaction.user.id)
     channel_id = str(channel.id)
     if is_dm:
         scope_key = DM_SCOPE_KEY
     elif is_thread:
-        scope_key = make_thread_scope(channel_id)
+        scope_key = make_thread_participant_scope(sender_ref, channel_id)
     else:
-        scope_key = make_channel_scope()
+        scope_key = make_participant_scope(sender_ref)
 
     from cubebox.models.im_connector import IMThreadLink
 
