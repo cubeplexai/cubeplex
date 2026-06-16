@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator'
 import { DetailPanel } from '@/components/shared/DetailPanel'
 
 import { ImAccountStatusPill } from './ImAccountStatusPill'
+import { PlatformLogo } from './PlatformLogo'
 
 interface Props {
   account: ImAccount
@@ -45,7 +46,19 @@ export function ImAccountDetailPanel({
           enabled={account.enabled}
         />
       }
-      subtitle={account.bot_app_name ? account.external_account_id : undefined}
+      subtitle={
+        <span className="inline-flex items-center gap-1.5">
+          <PlatformLogo platform={account.platform} className="size-3.5" />
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          <span>{t(`platform.${account.platform}.label` as any)}</span>
+          {account.bot_app_name && (
+            <>
+              <span className="mx-0.5 text-muted-foreground/50">·</span>
+              <span>{account.external_account_id}</span>
+            </>
+          )}
+        </span>
+      }
       actions={
         <>
           {account.enabled ? (
