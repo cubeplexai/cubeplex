@@ -182,10 +182,10 @@ Worktrees need both copied in before first test run. Details:
 
 ## Worktrees in Brief
 
-Always create from main repo root:
+Always create from main repo root, with a date prefix:
 
 ```bash
-./scripts/new-worktree feat/<name>
+./scripts/new-worktree feat/YYYY-MM-DD-<name>
 ```
 
 Inside a worktree, **first command**:
