@@ -66,7 +66,7 @@ class TestDiscordConnectorParseInbound:
         msg = _make_message(mentions_bot=True)
         event = self.connector.parse_inbound(msg)
         assert event is not None
-        assert event.scope_key == "ch"
+        assert event.scope_key == "u:111"
         assert event.scope_kind == "channel"
         assert event.reply_to_id == "333"
 
@@ -98,7 +98,7 @@ class TestDiscordConnectorParseInbound:
         )
         event = self.connector.parse_inbound(msg)
         assert event is not None
-        assert event.scope_key == "t:555"
+        assert event.scope_key == "u:111|t:555"
         assert event.scope_kind == "thread"
         assert event.channel_id == "555"
 
