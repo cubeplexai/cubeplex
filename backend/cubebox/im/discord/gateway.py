@@ -9,6 +9,7 @@ creates the Bot, registers event handlers, and spawns the task.
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 import discord
@@ -50,10 +51,12 @@ class DiscordGateway:
         intents.dm_messages = True
         intents.guild_reactions = True
 
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
         bot = commands.Bot(
-            command_prefix="!",  # unused — we use slash commands
+            command_prefix="!",
             intents=intents,
             application_id=int(self._application_id),
+            proxy=proxy,
         )
         self._bot = bot
         account = self._account
