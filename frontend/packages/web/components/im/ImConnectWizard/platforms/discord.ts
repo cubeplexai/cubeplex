@@ -22,7 +22,19 @@ export const discordDescriptor: PlatformDescriptor = {
     {
       key: 'intents',
       labelKey: 'im.wizard.discord.prereq.intents',
-      items: ['MESSAGE_CONTENT (privileged)', 'GUILD_MESSAGES', 'DIRECT_MESSAGES'],
+      items: ['Message Content Intent'],
+    },
+    {
+      key: 'permissions',
+      labelKey: 'im.wizard.discord.prereq.permissions',
+      items: [
+        'View Channels',
+        'Send Messages',
+        'Send Messages in Threads',
+        'Read Message History',
+        'Add Reactions',
+        'Embed Links',
+      ],
     },
     {
       key: 'invite',

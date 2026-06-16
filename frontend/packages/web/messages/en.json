@@ -1742,8 +1742,9 @@
         "prereq": {
           "app": "Create a Discord application at discord.com/developers/applications",
           "bot": "Add a Bot to the application and copy the bot token",
-          "intents": "Enable these Gateway intents in the Bot settings",
-          "invite": "Invite the bot to your server with appropriate permissions"
+          "intents": "Enable the Privileged Gateway Intent below in Bot settings",
+          "invite": "Invite the bot to your server using the OAuth2 URL Generator",
+          "permissions": "Grant these Bot Permissions when generating the invite link"
         },
         "field": {
           "botToken": "Bot Token",
