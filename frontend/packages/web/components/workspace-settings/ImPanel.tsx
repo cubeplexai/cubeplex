@@ -102,8 +102,10 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
               action={
                 <div className="flex flex-wrap justify-center gap-3">
                   {ALL_PLATFORMS.map((platform) => {
-                    const label = t(`platform.${platform.id}.label`)
-                    const coming = platform.live ? '' : t(`platform.${platform.id}.coming`)
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const label = t(`platform.${platform.id}.label` as any)
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const coming = platform.live ? '' : t(`platform.${platform.id}.coming` as any)
                     return (
                       <button
                         key={platform.id}

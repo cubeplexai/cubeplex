@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+
 import type { ImAccount } from '@cubebox/core'
 import { RailCard } from '@/components/shared/RailCard'
 
@@ -40,8 +42,11 @@ export function ImAccountListItem({
   showWorkspaceColumn,
   onSelect,
 }: Props): React.ReactElement {
+  const t = useTranslations('im')
   const last = relativeFromIso(account.runtime.last_inbound_at)
   const title = account.bot_app_name ?? account.external_account_id
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const platformLabel = t(`platform.${account.platform}.label` as any)
   const metaParts = [account.delivery_mode, last]
   if (showWorkspaceColumn) metaParts.unshift(account.workspace_id)
   return (
@@ -66,7 +71,18 @@ export function ImAccountListItem({
           enabled={account.enabled}
         />
       }
-      secondary={account.bot_app_name ? account.external_account_id : undefined}
+      secondary={
+        <span className="inline-flex items-center gap-1">
+          <PlatformLogo platform={account.platform} className="size-3 opacity-60" />
+          <span>{platformLabel}</span>
+          {account.bot_app_name && (
+            <>
+              <span className="mx-0.5">·</span>
+              <span>{account.external_account_id}</span>
+            </>
+          )}
+        </span>
+      }
       meta={metaParts.join(' · ')}
     />
   )
