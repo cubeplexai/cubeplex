@@ -794,6 +794,7 @@ class RunManager:
         run_id: str | None = None,
         preset_label: str | None = None,
         thinking: ThinkingLevel = "off",
+        cancel_pending_hitl: bool = False,
     ) -> str:
         """Create and start a new background run.
 
@@ -816,13 +817,17 @@ class RunManager:
         from cubebox.agents.checkpointer import init_checkpointer
 
         async with init_checkpointer() as _cp:
-            _db_pending = await _cp.load_pending_request(conversation_id)
+            _db_pending = await _cp.load_pending(conversation_id)
         if _db_pending is not None:
-            raise RuntimeError(
-                f"Conversation {conversation_id} has a pending HITL request "
-                f"(question_id={_db_pending.question_id}); "
-                f"answer or cancel before starting a new turn"
-            )
+            if not cancel_pending_hitl:
+                _pending_req = _db_pending[0]
+                raise RuntimeError(
+                    f"Conversation {conversation_id} has a pending HITL request "
+                    f"(question_id={_pending_req.question_id}); "
+                    f"answer or cancel before starting a new turn"
+                )
+            _pending_req, _old_run_id = _db_pending
+            await self._force_cancel_hitl(conversation_id, _old_run_id)
 
         created_run = await create_run(
             self._redis,
@@ -1083,6 +1088,58 @@ class RunManager:
         self._tasks[run_id] = task
         task.add_done_callback(lambda _: self._on_task_done(run_id))
         return run_id
+
+    async def _force_cancel_hitl(
+        self,
+        conversation_id: str,
+        old_run_id: str | None,
+    ) -> None:
+        """Silently cancel a paused HITL so a new run can start.
+
+        Clears the DB pending request, backfills synthetic tool_results for
+        the dangling tool_use, and tears down the Redis active-run lock.
+        Emits a terminal DoneEvent so any live OutboundRunTailer exits
+        cleanly instead of polling until TTL expiry.
+        """
+        from cubebox.agents.checkpointer import init_checkpointer
+
+        async with init_checkpointer() as cp:
+            await cp.save_pending_request(conversation_id, None)
+
+        await _repair_dangling_tool_calls(conversation_id)
+
+        if old_run_id is not None:
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=old_run_id,
+                status="cancelled",
+            )
+            await self._append_event(
+                old_run_id,
+                conversation_id,
+                DoneEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data={},
+                ),
+            )
+            await clear_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+                run_id=old_run_id,
+            )
+            await expire_run_data(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=old_run_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )
+        logger.info(
+            "[RunManager] force-cancelled paused HITL for conversation {} (old run {})",
+            conversation_id,
+            old_run_id,
+        )
 
     async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
         agent = self._agents.get(run_id)

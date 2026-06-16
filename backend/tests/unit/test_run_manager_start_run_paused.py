@@ -9,7 +9,7 @@ Two guards, exercised independently here:
 2. DB-side: Redis has no active row (meta aged out, or was never written
    because the worker crashed between ``save_pending_request`` and the
    ``update_run_meta(status='paused_hitl')`` write). The new guard
-   consults ``PostgresCheckpointer.load_pending_request`` and refuses
+   consults ``PostgresCheckpointer.load_pending`` and refuses
    when a pending HITL request still lives in the DB.
 
 The happy path — no active row, no DB pending — must still spawn the
@@ -51,7 +51,7 @@ def redis() -> fakeredis.aioredis.FakeRedis:
 
 @pytest.fixture
 def stub_no_db_pending(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch ``init_checkpointer`` so ``load_pending_request`` returns None.
+    """Patch ``init_checkpointer`` so ``load_pending`` returns None.
 
     Used by tests that should NOT raise on the DB-pending guard. The guard
     only runs on the conflict branch (when ``create_run`` returns None),
@@ -59,7 +59,7 @@ def stub_no_db_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     accidental DB connection attempt.
     """
     cp = MagicMock()
-    cp.load_pending_request = AsyncMock(return_value=None)
+    cp.load_pending = AsyncMock(return_value=None)
 
     @asynccontextmanager
     async def _fake_cm() -> Any:
@@ -120,7 +120,7 @@ async def test_start_run_rejects_when_db_pending_present(
     pending.question_id = "q_abc"
 
     cp = MagicMock()
-    cp.load_pending_request = AsyncMock(return_value=pending)
+    cp.load_pending = AsyncMock(return_value=(pending, "old_run_1"))
 
     @asynccontextmanager
     async def _fake_cm() -> Any:
@@ -154,7 +154,7 @@ async def test_start_run_rejects_when_db_pending_present(
             ctx=_ctx(),
         )
     assert "q_abc" in str(ei.value)
-    cp.load_pending_request.assert_awaited_once_with("c1")
+    cp.load_pending.assert_awaited_once_with("c1")
 
 
 async def test_start_run_succeeds_when_no_pending(
@@ -168,7 +168,7 @@ async def test_start_run_succeeds_when_no_pending(
     exiting to avoid event-loop warnings.
     """
     cp = MagicMock()
-    cp.load_pending_request = AsyncMock(return_value=None)
+    cp.load_pending = AsyncMock(return_value=None)
 
     @asynccontextmanager
     async def _fake_cm() -> Any:
@@ -195,7 +195,7 @@ async def test_start_run_succeeds_when_no_pending(
     # Up-front DB-pending guard runs unconditionally — the durability
     # claim depends on it (a TTL-expired Redis lock could otherwise let
     # a new turn slip past while DB pending lingers). One read per start.
-    cp.load_pending_request.assert_awaited_once()
+    cp.load_pending.assert_awaited_once()
 
     # Drain the spawned task before the loop closes.
     task = rm._tasks.get(run_id)

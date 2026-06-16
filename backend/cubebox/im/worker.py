@@ -45,6 +45,7 @@ class _RunStarter(Protocol):
         content: str,
         attachments: list[str] | None,
         ctx: RunContext,
+        cancel_pending_hitl: bool = False,
     ) -> str: ...
 
 
@@ -122,6 +123,7 @@ async def process_one_queue_item(
                 workspace_id=captured["workspace_id"],
                 trigger="im",
             ),
+            cancel_pending_hitl=True,
         )
     except Exception as exc:
         # ``RunManager.start_run`` raises a plain RuntimeError when the
