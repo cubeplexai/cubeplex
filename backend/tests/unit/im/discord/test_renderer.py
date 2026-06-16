@@ -97,6 +97,34 @@ class TestDiscordDispatchStream:
         assert d.sent_char_offset > 0
 
 
+class TestDiscordDispatchPatchResumeNewMessage:
+    @pytest.mark.asyncio
+    async def test_resolved_pending_resets_card_state(self) -> None:
+        """After AskUser is answered, follow-up reply should be a new message."""
+        from cubebox.im.card_model import PendingInput
+
+        d, state, conn = _make_dispatcher()
+        state.card_id = "msg_1"
+        state.bot_message_id = "msg_1"
+        state.card_state.streaming_content = "Here is my question"
+        state.card_state.pending_input = PendingInput(
+            kind="ask_user",
+            run_id="r1",
+            question="Pick one",
+            choices=[("A", "a", "primary")],
+            resolved_choice="answered",
+        )
+        await d.dispatch_patch(state)
+        assert state.card_id is None
+        assert state.bot_message_id is None
+        # Follow-up content should create a new message
+        state.card_state.streaming_content += " — follow-up"
+        await d.dispatch_create(state)
+        assert len(conn.sent) == 1
+        assert "follow-up" in conn.sent[0]
+        assert state.card_id == "msg_1"
+
+
 class TestDiscordDispatchFinalize:
     @pytest.mark.asyncio
     async def test_finalize_edits_final_content(self) -> None:

@@ -102,6 +102,13 @@ class DiscordOpDispatcher:
         ):
             await self._send_pending_input_buttons(pending)
             self._pending_input_sent_id = pending_id
+        # When the user answers a pending input, reset card state so the
+        # follow-up reply appears as a NEW message below the buttons
+        # instead of being edited into the old message above them.
+        if pending is not None and pending.resolved_choice is not None:
+            s.card_id = None
+            s.bot_message_id = None
+            self.sent_char_offset = len(s.card_state.streaming_content)
         # Send typing indicator during tool calls.
         if getattr(self._connector, "_bot", None) is not None and s.bot_message_id is not None:
             try:
