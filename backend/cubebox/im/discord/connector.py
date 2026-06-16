@@ -228,6 +228,20 @@ class DiscordConnector:
         await self.remove_reaction(target, _REACTION_PROCESSING)
         await self.add_reaction(target, _REACTION_FAILURE)
 
+    async def send_message_with_view(self, text: str, view: Any) -> str | None:
+        """Send a message with an interactive View (buttons). Returns message_id."""
+        if self._bot is None or not self._channel_id:
+            return None
+        try:
+            channel = self._bot.get_channel(int(self._channel_id))
+            if channel is None:
+                channel = await self._bot.fetch_channel(int(self._channel_id))
+            msg = await channel.send(text, view=view)
+            return str(msg.id)
+        except Exception:
+            logger.warning("[Discord] send_message_with_view failed", exc_info=True)
+            return None
+
     async def _send_emergency_text(self, text: str) -> str | None:
         return await self.send_message(text)
 
