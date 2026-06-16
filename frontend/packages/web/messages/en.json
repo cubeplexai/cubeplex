@@ -1743,7 +1743,7 @@
           "app": "Create a Discord application at discord.com/developers/applications",
           "bot": "Add a Bot to the application and copy the bot token",
           "intents": "Enable the Privileged Gateway Intent below in Bot settings",
-          "invite": "In OAuth2 → URL Generator, select scopes and permissions below, then open the generated link to add the bot to your server"
+          "invite": "In OAuth2 → URL Generator, select scopes bot and applications.commands, then grant these Bot Permissions and open the generated link to add the bot"
         },
         "field": {
           "botToken": "Bot Token",

@@ -1743,7 +1743,7 @@
           "app": "在 discord.com/developers/applications 创建 Discord 应用",
           "bot": "添加 Bot，复制 Bot Token",
           "intents": "在 Bot 设置页开启以下 Privileged Gateway Intent",
-          "invite": "在 OAuth2 → URL Generator 页面，勾选下列 scopes 和权限，然后打开生成的链接将 Bot 添加到服务器"
+          "invite": "在 OAuth2 → URL Generator 页面，选择 bot 和 applications.commands 两个 scope，再勾选以下 Bot Permissions，打开生成的链接将 Bot 添加到服务器"
         },
         "field": {
           "botToken": "Bot Token",

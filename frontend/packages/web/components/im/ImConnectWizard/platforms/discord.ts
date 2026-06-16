@@ -29,8 +29,6 @@ export const discordDescriptor: PlatformDescriptor = {
       labelKey: 'im.wizard.discord.prereq.invite',
       helpUrl: () => 'https://discord.com/developers/applications',
       items: [
-        'bot',
-        'applications.commands',
         'View Channels',
         'Send Messages',
         'Send Messages in Threads',
