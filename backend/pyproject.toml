@@ -25,7 +25,7 @@ dependencies = [
     "aioboto3>=15.5.0",
     "fastapi-users[sqlalchemy]>=14.0",
     "slowapi>=0.1.9",
-    "cryptography>=42.0",
+    "cryptography>=48.0.1",
     # Cap <8: redis-py 8 defaulted the protocol to RESP3, which exposes
     # an async-only fakeredis bug — `_decode` doesn't recurse into dicts,
     # so `FakeRedis(decode_responses=True).hgetall(...)` returns bytes
