@@ -45,9 +45,17 @@ SWEEP_INTERVAL = 15
 
 
 async def try_acquire_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> bool:
-    """Attempt to claim ownership of *account_id* in Redis (NX + TTL)."""
+    """Claim ownership of *account_id* via NX, or confirm we already own it."""
     key = f"{prefix}:im:gateway:{account_id}:owner"
-    return bool(await redis.set(key, instance_id, nx=True, ex=LEASE_TTL))
+    if await redis.set(key, instance_id, nx=True, ex=LEASE_TTL):
+        return True
+    current = await redis.get(key)
+    if current is not None:
+        decoded = current.decode() if isinstance(current, bytes) else current
+        if decoded == instance_id:
+            await redis.expire(key, LEASE_TTL)
+            return True
+    return False
 
 
 async def release_lease(redis: Any, *, account_id: str, instance_id: str, prefix: str) -> None:
