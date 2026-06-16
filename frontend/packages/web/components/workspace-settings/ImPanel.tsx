@@ -102,16 +102,8 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
               action={
                 <div className="flex flex-wrap justify-center gap-3">
                   {ALL_PLATFORMS.map((platform) => {
-                    const label =
-                      platform.id === 'feishu'
-                        ? t('platform.feishu.label')
-                        : platform.id === 'slack'
-                          ? t('platform.slack.label')
-                          : t('platform.teams.label')
-                    const coming =
-                      platform.id === 'slack'
-                        ? t('platform.slack.coming')
-                        : t('platform.teams.coming')
+                    const label = t(`platform.${platform.id}.label`)
+                    const coming = platform.live ? '' : t(`platform.${platform.id}.coming`)
                     return (
                       <button
                         key={platform.id}
@@ -124,10 +116,7 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
                             : 'cursor-not-allowed border-border/40 bg-muted/20 opacity-60',
                         )}
                       >
-                        <PlatformLogo
-                          platform={platform.id as 'feishu' | 'slack' | 'teams'}
-                          className="size-8"
-                        />
+                        <PlatformLogo platform={platform.id} className="size-8" />
                         <span className="text-xs font-medium text-foreground">{label}</span>
                         {!platform.live && (
                           <span className="text-[10px] text-muted-foreground/60">{coming}</span>
