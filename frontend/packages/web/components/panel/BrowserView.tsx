@@ -19,6 +19,8 @@ interface BrowserViewProps {
   enabled?: boolean
   /** Hide the PanelHeader when embedded in another panel (e.g. SandboxPanel). */
   hideHeader?: boolean
+  /** Expose the refresh function to a parent component. */
+  refreshRef?: React.MutableRefObject<(() => void) | null>
 }
 
 /**
@@ -30,11 +32,23 @@ interface BrowserViewProps {
  *   user cannot disrupt the agent while it drives.
  * - takeover: the lock is lifted and the user can click/type (login, OAuth, …).
  */
-export function BrowserView({ workspaceId, enabled = true, hideHeader }: BrowserViewProps) {
+export function BrowserView({
+  workspaceId,
+  enabled = true,
+  hideHeader,
+  refreshRef,
+}: BrowserViewProps) {
   const { url, loading, error, refresh } = useBrowserLiveView(workspaceId, enabled)
   const close = usePanelStore((s) => s.close)
   const [takeover, setTakeover] = useState(false)
   const overlayRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (refreshRef) refreshRef.current = () => refresh()
+    return () => {
+      if (refreshRef) refreshRef.current = null
+    }
+  }, [refreshRef, refresh])
 
   // While watch-only, swallow any keyboard event that reaches the overlay.
   const swallow = useCallback((e: React.SyntheticEvent) => {
@@ -60,6 +74,16 @@ export function BrowserView({ workspaceId, enabled = true, hideHeader }: Browser
 
   if (!workspaceId) return null
 
+  const takeoverButton = (
+    <button
+      type="button"
+      onClick={() => setTakeover((v) => !v)}
+      className="rounded bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity duration-fast"
+    >
+      {takeover ? 'Hand back to agent' : 'Take over'}
+    </button>
+  )
+
   const actionButtons = (
     <>
       <button
@@ -70,13 +94,7 @@ export function BrowserView({ workspaceId, enabled = true, hideHeader }: Browser
       >
         <RefreshCw className="size-3.5" />
       </button>
-      <button
-        type="button"
-        onClick={() => setTakeover((v) => !v)}
-        className="rounded bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity duration-fast"
-      >
-        {takeover ? 'Hand back to agent' : 'Take over'}
-      </button>
+      {takeoverButton}
     </>
   )
 
@@ -93,7 +111,7 @@ export function BrowserView({ workspaceId, enabled = true, hideHeader }: Browser
             {takeover ? 'You are in control' : 'Watching agent'}
           </span>
           <span className="flex-1" />
-          {actionButtons}
+          {takeoverButton}
         </div>
       ) : (
         <PanelHeader

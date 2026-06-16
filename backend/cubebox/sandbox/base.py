@@ -145,7 +145,7 @@ class Sandbox(ABC):
         result = await self.execute(
             "start-stop-daemon --start --oknodo --background"
             " --make-pidfile --pidfile /tmp/ttyd.pid"
-            " --exec /usr/bin/ttyd -- -p 7681 -W bash"
+            " --exec /usr/bin/ttyd -- -p 7681 -W -w /workspace bash"
             " && sleep 1",
             timeout=30,
         )
