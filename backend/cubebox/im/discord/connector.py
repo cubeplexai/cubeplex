@@ -21,6 +21,7 @@ from cubebox.im.types import (
 )
 
 _USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
+_ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
 
 _REACTION_PROCESSING = "⏳"
 _REACTION_FAILURE = "❌"
@@ -53,9 +54,9 @@ class DiscordConnector:
         self._reply_to_id = reply_to_id
 
     def _clean_mentions(self, text: str, message: Any) -> str:
-        """Strip the bot's own @mention; replace other user mentions with display names."""
+        """Strip the bot's own @mention and role mention; replace others with display names."""
 
-        def _replace(match: re.Match[str]) -> str:
+        def _replace_user(match: re.Match[str]) -> str:
             uid = int(match.group(1))
             if self._bot_user_id is not None and uid == self._bot_user_id:
                 return ""
@@ -64,7 +65,18 @@ class DiscordConnector:
                     return f"@{m.display_name}"
             return match.group(0)
 
-        return _USER_MENTION_RE.sub(_replace, text).strip()
+        def _replace_role(match: re.Match[str]) -> str:
+            rid = int(match.group(1))
+            for role in getattr(message, "role_mentions", []):
+                tags = getattr(role, "tags", None)
+                if tags and getattr(tags, "bot_id", None) == self._bot_user_id:
+                    if int(role.id) == rid:
+                        return ""
+            return match.group(0)
+
+        text = _USER_MENTION_RE.sub(_replace_user, text)
+        text = _ROLE_MENTION_RE.sub(_replace_role, text)
+        return text.strip()
 
     def parse_inbound(self, message: Any) -> InboundEvent | None:
         """Normalize one discord.py Message into InboundEvent.
@@ -146,6 +158,10 @@ class DiscordConnector:
             return False
         for mention in getattr(message, "mentions", []):
             if getattr(mention, "id", None) == self._bot_user_id:
+                return True
+        for role in getattr(message, "role_mentions", []):
+            tags = getattr(role, "tags", None)
+            if tags and getattr(tags, "bot_id", None) == self._bot_user_id:
                 return True
         return False
 
