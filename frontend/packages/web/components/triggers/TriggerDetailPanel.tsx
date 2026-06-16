@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { ArrowLeft, RotateCcw, X } from 'lucide-react'
-import Link from 'next/link'
+import { Inbox, RotateCcw } from 'lucide-react'
 import { createApiClient, useTriggerStore, type TriggerEvent } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { DetailPanel } from '@/components/shared/DetailPanel'
+import { EmptyState } from '@/components/shared/EmptyState'
 import {
   Table,
   TableBody,
@@ -73,14 +74,15 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
     [client, wsId, triggerId, rotate],
   )
 
+  const handleBack = useCallback(() => {
+    if (onClose) onClose()
+    else router.push(`/w/${wsId}/triggers`)
+  }, [onClose, router, wsId])
+
   const handleDelete = useCallback(async () => {
     await remove(client, wsId, triggerId)
-    if (onClose) {
-      onClose()
-    } else {
-      router.push(`/w/${wsId}/triggers`)
-    }
-  }, [client, wsId, triggerId, remove, router, onClose])
+    handleBack()
+  }, [client, wsId, triggerId, remove, handleBack])
 
   const handleReplay = useCallback(
     async (eventId: string) => {
@@ -100,28 +102,17 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
 
   if (loading && !trigger) {
     return (
-      <div className="flex h-full flex-col overflow-y-auto px-6 py-6">
-        <div className="mx-auto w-full max-w-4xl py-10 text-center text-xs text-muted-foreground">
-          {t('loading')}
-        </div>
+      <div className="flex h-full items-center justify-center py-10 text-center text-xs text-muted-foreground">
+        {t('loading')}
       </div>
     )
   }
 
   if (!trigger) {
     return (
-      <div className="flex h-full flex-col overflow-y-auto px-6 py-6">
-        <div className="mx-auto w-full max-w-4xl">
-          <Link
-            href={`/w/${wsId}/triggers`}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-4"
-          >
-            <ArrowLeft className="size-3.5" />
-            {t('backToList')}
-          </Link>
-          <p className="text-sm text-muted-foreground">{t('notFound')}</p>
-        </div>
-      </div>
+      <DetailPanel title={t('notFound')} onBack={handleBack} backLabel={t('backToList')}>
+        <p className="text-sm text-muted-foreground">{t('notFound')}</p>
+      </DetailPanel>
     )
   }
 
@@ -136,58 +127,35 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
   ]
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto px-6 py-6">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-        {/* Back link or close button */}
-        {onClose ? (
-          <button
-            onClick={onClose}
-            className="flex w-fit items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+    <DetailPanel
+      onBack={handleBack}
+      backLabel={t('backToList')}
+      title={trigger.name}
+      badge={
+        trigger.enabled ? (
+          <Badge
+            variant="default"
+            className="bg-success-solid/15 text-success-fg border-success-border hover:bg-success-solid/15"
           >
-            <X className="size-3.5" />
-            {t('close')}
-          </button>
+            {t('statusEnabled')}
+          </Badge>
         ) : (
-          <Link
-            href={`/w/${wsId}/triggers`}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground w-fit"
-          >
-            <ArrowLeft className="size-3.5" />
-            {t('backToList')}
-          </Link>
-        )}
-
-        {/* Header */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold tracking-tight">{trigger.name}</h2>
-              {trigger.enabled ? (
-                <Badge
-                  variant="default"
-                  className="bg-success-solid/15 text-success-fg border-success-border hover:bg-success-solid/15"
-                >
-                  {t('statusEnabled')}
-                </Badge>
-              ) : (
-                <Badge variant="secondary">{t('statusDisabled')}</Badge>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t('createdAt', { date: formatDate(trigger.created_at) })}
-            </p>
-          </div>
-
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setDeletingConfirm(true)}
-            data-testid="delete-trigger-btn"
-          >
-            {t('delete')}
-          </Button>
-        </div>
-
+          <Badge variant="secondary">{t('statusDisabled')}</Badge>
+        )
+      }
+      subtitle={t('createdAt', { date: formatDate(trigger.created_at) })}
+      actions={
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={() => setDeletingConfirm(true)}
+          data-testid="delete-trigger-btn"
+        >
+          {t('delete')}
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-6">
         {/* Counters */}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <CounterCard
@@ -250,47 +218,44 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold">{t('recentEvents')}</h3>
-            <div className="flex items-center gap-2">
-              <div className="flex gap-1">
-                {statusFilterOptions.map((s) => (
-                  <button
-                    key={s || 'all'}
-                    onClick={() => setStatusFilter(s)}
-                    className={`px-2 py-0.5 rounded text-xs transition-colors ${
-                      statusFilter === s
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
-                    }`}
-                  >
-                    {s || t('filterAll')}
-                  </button>
-                ))}
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 gap-1 text-xs"
-                onClick={() =>
-                  void loadEvents(
-                    client,
-                    wsId,
-                    triggerId,
-                    statusFilter ? { status: statusFilter } : undefined,
-                  )
-                }
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 gap-1 text-xs"
+              onClick={() =>
+                void loadEvents(
+                  client,
+                  wsId,
+                  triggerId,
+                  statusFilter ? { status: statusFilter } : undefined,
+                )
+              }
+            >
+              <RotateCcw className="size-3" />
+              {t('refresh')}
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-1">
+            {statusFilterOptions.map((s) => (
+              <button
+                key={s || 'all'}
+                onClick={() => setStatusFilter(s)}
+                className={`rounded px-2 py-0.5 text-xs transition-colors ${
+                  statusFilter === s
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
+                }`}
               >
-                <RotateCcw className="size-3" />
-                {t('refresh')}
-              </Button>
-            </div>
+                {s || t('filterAll')}
+              </button>
+            ))}
           </div>
 
           {eventsLoading ? (
             <div className="py-6 text-center text-xs text-muted-foreground">{t('loading')}</div>
           ) : events.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border/60 bg-muted/20 px-4 py-8 text-center text-xs text-muted-foreground">
-              {t('noEvents')}
-            </div>
+            <EmptyState size="sm" icon={Inbox} title={t('noEvents')} />
           ) : (
             <div className="rounded-xl border border-border/70 bg-card/40 shadow-sm">
               <Table>
@@ -342,7 +307,7 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
           </div>
         )}
       </div>
-    </div>
+    </DetailPanel>
   )
 }
 

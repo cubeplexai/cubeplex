@@ -19,6 +19,7 @@ import {
 import { useTranslations } from 'next-intl'
 import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { SETTINGS_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
 import { EnvTable } from '@/components/sandbox-env/EnvTable'
 import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
 
@@ -120,12 +121,11 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
 
   return (
     <div className="flex h-full flex-col">
-      <header className="border-b border-border/70 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">{t('description')}</p>
-          </div>
+      <SectionHeader
+        title={t('title')}
+        description={t('description')}
+        contained={SETTINGS_CONTENT_WIDTH}
+        action={
           <div className="flex gap-2">
             {isAdmin && (
               <Button
@@ -148,10 +148,10 @@ export function SandboxEnvPanel({ wsId }: SandboxEnvPanelProps): React.ReactElem
               {t('addPersonalVar')}
             </Button>
           </div>
-        </div>
-      </header>
+        }
+      />
       <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto max-w-3xl">
+        <div className={SETTINGS_CONTENT_WIDTH}>
           <EnvTable
             mode={tableMode}
             entries={entries}

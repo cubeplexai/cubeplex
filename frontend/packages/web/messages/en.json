@@ -932,7 +932,9 @@
       "tabPersonal": "Personal",
       "tabWorkspace": "Workspace",
       "tabOrg": "Organization",
-      "tabArchived": "Archived"
+      "tabArchived": "Archived",
+      "emptyTitle": "No memories yet",
+      "emptyHint": "Memories are saved automatically as you chat."
     },
     "sandboxEnv": {
       "title": "Sandbox environment variables",
@@ -943,6 +945,8 @@
       "loading": "Loading…",
       "loadError": "Failed to load: {error}",
       "empty": "No environment variables yet. Add one to inject it into your sandbox.",
+      "emptyTitle": "No environment variables yet",
+      "emptyHint": "Add one to inject it into your sandbox.",
       "colName": "Name",
       "colScope": "Scope",
       "colType": "Type",
@@ -1282,6 +1286,8 @@
     "close": "Close",
     "emptyTitle": "No triggers yet",
     "emptyHint": "Create a trigger to get an ingest URL, then paste it into your event source's webhook settings.",
+    "selectHint": "Select a trigger to view its details.",
+    "cardEvents": "{count} events",
     "colName": "Name",
     "colStatus": "Status",
     "colSource": "Source",
@@ -1502,6 +1508,12 @@
     "newTask": "New task",
     "emptyTitle": "No scheduled tasks yet",
     "emptyHint": "Create a task to run prompts on a schedule automatically.",
+    "selectHint": "Select a task to view its run history.",
+    "back": "Back",
+    "runHistory": "Run history",
+    "refresh": "Refresh",
+    "noRuns": "No runs yet",
+    "deleteConfirm": "Delete \"{name}\"? This cannot be undone.",
     "loadFailed": "Failed to load scheduled tasks",
     "dialogEditTitle": "Edit scheduled task",
     "dialogNewTitle": "New scheduled task",
@@ -1637,6 +1649,8 @@
     "sent": "Verification email sent."
   },
   "im": {
+    "back": "Back",
+    "selectHint": "Select a bot to view its details.",
     "nav": {
       "workspaceTab": "IM",
       "adminItem": "IM connectors"

@@ -1,7 +1,7 @@
 'use client'
 
 import type { ImAccount } from '@cubebox/core'
-import { cn } from '@/lib/utils'
+import { RailCard } from '@/components/shared/RailCard'
 
 import { ImAccountStatusPill } from './ImAccountStatusPill'
 import { PlatformLogo } from './PlatformLogo'
@@ -41,39 +41,33 @@ export function ImAccountListItem({
   onSelect,
 }: Props): React.ReactElement {
   const last = relativeFromIso(account.runtime.last_inbound_at)
+  const title = account.bot_app_name ?? account.external_account_id
+  const metaParts = [account.delivery_mode, last]
+  if (showWorkspaceColumn) metaParts.unshift(account.workspace_id)
   return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={selected}
-      onClick={() => onSelect(account.id)}
-      className={cn(
-        'flex w-full items-center gap-3 border-b border-border/40 px-3 py-2.5 text-left text-sm transition-colors',
-        selected ? 'bg-accent' : 'hover:bg-accent/50',
-      )}
-    >
-      {account.bot_avatar_url ? (
-        <img
-          src={account.bot_avatar_url}
-          alt={account.bot_app_name ?? account.external_account_id}
-          className="h-6 w-6 shrink-0 rounded-full object-cover"
+    <RailCard
+      selected={selected}
+      onSelect={() => onSelect(account.id)}
+      leading={
+        account.bot_avatar_url ? (
+          <img
+            src={account.bot_avatar_url}
+            alt={title}
+            className="size-6 rounded-full object-cover"
+          />
+        ) : (
+          <PlatformLogo platform={account.platform} className="size-6" />
+        )
+      }
+      title={title}
+      badge={
+        <ImAccountStatusPill
+          connectionState={account.runtime.connection_state}
+          enabled={account.enabled}
         />
-      ) : (
-        <PlatformLogo platform={account.platform} className="h-5 w-5 shrink-0" />
-      )}
-      <ImAccountStatusPill
-        connectionState={account.runtime.connection_state}
-        enabled={account.enabled}
-      />
-      <span className="font-medium">{account.bot_app_name ?? account.external_account_id}</span>
-      {account.bot_app_name ? (
-        <span className="text-xs text-muted-foreground">{account.external_account_id}</span>
-      ) : null}
-      {showWorkspaceColumn && (
-        <span className="text-xs text-muted-foreground">{account.workspace_id}</span>
-      )}
-      <span className="text-xs text-muted-foreground">· {account.delivery_mode}</span>
-      <span className="ml-auto text-xs text-muted-foreground">{last}</span>
-    </button>
+      }
+      secondary={account.bot_app_name ? account.external_account_id : undefined}
+      meta={metaParts.join(' · ')}
+    />
   )
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createApiClient, archiveMemory, listMemory } from '@cubebox/core'
 import type { MemoryItem, MemoryScope, MemoryStatus } from '@cubebox/core'
+import { useTranslations } from 'next-intl'
 import { Brain } from 'lucide-react'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { MemoryItemCard } from './MemoryItemCard'
@@ -20,6 +21,7 @@ export function MemoryList({
   status = 'active',
   sourceConversationId,
 }: MemoryListProps) {
+  const t = useTranslations('wsSettings.memory')
   const [items, setItems] = useState<MemoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -80,13 +82,7 @@ export function MemoryList({
   }
 
   if (items.length === 0) {
-    return (
-      <EmptyState
-        icon={Brain}
-        title="No memories yet"
-        description="Memories are saved automatically as you chat."
-      />
-    )
+    return <EmptyState icon={Brain} title={t('emptyTitle')} description={t('emptyHint')} />
   }
 
   return (
