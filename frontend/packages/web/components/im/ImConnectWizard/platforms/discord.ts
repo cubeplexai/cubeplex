@@ -34,6 +34,7 @@ export const discordDescriptor: PlatformDescriptor = {
         'Read Message History',
         'Add Reactions',
         'Embed Links',
+        'Use Slash Commands',
       ],
     },
     {
