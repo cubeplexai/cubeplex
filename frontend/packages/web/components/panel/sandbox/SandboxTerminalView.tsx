@@ -10,10 +10,18 @@ const KEEPALIVE_MS = 30_000
 
 interface SandboxTerminalViewProps {
   workspaceId: string
+  refreshRef?: React.MutableRefObject<(() => Promise<unknown>) | null>
 }
 
-export function SandboxTerminalView({ workspaceId }: SandboxTerminalViewProps) {
+export function SandboxTerminalView({ workspaceId, refreshRef }: SandboxTerminalViewProps) {
   const { url, loading, error, refresh } = useSandboxTerminal(workspaceId)
+
+  useEffect(() => {
+    if (refreshRef) refreshRef.current = () => refresh()
+    return () => {
+      if (refreshRef) refreshRef.current = null
+    }
+  }, [refreshRef, refresh])
 
   useEffect(() => {
     if (!url) return

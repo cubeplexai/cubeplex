@@ -18,6 +18,8 @@ export function useSandboxTerminal(workspaceId: string | null, enabled = true) {
   const key = workspaceId && enabled ? `/api/v1/ws/${workspaceId}/sandbox/terminal` : null
   const { data, error, isLoading, mutate } = useSWR<SandboxTerminal>(key, fetcher, {
     revalidateOnFocus: false,
+    revalidateIfStale: false,
+    revalidateOnReconnect: false,
     shouldRetryOnError: false,
   })
   return {

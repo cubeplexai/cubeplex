@@ -20,6 +20,7 @@ export function useBrowserLiveView(workspaceId: string | null, enabled = true) {
   const key = workspaceId && enabled ? `/api/v1/ws/${workspaceId}/browser/live-view` : null
   const { data, error, isLoading, mutate } = useSWR<BrowserLiveView>(key, fetcher, {
     revalidateOnFocus: false,
+    revalidateOnMount: true,
     shouldRetryOnError: false,
   })
   return {
