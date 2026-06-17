@@ -9,6 +9,7 @@ import {
   addTopicParticipants,
   removeTopicParticipant,
   updateParticipantRole as apiUpdateParticipantRole,
+  upgradeToTopic,
 } from '../api'
 
 export interface TopicWithParticipants {
@@ -36,6 +37,11 @@ export interface TopicStore {
     userId: string,
     role: 'owner' | 'member',
   ): Promise<void>
+  upgradeConversationToTopic(
+    client: ApiClient,
+    conversationId: string,
+    body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
+  ): Promise<{ topicId: string; conversationId: string }>
 }
 
 export const useTopicStore = create<TopicStore>((set) => ({
@@ -72,6 +78,21 @@ export const useTopicStore = create<TopicStore>((set) => ({
   async create(client, body) {
     const data = await createTopic(client, body)
     set((s) => ({ topics: [data.topic, ...s.topics] }))
+    return {
+      topicId: data.topic.id,
+      conversationId: data.conversation.id,
+    }
+  },
+
+  async upgradeConversationToTopic(client, conversationId, body) {
+    const data = await upgradeToTopic(client, conversationId, body)
+    set((s) => ({
+      topics: [data.topic, ...s.topics.filter((t) => t.id !== data.topic.id)],
+      topicParticipants: {
+        ...s.topicParticipants,
+        [data.topic.id]: data.participants,
+      },
+    }))
     return {
       topicId: data.topic.id,
       conversationId: data.conversation.id,
