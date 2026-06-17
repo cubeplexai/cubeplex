@@ -42,7 +42,10 @@
     "orgNotFound": "Organization not found",
     "orgNotFoundHint": "We couldn't find an organization with that identifier.",
     "backToGeneralLogin": "Back to general login",
-    "notAMember": "Not a member?"
+    "notAMember": "Not a member?",
+    "ssoError": "SSO Login Failed",
+    "backToLogin": "Back to login",
+    "loggingIn": "Logging you in…"
   },
   "sidebar": {
     "newChat": "New Chat",
