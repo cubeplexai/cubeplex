@@ -65,8 +65,10 @@ async def _create_and_activate_sso(client: httpx.AsyncClient) -> str:
             "display_name": "Corp SSO",
             "config": {
                 "client_id": "corp-client",
+                "issuer": "https://corp.example.com",
                 "authorization_endpoint": "https://corp.example.com/authorize",
                 "token_endpoint": "https://corp.example.com/token",
+                "jwks_uri": "https://corp.example.com/jwks",
             },
             "client_secret": "corp-secret",
         },

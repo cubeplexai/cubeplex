@@ -348,12 +348,20 @@ async def sso_saml_acs(
     mapping = conn.config.get("attribute_mapping", {})
     mapped = apply_mapping(raw_attrs, mapping, protocol="saml")
 
-    # SAML email only counts as verified when it came from a signed attribute
-    # in the assertion. NameID can be an opaque persistent/transient identifier
-    # — never treat it as a verified email or an IdP that omits the email
-    # attribute could take over an existing account by claiming the address as
-    # a NameID.
-    saml_email_verified = userinfo.email_from_signed_attribute
+    # SAML email only counts as verified when the mapped email VALUE came from
+    # a signed assertion attribute (not the NameID fallback). The attribute
+    # we trust is whatever key ``mapping["email"]`` points at — if the admin
+    # mapped email to "NameID", verified=False even though the literal "email"
+    # attribute may also be present. Without this guard, an IdP could set
+    # NameID=victim@corp.com (with mapping pointing email→NameID) and the
+    # callback would auto-link to the victim's account.
+    mapped_email_key = mapping.get("email", "email")
+    saml_email_verified = bool(
+        mapped_email_key != "NameID"
+        and userinfo.attributes
+        and mapped_email_key in userinfo.attributes
+        and userinfo.attributes[mapped_email_key]
+    )
 
     try:
         result = await resolve_identity(

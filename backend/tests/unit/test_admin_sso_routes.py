@@ -148,14 +148,20 @@ async def test_create_sso_happy_path(
         protocol="oidc",
         display_name="Acme OIDC",
         provisioning="auto",
-        config={"client_id": "abc", "issuer": "https://idp.example.com"},
+        config={
+            "client_id": "a",
+            "issuer": "https://idp.example.com",
+            "authorization_endpoint": "https://idp.example.com/auth",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+        },
     )
     resp = await admin_sso.create_sso(body, _make_request(fernet_backend), user, sso_session)
     assert resp.org_id == org.id
     assert resp.status == "testing"
     assert resp.protocol == "oidc"
     assert resp.display_name == "Acme OIDC"
-    assert resp.config["client_id"] == "abc"
+    assert resp.config["client_id"] == "a"
 
 
 async def test_create_sso_with_client_secret_stores_credential(
@@ -167,7 +173,13 @@ async def test_create_sso_with_client_secret_stores_credential(
     body = admin_sso.SSOConnectionCreate(
         protocol="oidc",
         display_name="Acme OIDC",
-        config={"client_id": "abc"},
+        config={
+            "client_id": "a",
+            "issuer": "https://idp.example.com",
+            "authorization_endpoint": "https://idp.example.com/auth",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+        },
         client_secret="s3cr3t",
     )
     resp = await admin_sso.create_sso(body, _make_request(fernet_backend), user, sso_session)
@@ -202,7 +214,15 @@ async def test_create_sso_409_when_already_configured(
 ) -> None:
     _, user = admin_setup
     body = admin_sso.SSOConnectionCreate(
-        protocol="oidc", display_name="Acme OIDC", config={"client_id": "abc"}
+        protocol="oidc",
+        display_name="Acme OIDC",
+        config={
+            "client_id": "a",
+            "issuer": "https://idp.example.com",
+            "authorization_endpoint": "https://idp.example.com/auth",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+        },
     )
     await admin_sso.create_sso(body, _make_request(fernet_backend), user, sso_session)
 
@@ -232,7 +252,13 @@ async def test_credential_name_namespacing_allows_two_sso_secrets_same_org(
     body1 = admin_sso.SSOConnectionCreate(
         protocol="oidc",
         display_name="Primary OIDC",
-        config={"client_id": "a"},
+        config={
+            "client_id": "a",
+            "issuer": "https://idp.example.com",
+            "authorization_endpoint": "https://idp.example.com/auth",
+            "token_endpoint": "https://idp.example.com/token",
+            "jwks_uri": "https://idp.example.com/jwks",
+        },
         client_secret="secret-1",
     )
     resp1 = await admin_sso.create_sso(body1, _make_request(fernet_backend), user, sso_session)
@@ -278,7 +304,15 @@ async def test_update_sso_changes_display_name_and_config(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Old", config={"client_id": "a"}
+            protocol="oidc",
+            display_name="Old",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
         ),
         _make_request(fernet_backend),
         user,
@@ -286,22 +320,43 @@ async def test_update_sso_changes_display_name_and_config(
     )
     updated = await admin_sso.update_sso(
         created.id,
-        admin_sso.SSOConnectionUpdate(display_name="New", config={"client_id": "a", "extra": True}),
+        admin_sso.SSOConnectionUpdate(
+            display_name="New",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+                "extra": True,
+            },
+        ),
+        _make_request(fernet_backend),
         user,
         sso_session,
     )
     assert updated.display_name == "New"
-    assert updated.config == {"client_id": "a", "extra": True}
+    assert updated.config == {
+        "client_id": "a",
+        "issuer": "https://idp.example.com",
+        "authorization_endpoint": "https://idp.example.com/auth",
+        "token_endpoint": "https://idp.example.com/token",
+        "jwks_uri": "https://idp.example.com/jwks",
+        "extra": True,
+    }
 
 
 async def test_update_sso_404_when_missing(
-    sso_session: AsyncSession, admin_setup: tuple[Organization, User]
+    sso_session: AsyncSession,
+    admin_setup: tuple[Organization, User],
+    fernet_backend: FernetBackend,
 ) -> None:
     _, user = admin_setup
     with pytest.raises(HTTPException) as exc_info:
         await admin_sso.update_sso(
             "sso_does_not_exist",
             admin_sso.SSOConnectionUpdate(display_name="x"),
+            _make_request(fernet_backend),
             user,
             sso_session,
         )
@@ -319,7 +374,16 @@ async def test_delete_sso_blocked_when_active(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -343,7 +407,16 @@ async def test_delete_sso_succeeds_when_inactive(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -372,7 +445,16 @@ async def test_activate_from_testing_to_active(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -391,7 +473,16 @@ async def test_activate_rejects_already_active(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -414,7 +505,16 @@ async def test_deactivate_from_active_to_inactive(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -433,7 +533,16 @@ async def test_deactivate_rejects_inactive(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -458,7 +567,16 @@ async def test_list_identities_paginates_and_unlink_deletes(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -498,7 +616,16 @@ async def test_unlink_identity_404_when_missing(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
         ),
         _make_request(fernet_backend),
         user,
@@ -536,6 +663,8 @@ async def test_discover_oidc_happy_path(
         return original(*args, **kwargs)
 
     monkeypatch.setattr("cubebox.sso.oidc.httpx.AsyncClient", factory)
+    # Bypass the SSRF guard's DNS lookup so the mock can serve the request.
+    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
 
     resp = await admin_sso.discover_oidc(
         admin_sso.OIDCDiscoveryRequest(issuer_url="https://idp.example.com"),
@@ -564,6 +693,7 @@ async def test_discover_oidc_400_on_missing_field(
         return original(*args, **kwargs)
 
     monkeypatch.setattr("cubebox.sso.oidc.httpx.AsyncClient", factory)
+    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
 
     with pytest.raises(HTTPException) as exc_info:
         await admin_sso.discover_oidc(
@@ -571,6 +701,128 @@ async def test_discover_oidc_400_on_missing_field(
             user,
         )
     assert exc_info.value.status_code == 400
+
+
+# --- SSRF + cross-org regressions ------------------------------------------
+
+
+async def test_discover_oidc_refuses_loopback_target(
+    admin_setup: tuple[Organization, User],
+) -> None:
+    """SSRF guard: an org admin must not be able to probe localhost via
+    /admin/sso/discover-oidc. The endpoint should refuse 127.0.0.1, private
+    ranges, link-local, and non-https schemes."""
+    _, user = admin_setup
+    for issuer in (
+        "https://127.0.0.1",
+        "https://10.0.0.1",
+        "https://169.254.169.254",  # AWS IMDS
+        "http://idp.example.com",  # http (no scheme allow-list)
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_sso.discover_oidc(admin_sso.OIDCDiscoveryRequest(issuer_url=issuer), user)
+        assert exc_info.value.status_code == 400
+        assert isinstance(exc_info.value.detail, dict)
+        assert exc_info.value.detail["code"] == "oidc_discovery_refused"
+
+
+async def test_unlink_identity_rejects_cross_org_eid(
+    sso_session: AsyncSession,
+    admin_setup: tuple[Organization, User],
+    fernet_backend: FernetBackend,
+) -> None:
+    """Round-1 regression: an Org A admin cannot delete an ExternalIdentity
+    row that belongs to Org B's SSO connection."""
+    _, admin_a = admin_setup
+    sso_a = await admin_sso.create_sso(
+        admin_sso.SSOConnectionCreate(
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+            client_secret="s3cr3t",
+        ),
+        _make_request(fernet_backend),
+        admin_a,
+        sso_session,
+    )
+    # Forge an identity that belongs to a DIFFERENT sso_id (Org B's, conceptually).
+    from cubebox.models.external_identity import ExternalIdentity
+
+    foreign = ExternalIdentity(
+        user_id="usr-foreign",
+        provider_type="oidc_sso",
+        provider_id="sso_org_b_xxxxxxxxxxxx",
+        external_id="foreign-sub",
+        external_email="foreign@b.com",
+    )
+    sso_session.add(foreign)
+    await sso_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_sso.unlink_identity(sso_a.id, foreign.id, admin_a, sso_session)
+    assert exc_info.value.status_code == 404
+    assert isinstance(exc_info.value.detail, dict)
+    assert exc_info.value.detail["code"] == "identity_not_found"
+
+
+async def test_create_sso_400_on_missing_oidc_config_fields(
+    sso_session: AsyncSession,
+    admin_setup: tuple[Organization, User],
+    fernet_backend: FernetBackend,
+) -> None:
+    """Round-2: config-shape validation at save time prevents a typo from
+    landing as a 500 on the first SSO callback."""
+    _, user = admin_setup
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_sso.create_sso(
+            admin_sso.SSOConnectionCreate(
+                protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            ),
+            _make_request(fernet_backend),
+            user,
+            sso_session,
+        )
+    assert exc_info.value.status_code == 400
+    assert isinstance(exc_info.value.detail, dict)
+    assert exc_info.value.detail["code"] == "config_missing_fields"
+    assert "issuer" in exc_info.value.detail["fields"]
+
+
+async def test_activate_oidc_without_client_secret_returns_409(
+    sso_session: AsyncSession,
+    admin_setup: tuple[Organization, User],
+    fernet_backend: FernetBackend,
+) -> None:
+    """Round-1 regression: activating an OIDC SSO without a credential
+    returns a structured 409, not an opaque 500 on first login."""
+    _, user = admin_setup
+    created = await admin_sso.create_sso(
+        admin_sso.SSOConnectionCreate(
+            protocol="oidc",
+            display_name="Acme",
+            config={
+                "client_id": "a",
+                "issuer": "https://idp.example.com",
+                "authorization_endpoint": "https://idp.example.com/auth",
+                "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
+            },
+        ),
+        _make_request(fernet_backend),
+        user,
+        sso_session,
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_sso.activate_sso(created.id, user, sso_session)
+    assert exc_info.value.status_code == 409
+    assert isinstance(exc_info.value.detail, dict)
+    assert exc_info.value.detail["code"] == "client_secret_required_for_oidc"
 
 
 # --- 403 smoke test ---------------------------------------------------------

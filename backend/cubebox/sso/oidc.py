@@ -110,25 +110,37 @@ async def exchange_code(
          ``userinfo.sub == id_token.sub``.
     """
     async with httpx.AsyncClient() as http:
-        token_resp = await http.post(
-            cfg.token_endpoint,
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": redirect_uri,
-                "client_id": cfg.client_id,
-                "client_secret": client_secret,
-                "code_verifier": code_verifier,
-            },
-        )
-        token_resp.raise_for_status()
+        try:
+            token_resp = await http.post(
+                cfg.token_endpoint,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "client_id": cfg.client_id,
+                    "client_secret": client_secret,
+                    "code_verifier": code_verifier,
+                },
+            )
+            token_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # Expired authorization codes, replay, IdP outages — translate
+            # so the callback returns a clean 400 instead of an opaque 500.
+            raise OIDCValidationError(f"token_endpoint_status_{exc.response.status_code}") from exc
+        except httpx.RequestError as exc:
+            raise OIDCValidationError("token_endpoint_unreachable") from exc
         token_data = token_resp.json()
         id_token = token_data.get("id_token")
         if not id_token:
             raise OIDCValidationError("missing_id_token")
 
-        jwks_resp = await http.get(cfg.jwks_uri, timeout=10)
-        jwks_resp.raise_for_status()
+        try:
+            jwks_resp = await http.get(cfg.jwks_uri, timeout=10)
+            jwks_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise OIDCValidationError(f"jwks_status_{exc.response.status_code}") from exc
+        except httpx.RequestError as exc:
+            raise OIDCValidationError("jwks_unreachable") from exc
         jwks = JsonWebKey.import_key_set(jwks_resp.json())
 
         try:
@@ -157,11 +169,16 @@ async def exchange_code(
         userinfo: dict[str, Any] = dict(claims)
         if cfg.userinfo_endpoint:
             access_token = token_data["access_token"]
-            userinfo_resp = await http.get(
-                cfg.userinfo_endpoint,
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            userinfo_resp.raise_for_status()
+            try:
+                userinfo_resp = await http.get(
+                    cfg.userinfo_endpoint,
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                userinfo_resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise OIDCValidationError(f"userinfo_status_{exc.response.status_code}") from exc
+            except httpx.RequestError as exc:
+                raise OIDCValidationError("userinfo_unreachable") from exc
             ui = userinfo_resp.json()
             if ui.get("sub") != claims["sub"]:
                 raise OIDCValidationError("userinfo_sub_mismatch")
@@ -177,10 +194,61 @@ async def exchange_code(
     )
 
 
+class OIDCDiscoveryRefused(Exception):
+    """The supplied issuer URL is not a safe discovery target."""
+
+
+def _refuse_ssrf_target(url: str) -> None:
+    """Reject issuer URLs that would let an authenticated admin probe the
+    internal network or non-HTTP services (SSRF guard).
+
+    - Require https:// (http would let an admin probe http-only metadata
+      services like 169.254.169.254 with predictable timing).
+    - Reject hostnames that resolve into private / loopback / link-local
+      ranges so an admin cannot scan the deployment's internal hosts.
+    """
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise OIDCDiscoveryRefused("scheme_must_be_https")
+    host = parsed.hostname or ""
+    if not host:
+        raise OIDCDiscoveryRefused("missing_host")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as exc:
+        raise OIDCDiscoveryRefused("dns_lookup_failed") from exc
+    for info in infos:
+        sockaddr = info[4]
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise OIDCDiscoveryRefused("private_address_blocked")
+
+
 async def discover_oidc_endpoints(issuer_url: str) -> dict[str, Any]:
-    """Fetch .well-known/openid-configuration for an issuer."""
-    url = issuer_url.rstrip("/") + "/.well-known/openid-configuration"
-    async with httpx.AsyncClient() as http:
+    """Fetch .well-known/openid-configuration for an issuer.
+
+    Refuses non-https and any host whose DNS resolves to private / loopback /
+    link-local ranges — without this guard an org admin could use the
+    admin discover endpoint to scan the deployment's internal network.
+    """
+    base = issuer_url.rstrip("/")
+    _refuse_ssrf_target(base)
+    url = base + "/.well-known/openid-configuration"
+    async with httpx.AsyncClient(follow_redirects=False) as http:
         resp = await http.get(url, timeout=10)
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
