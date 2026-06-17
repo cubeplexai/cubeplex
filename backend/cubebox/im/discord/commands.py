@@ -94,7 +94,7 @@ def _get_jwt_secret() -> str:
 def _get_frontend_base_url() -> str:
     from cubebox.config import config
 
-    return str(config.get("app.base_url", "http://localhost:3000")).rstrip("/")
+    return str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
 
 
 async def _initiate_link(
