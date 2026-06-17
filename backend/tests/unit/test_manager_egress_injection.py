@@ -509,8 +509,8 @@ async def test_cleanup_expired_revokes_refs(
             "cubebox.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
             new=AsyncMock(return_value=None),
         ),
-        # Stub sandbox kill so no real network call is made
-        patch("opensandbox.Sandbox.connect", side_effect=Exception("no sandbox")),
+        # Stub sandbox connect+kill so no real network call is made
+        patch("opensandbox.Sandbox.connect", return_value=AsyncMock()),
     ):
         await manager.cleanup_expired()
 
