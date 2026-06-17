@@ -52,6 +52,7 @@ dependencies = [
     "discord-py>=2.7.1",
     "slack-bolt>=1.28.0",
     "slack-sdk>=3.42.0",
+    "authlib>=1.7.2",
 ]
 
 [project.optional-dependencies]
