@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi_users.manager import BaseUserManager
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from fastapi import Request
 
 from cubebox.api.routes.v1.auth import UserCreate
 from cubebox.models.external_identity import ExternalIdentity
@@ -55,6 +58,7 @@ async def resolve_identity(
     email_verified: bool,
     claims: dict[str, Any] | None = None,
     sso_connection: SSOConnection | None = None,
+    request: Request | None = None,
 ) -> ResolvedIdentity:
     """Find or create a user for the given external identity.
 
@@ -139,6 +143,10 @@ async def resolve_identity(
         # strips is_verified/is_active/is_superuser via
         # CreateUpdateDictModel.create_update_dict() and would leave every
         # SSO-provisioned user unverified.
+        # Pass the request so on_after_register can read
+        # ``request.app.state.deployment_mode``. Without it, the manager
+        # defaults to multi_tenant and creates a spurious personal org
+        # for SSO users in a single_tenant deployment.
         user = await user_manager.create(
             UserCreate(
                 email=external_email,
@@ -147,6 +155,7 @@ async def resolve_identity(
                 is_verified=True,
             ),
             safe=False,
+            request=request,
         )
         created = True
 

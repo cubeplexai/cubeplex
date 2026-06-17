@@ -53,6 +53,14 @@ _SAML_REQUIRED_CONFIG_KEYS = (
 )
 
 
+_OIDC_URL_FIELDS = (
+    "authorization_endpoint",
+    "token_endpoint",
+    "jwks_uri",
+    "userinfo_endpoint",
+)
+
+
 def _validate_connection_config(protocol: str, config: dict[str, Any]) -> None:
     """Validate the protocol-specific config shape at save time.
 
@@ -60,7 +68,16 @@ def _validate_connection_config(protocol: str, config: dict[str, Any]) -> None:
     accidental empty config persists silently and the first SSO callback
     raises a bare KeyError → opaque 500. Fail fast at PUT/POST with a
     structured 400 the admin form can render.
+
+    Also runs the SSRF guard on every OIDC endpoint URL — the
+    ``/discover-oidc`` endpoint already does this for the issuer URL,
+    but admins can side-step it by typing the token/jwks/userinfo URLs
+    directly. Without per-field validation, a malicious admin could set
+    ``token_endpoint`` or ``jwks_uri`` to an internal address and let the
+    OIDC client perform the request at login time.
     """
+    from cubebox.sso.oidc import OIDCDiscoveryRefused, _refuse_ssrf_target
+
     keys = _OIDC_REQUIRED_CONFIG_KEYS if protocol == "oidc" else _SAML_REQUIRED_CONFIG_KEYS
     missing = [k for k in keys if not config.get(k)]
     if missing:
@@ -72,6 +89,21 @@ def _validate_connection_config(protocol: str, config: dict[str, Any]) -> None:
                 "fields": missing,
             },
         )
+    if protocol == "oidc":
+        bad: list[dict[str, str]] = []
+        for field in ("issuer", *_OIDC_URL_FIELDS):
+            value = config.get(field)
+            if not value:
+                continue
+            try:
+                _refuse_ssrf_target(str(value))
+            except OIDCDiscoveryRefused as exc:
+                bad.append({"field": field, "reason": str(exc)})
+        if bad:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "config_url_refused", "fields": bad},
+            )
 
 
 class SSOConnectionCreate(BaseModel):
@@ -215,21 +247,34 @@ async def update_sso(
         conn.provisioning = body.provisioning
 
     if body.client_secret is not None:
-        # Rotate: delete the existing row first because the credential
-        # name is namespaced by sso_id, so a new insert with the same
-        # (org_id, kind, name) would collide on the partial unique index.
-        if conn.credential_id is not None:
-            cred_repo = CredentialRepository(session, org_id=org_id)
-            await cred_repo.delete(conn.credential_id)
-            conn.credential_id = None
-        conn.credential_id = await _store_secret(
+        # Truthy-check after strip — accept an empty/whitespace string
+        # would happily store a useless secret and silently break logins.
+        new_secret = body.client_secret.strip()
+        if not new_secret:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "client_secret_empty"},
+            )
+        # Rotate the vault row. The credential name is namespaced by
+        # sso_id, so insert-then-delete would collide on the partial
+        # unique index. Instead: store under a temporary name, point
+        # the connection at the new row, then delete the old row.
+        old_credential_id = conn.credential_id
+        new_credential_id = await _store_secret(
             request,
             session,
             org_id=org_id,
-            sso_connection_id=conn.id,
-            secret=body.client_secret,
+            sso_connection_id=f"{conn.id}.new",
+            secret=new_secret,
             user_id=user.id,
         )
+        # If anything below fails we leave a temporary credential and the
+        # old credential both alive — better than dropping the working
+        # secret before the new one is wired up.
+        conn.credential_id = new_credential_id
+        if old_credential_id is not None:
+            cred_repo = CredentialRepository(session, org_id=org_id)
+            await cred_repo.delete(old_credential_id)
 
     conn = await repo.update(conn)
     return _to_response(conn)

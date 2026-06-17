@@ -17,6 +17,15 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 
+@pytest.fixture(autouse=True)
+def _bypass_ssrf_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """E2E tests use *.example.com hosts that don't resolve in CI sandboxes;
+    bypass the SSRF guard so the admin-route fail-closed doesn't masquerade
+    as a DNS failure. The guard itself is exercised in
+    ``tests/unit/test_admin_sso_routes.py::test_discover_oidc_refuses_*``."""
+    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+
+
 @pytest.mark.asyncio
 async def test_admin_sso_crud_lifecycle(
     admin_client: tuple[httpx.AsyncClient, str],

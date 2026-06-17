@@ -268,6 +268,7 @@ async def sso_oidc_callback(
             email_verified=userinfo.email_verified,
             claims=mapped.raw,
             sso_connection=conn,
+            request=request,
         )
     except SSOLoginRejected as exc:
         raise HTTPException(403, detail=exc.code) from exc
@@ -349,18 +350,23 @@ async def sso_saml_acs(
     mapped = apply_mapping(raw_attrs, mapping, protocol="saml")
 
     # SAML email only counts as verified when the mapped email VALUE came from
-    # a signed assertion attribute (not the NameID fallback). The attribute
-    # we trust is whatever key ``mapping["email"]`` points at — if the admin
-    # mapped email to "NameID", verified=False even though the literal "email"
-    # attribute may also be present. Without this guard, an IdP could set
-    # NameID=victim@corp.com (with mapping pointing email→NameID) and the
-    # callback would auto-link to the victim's account.
+    # a signed assertion attribute (not the NameID fallback) AND the resolved
+    # value is a non-empty string. The attribute we trust is whatever key
+    # ``mapping["email"]`` points at — if the admin mapped email to "NameID",
+    # verified=False even when the literal "email" attribute is also present.
+    # A malicious IdP could set NameID=victim@corp.com (mapping email→NameID)
+    # or send ``email: [""]`` (truthy list of empty strings) and auto-link
+    # to the victim's account otherwise.
     mapped_email_key = mapping.get("email", "email")
+    raw_email_value = userinfo.attributes.get(mapped_email_key) if userinfo.attributes else None
+    if isinstance(raw_email_value, list):
+        raw_email_value = raw_email_value[0] if raw_email_value else None
     saml_email_verified = bool(
         mapped_email_key != "NameID"
-        and userinfo.attributes
-        and mapped_email_key in userinfo.attributes
-        and userinfo.attributes[mapped_email_key]
+        and isinstance(raw_email_value, str)
+        and raw_email_value.strip()
+        and mapped.email
+        and mapped.email == raw_email_value
     )
 
     try:
@@ -374,6 +380,7 @@ async def sso_saml_acs(
             email_verified=saml_email_verified,
             claims=mapped.raw,
             sso_connection=conn,
+            request=request,
         )
     except SSOLoginRejected as exc:
         raise HTTPException(403, detail=exc.code) from exc

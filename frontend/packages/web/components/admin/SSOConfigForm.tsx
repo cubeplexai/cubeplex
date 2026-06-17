@@ -54,7 +54,15 @@ type KnownErrorKey =
   | 'errors.sso_already_configured'
   | 'errors.invalid_issuer_url'
   | 'errors.oidc_discovery_failed'
+  | 'errors.oidc_discovery_refused'
   | 'errors.invalid_config'
+  | 'errors.config_missing_fields'
+  | 'errors.config_url_refused'
+  | 'errors.client_secret_required_for_oidc'
+  | 'errors.client_secret_empty'
+  | 'errors.deactivate_before_delete'
+  | 'errors.invalid_status_transition'
+  | 'errors.app_base_url_missing_scheme'
   | 'errors.unauthorized'
   | 'errors.forbidden'
 
@@ -62,7 +70,15 @@ const KNOWN_ERROR_CODES = new Map<string, KnownErrorKey>([
   ['sso_already_configured', 'errors.sso_already_configured'],
   ['invalid_issuer_url', 'errors.invalid_issuer_url'],
   ['oidc_discovery_failed', 'errors.oidc_discovery_failed'],
+  ['oidc_discovery_refused', 'errors.oidc_discovery_refused'],
   ['invalid_config', 'errors.invalid_config'],
+  ['config_missing_fields', 'errors.config_missing_fields'],
+  ['config_url_refused', 'errors.config_url_refused'],
+  ['client_secret_required_for_oidc', 'errors.client_secret_required_for_oidc'],
+  ['client_secret_empty', 'errors.client_secret_empty'],
+  ['deactivate_before_delete', 'errors.deactivate_before_delete'],
+  ['invalid_status_transition', 'errors.invalid_status_transition'],
+  ['app_base_url_missing_scheme', 'errors.app_base_url_missing_scheme'],
   ['unauthorized', 'errors.unauthorized'],
   ['forbidden', 'errors.forbidden'],
 ])

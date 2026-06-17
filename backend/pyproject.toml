@@ -86,6 +86,7 @@ markers = [
     "real_llm: tests that require a real LLM endpoint with cache_control honored; deselected by default in CI",
     "diagnostic: diagnostic scaffold tests (cache investigation etc.); opt-in with '-m diagnostic'",
     "requires_api_key: tests that call a third-party API with a real key (e.g. search MCP providers); skipped when the env var is unset, never auto-run in CI",
+    "real_ssrf_guard: tests that exercise the SSRF guard with real loopback/private addresses (skips the test-suite bypass that lets other tests use idp.example.com without DNS)",
 ]
 
 [tool.hatch.build.targets.wheel]
