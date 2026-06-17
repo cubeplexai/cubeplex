@@ -29,3 +29,4 @@ export { useMcpToolRegistryStore, type McpToolRegistryStore } from './mcpToolReg
 export { useSkillsStore, type SkillsState } from './skillsStore'
 export { useAdminSkillsStore, type AdminSkillsState } from './adminSkillsStore'
 export { useMemoryEventStore } from './memoryEventStore'
+export { useTopicStore, type TopicStore, type TopicWithParticipants } from './topicStore'
