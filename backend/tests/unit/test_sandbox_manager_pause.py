@@ -622,7 +622,7 @@ async def test_resume_record_exception_leaves_row_resuming_for_reconciler(
 
 
 @pytest.mark.asyncio
-async def test_kill_record_swallows_kill_failure_and_marks_terminated(
+async def test_kill_record_marks_kill_pending_on_failure(
     mock_encryption_backend: Any,
 ) -> None:
     factory, session = _make_session_factory()
@@ -632,12 +632,14 @@ async def test_kill_record_swallows_kill_failure_and_marks_terminated(
     record = _make_record()
     scoped = MagicMock()
     scoped.mark_terminated = AsyncMock()
+    scoped.mark_kill_pending = AsyncMock()
 
     with patch("cubebox.sandbox.manager.opensandbox") as op:
         op.Sandbox.connect = AsyncMock(side_effect=RuntimeError("gone already"))
         await mgr._kill_record(session, scoped, record, conn_config=MagicMock())
 
-    scoped.mark_terminated.assert_awaited_once_with(record.id)
+    scoped.mark_kill_pending.assert_awaited_once_with(record.id)
+    scoped.mark_terminated.assert_not_awaited()
 
 
 # -------------------------------------------------------------------------

@@ -1345,8 +1345,13 @@ class SandboxManager:
         conn_config: ConnectionConfig,
     ) -> None:
         """Kill + revoke egress + mark terminated. Shared by cleanup_expired,
-        pause_idle fallback, and reconciler paths."""
+        pause_idle fallback, and reconciler paths.
+
+        On kill failure, marks the row ``kill_pending`` so the next cleanup loop
+        retries instead of orphaning the provider sandbox.
+        """
         raw: opensandbox.Sandbox | None = None
+        killed = False
         try:
             raw = await opensandbox.Sandbox.connect(
                 record.sandbox_id,
@@ -1355,15 +1360,14 @@ class SandboxManager:
             )
             await raw.kill()
             logger.info("Killed sandbox {}", record.sandbox_id)
+            killed = True
         except Exception as exc:
             logger.warning(
-                "Failed to kill sandbox {} (may already be gone): {}",
+                "Failed to kill sandbox {} (will retry on next loop): {}",
                 record.sandbox_id,
                 exc,
             )
         finally:
-            # G8: pair connect with close on every path so a kill that
-            # raises mid-flight doesn't leak the httpx transport.
             if raw is not None:
                 try:
                     await raw.close()
@@ -1373,9 +1377,12 @@ class SandboxManager:
                         record.sandbox_id,
                         exc,
                     )
-        await scoped_repo.mark_terminated(record.id)
-        if self._exchange_host:
-            await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+        if killed:
+            await scoped_repo.mark_terminated(record.id)
+            if self._exchange_host:
+                await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+        else:
+            await scoped_repo.mark_kill_pending(record.id)
 
 
 # ---------------------------------------------------------------------------

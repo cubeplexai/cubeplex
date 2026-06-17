@@ -15,7 +15,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
 
     model = UserSandbox
 
-    _ACTIVE_STATUSES = ("provisioning", "running")
+    _ACTIVE_STATUSES = ("provisioning", "running", "kill_pending")
 
     async def create(
         self,
@@ -139,6 +139,13 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         record = await self.get(record_id)
         if record:
             record.status = "terminated"
+            await self.session.commit()
+
+    async def mark_kill_pending(self, record_id: str) -> None:
+        """Mark a sandbox as kill_pending (provider kill failed, retry later)."""
+        record = await self.get(record_id)
+        if record:
+            record.status = "kill_pending"
             await self.session.commit()
 
     async def mark_failed_from_transient(self, record_id: str) -> bool:
