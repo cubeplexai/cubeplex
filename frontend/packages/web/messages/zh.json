@@ -1789,6 +1789,16 @@
       "title": "删除这个 bot 绑定？",
       "body": "会删除凭据并断开当前 long-connection。飞书侧的应用本身不动。",
       "confirmGate": "输入 {botName} 以确认"
+    },
+    "link": {
+      "title": "绑定 IM 账号",
+      "verifying": "正在验证绑定链接...",
+      "success": "你的 {platform} 账号已成功绑定到 cubebox。",
+      "invalidToken": "链接无效或已过期，请在 IM 中重新发送 /link 命令。",
+      "emailMismatch": "请使用 /link 命令中指定的邮箱登录。",
+      "notMember": "你不是该工作区的成员，请联系工作区管理员将你添加后重试。",
+      "error": "绑定失败，请重试。",
+      "goToApp": "进入 cubebox"
     }
   }
 }
