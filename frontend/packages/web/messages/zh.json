@@ -66,7 +66,19 @@
     "leaveGroup": "退出群聊",
     "sandboxDedicated": "独立沙盒",
     "sandboxCreator": "群主沙盒",
-    "sandboxWarning": "其他成员的操作将在你的沙盒中执行。"
+    "sandboxWarning": "其他成员的操作将在你的沙盒中执行。",
+    "createDialog": {
+      "title": "新建群聊",
+      "titleLabel": "标题",
+      "titlePlaceholder": "项目同步、设计评审…",
+      "membersLabel": "邀请成员",
+      "membersEmpty": "没有其他工作区成员可邀请。",
+      "sandboxLabel": "沙盒",
+      "cancel": "取消",
+      "create": "创建",
+      "creating": "创建中…",
+      "createError": "创建群聊失败。"
+    }
   },
   "time": {
     "justNow": "刚刚",
