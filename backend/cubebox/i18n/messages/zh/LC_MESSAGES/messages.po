@@ -8,6 +8,9 @@ msgstr ""
 msgid "login_bad_credentials"
 msgstr "邮箱或密码错误"
 
+msgid "login_sso_required"
+msgstr "你的组织要求使用 SSO 登录。"
+
 msgid "register_user_already_exists"
 msgstr "该邮箱已注册"
 

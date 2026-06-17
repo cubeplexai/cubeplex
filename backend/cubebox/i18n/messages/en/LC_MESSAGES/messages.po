@@ -8,6 +8,9 @@ msgstr ""
 msgid "login_bad_credentials"
 msgstr "Invalid email or password"
 
+msgid "login_sso_required"
+msgstr "Your organization requires SSO login."
+
 msgid "register_user_already_exists"
 msgstr "An account with this email already exists"
 

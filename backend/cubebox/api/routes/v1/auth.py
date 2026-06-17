@@ -66,6 +66,7 @@ async def login(
     credentials: Annotated[OAuth2PasswordRequestForm, Depends()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
     strategy: Annotated[Strategy[User, str], Depends(auth_backend.get_strategy)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     locale: Annotated[str, Depends(get_locale)],
 ) -> Response:
     _t = get_translator(locale)
@@ -78,6 +79,46 @@ async def login(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_t("login_bad_credentials"),
         )
+
+    # SSO enforcement: if the user belongs to any org with an active SSO
+    # connection, block password login and point them at the org's SSO entry.
+    # Testing-mode SSO connections do NOT block, so admins can validate a new
+    # connection without locking out password users.
+    from sqlalchemy import select
+
+    from cubebox.models import Organization, OrganizationMembership
+    from cubebox.models.sso_connection import SSOConnection
+
+    sso_row = (
+        await session.execute(
+            select(SSOConnection, Organization)
+            .join(
+                OrganizationMembership,
+                OrganizationMembership.org_id == SSOConnection.org_id,  # type: ignore[arg-type]
+            )
+            .join(
+                Organization,
+                Organization.id == SSOConnection.org_id,  # type: ignore[arg-type]
+            )
+            .where(
+                OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+                SSOConnection.status == "active",  # type: ignore[arg-type]
+            )
+            .limit(1)
+        )
+    ).first()
+    if sso_row is not None:
+        _sso_conn, org = sso_row
+        slug = org.slug or ""
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "sso_required",
+                "message": _t("login_sso_required"),
+                "login_url": f"/login/{slug}",
+            },
+        )
+
     return await auth_backend.login(strategy, user)
 
 
