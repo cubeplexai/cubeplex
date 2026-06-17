@@ -75,6 +75,7 @@ class DiscordGateway:
             # Store session_maker and account_id on bot for slash commands
             bot._cubebox_session_maker = session_maker  # type: ignore[attr-defined]
             bot._cubebox_account_id = account.id  # type: ignore[attr-defined]
+            bot._cubebox_workspace_id = account.workspace_id  # type: ignore[attr-defined]
             from cubebox.im.discord.commands import register_commands
 
             await register_commands(bot)
