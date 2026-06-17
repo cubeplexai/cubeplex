@@ -8,6 +8,12 @@ import { ApiError, createApiClient, confirmImLink } from '@cubebox/core'
 
 type Status = 'verifying' | 'success' | 'error'
 
+const CODE_TO_KEY: Record<string, string> = {
+  invalid_token: 'invalidToken',
+  email_mismatch: 'emailMismatch',
+  not_member: 'notMember',
+}
+
 export function ImLinkPage() {
   const t = useTranslations('im.link')
   const searchParams = useSearchParams()
@@ -37,7 +43,8 @@ export function ImLinkPage() {
           return
         }
         setStatus('error')
-        setErrorMsg(err instanceof ApiError ? err.message : t('error'))
+        const key = err instanceof ApiError && err.code ? CODE_TO_KEY[err.code] : undefined
+        setErrorMsg(key ? t(key) : t('error'))
       })
   }, [client, token])
 

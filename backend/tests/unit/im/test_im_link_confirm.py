@@ -57,7 +57,7 @@ async def test_email_mismatch_rejected() -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post("/api/v1/im/link/confirm", json={"token": token})
     assert resp.status_code == 403
-    assert "chris@example.com" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "email_mismatch"
 
 
 @pytest.mark.anyio
@@ -76,7 +76,7 @@ async def test_not_workspace_member_rejected() -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
             resp = await ac.post("/api/v1/im/link/confirm", json={"token": token})
     assert resp.status_code == 403
-    assert "管理员" in resp.json()["detail"]
+    assert resp.json()["detail"]["code"] == "not_member"
 
 
 @pytest.mark.anyio
