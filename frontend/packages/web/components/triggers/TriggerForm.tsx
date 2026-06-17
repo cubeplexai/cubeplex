@@ -107,7 +107,7 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
   const canSubmit = name.trim() && webhookSecret && promptTemplate && runAsUserId
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+    <DialogPrimitive.Root open={open} disablePointerDismissal onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop
           className={cn(
