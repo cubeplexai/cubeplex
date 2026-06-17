@@ -17,6 +17,7 @@ import type { Message, SubagentSummary } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
+import { SenderBadge } from './SenderBadge'
 import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
@@ -405,6 +406,12 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div key={msg.id} id={`msg-${idx + 1}`}>
             {msg.role === 'user' && msg.metadata?.synthetic !== true && (
               <>
+                {msg.metadata?.sender_display_name && msg.metadata?.sender_user_id && (
+                  <SenderBadge
+                    userId={msg.metadata.sender_user_id}
+                    displayName={msg.metadata.sender_display_name}
+                  />
+                )}
                 {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
                   <MessageAttachments
                     attachments={msg.metadata.attachments}
