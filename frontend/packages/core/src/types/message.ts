@@ -69,6 +69,10 @@ interface MessageBase {
     // Never rendered as a user bubble; synthetic_source is trace-only.
     synthetic?: boolean
     synthetic_source?: string
+    // Set on user messages sent into a group-chat conversation (is_group_chat=True).
+    // Frontend uses presence of `sender_display_name` to render the SenderBadge.
+    sender_user_id?: string
+    sender_display_name?: string
   }
 }
 
