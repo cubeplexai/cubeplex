@@ -78,6 +78,23 @@
       "create": "Create",
       "creating": "Creating…",
       "createError": "Failed to create group chat."
+    },
+    "memberPanel": {
+      "openLabel": "Show participants",
+      "title": "{count} participants",
+      "invite": "Invite",
+      "inviteHeader": "Invite members",
+      "inviteEmpty": "No other workspace members to invite.",
+      "confirmInvite": "Invite",
+      "inviting": "Inviting…",
+      "inviteError": "Failed to invite members.",
+      "cancel": "Cancel",
+      "promote": "Promote to owner",
+      "promoteError": "Failed to promote member.",
+      "removeError": "Failed to remove member.",
+      "leaving": "Leaving…",
+      "leaveError": "Failed to leave group.",
+      "soleOwnerHint": "Promote another member to owner first."
     }
   },
   "time": {
