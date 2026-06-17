@@ -27,7 +27,22 @@
     "resetting": "Resetting…",
     "passwordResetSuccess": "Password updated",
     "redirectingToLogin": "Redirecting to sign in…",
-    "requestNewLink": "Request a new link"
+    "requestNewLink": "Request a new link",
+    "loginWithGoogle": "Login with Google",
+    "loginWithSSO": "SSO Login",
+    "googleNotConfigured": "Google login is not configured.",
+    "orgSlugPlaceholder": "Organization identifier (e.g. acme)",
+    "redirecting": "Redirecting…",
+    "continue": "Continue",
+    "continueToSSO": "Continue to SSO",
+    "back": "Back",
+    "or": "or",
+    "loading": "Loading…",
+    "orgLoginTitle": "Login to {orgName}",
+    "orgNotFound": "Organization not found",
+    "orgNotFoundHint": "We couldn't find an organization with that identifier.",
+    "backToGeneralLogin": "Back to general login",
+    "notAMember": "Not a member?"
   },
   "sidebar": {
     "newChat": "New Chat",
