@@ -38,7 +38,7 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
 
     creator_user_id: str = Field(foreign_key="users.id", max_length=20)
     topic_id: str | None = Field(
-        default=None, foreign_key="topics.id", max_length=20, nullable=True, index=True
+        default=None, foreign_key="topics.id", max_length=20, nullable=True
     )
     title: str = Field(max_length=255)
     has_messages: bool = Field(default=False, index=True)

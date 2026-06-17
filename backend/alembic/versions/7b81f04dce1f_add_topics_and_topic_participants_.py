@@ -78,9 +78,6 @@ def upgrade() -> None:
         sa.Column('topic_id', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=True),
     )
     op.create_index('ix_conversations_topic', 'conversations', ['topic_id'], unique=False)
-    op.create_index(
-        op.f('ix_conversations_topic_id'), 'conversations', ['topic_id'], unique=False
-    )
     op.create_foreign_key(
         'fk_conversations_topic_id_topics',
         'conversations',
@@ -93,7 +90,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_constraint('fk_conversations_topic_id_topics', 'conversations', type_='foreignkey')
-    op.drop_index(op.f('ix_conversations_topic_id'), table_name='conversations')
     op.drop_index('ix_conversations_topic', table_name='conversations')
     op.drop_column('conversations', 'topic_id')
 
