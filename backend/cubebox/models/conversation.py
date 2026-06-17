@@ -33,9 +33,13 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
             "deleted_at",
             postgresql_where=text("deleted_at IS NOT NULL"),
         ),
+        Index("ix_conversations_topic", "topic_id"),
     )
 
     creator_user_id: str = Field(foreign_key="users.id", max_length=20)
+    topic_id: str | None = Field(
+        default=None, foreign_key="topics.id", max_length=20, nullable=True, index=True
+    )
     title: str = Field(max_length=255)
     has_messages: bool = Field(default=False, index=True)
     is_pinned: bool = Field(default=False)
