@@ -7,8 +7,9 @@ import Link from 'next/link'
 import { ApiError, createApiClient, confirmImLink } from '@cubebox/core'
 
 type Status = 'verifying' | 'success' | 'error'
+type ErrorKey = 'invalidToken' | 'emailMismatch' | 'notMember' | 'error'
 
-const CODE_TO_KEY: Record<string, string> = {
+const CODE_TO_KEY: Record<string, ErrorKey> = {
   invalid_token: 'invalidToken',
   email_mismatch: 'emailMismatch',
   not_member: 'notMember',
