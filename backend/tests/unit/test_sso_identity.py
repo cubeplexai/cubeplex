@@ -82,6 +82,45 @@ async def test_resolve_links_existing_user_by_verified_email(
 
 
 @pytest.mark.asyncio
+async def test_resolve_rejects_cross_org_takeover_via_email_match(
+    sso_session: AsyncSession,
+    sso_user_manager: UserManager,
+    make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
+) -> None:
+    """Security regression: existing user with verified email is NOT
+    auto-linked to an enterprise SSO of an org they don't belong to under
+    invite_only provisioning. Without this guard, an attacker who runs
+    any registered IdP and claims a victim's email gains access to the
+    victim's account."""
+    # Victim lives in Org A only.
+    _, victim = await make_org_with_user(email="victim@corp.com")
+    # Attacker controls SSO connection in Org B (different org, invite_only).
+    org_b, _attacker_admin = await make_org_with_user(email="attacker@evil.com")
+    sso_b = SSOConnection(
+        org_id=org_b.id,
+        protocol="oidc",
+        display_name="Evil SSO",
+        status="active",
+        provisioning="invite_only",
+        config={},
+    )
+    sso_session.add(sso_b)
+    await sso_session.commit()
+
+    with pytest.raises(SSOProvisioningDenied):
+        await resolve_identity(
+            sso_session,
+            user_manager=sso_user_manager,
+            provider_type="oidc_sso",
+            provider_id=sso_b.id,
+            external_id="evil-sub-1",
+            external_email="victim@corp.com",
+            email_verified=True,
+            sso_connection=sso_b,
+        )
+
+
+@pytest.mark.asyncio
 async def test_resolve_returns_existing_link(
     sso_session: AsyncSession,
     sso_user_manager: UserManager,

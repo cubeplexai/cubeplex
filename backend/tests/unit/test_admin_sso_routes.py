@@ -319,7 +319,7 @@ async def test_delete_sso_blocked_when_active(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,
@@ -343,7 +343,7 @@ async def test_delete_sso_succeeds_when_inactive(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,
@@ -372,7 +372,7 @@ async def test_activate_from_testing_to_active(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,
@@ -391,7 +391,7 @@ async def test_activate_rejects_already_active(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,
@@ -414,7 +414,7 @@ async def test_deactivate_from_active_to_inactive(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,
@@ -433,7 +433,7 @@ async def test_deactivate_rejects_inactive(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,
@@ -458,7 +458,7 @@ async def test_list_identities_paginates_and_unlink_deletes(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,
@@ -498,7 +498,7 @@ async def test_unlink_identity_404_when_missing(
     _, user = admin_setup
     created = await admin_sso.create_sso(
         admin_sso.SSOConnectionCreate(
-            protocol="oidc", display_name="Acme", config={"client_id": "a"}
+            protocol="oidc", display_name="Acme", config={"client_id": "a"}, client_secret="s3cr3t"
         ),
         _make_request(fernet_backend),
         user,

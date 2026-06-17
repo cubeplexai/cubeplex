@@ -146,6 +146,14 @@ async def exchange_code(
         except JoseError as exc:
             raise OIDCValidationError(f"id_token_invalid: {exc}") from exc
 
+        # Start from the signed ID-token claims. The userinfo endpoint
+        # response is NOT signed; if we replaced claims with it wholesale,
+        # an IdP whose ID token says email_verified=true would silently
+        # become email_verified=false (or vice versa) based on whatever
+        # the userinfo body — or a MITM of the userinfo TLS — returns.
+        # So userinfo only augments fields the ID token didn't carry; the
+        # security-sensitive claims (sub, email, email_verified, aud, iss)
+        # never get overwritten.
         userinfo: dict[str, Any] = dict(claims)
         if cfg.userinfo_endpoint:
             access_token = token_data["access_token"]
@@ -157,7 +165,8 @@ async def exchange_code(
             ui = userinfo_resp.json()
             if ui.get("sub") != claims["sub"]:
                 raise OIDCValidationError("userinfo_sub_mismatch")
-            userinfo = ui
+            for key, value in ui.items():
+                userinfo.setdefault(key, value)
 
     return OIDCUserInfo(
         sub=str(userinfo.get("sub", "")),

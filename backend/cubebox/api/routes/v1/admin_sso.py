@@ -176,7 +176,13 @@ async def delete_sso(
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """Delete the SSO connection. Refused while ``status == "active"``."""
+    """Delete the SSO connection. Refused while ``status == "active"``.
+
+    Also drops the linked credential vault row so we don't leak an
+    encrypted client_secret with no owning connection.
+    """
+    from cubebox.repositories.credential import CredentialRepository
+
     org_id = await resolve_unambiguous_admin_org_id(user, session)
     repo = SSOConnectionRepository(session, org_id=org_id)
     conn = await repo.get_by_id(sso_id)
@@ -187,7 +193,11 @@ async def delete_sso(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "deactivate_before_delete"},
         )
+    credential_id = conn.credential_id
     await repo.delete(sso_id)
+    if credential_id is not None:
+        cred_repo = CredentialRepository(session, org_id=org_id)
+        await cred_repo.delete(credential_id)
 
 
 @router.post("/{sso_id}/activate", response_model=SSOConnectionResponse)
@@ -206,6 +216,13 @@ async def activate_sso(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "invalid_status_transition"},
+        )
+    if conn.protocol == "oidc" and conn.credential_id is None:
+        # Without a client_secret the first SSO callback would 500 on
+        # _get_client_secret. Catch this here instead.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "client_secret_required_for_oidc"},
         )
     conn.status = "active"
     conn = await repo.update(conn)
@@ -280,9 +297,13 @@ async def unlink_identity(
     if conn is None:
         raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
     eid_repo = ExternalIdentityRepository(session)
-    deleted = await eid_repo.delete(eid)
-    if not deleted:
+    # Look up the identity first and verify it belongs to THIS sso_id.
+    # Without this guard, an org-A admin could DELETE any ExternalIdentity
+    # by id (including org-B's identity rows), breaking other orgs' SSO.
+    eid_row = await eid_repo.get_by_id(eid)
+    if eid_row is None or eid_row.provider_id != sso_id:
         raise HTTPException(status_code=404, detail={"code": "identity_not_found"})
+    await eid_repo.delete(eid)
 
 
 @router.post("/discover-oidc", response_model=OIDCDiscoveryResponse)
