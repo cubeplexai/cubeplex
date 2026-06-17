@@ -265,8 +265,7 @@ class TopicRepository(ScopedRepository[Topic]):
             role="owner",
         )
         self.session.add(owner)
-        await self.session.commit()
-        await self.session.refresh(topic)
+        await self.session.flush()
         return topic
 
     async def add_participants(
@@ -288,14 +287,22 @@ class TopicRepository(ScopedRepository[Topic]):
                 f"(current: {current_count})"
             )
 
+        from cubebox.repositories import MembershipRepository
+
+        membership_repo = MembershipRepository(self.session)
+        for uid in user_ids:
+            role = await membership_repo.get_role(
+                user_id=uid, workspace_id=self.workspace_id
+            )
+            if role is None:
+                raise ValueError(f"User {uid} is not a member of this workspace")
+
         participants: list[TopicParticipant] = []
         for uid in user_ids:
             p = TopicParticipant(topic_id=topic_id, user_id=uid, role="member")
             self.session.add(p)
             participants.append(p)
-        await self.session.commit()
-        for p in participants:
-            await self.session.refresh(p)
+        await self.session.flush()
         return participants
 
     async def remove_participant(self, topic_id: str, user_id: str) -> None:
@@ -550,6 +557,42 @@ def _scoped_select(self) -> Any:
 
 Add `select` to the imports at the top if not already present (it's already imported from sqlalchemy).
 
+- [ ] **Step 3b: Fix list_all count query to use _scoped_select**
+
+The `list_all` method in `conversation.py` has a separate `count_stmt` (around line 72) that hardcodes `creator_user_id == self.user_id`. After the `_scoped_select` change, this count diverges from the data query — topic conversations appear in results but not in the total. Fix by deriving the count from `_scoped_select`:
+
+```python
+count_stmt = (
+    select(func.count())
+    .select_from(
+        self._scoped_select()
+        .where(cast(Any, Conversation.has_messages).is_(True))
+        .subquery()
+    )
+)
+```
+
+Also check `update_title_if_current` (around line 109) — it hardcodes `creator_user_id == self.user_id` in a raw UPDATE. For topic conversations where a non-creator participant sends the first message, auto-title generation silently fails. Add topic-participant OR logic to the WHERE clause (same pattern as `_scoped_select`).
+
+- [ ] **Step 3c: Add topic_id to existing _serialize_conversation in conversations.py**
+
+In `backend/cubebox/api/routes/v1/conversations.py`, find `_serialize_conversation` (around line 64). Add `"topic_id": conv.topic_id` to the returned dict. Without this, the main conversation list endpoint omits `topic_id` and the frontend cannot group conversations under topics.
+
+- [ ] **Step 3d: Add topic-owner-only enforcement on conversation PATCH/DELETE**
+
+The spec's access control table says: for topic conversations, "Delete/rename conversation → Topic owner" (not any participant). The existing conversation PATCH (rename) and DELETE endpoints only check `creator_user_id`. For conversations with a `topic_id`, add a check: load the topic's participant record for the current user, verify `role == "owner"`. Without this, any participant can rename or delete group chat conversations.
+
+```python
+# In the rename/delete handlers, after loading the conversation:
+if conversation.topic_id is not None:
+    topic_repo = TopicRepository(session, ...)
+    participant = await topic_repo.get_participant(
+        conversation.topic_id, ctx.user.id
+    )
+    if participant is None or participant.role != "owner":
+        raise HTTPException(403, "Only topic owner can modify conversations")
+```
+
 - [ ] **Step 4: Verify existing conversation tests still pass**
 
 Run: `cd backend && uv run pytest tests/e2e/test_conversations.py -v -x`
@@ -632,7 +675,9 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.deps import RequestContext, get_session, require_member
+from cubebox.auth.context import RequestContext
+from cubebox.auth.dependencies import require_member
+from cubebox.db.session import get_session
 from cubebox.api.schemas.ws_topics import (
     TopicConversationCreateRequest,
     TopicCreateRequest,
@@ -1392,6 +1437,8 @@ class RunContext:
     is_group_chat: bool = False
     participant_ids: list[str] | None = None
     sender_display_name: str | None = None
+    sandbox_mode: str | None = None
+    topic_creator_user_id: str | None = None
 ```
 
 - [ ] **Step 2: Populate RunContext in send_message**
@@ -1415,6 +1462,9 @@ with:
     participant_ids: list[str] | None = None
     sender_display_name: str | None = None
 
+    sandbox_mode: str | None = None
+    topic_creator_user_id: str | None = None
+
     if topic_id is not None:
         from cubebox.repositories.topic import TopicRepository
 
@@ -1425,9 +1475,13 @@ with:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user.id,
             )
+            topic_obj = await topic_repo.get(topic_id)
             participants = await topic_repo.list_participants(topic_id)
             participant_ids = [p.user_id for p in participants]
             is_group_chat = len(participants) > 1
+            if topic_obj:
+                sandbox_mode = topic_obj.sandbox_mode
+                topic_creator_user_id = topic_obj.creator_user_id
 
         if is_group_chat:
             sender_display_name = ctx.user.display_name or ctx.user.email
@@ -1440,6 +1494,8 @@ with:
         is_group_chat=is_group_chat,
         participant_ids=participant_ids,
         sender_display_name=sender_display_name,
+        sandbox_mode=sandbox_mode,
+        topic_creator_user_id=topic_creator_user_id,
     )
 ```
 
@@ -1551,28 +1607,17 @@ In `run_manager.py` `_execute_run`, find the `LazySandbox` construction around l
                         )
 ```
 
-Replace with group-chat-aware resolution:
+Replace with group-chat-aware resolution. Use `sandbox_mode` from RunContext (added in Step 1) to avoid an extra DB query:
 
 ```python
                         sandbox_user_id = ctx.user_id
-                        if ctx.is_group_chat and ctx.topic_id:
-                            from cubebox.db.engine import (
-                                async_session_maker as _sbx_session_maker,
-                            )
-                            from cubebox.repositories.topic import TopicRepository
-
-                            async with _sbx_session_maker() as _sbx_session:
-                                _topic_repo = TopicRepository(
-                                    _sbx_session,
-                                    org_id=ctx.org_id,
-                                    workspace_id=ctx.workspace_id,
-                                    user_id=ctx.user_id,
-                                )
-                                _topic = await _topic_repo.get(ctx.topic_id)
-                                if _topic and _topic.sandbox_mode == "creator":
-                                    sandbox_user_id = _topic.creator_user_id
-                                elif _topic and _topic.sandbox_mode == "dedicated":
-                                    sandbox_user_id = ctx.topic_id
+                        if ctx.is_group_chat and ctx.sandbox_mode == "creator":
+                            sandbox_user_id = ctx.topic_creator_user_id
+                        # For dedicated mode: the topic creator owns the sandbox
+                        # on behalf of the group. We use creator_user_id (not
+                        # topic_id) because UserSandbox.user_id is FK → users.id.
+                        elif ctx.is_group_chat and ctx.sandbox_mode == "dedicated":
+                            sandbox_user_id = ctx.topic_creator_user_id
 
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
@@ -1584,11 +1629,25 @@ Replace with group-chat-aware resolution:
                         )
 ```
 
-This maps: `dedicated` → uses `topic_id` as the user_id key (creating a topic-specific sandbox), `creator` → uses the topic creator's user_id (sharing their sandbox). Non-group-chat conversations are unchanged.
+**Important:** `UserSandbox.user_id` has `foreign_key="users.id"` — passing a `topic_id` string would cause an IntegrityError. For dedicated mode, use the topic creator's `user_id` as the sandbox owner. The sandbox is still effectively topic-scoped because only group chat runs (routed through this creator's sandbox) use it. If true per-topic sandbox isolation is needed later (separate from any user), that requires a schema change to `UserSandbox` (add a nullable `topic_id` column as an alternative scoping key).
 
-Note: `LazySandbox` uses `user_id` as a keying parameter for `get_or_create`. Using `topic_id` as the key creates a sandbox bound to the topic, not any individual user. Verify this works with the `SandboxManager.get_or_create` signature — if it does workspace+user scoping, `topic_id` as user_id will create a dedicated scope.
+- [ ] **Step 6b: Apply the same sandbox resolution in `_resume_run`**
 
-Apply the same pattern in `_resume_run` (around line 3498+) which mirrors `_execute_run`.
+`_resume_run` (around line 3498+) mirrors `_execute_run` and has its own `LazySandbox` construction. Apply the identical `sandbox_user_id` resolution logic from Step 6 above.
+
+Also in `_resume_run`, find the memory snapshot call (mirrors `_run_cubepi_path`). Add the same `is_group_chat` guard from Step 4 so group chat resumes don't inject personal memory.
+
+- [ ] **Step 6c: Populate RunContext topic fields in HITL resume endpoints**
+
+`conversations.py` constructs `RunContext` in **four** places, not just `send_message`. The other three are:
+
+1. `steer_active_run` (~line 1252) — steering messages go through the existing run's context, no separate RunContext needed.
+2. `submit_sandbox_confirm` (~line 1445) — constructs a fresh `RunContext` for the resume.
+3. `submit_ask_user_answer` (~line 1521) — constructs a fresh `RunContext` for the resume.
+
+For (2) and (3), add the same topic-resolution block from Step 2: load the conversation's `topic_id`, query `TopicRepository` for participants/sandbox_mode/creator, populate all topic fields on `RunContext`. Without this, a resumed run after HITL in a group chat would have `is_group_chat=False`, wrong sandbox resolution, and no sender attribution.
+
+Also add participant validation: when `is_group_chat=True`, verify that `ctx.user.id IN participant_ids` before allowing the HITL response. This implements the spec's "any participant can respond" rule while preventing non-participants from answering.
 
 - [ ] **Step 7: Verify existing tests pass**
 
@@ -1607,8 +1666,9 @@ feat(runtime): RunContext topic fields, sender attribution, memory isolation, sa
 RunContext gains topic_id, is_group_chat, participant_ids,
 sender_display_name. Group chat messages get [Name]: prefix for model,
 sender metadata in JSONB for frontend. Personal memory skipped when
-is_group_chat. Steering messages also prefixed. Sandbox resolves by
-topic_id (dedicated) or creator_user_id (creator mode).
+is_group_chat. Steering messages also prefixed. HITL resume endpoints
+populate topic fields. Sandbox resolves by topic creator_user_id for
+both dedicated and creator modes (UserSandbox.user_id FK → users.id).
 EOF
 )"
 ```
@@ -1690,15 +1750,15 @@ export async function createTopic(
   client: ApiClient,
   body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
 ): Promise<TopicCreateResponse> {
-  const res = await client.post('/topics', body)
-  return res.data
+  const res = await client.post('/api/v1/topics', body)
+  return await res.json()
 }
 
 export async function listTopics(
   client: ApiClient,
 ): Promise<{ items: Topic[] }> {
-  const res = await client.get('/topics')
-  return res.data
+  const res = await client.get('/api/v1/topics')
+  return await res.json()
 }
 
 export async function getTopic(
@@ -1709,8 +1769,8 @@ export async function getTopic(
   participants: TopicParticipant[]
   conversations: { id: string; title: string; topic_id: string }[]
 }> {
-  const res = await client.get(`/topics/${topicId}`)
-  return res.data
+  const res = await client.get(`/api/v1/topics/${topicId}`)
+  return await res.json()
 }
 
 export async function updateTopic(
@@ -1718,15 +1778,15 @@ export async function updateTopic(
   topicId: string,
   body: { title?: string },
 ): Promise<{ topic: Topic }> {
-  const res = await client.patch(`/topics/${topicId}`, body)
-  return res.data
+  const res = await client.patch(`/api/v1/topics/${topicId}`, body)
+  return await res.json()
 }
 
 export async function deleteTopic(
   client: ApiClient,
   topicId: string,
 ): Promise<void> {
-  await client.delete(`/topics/${topicId}`)
+  await client.del(`/api/v1/topics/${topicId}`)
 }
 
 export async function addTopicParticipants(
@@ -1734,10 +1794,10 @@ export async function addTopicParticipants(
   topicId: string,
   userIds: string[],
 ): Promise<{ participants: TopicParticipant[] }> {
-  const res = await client.post(`/topics/${topicId}/participants`, {
+  const res = await client.post(`/api/v1/topics/${topicId}/participants`, {
     user_ids: userIds,
   })
-  return res.data
+  return await res.json()
 }
 
 export async function removeTopicParticipant(
@@ -1745,7 +1805,7 @@ export async function removeTopicParticipant(
   topicId: string,
   userId: string,
 ): Promise<void> {
-  await client.delete(`/topics/${topicId}/participants/${userId}`)
+  await client.del(`/api/v1/topics/${topicId}/participants/${userId}`)
 }
 
 export async function updateParticipantRole(
@@ -1755,10 +1815,10 @@ export async function updateParticipantRole(
   role: 'owner' | 'member',
 ): Promise<{ participant: TopicParticipant }> {
   const res = await client.patch(
-    `/topics/${topicId}/participants/${userId}`,
+    `/api/v1/topics/${topicId}/participants/${userId}`,
     { role },
   )
-  return res.data
+  return await res.json()
 }
 
 export async function createTopicConversation(
@@ -1766,10 +1826,10 @@ export async function createTopicConversation(
   topicId: string,
   title?: string,
 ): Promise<{ conversation: { id: string; title: string; topic_id: string } }> {
-  const res = await client.post(`/topics/${topicId}/conversations`, {
+  const res = await client.post(`/api/v1/topics/${topicId}/conversations`, {
     title: title ?? null,
   })
-  return res.data
+  return await res.json()
 }
 
 export async function upgradeToTopic(
@@ -1778,10 +1838,10 @@ export async function upgradeToTopic(
   body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
 ): Promise<TopicCreateResponse> {
   const res = await client.post(
-    `/conversations/${conversationId}/upgrade-to-topic`,
+    `/api/v1/conversations/${conversationId}/upgrade-to-topic`,
     body,
   )
-  return res.data
+  return await res.json()
 }
 ```
 
