@@ -1,8 +1,10 @@
 'use client'
 
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
-import type { ImAccount } from '@cubebox/core'
+import type { ImAccount, ImIdentityLink } from '@cubebox/core'
+import { createApiClient, wsListIdentityLinks } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { DetailPanel } from '@/components/shared/DetailPanel'
@@ -20,11 +22,6 @@ interface Props {
   backLabel?: string
 }
 
-/**
- * Detail sidebar / inline panel for a single IM account. Action set is
- * driven by ``scope`` per spec §4. Workspace gets Disable/Enable +
- * Delete; admin gets Disable/Enable only.
- */
 export function ImAccountDetailPanel({
   account,
   scope,
@@ -35,6 +32,22 @@ export function ImAccountDetailPanel({
   backLabel,
 }: Props): React.ReactElement {
   const t = useTranslations('im')
+  const client = useMemo(() => createApiClient(''), [])
+  const [links, setLinks] = useState<ImIdentityLink[]>([])
+
+  const loadLinks = useCallback(async () => {
+    try {
+      const res = await wsListIdentityLinks(client, account.workspace_id, account.id)
+      setLinks(res.links)
+    } catch {
+      // silently ignore — read-only, non-critical
+    }
+  }, [client, account.workspace_id, account.id])
+
+  useEffect(() => {
+    void loadLinks()
+  }, [loadLinks])
+
   return (
     <DetailPanel
       onBack={onBack}
@@ -100,6 +113,34 @@ export function ImAccountDetailPanel({
             {' · '}
             {t('runtime.gate.rejected', { count: account.runtime.rejected_24h })}
           </p>
+        </section>
+
+        <Separator />
+
+        <section>
+          <h3 className="mb-2 text-xs uppercase text-muted-foreground">
+            {t('identityLinks.title')}
+          </h3>
+          {links.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('identityLinks.empty')}</p>
+          ) : (
+            <div className="space-y-2">
+              {links.map((link) => (
+                <div
+                  key={link.id}
+                  className="flex items-center justify-between rounded-md border px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-medium">
+                      {link.user_display_name || link.user_email}
+                    </p>
+                    <p className="truncate text-xs text-muted-foreground">{link.user_email}</p>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">{link.im_user_id}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </DetailPanel>

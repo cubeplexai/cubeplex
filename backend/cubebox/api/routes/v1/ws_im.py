@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.routes.v1._im_runtime import build_im_list_out
@@ -13,6 +14,8 @@ from cubebox.api.schemas.im_connector import (
     ConnectDiscordAccountIn,
     ConnectFeishuAccountIn,
     ConnectIMAccountIn,
+    IdentityLinkListOut,
+    IdentityLinkOut,
     IMAccountListOut,
     IMAccountOut,
     ImRuntimeStatus,
@@ -25,8 +28,9 @@ from cubebox.credentials.dependencies import (
 )
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
-from cubebox.models.im_connector import IMConnectorAccount
+from cubebox.models.im_connector import IMConnectorAccount, IMIdentityLink
 from cubebox.models.membership import Role
+from cubebox.models.user import User
 from cubebox.repositories.membership import MembershipRepository
 from cubebox.repositories.organization_membership import OrganizationMembershipRepository
 from cubebox.services.im_connector import IMConnectorService
@@ -327,3 +331,45 @@ async def enable_workspace_account(
                     exc_info=True,
                 )
     return _to_out(updated)
+
+
+@router.get(
+    "/accounts/{account_id}/identity-links",
+    response_model=IdentityLinkListOut,
+)
+async def list_identity_links(
+    workspace_id: str,
+    account_id: str,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> IdentityLinkListOut:
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    rows = (
+        await session.execute(
+            select(  # type: ignore[call-overload]
+                IMIdentityLink, User.email, User.display_name
+            )
+            .join(User, IMIdentityLink.user_id == User.id)
+            .where(
+                IMIdentityLink.account_id == account_id,
+                IMIdentityLink.workspace_id == ctx.workspace_id,
+            )
+            .order_by(IMIdentityLink.created_at.desc())  # type: ignore[attr-defined]
+        )
+    ).all()
+    from cubebox.utils.time import utc_isoformat
+
+    return IdentityLinkListOut(
+        links=[
+            IdentityLinkOut(
+                id=link.id,
+                im_user_id=link.im_user_id,
+                user_id=link.user_id,
+                user_email=email,
+                user_display_name=display_name or "",
+                created_at=utc_isoformat(link.created_at),
+            )
+            for link, email, display_name in rows
+        ]
+    )

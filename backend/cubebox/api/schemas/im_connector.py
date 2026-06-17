@@ -90,3 +90,18 @@ ConnectIMAccountIn = Annotated[
     | Annotated[ConnectDiscordAccountIn, Tag("discord")],
     Discriminator("platform"),
 ]
+
+
+class IdentityLinkOut(BaseModel):
+    """Public projection of one ``IMIdentityLink`` row."""
+
+    id: str
+    im_user_id: str
+    user_id: str
+    user_email: str
+    user_display_name: str
+    created_at: str
+
+
+class IdentityLinkListOut(BaseModel):
+    links: list[IdentityLinkOut]
