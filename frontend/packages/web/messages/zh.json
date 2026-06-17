@@ -27,7 +27,22 @@
     "resetting": "重置中…",
     "passwordResetSuccess": "密码已更新",
     "redirectingToLogin": "正在跳转到登录页…",
-    "requestNewLink": "重新发送链接"
+    "requestNewLink": "重新发送链接",
+    "loginWithGoogle": "使用 Google 登录",
+    "loginWithSSO": "SSO 登录",
+    "googleNotConfigured": "Google 登录未配置。",
+    "orgSlugPlaceholder": "组织标识（如 acme）",
+    "redirecting": "跳转中…",
+    "continue": "继续",
+    "continueToSSO": "前往 SSO 登录",
+    "back": "返回",
+    "or": "或",
+    "loading": "加载中…",
+    "orgLoginTitle": "登录到 {orgName}",
+    "orgNotFound": "未找到组织",
+    "orgNotFoundHint": "没有找到该组织标识对应的组织。",
+    "backToGeneralLogin": "返回通用登录",
+    "notAMember": "不是成员？"
   },
   "sidebar": {
     "newChat": "新建对话",
