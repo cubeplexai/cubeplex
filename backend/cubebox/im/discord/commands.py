@@ -104,10 +104,13 @@ async def _initiate_link(
     email: str,
 ) -> None:
     """Generate a link token and reply with the confirmation URL."""
+    # Defer immediately — lazy imports below can exceed Discord's 3s deadline.
+    await interaction.response.defer(ephemeral=True)
+
     account_id = getattr(bot, "_cubebox_account_id", None)
     workspace_id = getattr(bot, "_cubebox_workspace_id", None)
     if not account_id or not workspace_id:
-        await interaction.response.send_message("内部错误。", ephemeral=True)
+        await interaction.followup.send("内部错误。", ephemeral=True)
         return
 
     from cubebox.im.link import sign_link_token
@@ -124,12 +127,12 @@ async def _initiate_link(
         )
     except Exception:
         logger.warning("[Discord] sign_link_token failed", exc_info=True)
-        await interaction.response.send_message("生成绑定链接失败。", ephemeral=True)
+        await interaction.followup.send("生成绑定链接失败。", ephemeral=True)
         return
 
     base = _get_frontend_base_url()
     url = f"{base}/im-link?token={token}"
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"点击链接完成绑定：\n{url}",
         ephemeral=True,
     )
