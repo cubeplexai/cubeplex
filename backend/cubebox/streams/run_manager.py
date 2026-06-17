@@ -2989,24 +2989,38 @@ class RunManager:
         if topic_id is None:
             return
 
-        async def _do_bump() -> None:
-            from cubebox.db.engine import async_session_maker
-            from cubebox.repositories.topic import TopicRepository
+        from cubebox.db.engine import async_session_maker
+        from cubebox.repositories.topic import TopicRepository
 
-            async with async_session_maker() as bump_session:
-                bump_repo = TopicRepository(
-                    bump_session,
-                    org_id=ctx.org_id,
-                    workspace_id=ctx.workspace_id,
-                    user_id=ctx.user_id,
-                )
-                await bump_repo.bump_activity(topic_id)
-                await bump_session.commit()
+        bump_session = async_session_maker()
+
+        async def _do_bump() -> None:
+            bump_repo = TopicRepository(
+                bump_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+            )
+            await bump_repo.bump_activity(topic_id)
+            await bump_session.commit()
 
         try:
             await asyncio.wait_for(_do_bump(), timeout=5.0)
+        except (TimeoutError, asyncio.CancelledError) as exc:
+            # Forcibly invalidate the connection so a mid-COMMIT timeout
+            # doesn't leak a half-committed connection back to the pool.
+            try:
+                await bump_session.invalidate()
+            except Exception:
+                pass
+            logger.warning("Topic activity bump timed out / cancelled: {}", exc)
         except Exception as exc:
             logger.warning("Failed to bump topic activity: {}", exc)
+        finally:
+            try:
+                await bump_session.close()
+            except Exception:
+                pass
 
     @staticmethod
     def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str | None]:
@@ -3020,12 +3034,16 @@ class RunManager:
         """
         if ctx.topic_id is None:
             return ctx.user_id, None
-        if ctx.sandbox_mode == "dedicated":
+        # Default an unspecified mode to "creator" so upgraded-from-1:1
+        # topics (sandbox_mode left null at upgrade time) still share one
+        # sandbox across participants. The matching default lives in
+        # ws_sandbox._resolve_sandbox_scope so panel and run agree.
+        effective_mode = ctx.sandbox_mode or "creator"
+        if effective_mode == "dedicated":
             # Audit owner is the topic creator; the topic_id keys the row.
             return (ctx.topic_creator_user_id or ctx.user_id, ctx.topic_id)
-        if ctx.sandbox_mode == "creator":
-            return ctx.topic_creator_user_id or ctx.user_id, None
-        return ctx.user_id, None
+        # creator-mode (and the implicit default):
+        return ctx.topic_creator_user_id or ctx.user_id, None
 
     async def _execute_run(
         self,

@@ -95,20 +95,26 @@ async def _resolve_sandbox_scope(
     topic_stmt = select(
         cast(Any, Topic.sandbox_mode),
         cast(Any, Topic.creator_user_id),
-    ).where(cast(Any, Topic.id) == topic_id)
+    ).where(
+        cast(Any, Topic.id) == topic_id,
+        cast(Any, Topic.is_archived).is_(False),
+    )
     topic_row = (await session.execute(topic_stmt)).first()
     if topic_row is None:
+        # Topic missing or archived — match ConversationRepository's
+        # archived-topic hiding so sandbox files don't outlive a delete.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
     mode, topic_creator_user_id = topic_row
 
-    if mode == "dedicated":
+    # Default an unspecified mode to "creator" so every participant of an
+    # upgraded-from-1:1 topic sees the topic creator's personal sandbox —
+    # the same one the agent run mounts. A null fallback would silently
+    # route each participant to their own /workspace, defeating the topic.
+    effective_mode = mode or "creator"
+    if effective_mode == "dedicated":
         return str(topic_creator_user_id or ctx.user.id), str(topic_id)
-    if mode == "creator":
-        # All participants see the topic creator's personal sandbox —
-        # the same one the agent run mounts.
-        return str(topic_creator_user_id or ctx.user.id), None
-    # Mode unspecified — fall back to caller's personal sandbox.
-    return ctx.user.id, None
+    # creator-mode (and the implicit default): topic creator's personal sandbox.
+    return str(topic_creator_user_id or ctx.user.id), None
 
 
 @router.get("/status", response_model=SandboxStatusOut)
