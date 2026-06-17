@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from opensandbox.exceptions import SandboxApiException
 
 from cubebox.sandbox.manager import SandboxManager
 
@@ -119,3 +120,26 @@ async def test_kill_connect_failure_marks_kill_pending() -> None:
 
     repo.mark_kill_pending.assert_called_once_with(record.id)
     repo.mark_terminated.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_kill_404_marks_terminated() -> None:
+    """When kill() returns 404 (sandbox already gone), treat as successful kill."""
+    mgr = _make_manager()
+    session = MagicMock()
+    repo = AsyncMock()
+    record = _make_record()
+
+    raw = AsyncMock()
+    raw.kill = AsyncMock(
+        side_effect=SandboxApiException("Not Found", status_code=404),
+    )
+    raw.close = AsyncMock()
+
+    conn_config = mgr._build_connection_config()
+
+    with patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
+        await mgr._kill_record(session, repo, record, conn_config)
+
+    repo.mark_terminated.assert_called_once_with(record.id)
+    repo.mark_kill_pending.assert_not_called()

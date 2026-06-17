@@ -22,7 +22,12 @@ from typing import Any
 import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
-from opensandbox.exceptions import SandboxException as ProviderSandboxError
+from opensandbox.exceptions import (
+    SandboxApiException as ProviderApiError,
+)
+from opensandbox.exceptions import (
+    SandboxException as ProviderSandboxError,
+)
 from opensandbox.models.sandboxes import PVC, Volume
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -207,6 +212,27 @@ class SandboxManager:
             request_timeout=timedelta(seconds=request_timeout or self._request_timeout),
             use_server_proxy=self._use_server_proxy,
         )
+
+    async def _renew_provider_ttl(self, sandbox_id: str) -> None:
+        """Best-effort extend the provider-side expiration so the OpenSandbox
+        controller won't GC an actively-used sandbox. Non-fatal on failure."""
+        conn_config = self._build_connection_config()
+        raw: opensandbox.Sandbox | None = None
+        try:
+            raw = await opensandbox.Sandbox.connect(
+                sandbox_id,
+                connection_config=conn_config,
+                skip_health_check=True,
+            )
+            await raw.renew(timedelta(seconds=self._ttl))
+        except Exception:
+            logger.debug("Provider-side renew failed for {} (non-fatal)", sandbox_id)
+        finally:
+            if raw is not None:
+                try:
+                    await raw.close()
+                except Exception:
+                    pass
 
     def _build_user_volume(self, workspace_id: str, user_id: str) -> Volume:
         """Build a PVC Volume keyed on (workspace_id, user_id).
@@ -712,25 +738,7 @@ class SandboxManager:
                     sandbox_id, now + timedelta(seconds=self._ttl)
                 )
 
-        # Extend provider-side expiry so the OpenSandbox controller won't GC
-        # an actively-used sandbox.
-        conn_config = self._build_connection_config()
-        raw: opensandbox.Sandbox | None = None
-        try:
-            raw = await opensandbox.Sandbox.connect(
-                sandbox_id,
-                connection_config=conn_config,
-                skip_health_check=True,
-            )
-            await raw.renew(timedelta(seconds=self._ttl))
-        except Exception:
-            logger.debug("Provider-side renew failed for {} (non-fatal)", sandbox_id)
-        finally:
-            if raw is not None:
-                try:
-                    await raw.close()
-                except Exception:
-                    pass
+        await self._renew_provider_ttl(sandbox_id)
 
     async def touch_active(
         self,
@@ -759,7 +767,8 @@ class SandboxManager:
                     record.sandbox_id, datetime.now(UTC) + timedelta(seconds=self._ttl)
                 )
             self._touch_cache[record.sandbox_id] = datetime.now(UTC)
-            return True
+        await self._renew_provider_ttl(record.sandbox_id)
+        return True
 
     async def renew_lease(
         self,
@@ -956,6 +965,7 @@ class SandboxManager:
                 await repo.mark_terminated(record.id)
                 await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
                 raise
+        await self._renew_provider_ttl(record.sandbox_id)
         return backend
 
     async def _await_stable_status(
@@ -1362,11 +1372,15 @@ class SandboxManager:
             logger.info("Killed sandbox {}", record.sandbox_id)
             killed = True
         except Exception as exc:
-            logger.warning(
-                "Failed to kill sandbox {} (will retry on next loop): {}",
-                record.sandbox_id,
-                exc,
-            )
+            if isinstance(exc, ProviderApiError) and exc.status_code == 404:
+                logger.info("Sandbox {} already gone (404)", record.sandbox_id)
+                killed = True
+            else:
+                logger.warning(
+                    "Failed to kill sandbox {} (will retry on next loop): {}",
+                    record.sandbox_id,
+                    exc,
+                )
         finally:
             if raw is not None:
                 try:
