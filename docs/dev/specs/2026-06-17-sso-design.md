@@ -39,9 +39,18 @@ One active connection per organization.
   "token_endpoint": "https://acme.okta.com/oauth2/v1/token",
   "userinfo_endpoint": "https://acme.okta.com/oauth2/v1/userinfo",
   "client_id": "0oa...",
-  "scopes": ["openid", "email", "profile"]
+  "scopes": ["openid", "email", "profile"],
+  "attribute_mapping": {
+    "id": "sub",
+    "email": "email",
+    "name": "name"
+  }
 }
 ```
+
+OIDC `attribute_mapping` has sensible defaults (`sub`, `email`, `name` per
+OpenID Connect Core standard claims) so admins only need to override when the
+IdP uses non-standard claim names.
 
 **SAML config shape:**
 
@@ -51,9 +60,36 @@ One active connection per organization.
   "idp_sso_url": "https://acme.okta.com/app/.../sso/saml",
   "idp_certificate": "MIIDpDCCA...",
   "sp_entity_id": "https://cubebox.app/saml/acme",
-  "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
+  "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+  "attribute_mapping": {
+    "id": "NameID",
+    "email": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+    "name": "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"
+  }
 }
 ```
+
+SAML `attribute_mapping` is required — SAML attribute names are not
+standardized and vary between IdPs (Okta uses short names like `email`,
+Azure AD uses full URI-style names, LDAP-backed IdPs use OID URNs). The
+admin panel shows common presets per IdP vendor to reduce manual input.
+
+### Attribute mapping
+
+Both OIDC and SAML configs carry an `attribute_mapping` object that tells
+Identity Resolution how to extract cubebox-relevant fields from IdP responses:
+
+| Mapping key | Purpose | OIDC default | SAML default |
+|---|---|---|---|
+| `id` | Unique user identifier at the IdP | `sub` | `NameID` |
+| `email` | User email address | `email` | *(must configure)* |
+| `name` | Display name (optional) | `name` | *(must configure)* |
+
+Identity Resolution reads the raw IdP response (OIDC claims dict / SAML
+assertion attributes), applies the mapping, and passes the normalized
+`(id, email, name)` tuple to the find-or-create logic. If a mapped key is
+missing from the IdP response, `id` and `email` cause a login failure;
+`name` falls back to the email local part.
 
 Sensitive values (OIDC client_secret, SAML SP private key) are stored in the
 existing Credential Vault, referenced by `credential_id`.
@@ -178,10 +214,25 @@ Same as OIDC enterprise flow, except:
 
 ### Identity Resolution (shared by all flows)
 
-All SSO and social login flows converge on the same resolution logic:
+All SSO and social login flows converge on the same resolution logic.
+
+**Step 0 — Attribute mapping.** Before resolution, the raw IdP response is
+normalized via the connection's `attribute_mapping`:
+
+- OIDC: read claims dict, apply mapping (defaults: `sub` → id, `email` →
+  email, `name` → name).
+- SAML: read assertion attributes, apply mapping (no defaults — admin must
+  configure).
+- Google social: hardcoded standard claims, no mapping needed.
+
+If `id` or `email` cannot be resolved after mapping, the login fails with a
+clear error ("missing required attribute").
+
+**Step 1–2 — Find or create user:**
 
 ```
 Input: (provider_type, provider_id, external_id, external_email, claims)
+       ← all derived from the mapped attributes above
 
 1. Look up external_identities → found → sign in as linked user
 
@@ -377,10 +428,18 @@ Org Settings
    Client ID, Client Secret. Display Redirect URI for admin to copy into IdP.
 3. SAML: upload IdP Metadata XML (auto-parse) or fill manually. Display
    SP Metadata URL / ACS URL / Entity ID for admin to configure in IdP.
-4. Select provisioning: auto-create / invite-only
-5. Save → `status = "testing"`
-6. Admin clicks "Test SSO" → opens new window, runs SSO flow → success/failure feedback
-7. Admin clicks "Activate" → `status = "active"`, password login disabled for org
+4. Configure attribute mapping:
+   - OIDC: pre-filled with standard defaults (`sub`, `email`, `name`); admin
+     can override if their IdP uses non-standard claim names.
+   - SAML: required fields. The form offers vendor presets (Okta, Azure AD,
+     Google Workspace, Generic LDAP) that pre-fill common attribute URIs;
+     admin can still edit manually.
+5. Select provisioning: auto-create / invite-only
+6. Save → `status = "testing"`
+7. Admin clicks "Test SSO" → opens new window, runs SSO flow → success/failure
+   feedback. The test result page shows the raw attributes returned by the IdP
+   alongside the mapped values, so the admin can verify the mapping is correct.
+8. Admin clicks "Activate" → `status = "active"`, password login disabled for org
 
 ### Member SSO status page
 
