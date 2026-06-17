@@ -59,7 +59,6 @@ derived from participant count, not a separate flag.
 | `workspace_id` | FK → workspaces | OrgScopedMixin |
 | `creator_user_id` | FK → users | Audit: who created it |
 | `title` | str(255) | Display name |
-| `kind` | str(20) | `"group_chat"` / `"scheduled"` / `"im"` — extensible |
 | `sandbox_mode` | str(20), nullable | `"dedicated"` / `"creator"` / NULL |
 | `max_participants` | int | Default 20 |
 | `is_archived` | bool | Soft delete |
