@@ -119,6 +119,20 @@ class Topic(CubeboxBase, OrgScopedMixin, table=True):
     sandbox_mode: str | None = Field(default=None, max_length=20)
     max_participants: int = Field(default=20)
     is_archived: bool = Field(default=False)
+    # Bumped on every message insert into any child conversation. Drives
+    # sidebar ordering ("topic with the most recent message floats up").
+    # Without this column, topics rank by Topic.updated_at which only
+    # changes on metadata edits — topics would appear frozen in the sidebar
+    # after the first message. Default to created_at via Python; the DB
+    # default is a literal `now()` (Postgres) / CURRENT_TIMESTAMP (sqlite).
+    last_activity_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
+        ),
+    )
 
 
 class TopicParticipant(CubeboxBase, table=True):
@@ -397,6 +411,23 @@ class TopicRepository(ScopedRepository[Topic]):
             return None, []
         participants = await self.list_participants(topic_id)
         return topic, participants
+
+    async def list_for_sidebar(self) -> list[Topic]:
+        """Sidebar order: most recent activity first."""
+        stmt = self._scoped_select().order_by(Topic.last_activity_at.desc())
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def bump_activity(self, topic_id: str) -> None:
+        """Update last_activity_at to now. Called from the message
+        insertion path; safe to call on a topic the caller may not be
+        a participant of (system path)."""
+        stmt = (
+            update(Topic)
+            .where(Topic.id == topic_id)
+            .values(last_activity_at=datetime.now(UTC))
+        )
+        await self.session.execute(stmt)
 ```
 
 - [ ] **Step 2: Export TopicRepository**
@@ -437,17 +468,22 @@ EOF
 
 - [ ] **Step 1: Add `topic_id` column + second partial unique index**
 
-In `backend/cubebox/models/user_sandbox.py`, add to fields:
+In `backend/cubebox/models/user_sandbox.py`, add to fields. **Use `sa_column` to specify `ondelete`** — SQLModel's `foreign_key=` shorthand does NOT accept ondelete, and the default RESTRICT means any topic with a once-provisioned sandbox row becomes permanently undeletable:
 
 ```python
     topic_id: str | None = Field(
         default=None,
-        foreign_key="topics.id",
-        max_length=20,
-        nullable=True,
-        index=True,
+        sa_column=Column(
+            "topic_id",
+            String(20),
+            ForeignKey("topics.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
 ```
+
+`SET NULL` preserves the sandbox row (and audit trail of which user actually owned it) when the topic is hard-deleted; the row's status transitions on its normal GC path. Add `from sqlalchemy import Column, ForeignKey, String` to the imports.
 
 And add to `__table_args__`:
 
@@ -487,9 +523,9 @@ Index(
 
 After this, the two partial unique indexes carve the active rows into disjoint sets: personal sandboxes uniquely keyed by `user_id`; topic sandboxes uniquely keyed by `topic_id`. A user with 3 personal workspaces and a topic in one of them gets 4 distinct active rows.
 
-- [ ] **Step 2: Add topic-keyed repo lookups**
+- [ ] **Step 2: Add topic-keyed repo lookups + thread `topic_id` into `reserve()`**
 
-In `backend/cubebox/repositories/user_sandbox.py`, alongside `get_active_by_user`:
+In `backend/cubebox/repositories/user_sandbox.py`:
 
 ```python
 async def get_active_by_topic(self, topic_id: str) -> UserSandbox | None:
@@ -517,35 +553,95 @@ async def get_resumable_by_topic(self, topic_id: str) -> UserSandbox | None:
     return result.scalar_one_or_none()
 ```
 
-- [ ] **Step 3: Thread `topic_id` through LazySandbox + SandboxManager**
+**Critical: extend the existing `reserve()` method to accept and persist `topic_id`.** Without this, the partial unique `uq_user_sandbox_active_topic` is never armed — every topic reserve inserts a row with `topic_id=NULL`, the new index does nothing, and dedicated mode silently collapses to per-user mode. Find `reserve(self, *, user_id, image, ttl_seconds, ...)` and add `topic_id: str | None = None`; pass it into the `UserSandbox(...)` row constructor.
 
-In `backend/cubebox/sandbox/manager.py`, add `topic_id: str | None = None` to `LazySandbox.__init__` and store it. The manager's `get_or_create_for(...)` (or equivalent entry point) gains a `topic_id` parameter — when set, every lookup that today calls `get_active_by_user(user_id)` / `get_resumable_by_user(user_id)` instead calls the `_by_topic` variants. The `create()` path forwards `topic_id` into the row.
+- [ ] **Step 3: Thread `topic_id` through LazySandbox + SandboxManager via a single scope-aware lookup**
 
-For each callsite under `backend/cubebox/sandbox/manager.py` line 335, 361, 395, 477, 485, 731 — replace the unconditional `_by_user` call with:
+In `backend/cubebox/repositories/user_sandbox.py`, add two methods that pick the correct lookup by scope. This avoids duplicating `if topic_id is not None: ... else: ...` at every callsite (6+ today, growing):
 
 ```python
-if topic_id is not None:
-    record = await repo.get_resumable_by_topic(topic_id)
-else:
-    record = await repo.get_resumable_by_user(user_id)
+async def get_active_for_scope(
+    self, *, user_id: str, topic_id: str | None
+) -> UserSandbox | None:
+    if topic_id is not None:
+        return await self.get_active_by_topic(topic_id)
+    return await self.get_active_by_user(user_id)
+
+async def get_resumable_for_scope(
+    self, *, user_id: str, topic_id: str | None
+) -> UserSandbox | None:
+    if topic_id is not None:
+        return await self.get_resumable_by_topic(topic_id)
+    return await self.get_resumable_by_user(user_id)
 ```
 
-(Same shape for the `get_active_by_user` callsites.)
+In `backend/cubebox/sandbox/manager.py`, add `topic_id: str | None = None` to `LazySandbox.__init__` and store it. The manager's `get_or_create_for(...)` (or equivalent entry point) gains a `topic_id` parameter, threaded into:
 
-- [ ] **Step 4: Generate migration**
+1. Every lookup callsite — `repo.get_active_for_scope(user_id=..., topic_id=topic_id)` / `repo.get_resumable_for_scope(...)`. Audit: lines 335, 361, 395, 731 (and any other `_by_user` callsite — grep `_by_user` to confirm full set).
+2. The **race-loss poll** at lines 477 and 485. Today: when `reserve()` raises IntegrityError because another concurrent run won, the recovery polls `get_active_by_user(user_id)` to attach to the winner. In topic mode the winner row may have a different `user_id` (the other participant), and only its `topic_id` matches. Replace with `get_active_for_scope(user_id=..., topic_id=topic_id)` so the loser correctly attaches to the topic's winner instead of timing out with `SandboxError`.
+3. The `reserve()` invocation — forward `topic_id` so the row is inserted with the correct partitioning key (Step 2 added the parameter on the repo method).
+
+**Additional callsite missed by the original audit:** `backend/cubebox/api/routes/v1/ws_sandbox.py:53` — the `GET /ws/{ws}/sandbox` endpoint feeding the frontend sandbox panel (files / terminal / browser-live-view) still calls `repo.get_active_by_user(ctx.user.id)`. When a participant has an open topic conversation, the panel must show the *topic's* sandbox, not their personal one. Either:
+
+- Add a `?topic_id=` query parameter to the route, default to the personal sandbox when absent, and have the frontend pass the current conversation's `topic_id` when rendering the panel; or
+- Have the frontend call a new sibling route `GET /ws/{ws}/topics/{topic_id}/sandbox` for topic conversations.
+
+Pick the route-param shape (matches the scope-isolated APIs rule in AGENTS.md — the topic-scoped sandbox is a distinct resource, not a query mode on the personal one). The frontend store wiring is added in Task 8.
+
+- [ ] **Step 4: Generate migration — and HAND-EDIT the existing index predicate**
 
 ```bash
 cd backend && uv run alembic revision --autogenerate \
   -m "user_sandbox topic_id + partial unique split"
 ```
 
-Verify the autogen migration:
-- Adds `topic_id` column nullable, FK to `topics.id`
-- Adds `ix_user_sandboxes_topic_id` index
-- DROPs and re-CREATEs `uq_user_sandbox_active` with the new `topic_id IS NULL` predicate
-- CREATEs `uq_user_sandbox_active_topic`
+**Known autogen gap (this step's most important caveat):** Alembic's autogen does **not** detect predicate-only changes on partial indexes. The change from `postgresql_where=text("status IN (...)")` to `postgresql_where=text("topic_id IS NULL AND status IN (...)")` on the existing `uq_user_sandbox_active` will NOT appear in the migration output. If you ship the migration as-is, on any user who already has a personal sandbox row, creating their first dedicated topic raises `IntegrityError` because the OLD predicate (no `topic_id` filter) still fires on the second row. Tests on a clean dev DB pass; prod breaks on first contact with existing users.
 
-If autogen omits the partial predicates on either index, hand-add them — alembic's autogen does not always round-trip `postgresql_where`. The migration must NOT be a destructive replace of the existing personal-sandbox index that leaves a window of unsynced state; use `op.create_index(..., if_not_exists=False)` after `op.drop_index(...)` in one migration step.
+You MUST hand-add to the migration's `upgrade()`:
+
+```python
+def upgrade() -> None:
+    op.add_column(
+        "user_sandboxes",
+        sa.Column("topic_id", sa.String(length=20), nullable=True),
+    )
+    op.create_foreign_key(
+        "fk_user_sandboxes_topic_id",
+        "user_sandboxes", "topics",
+        ["topic_id"], ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_index(
+        "ix_user_sandboxes_topic_id",
+        "user_sandboxes", ["topic_id"],
+    )
+
+    # CRITICAL: drop and recreate the existing partial unique with the new
+    # predicate. Autogen does NOT detect predicate-only changes on partial
+    # indexes — without this, dedicated mode breaks for any user with a
+    # pre-existing personal sandbox.
+    op.drop_index("uq_user_sandbox_active", table_name="user_sandboxes")
+    op.create_index(
+        "uq_user_sandbox_active",
+        "user_sandboxes",
+        ["org_id", "workspace_id", "user_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "topic_id IS NULL AND status IN ('provisioning','running')"
+        ),
+    )
+    op.create_index(
+        "uq_user_sandbox_active_topic",
+        "user_sandboxes",
+        ["org_id", "workspace_id", "topic_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "topic_id IS NOT NULL AND status IN ('provisioning','running')"
+        ),
+    )
+```
+
+DROP + CREATE on the same partial unique runs inside the migration's single transaction; concurrent INSERTs block on the table lock briefly, no `CONCURRENTLY` needed for the small `user_sandboxes` table. Mirror the same DROPs + reverse CREATEs in `downgrade()`.
 
 - [ ] **Step 5: Run migration and verify no existing rows broke**
 
@@ -561,7 +657,35 @@ Expected: existing `user_sandboxes` rows still satisfy the new partial unique on
 In `backend/tests/unit/repositories/test_user_sandbox_repository.py` (create if absent), test that:
 - A personal sandbox (`topic_id=NULL`) and a dedicated topic sandbox (`topic_id=top-xxx`) for the same `(org_id, workspace_id, user_id)` can both be `running` simultaneously.
 - `get_active_by_topic(top-xxx)` returns the topic sandbox; `get_active_by_user(user_id)` returns the personal one.
+- `get_active_for_scope(user_id=X, topic_id=None)` and `get_active_for_scope(user_id=X, topic_id="top-xxx")` return the two distinct rows.
 - Attempting to insert a second `running` row at the same `topic_id` raises `IntegrityError`.
+- Race-loss recovery: two concurrent `reserve(topic_id="top-xxx")` calls — one succeeds, the other raises `IntegrityError`. After the loser's `get_active_for_scope(user_id=loser, topic_id="top-xxx")` it returns the winner's row (NOT None), even though `user_id` on the winning row is the other participant.
+
+- [ ] **Step 6b: SandboxManager integration test for actual isolation**
+
+Repo unit tests alone don't catch the bugs where `LazySandbox` / `SandboxManager` forget to thread `topic_id` through. Add an integration test in `backend/tests/integration/sandbox/test_topic_isolation.py`:
+
+```python
+async def test_dedicated_topic_sandbox_isolated_from_personal(
+    sandbox_manager, alice_user, workspace, topic_top
+):
+    # Alice has a personal sandbox.
+    personal = await sandbox_manager.get_or_create_for(
+        user_id=alice_user.id, workspace_id=workspace.id, topic_id=None
+    )
+    # And opens a dedicated topic.
+    topic_sb = await sandbox_manager.get_or_create_for(
+        user_id=alice_user.id, workspace_id=workspace.id, topic_id=topic_top.id
+    )
+    # They must be distinct sandbox instances.
+    assert personal.sandbox_id != topic_sb.sandbox_id
+    # And subsequent lookups must remain stable.
+    assert (await sandbox_manager.get_or_create_for(
+        user_id=alice_user.id, workspace_id=workspace.id, topic_id=topic_top.id
+    )).sandbox_id == topic_sb.sandbox_id
+```
+
+This is the gate that proves the spec's "dedicated mode = isolated environment" promise. Without it, every bug in Steps 1-3 (missed callsite, forgotten `reserve()` parameter, predicate not hand-edited) is invisible to CI.
 
 - [ ] **Step 7: Commit**
 
@@ -1063,7 +1187,7 @@ async def list_topics(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, Any]:
     repo = _topic_repo(session, ctx)
-    topics = await repo.list()
+    topics = await repo.list_for_sidebar()
     return {"items": [_serialize_topic(t) for t in topics]}
 
 
@@ -1218,6 +1342,31 @@ async def update_participant_role(
     if body.role == "owner" and target.user_id != caller_participant.user_id:
         caller_participant.role = "member"
         session.add(caller_participant)
+
+    # Block self-demotion when it would leave the topic without any owner.
+    # Without this guard a sole owner could PATCH themselves to "member" and
+    # brick the topic — nobody can rename, delete, manage members, or
+    # re-promote anyone without DB intervention.
+    if (
+        body.role == "member"
+        and target.user_id == caller_participant.user_id
+        and caller_participant.role == "owner"
+    ):
+        other_owners_stmt = (
+            select(func.count())
+            .select_from(TopicParticipant)
+            .where(
+                TopicParticipant.topic_id == topic_id,
+                TopicParticipant.role == "owner",
+                TopicParticipant.user_id != caller_participant.user_id,
+            )
+        )
+        other_owners = (await session.execute(other_owners_stmt)).scalar_one()
+        if other_owners == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot step down: promote another member to owner first",
+            )
 
     target.role = body.role
     session.add(target)
@@ -1768,7 +1917,13 @@ with:
 
 Note: `ctx.user` should have `display_name` or `email`. Check the actual User model field names and adjust.
 
-- [ ] **Step 3: Add sender prefix + metadata on user message**
+- [ ] **Step 3: Add sender metadata on user message (no content mutation)**
+
+Sender attribution is rendered at cubepi's provider boundary from message metadata (see cubepi PR + pin bump referenced in the commit history for this branch). Cubebox only writes the metadata fields; cubepi templates the visible prefix when sending to the model. This altitude lets us:
+
+- Survive name changes (the template re-renders from current `display_name` at prompt time, not from a baked-in string at write time)
+- Handle attachment-only messages (empty `content` stays empty; template omits the prefix when content is empty)
+- Avoid prompt-cache invalidation on i18n changes
 
 In `run_manager.py`, find the user message construction around line 1549:
 
@@ -1783,18 +1938,39 @@ In `run_manager.py`, find the user message construction around line 1549:
 Replace with:
 
 ```python
-            _msg_text = content
             if ctx.is_group_chat and ctx.sender_display_name:
-                _msg_text = f"[{ctx.sender_display_name}]: {content}"
                 _user_msg_metadata["sender_user_id"] = ctx.user_id
                 _user_msg_metadata["sender_display_name"] = ctx.sender_display_name
 
             _user_msg = _UserMessage(
-                content=[_TextContent(text=_msg_text)],
+                content=[_TextContent(text=content)],
                 timestamp=_time.time(),
                 metadata=_user_msg_metadata,
             )
 ```
+
+Cubebox no longer concatenates `[Name]: ` into `content`. The cubepi-side template reads `metadata.sender_display_name` and renders the prefix into the prompt at provider call time.
+
+- [ ] **Step 3b: Bump `Topic.last_activity_at` on message insert**
+
+After the user message is persisted (around the same block in `run_manager.py`), update the topic's activity timestamp so the sidebar reflects new traffic. The Topic row is in a different scope (managed by `TopicRepository`); use a fresh session to avoid cross-scope state bleeding:
+
+```python
+            if ctx.is_group_chat and ctx.topic_id is not None:
+                from cubebox.repositories.topic import TopicRepository
+
+                async with async_session_maker() as bump_session:
+                    bump_repo = TopicRepository(
+                        bump_session,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        user_id=ctx.user_id,
+                    )
+                    await bump_repo.bump_activity(ctx.topic_id)
+                    await bump_session.commit()
+```
+
+Apply the same bump in the assistant-message persistence path (after the agent's reply is recorded), so the sidebar moves the topic even when the user is idle but the agent is replying.
 
 - [ ] **Step 4: Skip memory injection for group chat**
 
@@ -1825,7 +2001,9 @@ Wrap it with a group-chat guard:
                     logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
 ```
 
-- [ ] **Step 5: Add sender prefix on steering too**
+- [ ] **Step 5: Pass sender metadata on steering**
+
+Steering messages also need sender attribution. `dispatch_steer` accepts an optional metadata dict; pass `sender_user_id` and `sender_display_name` for group chats, and cubepi's template renders the prefix the same way it does for regular user messages. No string injection.
 
 Find `dispatch_steer` usage in conversations.py (line 1342):
 
@@ -1835,10 +2013,10 @@ Find `dispatch_steer` usage in conversations.py (line 1342):
     )
 ```
 
-Before this line, add sender prefix for group chats:
+Replace with:
 
 ```python
-    steer_content = body.content
+    steer_metadata: dict[str, Any] = {}
     if conversation.topic_id is not None:
         from cubebox.repositories.topic import TopicRepository
 
@@ -1851,13 +2029,20 @@ Before this line, add sender prefix for group chats:
             )
             participants = await topic_repo.list_participants(conversation.topic_id)
             if len(participants) > 1:
-                display_name = ctx.user.display_name or ctx.user.email
-                steer_content = f"[{display_name}]: {body.content}"
+                steer_metadata["sender_user_id"] = ctx.user.id
+                steer_metadata["sender_display_name"] = (
+                    ctx.user.display_name or ctx.user.email
+                )
 
     dispatch_status = await run_manager.dispatch_steer(
-        active_run.run_id, steer_content, steer_id=body.steer_id
+        active_run.run_id,
+        body.content,
+        steer_id=body.steer_id,
+        metadata=steer_metadata or None,
     )
 ```
+
+If `dispatch_steer` does not accept `metadata=`, extend its signature in cubepi (same PR that introduces the sender-template). Until that PR is merged + pinned, this step is blocked.
 
 - [ ] **Step 6: Sandbox resolution for group chat**
 
@@ -1924,18 +2109,29 @@ For (2) and (3), add the same topic-resolution block from Step 2: load the conve
 
 Also add participant validation: when `is_group_chat=True`, verify that `ctx.user.id IN participant_ids` before allowing the HITL response. This implements the spec's "any participant can respond" rule while preventing non-participants from answering.
 
-- [ ] **Step 6d: Participant guard on send_message**
+- [ ] **Step 6d: Participant guard on send_message (+ helper)**
 
-The `_scoped_select` change blocks non-participants from `GET /conversations/{id}`, but a removed-but-still-active client could replay `POST /conversations/{id}/messages` against a known conversation ID. After the topic-resolution block in Step 2, add an explicit membership check:
+The `_scoped_select` change blocks non-participants from `GET /conversations/{id}`, but a removed-but-still-active client could replay `POST /conversations/{id}/messages` against a known conversation ID. Extract a small helper to mirror the `_require_topic_owner_if_topic` pattern from Step 3d, so the check can't be forgotten when adding new write endpoints:
 
 ```python
-    if topic_id is not None and ctx.user.id not in (participant_ids or []):
-        raise HTTPException(403, "You are no longer a participant in this topic")
+def _require_participant_if_topic(
+    conversation: Conversation,
+    ctx: RequestContext,
+    participant_ids: list[str] | None,
+) -> None:
+    if conversation.topic_id is None:
+        return
+    if ctx.user.id not in (participant_ids or []):
+        # Return 404 to match GET behavior (_scoped_select hides this row
+        # from a non-participant on read). A 403 with a topic-specific
+        # message would leak conversation existence and prior-membership
+        # history to anyone who guesses or replays an ID.
+        raise HTTPException(404, "Conversation not found")
 ```
 
-This catches the same case for the topic-create-time bootstrap (creator is always in participant_ids by construction) and for removed members holding stale page state. Apply the identical check in `steer_active_run`, `submit_sandbox_confirm`, and `submit_ask_user_answer`.
+Apply the helper in `send_message`, `steer_active_run`, `submit_sandbox_confirm`, and `submit_ask_user_answer` immediately after the topic-resolution block populates `participant_ids`. The creator is always in `participant_ids` by construction, so the bootstrap case is naturally allowed.
 
-- [ ] **Step 6e: Other RunContext construction sites (deferred / out-of-scope check)**
+- [ ] **Step 6e: Block upgrades that would orphan external entry points + guard at dispatch**
 
 `RunContext(...)` is also constructed in four non-`conversations.py` places that drive runs:
 
@@ -1944,9 +2140,40 @@ This catches the same case for the topic-create-time bootstrap (creator is alway
 - `backend/cubebox/triggers/pipeline.py` — webhook/trigger pipeline
 - `backend/cubebox/schedules/dispatch.py` — scheduled task dispatcher
 
-**Audit at implementation time:** for each, check whether the conversation it dispatches against can have a non-NULL `topic_id`. If yes, that path needs the same topic-resolution block from Step 2; otherwise it must guard `if conversation.topic_id is not None: raise / log / skip` so a topic conversation can't be silently driven with `is_group_chat=False` (which would leak personal memory, drop sender prefix, and resolve sandbox to the trigger user).
+**Two-layer fix.**
 
-**v1 scope decision:** IM mapping, triggers, and scheduled tasks are all in the spec's "Out of scope (v1)" list. Add the guard (refuse to dispatch when `conversation.topic_id is not None`) but **do not** implement topic-aware resolution there. Document the guard's rationale inline so it isn't silently relaxed. The audit + guard adds ~15 minutes per file and prevents a v1 release that quietly leaks cross-user memory.
+**Layer 1 — refuse at the entry point.** Each of the four sites adds a guard immediately after loading the target conversation:
+
+```python
+if conversation.topic_id is not None:
+    logger.warning(
+        "Refusing to dispatch run via {} against topic conversation {} — "
+        "topic-aware resolution not yet implemented here (v1 scope).",
+        __name__, conversation.id,
+    )
+    return  # or raise the path's existing skip/error
+```
+
+This prevents the dispatcher from quietly running with `is_group_chat=False`, which would leak personal memory, drop sender attribution, and resolve sandbox to the trigger user.
+
+**Layer 2 — block the upgrade.** `POST /conversations/{id}/upgrade-to-topic` (Task 4) on a conversation that *already* has any of:
+- an IM binding row (`im_conversation_links` or equivalent),
+- a scheduled task pointing at it,
+- an active webhook trigger,
+
+must return 409 with a clear message ("Conversation is bound to <IM/schedule/trigger>; remove that binding before upgrading"). Without this, a user can convert their IM-bound personal conversation to a topic and then silently lose IM replies — they'd see no error in the UI and just stop receiving responses.
+
+```python
+# In upgrade-to-topic handler, before creating the Topic:
+if await _conversation_has_external_binding(session, conversation_id):
+    raise HTTPException(
+        409,
+        "Conversation is bound to an IM account, schedule, or trigger. "
+        "Remove that binding before upgrading to a topic.",
+    )
+```
+
+Implement `_conversation_has_external_binding` as a small helper that queries the three binding tables. v1 ships with all three as "out of scope for topic" (per spec § Out of scope), so blocking the upgrade is the only correct behavior.
 
 - [ ] **Step 7: Verify existing tests pass**
 
@@ -2756,10 +2983,10 @@ These were flagged in round-2 review as cross-cutting impacts of group chat that
 
 2. **Conversation search filters by chunk writer.** `services/conversation_search/...` (vector and pg_bigm / pgroonga lexical legs) ANDs `cc.creator_user_id = :user_id` where `creator_user_id` is the chunk WRITER, not the conversation creator. In a group chat, search results hide every chunk written by other participants. Follow-up: drop the chunk-writer filter for topic conversations and rely on the conversation-level `_scoped_select` access check, or reshape search to walk the participant set.
 
-3. **Topic list ordering by "last activity".** Spec § Frontend (line 342) promises mixed sidebar ordering by last activity. Plan currently sorts topics by their own `updated_at`, which only changes on metadata edits. Follow-up: add a `last_activity_at` column on `topics` updated whenever any child conversation receives a message, OR derive ordering from a subquery against `conversations.updated_at` at list time.
+3. **IM / triggers / scheduled-task entry points.** Task 6 Step 6e blocks these from dispatching against topic conversations and blocks the upgrade-to-topic of conversations with such bindings. The v2 follow-up is to make each of them topic-aware: replicate Task 6 Step 2's resolution block in `im/resume.py`, `im/worker.py`, `triggers/pipeline.py`, `schedules/dispatch.py`, then allow upgrades to lift the binding block.
 
-4. **IM / triggers / scheduled-task entry points.** Task 6 Step 6e blocks these from dispatching against topic conversations. The v2 follow-up is to make each of them topic-aware: replicate Task 6 Step 2's resolution block in `im/resume.py`, `im/worker.py`, `triggers/pipeline.py`, `schedules/dispatch.py`. This is mandatory before exposing topics through IM, scheduled tasks, or external triggers.
+4. **HITL responder identity in stored answer metadata.** When any participant answers an AskUser/SandboxConfirm in a group chat, the message metadata should record `responded_by_user_id`. The plan resumes the run correctly but does not persist who answered; frontend cannot show "Alice responded: …". Follow-up: extend the HITL answer schema with `responded_by_user_id` and surface it in the message bubble.
 
-5. **HITL responder identity in stored answer metadata.** When any participant answers an AskUser/SandboxConfirm in a group chat, the message metadata should record `responded_by_user_id`. The plan resumes the run correctly but does not persist who answered; frontend cannot show "Alice responded: …". Follow-up: extend the HITL answer schema with `responded_by_user_id` and surface it in the message bubble.
+5. **Sender attribution at the right altitude — handled by a cubepi PR.** Sender attribution is now implemented as `metadata.sender_display_name` on the user message and templated at cubepi's provider boundary (separate cubepi PR + pin bump). Cubebox no longer mutates the user message `content` to inject `[Name]:`. See Task 6 Step 3 for the cubebox-side change after the pin bump.
 
 
