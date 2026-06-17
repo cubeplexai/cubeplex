@@ -532,7 +532,10 @@ async def upgrade_conversation_to_topic(
         _select(_Conv).where(_Conv.id == conversation_id).with_for_update()  # type: ignore[arg-type]
     )
     locked = (await session.execute(lock_stmt)).scalar_one_or_none()
-    if locked is None or locked.topic_id is not None:
+    if locked is None:
+        # Row deleted between get_by_id and the lock acquisition.
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if locked.topic_id is not None:
         raise HTTPException(status_code=409, detail="Conversation already belongs to a topic")
     # Re-read into our working object after the lock so subsequent
     # mutations apply to the freshly-locked row.
