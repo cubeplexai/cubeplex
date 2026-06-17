@@ -567,7 +567,7 @@ class SandboxManager:
                 raw_sandbox = await opensandbox.Sandbox.create(
                     policy.default_image,
                     connection_config=create_conn_config,
-                    timeout=None,
+                    timeout=timedelta(seconds=self._ttl),
                     ready_timeout=timedelta(seconds=self._ready_timeout),
                     volumes=volumes,
                     resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
@@ -711,6 +711,26 @@ class SandboxManager:
                 await EgressRefRepository(session).extend_expiry_for_sandbox(
                     sandbox_id, now + timedelta(seconds=self._ttl)
                 )
+
+        # Extend provider-side expiry so the OpenSandbox controller won't GC
+        # an actively-used sandbox.
+        conn_config = self._build_connection_config()
+        raw: opensandbox.Sandbox | None = None
+        try:
+            raw = await opensandbox.Sandbox.connect(
+                sandbox_id,
+                connection_config=conn_config,
+                skip_health_check=True,
+            )
+            await raw.renew(timedelta(seconds=self._ttl))
+        except Exception:
+            logger.debug("Provider-side renew failed for {} (non-fatal)", sandbox_id)
+        finally:
+            if raw is not None:
+                try:
+                    await raw.close()
+                except Exception:
+                    pass
 
     async def touch_active(
         self,
