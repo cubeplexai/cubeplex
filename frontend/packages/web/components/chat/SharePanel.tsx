@@ -32,6 +32,21 @@ export function SharePanel({ conversationId }: SharePanelProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [scope, setScope] = useState<ShareScope>('public')
 
+  const copyText = useCallback(async (text: string) => {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text)
+      return
+    }
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }, [])
+
   const client = useMemo(() => {
     const c = createApiClient('')
     c.setWorkspaceId(workspaceId)
@@ -57,13 +72,13 @@ export function SharePanel({ conversationId }: SharePanelProps) {
     try {
       const share = await createShare(client, conversationId, scope)
       setShares((prev) => [share, ...prev])
-      await navigator.clipboard.writeText(window.location.origin + share.url)
+      await copyText(window.location.origin + share.url)
       setCopiedId(share.id)
       setTimeout(() => setCopiedId(null), 2000)
     } finally {
       setCreating(false)
     }
-  }, [client, conversationId, scope])
+  }, [client, conversationId, scope, copyText])
 
   const handleRevoke = useCallback(
     async (shareId: string) => {
@@ -74,11 +89,14 @@ export function SharePanel({ conversationId }: SharePanelProps) {
     [client, t],
   )
 
-  const handleCopy = useCallback(async (url: string, id: string) => {
-    await navigator.clipboard.writeText(window.location.origin + url)
-    setCopiedId(id)
-    setTimeout(() => setCopiedId(null), 2000)
-  }, [])
+  const handleCopy = useCallback(
+    async (url: string, id: string) => {
+      await copyText(window.location.origin + url)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    },
+    [copyText],
+  )
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
