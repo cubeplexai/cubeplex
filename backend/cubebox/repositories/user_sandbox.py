@@ -15,7 +15,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
 
     model = UserSandbox
 
-    _ACTIVE_STATUSES = ("provisioning", "running", "kill_pending")
+    _ACTIVE_STATUSES = ("provisioning", "running")
+    _REAPABLE_STATUSES = ("provisioning", "running", "kill_pending")
 
     async def create(
         self,
@@ -345,7 +346,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """
         stmt = (
             select(UserSandbox)
-            .where(UserSandbox.status.in_(cls._ACTIVE_STATUSES))  # type: ignore[attr-defined]
+            .where(UserSandbox.status.in_(cls._REAPABLE_STATUSES))  # type: ignore[attr-defined]
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await session.execute(stmt)
