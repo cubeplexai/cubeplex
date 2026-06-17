@@ -208,12 +208,24 @@ class TopicRepository(ScopedRepository[Topic]):
         return list(result.scalars().all())
 
     async def bump_activity(self, topic_id: str) -> None:
-        """Update last_activity_at to now. Called from the message
+        """Update ``last_activity_at`` to now. Called from the message
         insertion path; safe to call on a topic the caller may not be
-        a participant of (system path)."""
+        a participant of (system path).
+
+        Scoped to ``(org_id, workspace_id)`` for defense-in-depth: a
+        spoofed/misrouted ``topic_id`` cannot touch a row in a different
+        workspace. Monotonic: only bumps forward, so a late-arriving
+        message under clock skew cannot reorder the sidebar backward.
+        """
+        now = datetime.now(UTC)
         stmt = (
             update(Topic)
-            .where(Topic.id == topic_id)  # type: ignore[arg-type]
-            .values(last_activity_at=datetime.now(UTC))
+            .where(
+                cast(Any, Topic.id) == topic_id,
+                cast(Any, Topic.org_id) == self.org_id,
+                cast(Any, Topic.workspace_id) == self.workspace_id,
+                cast(Any, Topic.last_activity_at) < now,
+            )
+            .values(last_activity_at=now)
         )
         await self.session.execute(stmt)

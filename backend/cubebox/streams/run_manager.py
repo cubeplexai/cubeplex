@@ -2981,14 +2981,18 @@ class RunManager:
 
         Drives sidebar ordering and applies to any topic — solo or group.
         Uses a fresh session so it never bleeds into a caller's transaction.
-        Best-effort: any failure is swallowed with a warning.
+        Best-effort: any failure (DB hiccup, timeout) is swallowed with a
+        warning. The 5-second timeout prevents the bump from hanging the
+        run's finally path if the connection pool is exhausted.
         """
-        if ctx.topic_id is None:
+        topic_id = ctx.topic_id
+        if topic_id is None:
             return
-        from cubebox.db.engine import async_session_maker
-        from cubebox.repositories.topic import TopicRepository
 
-        try:
+        async def _do_bump() -> None:
+            from cubebox.db.engine import async_session_maker
+            from cubebox.repositories.topic import TopicRepository
+
             async with async_session_maker() as bump_session:
                 bump_repo = TopicRepository(
                     bump_session,
@@ -2996,8 +3000,11 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
                 )
-                await bump_repo.bump_activity(ctx.topic_id)
+                await bump_repo.bump_activity(topic_id)
                 await bump_session.commit()
+
+        try:
+            await asyncio.wait_for(_do_bump(), timeout=5.0)
         except Exception as exc:
             logger.warning("Failed to bump topic activity: {}", exc)
 
@@ -3736,14 +3743,7 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
-                        sandbox_user_id = ctx.user_id
-                        sandbox_topic_id: str | None = None
-                        if ctx.is_group_chat and ctx.sandbox_mode == "dedicated":
-                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
-                            sandbox_topic_id = ctx.topic_id
-                        elif ctx.is_group_chat and ctx.sandbox_mode == "creator":
-                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
-
+                        sandbox_user_id, sandbox_topic_id = self._resolve_sandbox_target(ctx)
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
                             user_id=sandbox_user_id,
