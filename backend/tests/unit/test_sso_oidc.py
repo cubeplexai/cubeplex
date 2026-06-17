@@ -415,7 +415,9 @@ async def test_exchange_code_rejects_userinfo_sub_mismatch(
 
 
 async def test_discover_oidc_endpoints_parses_json(
-    rsa_key: Any, patch_async_client: Callable[..., None]
+    rsa_key: Any,
+    patch_async_client: Callable[..., None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     body = {
         "issuer": ISSUER,
@@ -425,6 +427,8 @@ async def test_discover_oidc_endpoints_parses_json(
         "userinfo_endpoint": USERINFO_ENDPOINT,
     }
     patch_async_client(_make_transport(rsa_key=rsa_key, discovery_body=body))
+    # Bypass the SSRF guard's DNS lookup so the mock can answer.
+    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
     out = await discover_oidc_endpoints(ISSUER + "/")
     assert out == body
     assert json.dumps(out)  # round-trippable

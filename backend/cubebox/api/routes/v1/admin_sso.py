@@ -39,6 +39,41 @@ router = APIRouter(prefix="/admin/sso", tags=["admin-sso"])
 # --- request / response models ---------------------------------------------
 
 
+_OIDC_REQUIRED_CONFIG_KEYS = (
+    "issuer",
+    "authorization_endpoint",
+    "token_endpoint",
+    "jwks_uri",
+    "client_id",
+)
+_SAML_REQUIRED_CONFIG_KEYS = (
+    "idp_entity_id",
+    "idp_sso_url",
+    "idp_certificate",
+)
+
+
+def _validate_connection_config(protocol: str, config: dict[str, Any]) -> None:
+    """Validate the protocol-specific config shape at save time.
+
+    Without this guard, a typo (``jwks-uri`` vs ``jwks_uri``) or an
+    accidental empty config persists silently and the first SSO callback
+    raises a bare KeyError → opaque 500. Fail fast at PUT/POST with a
+    structured 400 the admin form can render.
+    """
+    keys = _OIDC_REQUIRED_CONFIG_KEYS if protocol == "oidc" else _SAML_REQUIRED_CONFIG_KEYS
+    missing = [k for k in keys if not config.get(k)]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "config_missing_fields",
+                "protocol": protocol,
+                "fields": missing,
+            },
+        )
+
+
 class SSOConnectionCreate(BaseModel):
     protocol: str = Field(pattern=r"^(oidc|saml)$")
     display_name: str = Field(min_length=1, max_length=255)
@@ -53,6 +88,13 @@ class SSOConnectionUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=255)
     provisioning: str | None = Field(default=None, pattern=r"^(auto|invite_only)$")
     config: dict[str, Any] | None = None
+    client_secret: str | None = Field(
+        default=None,
+        description=(
+            "Replace the OIDC client_secret in the vault. Omit (or pass None) "
+            "to leave the existing secret unchanged."
+        ),
+    )
 
 
 class SSOConnectionResponse(BaseModel):
@@ -113,6 +155,7 @@ async def create_sso(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SSOConnectionResponse:
     """Create the SSO connection for this org. 409 if one already exists."""
+    _validate_connection_config(body.protocol, body.config)
     org_id = await resolve_unambiguous_admin_org_id(user, session)
     repo = SSOConnectionRepository(session, org_id=org_id)
     existing = await repo.get()
@@ -149,22 +192,44 @@ async def create_sso(
 async def update_sso(
     sso_id: str,
     body: Annotated[SSOConnectionUpdate, Body()],
+    request: Request,
     user: Annotated[User, Depends(require_org_admin)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SSOConnectionResponse:
-    """Update display name / provisioning / config on the SSO connection."""
+    """Update display name / provisioning / config / client_secret."""
+    from cubebox.repositories.credential import CredentialRepository
+
     org_id = await resolve_unambiguous_admin_org_id(user, session)
     repo = SSOConnectionRepository(session, org_id=org_id)
     conn = await repo.get_by_id(sso_id)
     if conn is None:
         raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
 
+    if body.config is not None:
+        _validate_connection_config(conn.protocol, body.config)
+        conn.config = body.config
+
     if body.display_name is not None:
         conn.display_name = body.display_name
     if body.provisioning is not None:
         conn.provisioning = body.provisioning
-    if body.config is not None:
-        conn.config = body.config
+
+    if body.client_secret is not None:
+        # Rotate: delete the existing row first because the credential
+        # name is namespaced by sso_id, so a new insert with the same
+        # (org_id, kind, name) would collide on the partial unique index.
+        if conn.credential_id is not None:
+            cred_repo = CredentialRepository(session, org_id=org_id)
+            await cred_repo.delete(conn.credential_id)
+            conn.credential_id = None
+        conn.credential_id = await _store_secret(
+            request,
+            session,
+            org_id=org_id,
+            sso_connection_id=conn.id,
+            secret=body.client_secret,
+            user_id=user.id,
+        )
 
     conn = await repo.update(conn)
     return _to_response(conn)
@@ -312,10 +377,17 @@ async def discover_oidc(
     user: Annotated[User, Depends(require_org_admin)],
 ) -> OIDCDiscoveryResponse:
     """Fetch and parse ``.well-known/openid-configuration`` for an issuer URL."""
-    from cubebox.sso.oidc import discover_oidc_endpoints
+    from cubebox.sso.oidc import OIDCDiscoveryRefused, discover_oidc_endpoints
 
     try:
         endpoints = await discover_oidc_endpoints(body.issuer_url)
+    except OIDCDiscoveryRefused as exc:
+        # SSRF guard refused the target (private IP, non-https, bad DNS).
+        # Surface a stable code so the admin form can show a precise hint.
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "oidc_discovery_refused", "reason": str(exc)},
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=400,

@@ -40,6 +40,7 @@ async def test_admin_sso_crud_lifecycle(
                 "issuer": "https://idp.example.com",
                 "authorization_endpoint": "https://idp.example.com/authorize",
                 "token_endpoint": "https://idp.example.com/token",
+                "jwks_uri": "https://idp.example.com/jwks",
                 "userinfo_endpoint": "https://idp.example.com/userinfo",
                 "client_id": "test-client-id",
                 "scopes": ["openid", "email", "profile"],
@@ -110,8 +111,10 @@ async def test_admin_sso_duplicate_rejected(
         "display_name": "First",
         "config": {
             "client_id": "a",
+            "issuer": "https://a.example.com",
             "authorization_endpoint": "https://a.example.com/authorize",
             "token_endpoint": "https://a.example.com/token",
+            "jwks_uri": "https://a.example.com/jwks",
         },
     }
     resp = await client.post("/api/v1/admin/sso", json=payload)
@@ -138,8 +141,10 @@ async def test_admin_sso_deactivate_requires_active(
             "display_name": "Test SSO",
             "config": {
                 "client_id": "c",
+                "issuer": "https://c.example.com",
                 "authorization_endpoint": "https://c.example.com/authorize",
                 "token_endpoint": "https://c.example.com/token",
+                "jwks_uri": "https://c.example.com/jwks",
             },
         },
     )
