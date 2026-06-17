@@ -63,6 +63,7 @@ def _serialize_topic(topic: Any) -> dict[str, Any]:
         "is_archived": topic.is_archived,
         "created_at": utc_isoformat(topic.created_at),
         "updated_at": utc_isoformat(topic.updated_at),
+        "last_activity_at": utc_isoformat(topic.last_activity_at),
     }
 
 
