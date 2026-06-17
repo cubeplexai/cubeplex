@@ -66,9 +66,34 @@ def _serialize_conversation(c: Conversation) -> dict[str, object]:
         "id": c.id,
         "title": c.title,
         "is_pinned": c.is_pinned,
+        "topic_id": c.topic_id,
         "created_at": utc_isoformat(c.created_at),
         "updated_at": utc_isoformat(c.updated_at),
     }
+
+
+async def _require_topic_owner_if_topic(
+    session: AsyncSession,
+    ctx: RequestContext,
+    conversation: Conversation,
+) -> None:
+    """For topic conversations, raise 403 unless the caller is a topic owner."""
+    if conversation.topic_id is None:
+        return
+    from cubebox.repositories.topic import TopicRepository
+
+    topic_repo = TopicRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    participant = await topic_repo.get_participant(conversation.topic_id, ctx.user.id)
+    if participant is None or participant.role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only topic owner can modify this conversation",
+        )
 
 
 async def _update_conversation_timestamp(
@@ -283,6 +308,13 @@ async def update_conversation(
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
     )
+    existing = await repo.get_by_id(conversation_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+    await _require_topic_owner_if_topic(session, ctx, existing)
     conversation = await repo.update_title(conversation_id, title)
     if not conversation:
         raise HTTPException(
@@ -312,6 +344,13 @@ async def set_pin(
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
     )
+    existing = await repo.get_by_id(conversation_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+    await _require_topic_owner_if_topic(session, ctx, existing)
     conversation = await repo.set_pin(conversation_id, body.is_pinned)
     if not conversation:
         raise HTTPException(
@@ -340,6 +379,13 @@ async def delete_conversation(
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
     )
+    existing = await repo.get_by_id(conversation_id)
+    if not existing:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+    await _require_topic_owner_if_topic(session, ctx, existing)
     deleted = await repo.delete_conversation(conversation_id)
     if not deleted:
         raise HTTPException(

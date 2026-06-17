@@ -1,17 +1,19 @@
-"""Conversation repository — scoped by (workspace_id, creator_user_id).
+"""Conversation repository — scoped by (workspace_id, creator_user_id | topic membership).
 
-Conversations are per-user: only the creator can see/mutate their rows.
-Org + workspace columns are still persisted via ``OrgScopedMixin`` but
-the primary access check is ``creator_user_id``.
+Personal conversations (``topic_id IS NULL``) are visible only to their
+creator. Topic conversations are visible to all participants of the
+owning topic (and only while the topic is not archived). Org + workspace
+columns are still persisted via ``OrgScopedMixin``.
 """
 
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import case, desc, func, select, update
+from sqlalchemy import and_, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import Conversation
+from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.repositories.base import ScopedRepository
 
 
@@ -30,11 +32,28 @@ class ConversationRepository(ScopedRepository[Conversation]):
         self.user_id = user_id
 
     def _scoped_select(self) -> Any:
+        topic_member_subq = (
+            select(cast(Any, TopicParticipant.topic_id))
+            .join(Topic, cast(Any, Topic.id) == TopicParticipant.topic_id)
+            .where(
+                cast(Any, TopicParticipant.user_id) == self.user_id,
+                cast(Any, Topic.is_archived).is_(False),
+            )
+        )
         return (
             super()
             ._scoped_select()
             .where(
-                Conversation.creator_user_id == self.user_id,
+                or_(
+                    and_(
+                        cast(Any, Conversation.topic_id).is_(None),
+                        cast(Any, Conversation.creator_user_id) == self.user_id,
+                    ),
+                    and_(
+                        cast(Any, Conversation.topic_id).is_not(None),
+                        cast(Any, Conversation.topic_id).in_(topic_member_subq),
+                    ),
+                ),
                 cast(Any, Conversation.deleted_at).is_(None),
             )
         )
@@ -69,15 +88,8 @@ class ConversationRepository(ScopedRepository[Conversation]):
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())
 
-        count_stmt = (
-            select(func.count())
-            .select_from(Conversation)
-            .where(
-                Conversation.workspace_id == self.workspace_id,  # type: ignore[arg-type]
-                Conversation.creator_user_id == self.user_id,  # type: ignore[arg-type]
-                cast(Any, Conversation.has_messages).is_(True),
-                cast(Any, Conversation.deleted_at).is_(None),
-            )
+        count_stmt = select(func.count()).select_from(
+            self._scoped_select().where(cast(Any, Conversation.has_messages).is_(True)).subquery()
         )
         total = (await self.session.execute(count_stmt)).scalar_one()
         return items, total
@@ -106,12 +118,29 @@ class ConversationRepository(ScopedRepository[Conversation]):
         or ``None`` if the conversation no longer exists.
         """
         now = datetime.now(UTC)
+        topic_member_subq = (
+            select(cast(Any, TopicParticipant.topic_id))
+            .join(Topic, cast(Any, Topic.id) == TopicParticipant.topic_id)
+            .where(
+                cast(Any, TopicParticipant.user_id) == self.user_id,
+                cast(Any, Topic.is_archived).is_(False),
+            )
+        )
         stmt = (
             update(Conversation)
             .where(
                 Conversation.id == conversation_id,  # type: ignore[arg-type]
-                Conversation.creator_user_id == self.user_id,  # type: ignore[arg-type]
                 Conversation.title == expected_title,  # type: ignore[arg-type]
+                or_(
+                    and_(
+                        cast(Any, Conversation.topic_id).is_(None),
+                        cast(Any, Conversation.creator_user_id) == self.user_id,
+                    ),
+                    and_(
+                        cast(Any, Conversation.topic_id).is_not(None),
+                        cast(Any, Conversation.topic_id).in_(topic_member_subq),
+                    ),
+                ),
                 cast(Any, Conversation.deleted_at).is_(None),
             )
             .values(title=new_title, updated_at=now)
