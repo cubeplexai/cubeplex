@@ -95,6 +95,22 @@
       "leaving": "退出中…",
       "leaveError": "退出群聊失败。",
       "soleOwnerHint": "请先将其他成员提升为群主。"
+    },
+    "upgradeDialog": {
+      "openLabel": "邀请成员",
+      "title": "升级为群聊",
+      "irreversibleWarning": "升级不可撤销。所有当前参与者将对受邀成员可见。",
+      "titleLabel": "标题",
+      "titlePlaceholder": "项目同步、设计评审…",
+      "membersLabel": "邀请成员",
+      "membersEmpty": "没有其他工作区成员可邀请。",
+      "sandboxLabel": "沙盒",
+      "cancel": "取消",
+      "upgrade": "升级",
+      "upgrading": "升级中…",
+      "upgradeError": "升级会话失败。",
+      "alreadyTopicError": "此会话已升级为群聊。",
+      "externalBindingError": "此会话已绑定 IM、定时任务或触发器，无法升级。"
     }
   },
   "time": {

@@ -6,8 +6,10 @@ import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { AlertTriangle, X } from 'lucide-react'
 import {
+  ApiError,
   createApiClient,
   useAuthStore,
+  useConversationStore,
   useMemberStore,
   useTopicStore,
   type WsMember,
@@ -19,21 +21,25 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
 import { WorkspaceMemberPicker } from '@/components/dialogs/WorkspaceMemberPicker'
 
-interface CreateGroupChatDialogProps {
+interface UpgradeToTopicDialogProps {
   wsId: string
+  conversationId: string
+  initialTitle: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
 type SandboxMode = 'dedicated' | 'creator'
 
-export function CreateGroupChatDialog({
+export function UpgradeToTopicDialog({
   wsId,
+  conversationId,
+  initialTitle,
   open,
   onOpenChange,
-}: CreateGroupChatDialogProps): React.ReactElement {
+}: UpgradeToTopicDialogProps): React.ReactElement {
   const t = useTranslations('topics')
-  const tDialog = useTranslations('topics.createDialog')
+  const tDialog = useTranslations('topics.upgradeDialog')
   const router = useRouter()
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -42,26 +48,28 @@ export function CreateGroupChatDialog({
   }, [wsId])
   const currentUserId = useAuthStore((s) => s.user?.id ?? null)
   const { wsMembers, loadWsMembers } = useMemberStore()
-  const createTopic = useTopicStore((s) => s.create)
+  const upgradeConversationToTopic = useTopicStore((s) => s.upgradeConversationToTopic)
+  const fetchTopicList = useTopicStore((s) => s.fetchList)
+  const fetchConversationList = useConversationStore((s) => s.fetchList)
 
-  const [title, setTitle] = useState('')
+  const [title, setTitle] = useState(initialTitle)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sandboxMode, setSandboxMode] = useState<SandboxMode>('dedicated')
-  const [creating, setCreating] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (open) {
       /* eslint-disable react-hooks/set-state-in-effect */
-      setTitle('')
+      setTitle(initialTitle)
       setSelected(new Set())
       setSandboxMode('dedicated')
       setError(null)
-      setCreating(false)
+      setSubmitting(false)
       /* eslint-enable react-hooks/set-state-in-effect */
       void loadWsMembers(client, wsId)
     }
-  }, [open, client, wsId, loadWsMembers])
+  }, [open, initialTitle, client, wsId, loadWsMembers])
 
   const invitable: WsMember[] = useMemo(
     () => wsMembers.filter((m) => m.user_id !== currentUserId),
@@ -77,24 +85,37 @@ export function CreateGroupChatDialog({
     })
   }
 
-  const canSubmit = title.trim().length > 0 && !creating
+  const canSubmit = title.trim().length > 0 && !submitting
 
   const handleSubmit = async (): Promise<void> => {
     if (!canSubmit) return
-    setCreating(true)
+    setSubmitting(true)
     setError(null)
     try {
-      const { conversationId } = await createTopic(client, {
+      await upgradeConversationToTopic(client, conversationId, {
         title: title.trim(),
         sandbox_mode: sandboxMode,
         member_user_ids: Array.from(selected),
       })
+      // Refresh sidebar lists so the conversation moves under its new topic
+      // and the topic appears in the topic list.
+      void fetchTopicList(client).catch(() => undefined)
+      void fetchConversationList(client).catch(() => undefined)
       onOpenChange(false)
-      router.push(`/w/${wsId}/conversations/${conversationId}`)
-    } catch {
-      setError(tDialog('createError'))
+      router.refresh()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        const msg = (e.message || '').toLowerCase()
+        if (msg.includes('binding')) {
+          setError(tDialog('externalBindingError'))
+        } else {
+          setError(tDialog('alreadyTopicError'))
+        }
+      } else {
+        setError(tDialog('upgradeError'))
+      }
     } finally {
-      setCreating(false)
+      setSubmitting(false)
     }
   }
 
@@ -120,7 +141,7 @@ export function CreateGroupChatDialog({
             'data-[starting-style]:opacity-0',
             'transition-opacity duration-200',
           )}
-          data-testid="create-group-chat-dialog"
+          data-testid="upgrade-to-topic-dialog"
         >
           <div className="flex items-start justify-between gap-3">
             <DialogPrimitive.Title className="text-base font-semibold">
@@ -143,10 +164,20 @@ export function CreateGroupChatDialog({
           </div>
 
           <div className="mt-4 flex flex-col gap-4">
+            <div
+              className={cn(
+                'flex items-start gap-2 rounded-md border border-warning-border',
+                'bg-warning-surface px-2.5 py-2 text-xs text-warning-fg',
+              )}
+            >
+              <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
+              <span>{tDialog('irreversibleWarning')}</span>
+            </div>
+
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="group-chat-title">{tDialog('titleLabel')}</Label>
+              <Label htmlFor="upgrade-topic-title">{tDialog('titleLabel')}</Label>
               <Input
-                id="group-chat-title"
+                id="upgrade-topic-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={tDialog('titlePlaceholder')}
@@ -209,7 +240,7 @@ export function CreateGroupChatDialog({
           <div className="mt-5 flex items-center justify-end gap-2">
             <DialogPrimitive.Close
               render={
-                <Button type="button" variant="ghost" size="sm" disabled={creating}>
+                <Button type="button" variant="ghost" size="sm" disabled={submitting}>
                   {tDialog('cancel')}
                 </Button>
               }
@@ -220,7 +251,7 @@ export function CreateGroupChatDialog({
               onClick={() => void handleSubmit()}
               disabled={!canSubmit}
             >
-              {creating ? tDialog('creating') : tDialog('create')}
+              {submitting ? tDialog('upgrading') : tDialog('upgrade')}
             </Button>
           </div>
         </DialogPrimitive.Popup>

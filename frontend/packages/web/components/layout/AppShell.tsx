@@ -1,7 +1,8 @@
 'use client'
 
 import { ReactNode, useEffect, useRef, useState } from 'react'
-import { Menu, Monitor, X } from 'lucide-react'
+import { Menu, Monitor, UserPlus, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
@@ -17,6 +18,7 @@ import { useConversationStore, usePanelStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 import { SharePanel } from '@/components/chat/SharePanel'
 import { ChatHeaderGroupBadge } from '@/components/chat/ChatHeaderGroupBadge'
+import { UpgradeToTopicDialog } from '@/components/dialogs/UpgradeToTopicDialog'
 
 interface AppShellProps {
   children: ReactNode
@@ -25,6 +27,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, headerTitle, conversationId }: AppShellProps) {
+  const tUpgrade = useTranslations('topics.upgradeDialog')
   const view = usePanelStore((s) => s.view)
   const openSandbox = usePanelStore((s) => s.openSandbox)
   const { workspaceId } = useWorkspaceContext()
@@ -32,6 +35,8 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
     conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined,
   )
   const topicId = conversation?.topic_id ?? null
+  const canUpgrade = Boolean(workspaceId && conversation && !conversation.topic_id)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   // Only offer the browser panel where the backend actually mounts /browser/*
   // (sandbox support enabled); otherwise the button opens a panel that 404s.
   const { sandboxEnabled } = useDeploymentMode()
@@ -96,6 +101,16 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
       <ToolDetailPanel />
     )
 
+  const upgradeDialog = workspaceId && conversation && !conversation.topic_id && (
+    <UpgradeToTopicDialog
+      wsId={workspaceId}
+      conversationId={conversation.id}
+      initialTitle={conversation.title ?? ''}
+      open={upgradeOpen}
+      onOpenChange={setUpgradeOpen}
+    />
+  )
+
   const main = (
     <div className="flex flex-col h-full overflow-hidden">
       <header className="h-11 border-b border-border flex items-center px-3 md:px-4 shrink-0 gap-1">
@@ -109,6 +124,17 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         </button>
         <span className="text-sm text-muted-foreground truncate flex-1">{headerTitle || ''}</span>
         {workspaceId && topicId && <ChatHeaderGroupBadge wsId={workspaceId} topicId={topicId} />}
+        {canUpgrade && (
+          <button
+            type="button"
+            onClick={() => setUpgradeOpen(true)}
+            className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
+            aria-label={tUpgrade('openLabel')}
+            title={tUpgrade('openLabel')}
+          >
+            <UserPlus className="h-4 w-4" />
+          </button>
+        )}
         {conversationId && <SharePanel conversationId={conversationId} />}
         {workspaceId && sandboxEnabled && (
           <button
@@ -148,31 +174,35 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
             </button>
           </div>
         )}
+        {upgradeDialog}
       </div>
     )
   }
 
   return (
-    <ResizablePanelGroup
-      orientation="horizontal"
-      className={cn('h-full', dragging && 'panel-dragging')}
-      elementRef={groupRef}
-    >
-      <ResizablePanel
-        defaultSize={panelOpen ? (isSandboxPanel ? 35 : 50) : 100}
-        minSize={isSandboxPanel ? 25 : 30}
+    <>
+      <ResizablePanelGroup
+        orientation="horizontal"
+        className={cn('h-full', dragging && 'panel-dragging')}
+        elementRef={groupRef}
       >
-        {main}
-      </ResizablePanel>
+        <ResizablePanel
+          defaultSize={panelOpen ? (isSandboxPanel ? 35 : 50) : 100}
+          minSize={isSandboxPanel ? 25 : 30}
+        >
+          {main}
+        </ResizablePanel>
 
-      {panelOpen && (
-        <>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={isSandboxPanel ? 65 : 50} minSize={25}>
-            {panelContent}
-          </ResizablePanel>
-        </>
-      )}
-    </ResizablePanelGroup>
+        {panelOpen && (
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={isSandboxPanel ? 65 : 50} minSize={25}>
+              {panelContent}
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
+      {upgradeDialog}
+    </>
   )
 }

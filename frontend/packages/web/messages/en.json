@@ -95,6 +95,22 @@
       "leaving": "Leaving…",
       "leaveError": "Failed to leave group.",
       "soleOwnerHint": "Promote another member to owner first."
+    },
+    "upgradeDialog": {
+      "openLabel": "Invite members",
+      "title": "Upgrade to group chat",
+      "irreversibleWarning": "Upgrade is irreversible. All current participants will be visible to invited members.",
+      "titleLabel": "Title",
+      "titlePlaceholder": "Project sync, design review…",
+      "membersLabel": "Invite members",
+      "membersEmpty": "No other workspace members to invite.",
+      "sandboxLabel": "Sandbox",
+      "cancel": "Cancel",
+      "upgrade": "Upgrade",
+      "upgrading": "Upgrading…",
+      "upgradeError": "Failed to upgrade conversation.",
+      "alreadyTopicError": "This conversation has already been upgraded to a group chat.",
+      "externalBindingError": "This conversation is bound to an IM, schedule, or trigger and cannot be upgraded."
     }
   },
   "time": {
