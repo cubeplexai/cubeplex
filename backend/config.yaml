@@ -277,6 +277,14 @@ default:
       login_per_minute: 5
       register_per_minute: 3
 
+  # Social login (Google OAuth2/OIDC). The client_secret is NOT stored here;
+  # operator seeds it into the Credential Vault as kind="social_login",
+  # name="google", org_id=NULL.
+  social_login:
+    google:
+      enabled: false
+      client_id: "" # ENV: CUBEBOX_SOCIAL_LOGIN__GOOGLE__CLIENT_ID
+
   # File parsers (M6 file_read tool)
   parsers:
     docling_serve:
