@@ -56,6 +56,18 @@
       "unavailable": "Search unavailable"
     }
   },
+  "topics": {
+    "newGroupChat": "New Group Chat",
+    "members": "{count} members",
+    "owner": "Owner",
+    "member": "Member",
+    "inviteMembers": "Invite Members",
+    "removeMember": "Remove",
+    "leaveGroup": "Leave Group",
+    "sandboxDedicated": "Dedicated sandbox",
+    "sandboxCreator": "Creator's sandbox",
+    "sandboxWarning": "Other members' operations will execute in your environment."
+  },
   "time": {
     "justNow": "Just now",
     "minutesAgo": "{n}m ago",

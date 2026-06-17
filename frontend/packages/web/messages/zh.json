@@ -56,6 +56,18 @@
       "unavailable": "搜索暂不可用"
     }
   },
+  "topics": {
+    "newGroupChat": "新建群聊",
+    "members": "{count} 位成员",
+    "owner": "群主",
+    "member": "成员",
+    "inviteMembers": "邀请成员",
+    "removeMember": "移除",
+    "leaveGroup": "退出群聊",
+    "sandboxDedicated": "独立沙盒",
+    "sandboxCreator": "群主沙盒",
+    "sandboxWarning": "其他成员的操作将在你的沙盒中执行。"
+  },
   "time": {
     "justNow": "刚刚",
     "minutesAgo": "{n}m 前",
