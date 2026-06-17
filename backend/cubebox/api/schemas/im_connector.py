@@ -33,6 +33,15 @@ class ConnectDiscordAccountIn(BaseModel):
     acting_user_id: str = Field(default="self", min_length=1)
 
 
+class ConnectSlackAccountIn(BaseModel):
+    """Payload for ``POST /ws/{ws}/im/accounts`` when ``platform == 'slack'``."""
+
+    platform: Literal["slack"] = "slack"
+    bot_token: str = Field(min_length=1)
+    app_token: str = Field(min_length=1)
+    acting_user_id: str = Field(default="self", min_length=1)
+
+
 class ImRuntimeStatus(BaseModel):
     """Runtime status snapshot embedded on every ``IMAccountOut``.
 
@@ -87,7 +96,8 @@ class IMAccountListOut(BaseModel):
 
 ConnectIMAccountIn = Annotated[
     Annotated[ConnectFeishuAccountIn, Tag("feishu")]
-    | Annotated[ConnectDiscordAccountIn, Tag("discord")],
+    | Annotated[ConnectDiscordAccountIn, Tag("discord")]
+    | Annotated[ConnectSlackAccountIn, Tag("slack")],
     Discriminator("platform"),
 ]
 
