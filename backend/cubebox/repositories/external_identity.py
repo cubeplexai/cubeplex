@@ -32,6 +32,12 @@ class ExternalIdentityRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_by_id(self, identity_id: str) -> ExternalIdentity | None:
+        stmt = select(ExternalIdentity).where(
+            ExternalIdentity.id == identity_id  # type: ignore[arg-type]
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def list_by_user(self, user_id: str) -> list[ExternalIdentity]:
         stmt = select(ExternalIdentity).where(
             ExternalIdentity.user_id == user_id  # type: ignore[arg-type]

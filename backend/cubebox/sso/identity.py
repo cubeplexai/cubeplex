@@ -152,6 +152,26 @@ async def resolve_identity(
 
         if sso_connection is not None:
             await _provision_org_membership(session, user, sso_connection)
+    elif sso_connection is not None:
+        # Existing user, enterprise SSO. Linking by verified email alone is
+        # not enough — without this membership check, an attacker who runs
+        # any registered org's SSO with a claim of email=<victim> would
+        # gain access to the victim's existing account.
+        already_member = (
+            await session.execute(
+                select(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user.id,  # type: ignore[arg-type]
+                    OrganizationMembership.org_id == sso_connection.org_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if already_member is None:
+            if sso_connection.provisioning == "invite_only":
+                raise SSOProvisioningDenied(
+                    "Auto-provisioning is disabled for this organization. "
+                    "Contact your administrator."
+                )
+            await _provision_org_membership(session, user, sso_connection)
 
     identity = ExternalIdentity(
         user_id=user.id,

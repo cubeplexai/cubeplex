@@ -67,7 +67,17 @@ def _get_state_store(request: Request) -> SSOStateStore:
 
 
 def _base_url() -> str:
-    return str(config.get("app.base_url", "http://localhost:3000")).rstrip("/")
+    url = str(config.get("app.base_url", "http://localhost:3000")).rstrip("/")
+    if "://" not in url:
+        # Misconfiguration: surfaces as a clean 500 with a known code
+        # instead of an opaque IndexError from string-splitting later.
+        raise HTTPException(500, detail={"code": "app_base_url_missing_scheme"})
+    return url
+
+
+def _http_host_from_base(base: str) -> str:
+    """Extract the host[:port] segment from ``app.base_url`` for python3-saml."""
+    return base.split("://", 1)[1].split("/")[0]
 
 
 async def _resolve_sso_connection(
@@ -170,7 +180,7 @@ async def sso_initiate(
         sp_acs_url = f"{base}/api/v1/auth/sso/saml/acs"
         request_data: dict[str, Any] = {
             "https": "on" if base.startswith("https") else "off",
-            "http_host": base.split("//", 1)[1].split("/")[0],
+            "http_host": _http_host_from_base(base),
             "script_name": "",
             "get_data": {},
             "post_data": {},
@@ -316,7 +326,7 @@ async def sso_saml_acs(
 
     request_data = {
         "https": "on" if base.startswith("https") else "off",
-        "http_host": base.split("//", 1)[1].split("/")[0],
+        "http_host": _http_host_from_base(base),
         "script_name": "",
         "get_data": {},
         "post_data": {"SAMLResponse": saml_response},
@@ -422,10 +432,21 @@ async def _enforce_forced_sso_for_user(
     *,
     allowed_org_id: str | None,
 ) -> None:
-    """Reject login if the user belongs to any org with an ``active`` SSO
-    connection, except for ``allowed_org_id`` (the org whose SSO callback we
-    are running). Blocks Google social login from bypassing enterprise SSO
-    and prevents entering Org A via Org B's callback.
+    """Reject login when the user belongs to any org with active forced SSO
+    and the current login flow didn't use SSO for one of those orgs.
+
+    Policy:
+    - Password login and Google social login pass ``allowed_org_id=None``;
+      if the user belongs to any forced-SSO org, reject.
+    - Enterprise SSO callbacks pass ``allowed_org_id=conn.org_id``; if
+      that org is one of the user's forced-SSO orgs, this login satisfies
+      enforcement and is allowed. (Without this, a user in TWO forced-SSO
+      orgs could never log in — strict per-org enforcement is impossible
+      because the JWT cookie is global.)
+    - If the SSO callback is for an org the user is NOT a forced-SSO
+      member of (cross-org), enforcement still blocks the login so that
+      a user in forced-SSO Org A cannot authenticate through some
+      unrelated Org B's SSO.
     """
     rows = (
         await session.execute(
@@ -441,16 +462,17 @@ async def _enforce_forced_sso_for_user(
         )
     ).all()
     forced_orgs = {row[0] for row in rows}
-    if allowed_org_id is not None:
-        forced_orgs.discard(allowed_org_id)
-    if forced_orgs:
-        raise HTTPException(
-            403,
-            detail={
-                "code": "sso_required",
-                "message": "Your organization requires SSO login.",
-            },
-        )
+    if not forced_orgs:
+        return
+    if allowed_org_id is not None and allowed_org_id in forced_orgs:
+        return
+    raise HTTPException(
+        403,
+        detail={
+            "code": "sso_required",
+            "message": "Your organization requires SSO login.",
+        },
+    )
 
 
 async def _login_and_redirect(request: Request, session: AsyncSession, user: User) -> Response:
