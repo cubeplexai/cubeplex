@@ -1,0 +1,366 @@
+"""Admin SSO routes: CRUD for the per-org SSO connection + identity management.
+
+Scope-isolated under ``/admin/sso`` — workspace-scoped SSO surface lives
+elsewhere (it doesn't exist; this is admin-only). Gated by ``require_org_admin``
+and routed to the unambiguous admin org via ``resolve_unambiguous_admin_org_id``,
+matching the pattern in :mod:`cubebox.api.routes.v1.admin`.
+
+Status transitions are strict:
+
+- activate: only from ``testing`` or ``inactive`` → ``active``
+- deactivate: only from ``active`` → ``inactive``
+- delete: refused while ``status == "active"`` (must deactivate first)
+
+Client secrets (OIDC) are written to the credential vault. The credential
+``name`` is namespaced as ``f"sso:{sso_connection_id}"`` so the partial
+unique index ``uq_credential_org_kind_name`` does not block a second SSO
+connection (or a second secret kind on the same connection, e.g. SAML
+signing cert alongside an OIDC client secret).
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cubebox.auth.dependencies import require_org_admin, resolve_unambiguous_admin_org_id
+from cubebox.db import get_session
+from cubebox.models import User
+from cubebox.models.sso_connection import SSOConnection
+from cubebox.repositories.external_identity import ExternalIdentityRepository
+from cubebox.repositories.sso_connection import SSOConnectionRepository
+
+router = APIRouter(prefix="/admin/sso", tags=["admin-sso"])
+
+
+# --- request / response models ---------------------------------------------
+
+
+class SSOConnectionCreate(BaseModel):
+    protocol: str = Field(pattern=r"^(oidc|saml)$")
+    display_name: str = Field(min_length=1, max_length=255)
+    provisioning: str = Field(default="auto", pattern=r"^(auto|invite_only)$")
+    config: dict[str, Any] = Field(default_factory=dict)
+    client_secret: str | None = Field(
+        default=None, description="OIDC client_secret, stored in vault"
+    )
+
+
+class SSOConnectionUpdate(BaseModel):
+    display_name: str | None = Field(default=None, min_length=1, max_length=255)
+    provisioning: str | None = Field(default=None, pattern=r"^(auto|invite_only)$")
+    config: dict[str, Any] | None = None
+
+
+class SSOConnectionResponse(BaseModel):
+    id: str
+    org_id: str
+    protocol: str
+    display_name: str
+    status: str
+    provisioning: str
+    config: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+class ExternalIdentityResponse(BaseModel):
+    id: str
+    user_id: str
+    provider_type: str
+    external_id: str
+    external_email: str
+    created_at: str
+
+
+class OIDCDiscoveryRequest(BaseModel):
+    issuer_url: str = Field(min_length=1)
+
+
+class OIDCDiscoveryResponse(BaseModel):
+    issuer: str
+    authorization_endpoint: str
+    token_endpoint: str
+    userinfo_endpoint: str | None = None
+    jwks_uri: str | None = None
+
+
+# --- routes -----------------------------------------------------------------
+
+
+@router.get("", response_model=SSOConnectionResponse | None)
+async def get_sso(
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SSOConnectionResponse | None:
+    """Return this org's SSO connection, or ``null`` if none configured."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get()
+    if conn is None:
+        return None
+    return _to_response(conn)
+
+
+@router.post("", response_model=SSOConnectionResponse, status_code=status.HTTP_201_CREATED)
+async def create_sso(
+    body: Annotated[SSOConnectionCreate, Body()],
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SSOConnectionResponse:
+    """Create the SSO connection for this org. 409 if one already exists."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    existing = await repo.get()
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "sso_already_configured"},
+        )
+
+    conn = SSOConnection(
+        org_id=org_id,
+        protocol=body.protocol,
+        display_name=body.display_name,
+        status="testing",
+        provisioning=body.provisioning,
+        config=body.config,
+        credential_id=None,
+    )
+    conn = await repo.add(conn)
+    if body.client_secret:
+        conn.credential_id = await _store_secret(
+            request,
+            session,
+            org_id=org_id,
+            sso_connection_id=conn.id,
+            secret=body.client_secret,
+            user_id=user.id,
+        )
+        conn = await repo.update(conn)
+    return _to_response(conn)
+
+
+@router.put("/{sso_id}", response_model=SSOConnectionResponse)
+async def update_sso(
+    sso_id: str,
+    body: Annotated[SSOConnectionUpdate, Body()],
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SSOConnectionResponse:
+    """Update display name / provisioning / config on the SSO connection."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get_by_id(sso_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
+
+    if body.display_name is not None:
+        conn.display_name = body.display_name
+    if body.provisioning is not None:
+        conn.provisioning = body.provisioning
+    if body.config is not None:
+        conn.config = body.config
+
+    conn = await repo.update(conn)
+    return _to_response(conn)
+
+
+@router.delete("/{sso_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_sso(
+    sso_id: str,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Delete the SSO connection. Refused while ``status == "active"``."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get_by_id(sso_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
+    if conn.status == "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "deactivate_before_delete"},
+        )
+    await repo.delete(sso_id)
+
+
+@router.post("/{sso_id}/activate", response_model=SSOConnectionResponse)
+async def activate_sso(
+    sso_id: str,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SSOConnectionResponse:
+    """Activate the SSO connection. Allowed only from ``testing`` or ``inactive``."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get_by_id(sso_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
+    if conn.status not in ("testing", "inactive"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "invalid_status_transition"},
+        )
+    conn.status = "active"
+    conn = await repo.update(conn)
+    return _to_response(conn)
+
+
+@router.post("/{sso_id}/deactivate", response_model=SSOConnectionResponse)
+async def deactivate_sso(
+    sso_id: str,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SSOConnectionResponse:
+    """Deactivate the SSO connection. Allowed only from ``active``."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get_by_id(sso_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
+    if conn.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "invalid_status_transition"},
+        )
+    conn.status = "inactive"
+    conn = await repo.update(conn)
+    return _to_response(conn)
+
+
+@router.get("/{sso_id}/identities", response_model=list[ExternalIdentityResponse])
+async def list_identities(
+    sso_id: str,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = 50,
+    offset: int = 0,
+) -> list[ExternalIdentityResponse]:
+    """List external identities linked to this SSO connection, paginated."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get_by_id(sso_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
+    eid_repo = ExternalIdentityRepository(session)
+    identities = await eid_repo.list_by_connection(sso_id)
+    page = identities[offset : offset + limit]
+    from cubebox.utils.time import utc_isoformat
+
+    return [
+        ExternalIdentityResponse(
+            id=eid.id,
+            user_id=eid.user_id,
+            provider_type=eid.provider_type,
+            external_id=eid.external_id,
+            external_email=eid.external_email or "",
+            created_at=utc_isoformat(eid.created_at),
+        )
+        for eid in page
+    ]
+
+
+@router.delete("/{sso_id}/identities/{eid}", status_code=status.HTTP_204_NO_CONTENT)
+async def unlink_identity(
+    sso_id: str,
+    eid: str,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Unlink an external identity from its mapped user."""
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get_by_id(sso_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
+    eid_repo = ExternalIdentityRepository(session)
+    deleted = await eid_repo.delete(eid)
+    if not deleted:
+        raise HTTPException(status_code=404, detail={"code": "identity_not_found"})
+
+
+@router.post("/discover-oidc", response_model=OIDCDiscoveryResponse)
+async def discover_oidc(
+    body: Annotated[OIDCDiscoveryRequest, Body()],
+    user: Annotated[User, Depends(require_org_admin)],
+) -> OIDCDiscoveryResponse:
+    """Fetch and parse ``.well-known/openid-configuration`` for an issuer URL."""
+    from cubebox.sso.oidc import discover_oidc_endpoints
+
+    try:
+        endpoints = await discover_oidc_endpoints(body.issuer_url)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "oidc_discovery_failed", "message": str(exc)},
+        ) from exc
+
+    try:
+        return OIDCDiscoveryResponse(
+            issuer=endpoints.get("issuer", body.issuer_url),
+            authorization_endpoint=endpoints["authorization_endpoint"],
+            token_endpoint=endpoints["token_endpoint"],
+            userinfo_endpoint=endpoints.get("userinfo_endpoint"),
+            jwks_uri=endpoints.get("jwks_uri"),
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "oidc_discovery_missing_field", "message": str(exc)},
+        ) from exc
+
+
+# --- helpers ----------------------------------------------------------------
+
+
+def _to_response(conn: SSOConnection) -> SSOConnectionResponse:
+    from cubebox.utils.time import utc_isoformat
+
+    return SSOConnectionResponse(
+        id=conn.id,
+        org_id=conn.org_id,
+        protocol=conn.protocol,
+        display_name=conn.display_name,
+        status=conn.status,
+        provisioning=conn.provisioning,
+        config=conn.config,
+        created_at=utc_isoformat(conn.created_at),
+        updated_at=utc_isoformat(conn.updated_at),
+    )
+
+
+async def _store_secret(
+    request: Request,
+    session: AsyncSession,
+    *,
+    org_id: str,
+    sso_connection_id: str,
+    secret: str,
+    user_id: str,
+) -> str:
+    """Encrypt and store an SSO secret in the credential vault, return its id.
+
+    The credential ``name`` is namespaced ``f"sso:{sso_connection_id}"`` so the
+    partial unique index ``uq_credential_org_kind_name`` does not block a
+    second SSO connection (or a second secret kind on the same connection).
+    Goes through :class:`CredentialService` so encryption + audit metadata
+    stay in one place.
+    """
+    from cubebox.credentials.encryption import EncryptionBackend
+    from cubebox.repositories.credential import CredentialRepository
+    from cubebox.services.credential import CredentialService
+
+    backend: EncryptionBackend = request.app.state.encryption_backend
+    repo = CredentialRepository(session, org_id=org_id)
+    service = CredentialService(repo, backend, org_id=org_id, actor_user_id=user_id)
+    return await service.create(
+        kind="sso_client_secret",
+        name=f"sso:{sso_connection_id}",
+        plaintext=secret,
+    )

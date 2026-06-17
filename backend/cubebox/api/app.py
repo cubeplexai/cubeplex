@@ -504,6 +504,7 @@ def create_app(
         admin_sandbox_policy,
         admin_skill_registries,
         admin_skills,
+        admin_sso,
         admin_traces,
         artifacts_router,
         attachments_router,
@@ -568,6 +569,7 @@ def create_app(
     app.include_router(admin_mcp.public_templates_router, prefix="/api/v1")
     app.include_router(mcp_oauth.oauth_callback_router, prefix="/api/v1")
     app.include_router(admin_skill_registries.router, prefix="/api/v1")
+    app.include_router(admin_sso.router, prefix="/api/v1")
     app.include_router(admin_skills.router, prefix="/api/v1")
     app.include_router(admin_skills.bindings_router, prefix="/api/v1")
     app.include_router(ws_mcp.router, prefix="/api/v1")
