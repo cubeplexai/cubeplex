@@ -300,6 +300,130 @@ class IMConnectorService:
                 )
             raise
 
+    async def connect_slack(
+        self,
+        *,
+        workspace_id: str,
+        bot_token: str,
+        app_token: str,
+        acting_user_id: str,
+    ) -> IMConnectorAccount:
+        """Bind one Slack bot: validate token, store credential, return account."""
+        team_id, bot_user_id, bot_name, bot_avatar_url = await self._hydrate_slack_bot_info(
+            bot_token
+        )
+
+        existing = (
+            await self._session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
+                    IMConnectorAccount.platform == "slack",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id == team_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(
+                f"slack account already exists for team_id={team_id} (id={existing.id})"
+            )
+
+        secret_payload = json.dumps(
+            {
+                "bot_token": bot_token,
+                "app_token": app_token,
+                "bot_user_id": bot_user_id,
+            }
+        )
+        try:
+            credential_id = await self._credentials.create(
+                kind="im_bot",
+                name=f"slack:{team_id}",
+                plaintext=secret_payload,
+            )
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ValueError(
+                f"slack account already exists for team_id={team_id} (credential race)"
+            ) from exc
+        try:
+            account = IMConnectorAccount(
+                org_id=self._org_id,
+                workspace_id=workspace_id,
+                platform="slack",
+                external_account_id=team_id,
+                acting_user_id=acting_user_id,
+                credential_id=credential_id,
+                delivery_mode="socket_mode",
+                config={
+                    "bot_app_name": bot_name or None,
+                    "bot_avatar_url": bot_avatar_url or None,
+                },
+            )
+            self._session.add(account)
+            await self._session.commit()
+            await self._session.refresh(account)
+            return account
+        except Exception:
+            await self._session.rollback()
+            try:
+                await self._credentials.delete(credential_id=credential_id)
+            except Exception:
+                logger.warning(
+                    "[IM] orphan credential {} could not be rolled back",
+                    credential_id,
+                    exc_info=True,
+                )
+            raise
+
+    async def _hydrate_slack_bot_info(
+        self,
+        bot_token: str,
+    ) -> tuple[str, str, str, str]:
+        """Validate bot token via Slack ``auth.test`` + ``users.info``.
+
+        Returns ``(team_id, bot_user_id, bot_name, avatar_url)``.
+        """
+        import httpx
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://slack.com/api/auth.test",
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    timeout=10.0,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if not data.get("ok"):
+                    raise ValueError(f"Slack auth.test failed: {data.get('error', 'unknown')}")
+                team_id = str(data["team_id"])
+                bot_user_id = str(data["user_id"])
+
+                resp2 = await client.get(
+                    "https://slack.com/api/users.info",
+                    params={"user": bot_user_id},
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                    timeout=10.0,
+                )
+                resp2.raise_for_status()
+                user_data = resp2.json()
+                bot_name = ""
+                bot_avatar_url = ""
+                if user_data.get("ok"):
+                    profile = user_data.get("user", {}).get("profile", {})
+                    bot_name = (
+                        user_data.get("user", {}).get("real_name")
+                        or profile.get("display_name")
+                        or ""
+                    )
+                    bot_avatar_url = profile.get("image_72", "")
+                return team_id, bot_user_id, bot_name, bot_avatar_url
+        except ValueError:
+            raise
+        except Exception:
+            logger.exception("[IM] Slack auth.test probe failed")
+            raise ValueError("could not validate Slack bot token") from None
+
     async def _hydrate_discord_bot_info(
         self,
         bot_token: str,
