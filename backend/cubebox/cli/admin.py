@@ -1,4 +1,4 @@
-"""cubebox admin subcommands: grant-admin / revoke-admin."""
+"""cubebox admin subcommands: grant-admin / revoke-admin / disable-sso / list-sso."""
 
 import asyncio
 import sys
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.db import async_session_maker
 from cubebox.models import Organization, OrgRole, User
+from cubebox.models.sso_connection import SSOConnection
 from cubebox.repositories import OrganizationMembershipRepository
 
 
@@ -100,3 +101,78 @@ async def _revoke_admin_async(email: str, org_slug: str | None) -> None:
             return
         await repo.promote(user_id=user.id, org_id=org.id, role=OrgRole.MEMBER)
         click.echo(f"Demoted {email} to member of org {org.slug!r} ({org.id}).")
+
+
+@admin_group.command("disable-sso")
+@click.option("--org-slug", required=True, help="Org slug to disable SSO for.")
+def disable_sso(org_slug: str) -> None:
+    """Emergency lockout recovery: flip the org's SSO connection to inactive.
+
+    Does not delete the row or clear the credential — operator needs to be
+    able to inspect and re-activate after the underlying issue is fixed.
+    """
+    asyncio.run(_disable_sso_async(org_slug))
+
+
+async def _disable_sso_async(org_slug: str) -> None:
+    async with async_session_maker() as session:
+        org = (
+            await session.execute(
+                select(Organization).where(Organization.slug == org_slug)  # type: ignore[arg-type]
+            )
+        ).scalar_one_or_none()
+        if org is None:
+            click.echo(f"No org with slug {org_slug!r}", err=True)
+            sys.exit(1)
+
+        conn = (
+            await session.execute(
+                select(SSOConnection).where(
+                    SSOConnection.org_id == org.id  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if conn is None:
+            click.echo(f"No SSO connection for org {org_slug!r}.", err=True)
+            sys.exit(1)
+
+        previous_status = conn.status
+        conn.status = "inactive"
+        session.add(conn)
+        await session.commit()
+        click.echo(
+            f"Disabled SSO for org {org_slug!r} (sso_id={conn.id}, was {previous_status!r})."
+        )
+
+
+@admin_group.command("list-sso")
+def list_sso() -> None:
+    """List all SSO connections (org_slug | protocol | status | provisioning | display_name | sso_id)."""
+    asyncio.run(_list_sso_async())
+
+
+async def _list_sso_async() -> None:
+    async with async_session_maker() as session:
+        rows = (
+            await session.execute(
+                select(SSOConnection, Organization).join(
+                    Organization,
+                    SSOConnection.org_id == Organization.id,  # type: ignore[arg-type]
+                )
+            )
+        ).all()
+        if not rows:
+            click.echo("No SSO connections configured.")
+            return
+
+        header = (
+            f"{'org_slug':<20}  {'protocol':<8}  {'status':<10}  "
+            f"{'provisioning':<14}  {'display_name':<30}  sso_id"
+        )
+        click.echo(header)
+        click.echo("-" * len(header))
+        for conn, org in rows:
+            click.echo(
+                f"{org.slug:<20}  {conn.protocol:<8}  {conn.status:<10}  "
+                f"{conn.provisioning:<14}  {conn.display_name:<30}  {conn.id}"
+            )
