@@ -53,6 +53,7 @@ dependencies = [
     "slack-bolt>=1.28.0",
     "slack-sdk>=3.42.0",
     "authlib>=1.7.2",
+    "python3-saml>=1.16.0",
 ]
 
 [project.optional-dependencies]

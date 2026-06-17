@@ -1,0 +1,12 @@
+<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://idp.example.com/saml/metadata">
+  <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol" WantAuthnRequestsSigned="false">
+    <md:KeyDescriptor use="signing">
+      <ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+        <ds:X509Data>
+          <ds:X509Certificate>MIIC9jCCAd6gAwIBAgIUdHjsQWFGlK/ngL+Ja0+YYrpxjR4wDQYJKoZIhvcNAQELBQAwNTEYMBYGA1UEAwwPaWRwLmV4YW1wbGUuY29tMRkwFwYDVQQKDBBDdWJlYm94IFRlc3QgSWRQMB4XDTI2MDYxNjE0MjU1NVoXDTM2MDYxNDE0MjU1NVowNTEYMBYGA1UEAwwPaWRwLmV4YW1wbGUuY29tMRkwFwYDVQQKDBBDdWJlYm94IFRlc3QgSWRQMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2EsxN2DJpAc8xlYm1sCBhHnySxPwyLFaPvUKX4/Yu+cQnZCXv57thEVKA3jjEr19NVAOl6XAeZ2oL5BocWdKZ2c4INDPmQJ8nVc2unLD3EeEuCxq6Dbrzp9IVv/LTzYBjn0WcTLrqiphFqAz3PblchWwjWmmg2dui4kvfmh8KOIefSHpYFyOO1pdwt7IIWsZ7BWWgNl9muZpcmf0kAmOP5rgCQNS4hrz6wW9XSIhYontwSAwHzqoM3uRBSWWW5IK7Uw6sLKPBGHOg6bjqYWI3Mgl4HtBc6gXYxCSBcTHaqSjtnfrVmNYcZFHwCC2tqOU6LYT/lJXMitTtZpGJXFO5wIDAQABMA0GCSqGSIb3DQEBCwUAA4IBAQCRKayuUQjMdLZwcHxM1tBUdMsVI7/RWoEh/7YRT+2CJ+9ncfZV23lkcostxcQ5WuID8kz3G6/pletjTUjFi5DYSF+1RNuVLc44ZD6XpWWhbO1ZOVUoc6XyiOCw848+xrM51Z7CuQhD0ZFJmAlbDQH84qyjoiN/3REhzEHIjLR3q24+Tb9MNEeOpVdkSQxpYNWKX7L3YBkagbk2y13DN+07cLTIMQNqUJ974Gx7h8VKL0Ee3uXurXZFyVYEohz/ome7Mbxq2oj7bzLw2+XSvH1s3onwxcAIINtgwgyvE3e3xLDkxai8V2PJCD/he6nlfRJl+ERIFZaoCGQ+4mflvHvu</ds:X509Certificate>
+        </ds:X509Data>
+      </ds:KeyInfo>
+    </md:KeyDescriptor>
+    <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://idp.example.com/saml/sso"/>
+  </md:IDPSSODescriptor>
+</md:EntityDescriptor>
