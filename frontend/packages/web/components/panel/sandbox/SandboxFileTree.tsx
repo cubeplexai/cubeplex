@@ -8,15 +8,22 @@ import { getFileVisual } from '@/lib/fileIcons'
 
 interface SandboxFileTreeProps {
   workspaceId: string
+  conversationId?: string | null
   onSelectFile: (entry: SandboxFileEntry) => void
   selectedPath: string | null
 }
 
-export function SandboxFileTree({ workspaceId, onSelectFile, selectedPath }: SandboxFileTreeProps) {
+export function SandboxFileTree({
+  workspaceId,
+  conversationId,
+  onSelectFile,
+  selectedPath,
+}: SandboxFileTreeProps) {
   return (
     <div className="h-full overflow-auto py-1">
       <TreeDirectory
         workspaceId={workspaceId}
+        conversationId={conversationId}
         path="/workspace"
         depth={0}
         defaultOpen
@@ -29,6 +36,7 @@ export function SandboxFileTree({ workspaceId, onSelectFile, selectedPath }: San
 
 function TreeDirectory({
   workspaceId,
+  conversationId,
   path,
   depth,
   defaultOpen = false,
@@ -36,6 +44,7 @@ function TreeDirectory({
   selectedPath,
 }: {
   workspaceId: string
+  conversationId?: string | null
   path: string
   depth: number
   defaultOpen?: boolean
@@ -43,7 +52,7 @@ function TreeDirectory({
   selectedPath: string | null
 }) {
   const [open, setOpen] = useState(defaultOpen)
-  const { files, loading } = useSandboxFiles(open ? workspaceId : null, path)
+  const { files, loading } = useSandboxFiles(open ? workspaceId : null, path, conversationId)
 
   return (
     <>
@@ -56,6 +65,7 @@ function TreeDirectory({
           onClick={() => setOpen((v) => !v)}
           selected={false}
           workspaceId={workspaceId}
+          conversationId={conversationId}
           path={path}
         />
       )}
@@ -74,6 +84,7 @@ function TreeDirectory({
             <TreeDirectory
               key={entry.path}
               workspaceId={workspaceId}
+              conversationId={conversationId}
               path={entry.path}
               depth={depth + 1}
               onSelectFile={onSelectFile}
@@ -88,6 +99,7 @@ function TreeDirectory({
               selected={selectedPath === entry.path}
               onClick={() => onSelectFile(entry)}
               workspaceId={workspaceId}
+              conversationId={conversationId}
               path={entry.path}
             />
           ),
@@ -104,6 +116,7 @@ function TreeRow({
   selected,
   onClick,
   workspaceId,
+  conversationId,
   path,
 }: {
   name: string
@@ -113,6 +126,7 @@ function TreeRow({
   selected: boolean
   onClick: () => void
   workspaceId: string
+  conversationId?: string | null
   path: string
 }) {
   const visual = isDir ? null : getFileVisual({ filename: name })
@@ -122,10 +136,11 @@ function TreeRow({
     (e: React.MouseEvent) => {
       e.stopPropagation()
       const ep = encodeURIComponent(path)
-      const url = `/api/v1/ws/${workspaceId}/sandbox/files/download` + `?path=${ep}`
+      const convQs = conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : ''
+      const url = `/api/v1/ws/${workspaceId}/sandbox/files/download?path=${ep}${convQs}`
       window.open(url, '_blank')
     },
-    [workspaceId, path],
+    [workspaceId, conversationId, path],
   )
 
   return (

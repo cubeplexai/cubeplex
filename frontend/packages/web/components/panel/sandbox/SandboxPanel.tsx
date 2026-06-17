@@ -14,6 +14,7 @@ type SandboxTab = 'files' | 'browser' | 'terminal'
 
 interface SandboxPanelProps {
   workspaceId: string | null
+  conversationId?: string | null
 }
 
 const TABS: {
@@ -26,7 +27,7 @@ const TABS: {
   { id: 'terminal', label: 'Terminal', Icon: TerminalSquare },
 ]
 
-export function SandboxPanel({ workspaceId }: SandboxPanelProps) {
+export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps) {
   const [activeTab, setActiveTab] = useState<SandboxTab>('files')
   const [refreshing, setRefreshing] = useState(false)
   const close = usePanelStore((s) => s.close)
@@ -100,12 +101,18 @@ export function SandboxPanel({ workspaceId }: SandboxPanelProps) {
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
           </div>
         )}
-        {activeTab === 'files' && <SandboxFilesView workspaceId={workspaceId} />}
+        {activeTab === 'files' && (
+          <SandboxFilesView workspaceId={workspaceId} conversationId={conversationId} />
+        )}
         {activeTab === 'browser' && (
           <BrowserView workspaceId={workspaceId} hideHeader refreshRef={browserRefreshRef} />
         )}
         {activeTab === 'terminal' && (
-          <SandboxTerminalView workspaceId={workspaceId} refreshRef={terminalRefreshRef} />
+          <SandboxTerminalView
+            workspaceId={workspaceId}
+            conversationId={conversationId}
+            refreshRef={terminalRefreshRef}
+          />
         )}
       </div>
     </div>

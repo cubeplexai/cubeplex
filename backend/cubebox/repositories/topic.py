@@ -84,6 +84,18 @@ class TopicRepository(ScopedRepository[Topic]):
                 seen.add(uid)
                 unique_ids.append(uid)
 
+        # Lock the topic row FIRST so concurrent invites for the same
+        # user_id serialize. If the dedup query ran before the lock, two
+        # concurrent invites of the same user would each see no existing
+        # row and both attempt the INSERT — the loser raises IntegrityError
+        # on uq_topic_participant.
+        lock_stmt = (
+            select(Topic)
+            .where(Topic.id == topic_id)  # type: ignore[arg-type]
+            .with_for_update()
+        )
+        await self.session.execute(lock_stmt)
+
         # Skip user_ids who are already participants (idempotent add).
         existing_stmt = select(cast(Any, TopicParticipant.user_id)).where(
             TopicParticipant.topic_id == topic_id,  # type: ignore[arg-type]
@@ -92,14 +104,6 @@ class TopicRepository(ScopedRepository[Topic]):
         existing_result = await self.session.execute(existing_stmt)
         already_member = set(existing_result.scalars().all())
         to_add = [uid for uid in unique_ids if uid not in already_member]
-
-        # Lock the topic row to serialize concurrent invites against the cap.
-        lock_stmt = (
-            select(Topic)
-            .where(Topic.id == topic_id)  # type: ignore[arg-type]
-            .with_for_update()
-        )
-        await self.session.execute(lock_stmt)
 
         count_stmt = select(func.count()).where(
             TopicParticipant.topic_id == topic_id  # type: ignore[arg-type]

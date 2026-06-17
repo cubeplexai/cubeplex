@@ -71,29 +71,50 @@ function isTextFile(name: string): boolean {
 interface SandboxFilePreviewProps {
   entry: SandboxFileEntry
   workspaceId: string
+  conversationId?: string | null
 }
 
-export function SandboxFilePreview({ entry, workspaceId }: SandboxFilePreviewProps) {
+export function SandboxFilePreview({
+  entry,
+  workspaceId,
+  conversationId,
+}: SandboxFilePreviewProps) {
   const ext = getExtension(entry.name)
 
   if (OFFICE_EXTENSIONS.has(ext)) {
-    return <OfficeFilePreview entry={entry} workspaceId={workspaceId} />
+    return (
+      <OfficeFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+    )
   }
   if (ext === '.html') {
-    return <HtmlFilePreview entry={entry} workspaceId={workspaceId} />
+    return (
+      <HtmlFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+    )
   }
   if (isTextFile(entry.name)) {
-    return <TextFilePreview entry={entry} workspaceId={workspaceId} />
+    return (
+      <TextFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+    )
   }
-  return <FallbackPreview entry={entry} workspaceId={workspaceId} />
+  return <FallbackPreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
 }
 
-function TextFilePreview({ entry, workspaceId }: { entry: SandboxFileEntry; workspaceId: string }) {
-  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path)
+function TextFilePreview({
+  entry,
+  workspaceId,
+  conversationId,
+}: {
+  entry: SandboxFileEntry
+  workspaceId: string
+  conversationId?: string | null
+}) {
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
 
   if (loading) return <PreviewLoading />
   if (error?.message === 'FILE_TOO_LARGE') {
-    return <FallbackPreview entry={entry} workspaceId={workspaceId} />
+    return (
+      <FallbackPreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+    )
   }
   if (error) {
     return <div className="p-4 text-sm text-destructive">Failed to load: {error.message}</div>
@@ -113,8 +134,16 @@ function TextFilePreview({ entry, workspaceId }: { entry: SandboxFileEntry; work
   )
 }
 
-function HtmlFilePreview({ entry, workspaceId }: { entry: SandboxFileEntry; workspaceId: string }) {
-  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path)
+function HtmlFilePreview({
+  entry,
+  workspaceId,
+  conversationId,
+}: {
+  entry: SandboxFileEntry
+  workspaceId: string
+  conversationId?: string | null
+}) {
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
   const blobUrl = useMemo(() => {
     if (!content) return null
     const blob = new Blob([content], { type: 'text/html' })
@@ -148,9 +177,11 @@ const OFFICE_LOAD_TIMEOUT_MS = 15_000
 function OfficeFilePreview({
   entry,
   workspaceId,
+  conversationId,
 }: {
   entry: SandboxFileEntry
   workspaceId: string
+  conversationId?: string | null
 }) {
   const [viewerUrl, setViewerUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -162,10 +193,13 @@ function OfficeFilePreview({
     let cancelled = false
     const fetchToken = async () => {
       try {
+        const convQs = conversationId
+          ? `&conversation_id=${encodeURIComponent(conversationId)}`
+          : ''
         const url =
           `/api/v1/ws/${workspaceId}` +
           `/sandbox/files/preview-token` +
-          `?path=${encodeURIComponent(entry.path)}`
+          `?path=${encodeURIComponent(entry.path)}${convQs}`
         const res = await fetch(url, {
           method: 'POST',
           credentials: 'include',
@@ -182,7 +216,7 @@ function OfficeFilePreview({
     return () => {
       cancelled = true
     }
-  }, [workspaceId, entry.path])
+  }, [workspaceId, conversationId, entry.path])
 
   useEffect(() => {
     if (!viewerUrl) return
@@ -237,11 +271,20 @@ function OfficeFilePreview({
   )
 }
 
-function FallbackPreview({ entry, workspaceId }: { entry: SandboxFileEntry; workspaceId: string }) {
+function FallbackPreview({
+  entry,
+  workspaceId,
+  conversationId,
+}: {
+  entry: SandboxFileEntry
+  workspaceId: string
+  conversationId?: string | null
+}) {
+  const convQs = conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : ''
   const downloadUrl =
     `/api/v1/ws/${workspaceId}` +
     `/sandbox/files/download` +
-    `?path=${encodeURIComponent(entry.path)}`
+    `?path=${encodeURIComponent(entry.path)}${convQs}`
   const sizeLabel =
     entry.size < 1024
       ? `${entry.size} B`
