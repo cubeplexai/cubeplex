@@ -51,6 +51,8 @@ PREFIX_IM_RUN_QUEUE_ITEM: str = "imrq"
 PREFIX_TOP: str = "top"
 PREFIX_TPM: str = "tpm"
 PREFIX_CPM: str = "cpm"
+PREFIX_SSO_CONNECTION: str = "sso"
+PREFIX_EXTERNAL_IDENTITY: str = "eid"
 
 
 @dataclass
