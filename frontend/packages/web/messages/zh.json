@@ -1677,8 +1677,7 @@
         "label": "Lark / 飞书"
       },
       "slack": {
-        "label": "Slack",
-        "coming": "即将支持"
+        "label": "Slack"
       },
       "discord": {
         "label": "Discord"
@@ -1750,6 +1749,19 @@
         "field": {
           "botToken": "Bot Token",
           "applicationId": "Application ID"
+        }
+      },
+      "slack": {
+        "prereq": {
+          "app": "在 api.slack.com/apps 创建 Slack 应用",
+          "scopes": "在 OAuth & Permissions 中添加以下 Bot Token Scopes",
+          "socketMode": "在应用设置中启用 Socket Mode",
+          "appToken": "生成具有此 scope 的 App-Level Token",
+          "install": "将应用安装到你的工作区并复制 Bot Token"
+        },
+        "field": {
+          "botToken": "Bot Token (xoxb-...)",
+          "appToken": "App Token (xapp-...)"
         }
       }
     },
