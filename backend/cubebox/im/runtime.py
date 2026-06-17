@@ -120,6 +120,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
     # Trigger platform registrations
     import cubebox.im.discord  # noqa: F401
     import cubebox.im.feishu  # noqa: F401
+    import cubebox.im.slack  # noqa: F401
 
     instance_id = str(uuid.uuid4())
 
