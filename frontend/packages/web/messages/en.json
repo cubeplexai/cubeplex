@@ -1789,6 +1789,16 @@
       "title": "Delete this bot connection?",
       "body": "This removes the credential and stops any active long-connection. The Feishu app itself is untouched.",
       "confirmGate": "Type {botName} to confirm"
+    },
+    "link": {
+      "title": "Link IM Account",
+      "verifying": "Verifying your identity link...",
+      "success": "Your {platform} account has been linked to cubebox successfully.",
+      "invalidToken": "This link is invalid or has expired. Please run /link again in your IM.",
+      "emailMismatch": "Please log in with the email specified in the /link command.",
+      "notMember": "You are not a member of this workspace. Ask the workspace admin to add you.",
+      "error": "Linking failed. Please try again.",
+      "goToApp": "Go to cubebox"
     }
   }
 }

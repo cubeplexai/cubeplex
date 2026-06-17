@@ -122,3 +122,20 @@ export async function adminEnableImAccount(
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as ImAccount
 }
+
+// ── Identity link ────────────────────────────────────────────────────────────
+
+export interface ImLinkConfirmResult {
+  ok: boolean
+  platform: string
+  account_id: string
+}
+
+export async function confirmImLink(
+  client: ApiClient,
+  token: string,
+): Promise<ImLinkConfirmResult> {
+  const res = await client.post('/api/v1/im/link/confirm', { token })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ImLinkConfirmResult
+}
