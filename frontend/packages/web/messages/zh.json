@@ -78,6 +78,23 @@
       "create": "创建",
       "creating": "创建中…",
       "createError": "创建群聊失败。"
+    },
+    "memberPanel": {
+      "openLabel": "查看参与者",
+      "title": "{count} 位参与者",
+      "invite": "邀请",
+      "inviteHeader": "邀请成员",
+      "inviteEmpty": "没有其他工作区成员可邀请。",
+      "confirmInvite": "邀请",
+      "inviting": "邀请中…",
+      "inviteError": "邀请成员失败。",
+      "cancel": "取消",
+      "promote": "提升为群主",
+      "promoteError": "提升成员失败。",
+      "removeError": "移除成员失败。",
+      "leaving": "退出中…",
+      "leaveError": "退出群聊失败。",
+      "soleOwnerHint": "请先将其他成员提升为群主。"
     }
   },
   "time": {

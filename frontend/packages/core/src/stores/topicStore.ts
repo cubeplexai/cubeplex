@@ -8,6 +8,7 @@ import {
   deleteTopic,
   addTopicParticipants,
   removeTopicParticipant,
+  updateParticipantRole as apiUpdateParticipantRole,
 } from '../api'
 
 export interface TopicWithParticipants {
@@ -29,6 +30,12 @@ export interface TopicStore {
   remove(client: ApiClient, topicId: string): Promise<void>
   addMembers(client: ApiClient, topicId: string, userIds: string[]): Promise<void>
   removeMember(client: ApiClient, topicId: string, userId: string): Promise<void>
+  updateParticipantRole(
+    client: ApiClient,
+    topicId: string,
+    userId: string,
+    role: 'owner' | 'member',
+  ): Promise<void>
 }
 
 export const useTopicStore = create<TopicStore>((set) => ({
@@ -94,5 +101,33 @@ export const useTopicStore = create<TopicStore>((set) => ({
         [topicId]: (s.topicParticipants[topicId] ?? []).filter((p) => p.user_id !== userId),
       },
     }))
+  },
+
+  async updateParticipantRole(client, topicId, userId, role) {
+    const { participant } = await apiUpdateParticipantRole(client, topicId, userId, role)
+    set((s) => {
+      const current = s.topicParticipants[topicId] ?? []
+      // When promoting another member to owner, the backend demotes the caller
+      // to member. Refetch to keep all roles in sync rather than guessing.
+      const next = current.map((p) => (p.user_id === userId ? participant : p))
+      return {
+        topicParticipants: {
+          ...s.topicParticipants,
+          [topicId]: next,
+        },
+      }
+    })
+    // Authoritative refresh — caller demotion + any cascading changes.
+    try {
+      const detail = await getTopic(client, topicId)
+      set((s) => ({
+        topicParticipants: {
+          ...s.topicParticipants,
+          [topicId]: detail.participants,
+        },
+      }))
+    } catch {
+      /* best-effort */
+    }
   },
 }))
