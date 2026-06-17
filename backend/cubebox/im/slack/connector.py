@@ -211,26 +211,6 @@ class SlackConnector:
             logger.warning("[Slack] send_message_with_blocks failed", exc_info=True)
             return None
 
-    async def update_message_with_blocks(
-        self, message_ts: str, blocks: list[dict[str, Any]], text: str
-    ) -> bool:
-        """Update with custom blocks."""
-        if self._client is None or not self._channel_id:
-            return False
-        try:
-            await self._client.chat_update(
-                channel=self._channel_id,
-                ts=message_ts,
-                blocks=blocks,
-                text=text[:_SECTION_CHAR_LIMIT],
-            )
-            return True
-        except Exception as exc:
-            if self._is_rate_limit(exc):
-                raise SlackRateLimitError(f"update rate limited: {exc}") from exc
-            logger.warning("[Slack] update_message_with_blocks failed", exc_info=True)
-            return False
-
     async def add_reaction(self, message_ts: str, emoji: str) -> bool:
         """Add an emoji reaction to a message."""
         if self._client is None or not self._channel_id:

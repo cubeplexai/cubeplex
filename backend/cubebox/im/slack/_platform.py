@@ -35,7 +35,7 @@ class SlackPlatform:
         bot_user_id = ""
         if load_secrets is not None:
             secrets = await load_secrets(account)
-            bot_user_id = secrets.get("bot_user_id", "")
+            bot_user_id = secrets.get("bot_open_id", "")
 
         thread_ts = queue_item.reply_to_id
 
@@ -77,7 +77,7 @@ class SlackPlatform:
 
         bot_token = str(secrets.get("bot_token") or "")
         app_token = str(secrets.get("app_token") or "")
-        bot_user_id = str(secrets.get("bot_user_id") or "")
+        bot_user_id = str(secrets.get("bot_open_id") or "")
         if not bot_token or not app_token:
             logger.warning("[Slack] skipping account {} — missing tokens", account.id)
             return
