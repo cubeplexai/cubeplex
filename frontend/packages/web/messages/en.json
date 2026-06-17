@@ -66,7 +66,19 @@
     "leaveGroup": "Leave Group",
     "sandboxDedicated": "Dedicated sandbox",
     "sandboxCreator": "Creator's sandbox",
-    "sandboxWarning": "Other members' operations will execute in your environment."
+    "sandboxWarning": "Other members' operations will execute in your environment.",
+    "createDialog": {
+      "title": "New Group Chat",
+      "titleLabel": "Title",
+      "titlePlaceholder": "Project sync, design review…",
+      "membersLabel": "Invite members",
+      "membersEmpty": "No other workspace members to invite.",
+      "sandboxLabel": "Sandbox",
+      "cancel": "Cancel",
+      "create": "Create",
+      "creating": "Creating…",
+      "createError": "Failed to create group chat."
+    }
   },
   "time": {
     "justNow": "Just now",

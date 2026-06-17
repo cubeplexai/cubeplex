@@ -25,6 +25,7 @@ import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
 import { TopicNode } from '@/components/sidebar/TopicNode'
 import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
+import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
 import { VscMcp } from 'react-icons/vsc'
 import {
   Box,
@@ -40,6 +41,7 @@ import {
   Settings,
   Sparkles,
   Trash2,
+  Users,
   Webhook,
 } from 'lucide-react'
 
@@ -384,9 +386,11 @@ interface SidebarProps {
 export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): React.ReactElement {
   const tSidebar = useTranslations('sidebar')
   const tShell = useTranslations('shellLayout')
+  const t = useTranslations('topics')
   const { conversations, activeId } = useConversationStore()
   const { topics } = useTopicStore()
   const pathname = usePathname()
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false)
 
   // Current workspace inferred from URL (no WorkspaceContext dependency).
   const wsMatch = pathname?.match(/^\/w\/([^/]+)/)
@@ -466,7 +470,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
         </div>
       )}
 
-      {/* Primary actions: new chat + search */}
+      {/* Primary actions: new chat + new group chat + search */}
       <div className="px-2 pt-1.5 pb-1 space-y-0.5">
         {/* New chat */}
         {(() => {
@@ -488,6 +492,29 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
             newChatLink
           )
         })()}
+        {/* New group chat */}
+        {currentWsId &&
+          (() => {
+            const newGroupBtn = (
+              <button
+                type="button"
+                onClick={() => setGroupDialogOpen(true)}
+                className={cn(
+                  'flex w-full items-center px-2 py-1.5 rounded transition-colors duration-fast text-xs text-muted-foreground hover:text-foreground hover:bg-accent',
+                  collapsed ? 'justify-center' : 'gap-2',
+                )}
+                aria-label={t('newGroupChat')}
+              >
+                <Users className="size-3.5 shrink-0" />
+                {!collapsed && <span className="whitespace-nowrap">{t('newGroupChat')}</span>}
+              </button>
+            )
+            return collapsed ? (
+              <RailTooltip label={t('newGroupChat')}>{newGroupBtn}</RailTooltip>
+            ) : (
+              newGroupBtn
+            )
+          })()}
         {/* Search */}
         {collapsed ? (
           <RailTooltip label={tSidebar('search.open')}>
@@ -557,6 +584,14 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
       <div className="mt-auto border-t border-border p-2">
         <AvatarPopover collapsed={collapsed} />
       </div>
+
+      {currentWsId && (
+        <CreateGroupChatDialog
+          wsId={currentWsId}
+          open={groupDialogOpen}
+          onOpenChange={setGroupDialogOpen}
+        />
+      )}
     </aside>
   )
 }
