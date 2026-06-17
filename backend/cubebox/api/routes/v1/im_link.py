@@ -66,7 +66,10 @@ async def _upsert_identity_link(
         )
     ).scalar_one_or_none()
     if account is None:
-        raise HTTPException(status_code=400, detail="IM 账号不存在。")
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "account_not_found", "message": "IM account not found."},
+        )
 
     existing = (
         await session.execute(
@@ -92,7 +95,10 @@ async def _upsert_identity_link(
         await session.commit()
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(status_code=409, detail="绑定冲突，请重试。") from None
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "link_conflict", "message": "Link conflict, please retry."},
+        ) from None
 
 
 @router.post("/confirm")
@@ -105,19 +111,22 @@ async def confirm_im_link(
     try:
         claims = verify_link_token(body.token, secret=secret)
     except ValueError:
-        raise HTTPException(status_code=400, detail="链接无效或已过期，请重新发起绑定。") from None
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_token", "message": "Link expired or invalid."},
+        ) from None
 
     if user.email.strip().lower() != claims.email:
         raise HTTPException(
             status_code=403,
-            detail=f"请使用 {claims.email} 登录后重试。",
+            detail={"code": "email_mismatch", "message": "Email mismatch."},
         )
 
     is_member = await _check_membership(session, user.id, claims.workspace_id)
     if not is_member:
         raise HTTPException(
             status_code=403,
-            detail="你不是该工作区的成员，请联系工作区管理员将你添加后重试。",
+            detail={"code": "not_member", "message": "Not a workspace member."},
         )
 
     await _upsert_identity_link(session, claims, user.id)
