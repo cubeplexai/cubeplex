@@ -289,29 +289,27 @@ async def update_participant_role(
         caller_participant.role = "member"
         session.add(caller_participant)
 
-    # Block self-demotion when it would leave the topic without any owner.
-    # Without this guard a sole owner could PATCH themselves to "member" and
-    # brick the topic — nobody can rename, delete, manage members, or
-    # re-promote anyone without DB intervention.
-    if (
-        body.role == "member"
-        and target.user_id == caller_participant.user_id
-        and caller_participant.role == "owner"
-    ):
+    # Demoting an owner (any owner, not just self) must leave at least one
+    # owner standing. Two-owner states are reachable transiently (e.g. raced
+    # transfer) or via admin scripts; without this guard one demote can
+    # brick the topic.
+    if body.role != "owner" and target.role == "owner":
+        # Count other owners AFTER the transfer-demote above (caller may
+        # have already been moved to "member" in this transaction).
         other_owners_stmt = (
             select(func.count())
             .select_from(TopicParticipant)
             .where(
                 TopicParticipant.topic_id == topic_id,  # type: ignore[arg-type]
                 TopicParticipant.role == "owner",  # type: ignore[arg-type]
-                TopicParticipant.user_id != caller_participant.user_id,  # type: ignore[arg-type]
+                TopicParticipant.user_id != target.user_id,  # type: ignore[arg-type]
             )
         )
         other_owners = (await session.execute(other_owners_stmt)).scalar_one()
         if other_owners == 0:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot step down: promote another member to owner first",
+                detail=("Cannot demote the last owner: promote another member to owner first"),
             )
 
     target.role = body.role

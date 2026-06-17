@@ -464,15 +464,19 @@ async def delete_conversation(
 
 
 async def _conversation_has_external_binding(session: AsyncSession, conversation_id: str) -> bool:
-    """Return True if this conversation is referenced by an IM thread,
-    a scheduled task target, or a trigger target_ref. Upgrading such a
-    conversation to a topic would silently break those bindings (each
-    binding assumes a stable 1:1 conversation identity)."""
-    from sqlalchemy import String, func, select
+    """Return True if this conversation is referenced by an IM thread
+    or a scheduled task target. Upgrading such a conversation to a topic
+    would silently break those bindings (each binding assumes a stable
+    1:1 conversation identity).
+
+    Triggers are not checked: they always create a fresh draft
+    conversation per fire (``triggers/pipeline.py``); they never bind to
+    an existing conversation id.
+    """
+    from sqlalchemy import func, select
 
     from cubebox.models.im_connector import IMThreadLink
     from cubebox.models.scheduled_task import ScheduledTask
-    from cubebox.models.trigger import Trigger
 
     im_stmt = (
         select(func.count())
@@ -488,18 +492,6 @@ async def _conversation_has_external_binding(session: AsyncSession, conversation
         .where(ScheduledTask.target_conversation_id == conversation_id)  # type: ignore[arg-type]
     )
     if (await session.execute(sched_stmt)).scalar_one() > 0:
-        return True
-
-    # Triggers reference their target via a JSON `target_ref` blob; match any
-    # trigger whose JSON serialises with this conversation id. False positives
-    # are acceptable for a guard — false negatives would silently break the
-    # trigger after upgrade.
-    trig_stmt = (
-        select(func.count())
-        .select_from(Trigger)
-        .where(Trigger.target_ref.cast(String).like(f"%{conversation_id}%"))  # type: ignore[attr-defined]
-    )
-    if (await session.execute(trig_stmt)).scalar_one() > 0:
         return True
 
     return False

@@ -18,9 +18,16 @@ async function fetcher(url: string): Promise<SandboxFileEntry[]> {
   return res.json() as Promise<SandboxFileEntry[]>
 }
 
-export function useSandboxFiles(workspaceId: string | null, path: string) {
+export function useSandboxFiles(
+  workspaceId: string | null,
+  path: string,
+  conversationId?: string | null,
+) {
+  // Pass conversation_id so dedicated-mode topic conversations resolve
+  // to the topic-keyed sandbox instead of the viewer's personal one.
+  const convQs = conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : ''
   const key = workspaceId
-    ? `/api/v1/ws/${workspaceId}/sandbox/files` + `?path=${encodeURIComponent(path)}`
+    ? `/api/v1/ws/${workspaceId}/sandbox/files?path=${encodeURIComponent(path)}${convQs}`
     : null
   const { data, error, isLoading, mutate } = useSWR<SandboxFileEntry[]>(key, fetcher, {
     revalidateOnFocus: false,

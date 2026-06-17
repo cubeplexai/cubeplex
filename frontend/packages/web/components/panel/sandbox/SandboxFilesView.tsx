@@ -8,9 +8,10 @@ import type { SandboxFileEntry } from '@/hooks/useSandboxFiles'
 
 interface SandboxFilesViewProps {
   workspaceId: string
+  conversationId?: string | null
 }
 
-export function SandboxFilesView({ workspaceId }: SandboxFilesViewProps) {
+export function SandboxFilesView({ workspaceId, conversationId }: SandboxFilesViewProps) {
   const [selectedFile, setSelectedFile] = useState<SandboxFileEntry | null>(null)
 
   return (
@@ -18,6 +19,7 @@ export function SandboxFilesView({ workspaceId }: SandboxFilesViewProps) {
       <ResizablePanel defaultSize={selectedFile ? 30 : 100} minSize={20}>
         <SandboxFileTree
           workspaceId={workspaceId}
+          conversationId={conversationId}
           onSelectFile={setSelectedFile}
           selectedPath={selectedFile?.path ?? null}
         />
@@ -30,6 +32,7 @@ export function SandboxFilesView({ workspaceId }: SandboxFilesViewProps) {
               key={selectedFile.path}
               entry={selectedFile}
               workspaceId={workspaceId}
+              conversationId={conversationId}
             />
           </ResizablePanel>
         </>

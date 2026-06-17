@@ -90,7 +90,7 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
     ) : view.type === 'attachment' ? (
       <AttachmentPreviewView info={view.info} />
     ) : view.type === 'sandbox' ? (
-      <SandboxPanel workspaceId={workspaceId} />
+      <SandboxPanel workspaceId={workspaceId} conversationId={conversationId} />
     ) : view.type === 'skill-candidate' ? (
       <SkillCandidatePanel
         candidateId={view.candidateId}

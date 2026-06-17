@@ -15,7 +15,7 @@ import mimetypes
 import posixpath
 import secrets
 from datetime import datetime
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 from urllib.parse import quote
 
 import orjson
@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.schemas.sandbox_policy import (
@@ -42,15 +43,54 @@ from cubebox.utils.time import utc_isoformat
 router = APIRouter(prefix="/ws/{workspace_id}/sandbox", tags=["ws-sandbox"])
 
 
+async def _resolve_target_topic_id(
+    session: AsyncSession, ctx: RequestContext, conversation_id: str | None
+) -> str | None:
+    """Resolve the topic_id for a sandbox lookup.
+
+    Frontend hooks pass the current conversation's id (when one is open)
+    so we can route file/terminal/download/preview requests to the
+    topic-scoped sandbox for dedicated-mode topics. Returns None for
+    personal conversations or when the conversation has no dedicated
+    topic — falls back to the user's personal sandbox.
+    """
+    if conversation_id is None:
+        return None
+    from cubebox.models.conversation import Conversation
+    from cubebox.models.topic import Topic
+
+    conv_stmt = select(cast(Any, Conversation.topic_id)).where(
+        cast(Any, Conversation.id) == conversation_id,
+        cast(Any, Conversation.workspace_id) == ctx.workspace_id,
+    )
+    topic_id = (await session.execute(conv_stmt)).scalar_one_or_none()
+    if topic_id is None:
+        return None
+    mode_stmt = select(cast(Any, Topic.sandbox_mode)).where(
+        cast(Any, Topic.id) == topic_id,
+    )
+    mode = (await session.execute(mode_stmt)).scalar_one_or_none()
+    if mode != "dedicated":
+        return None
+    return str(topic_id)
+
+
 @router.get("/status", response_model=SandboxStatusOut)
 async def get_sandbox_status(
     workspace_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    conversation_id: str | None = Query(default=None),
 ) -> SandboxStatusOut:
-    """Return the caller's active sandbox row in this workspace, or absent."""
+    """Return the active sandbox row for this scope, or absent.
+
+    With ``conversation_id`` set to a dedicated-mode topic conversation,
+    returns the topic-keyed sandbox row instead of the caller's personal
+    one so the panel reflects what the agent is actually using.
+    """
     repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    row = await repo.get_active_by_user(ctx.user.id)
+    target_topic_id = await _resolve_target_topic_id(session, ctx, conversation_id)
+    row = await repo.get_active_for_scope(user_id=ctx.user.id, topic_id=target_topic_id)
     if row is None:
         return SandboxStatusOut(
             status="absent",
@@ -80,8 +120,10 @@ class SandboxFileEntry(BaseModel):
 @router.get("/files", response_model=list[SandboxFileEntry])
 async def list_sandbox_files(
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     path: str = Query(default="/workspace"),
     pattern: str = Query(default="*"),
+    conversation_id: str | None = Query(default=None),
 ) -> list[SandboxFileEntry]:
     """List direct children of a directory in the sandbox."""
     normalized = posixpath.normpath(path)
@@ -91,11 +133,13 @@ async def list_sandbox_files(
             detail="path outside workspace",
         )
     manager = get_sandbox_manager()
+    target_topic_id = await _resolve_target_topic_id(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
             ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
+            topic_id=target_topic_id,
         )
         await manager.touch(
             sandbox.id,
@@ -179,7 +223,9 @@ class SandboxFileContent(BaseModel):
 @router.get("/files/content", response_model=SandboxFileContent)
 async def get_sandbox_file_content(
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     path: str = Query(...),
+    conversation_id: str | None = Query(default=None),
 ) -> SandboxFileContent:
     """Read a text file from the sandbox for inline preview."""
     normalized = posixpath.normpath(path)
@@ -189,11 +235,13 @@ async def get_sandbox_file_content(
             detail="path outside workspace",
         )
     manager = get_sandbox_manager()
+    target_topic_id = await _resolve_target_topic_id(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
             ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
+            topic_id=target_topic_id,
         )
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("filesystem operations require OpenSandbox backend")
@@ -226,7 +274,9 @@ async def get_sandbox_file_content(
 @router.get("/files/download")
 async def download_sandbox_file(
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     path: str = Query(...),
+    conversation_id: str | None = Query(default=None),
 ) -> StreamingResponse:
     """Stream a file from the sandbox as a download."""
     normalized = posixpath.normpath(path)
@@ -236,11 +286,13 @@ async def download_sandbox_file(
             detail="path outside workspace",
         )
     manager = get_sandbox_manager()
+    target_topic_id = await _resolve_target_topic_id(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
             ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
+            topic_id=target_topic_id,
         )
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("filesystem operations require OpenSandbox backend")
@@ -286,8 +338,10 @@ class SandboxPreviewTokenResponse(BaseModel):
 async def create_sandbox_preview_token(
     request: Request,
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     rh: Annotated[RedisHandle, Depends(redis_dep)],
     path: str = Query(...),
+    conversation_id: str | None = Query(default=None),
 ) -> SandboxPreviewTokenResponse:
     """Issue a one-time nonce for Office Online Viewer."""
     filename = posixpath.basename(path)
@@ -299,11 +353,13 @@ async def create_sandbox_preview_token(
         )
 
     manager = get_sandbox_manager()
+    target_topic_id = await _resolve_target_topic_id(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
             ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
+            topic_id=target_topic_id,
         )
     except SandboxError as exc:
         raise HTTPException(
@@ -343,14 +399,18 @@ class SandboxTerminalResponse(BaseModel):
 @router.get("/terminal", response_model=SandboxTerminalResponse)
 async def get_terminal(
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    conversation_id: str | None = Query(default=None),
 ) -> SandboxTerminalResponse:
     """Start ttyd in the sandbox and return a signed URL."""
     manager = get_sandbox_manager()
+    target_topic_id = await _resolve_target_topic_id(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
             ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
+            topic_id=target_topic_id,
         )
         await sandbox.start_terminal()
         await manager.touch(

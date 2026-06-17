@@ -72,6 +72,28 @@ async def _check_scope_access(
 # ── routes ───────────────────────────────────────────────────────────────
 
 
+async def _is_topic_owner_of_conversation(
+    session: AsyncSession, conversation_id: str, user_id: str
+) -> bool:
+    """True when the conversation belongs to a topic and the user is an owner."""
+    from typing import Any, cast
+
+    from cubebox.models.topic import TopicParticipant
+
+    conv_stmt = select(cast(Any, Conversation.topic_id)).where(
+        cast(Any, Conversation.id) == conversation_id,
+    )
+    topic_id = (await session.execute(conv_stmt)).scalar_one_or_none()
+    if topic_id is None:
+        return False
+    part_stmt = select(cast(Any, TopicParticipant.role)).where(
+        cast(Any, TopicParticipant.topic_id) == topic_id,
+        cast(Any, TopicParticipant.user_id) == user_id,
+    )
+    role = (await session.execute(part_stmt)).scalar_one_or_none()
+    return role == "owner"
+
+
 class CreateShareRequest(BaseModel):
     conversation_id: str
     scope: ShareScope = ShareScope.public
@@ -178,7 +200,13 @@ async def list_conversation_shares(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[dict[str, object]]:
     repo = ConversationShareRepository(session)
-    shares = await repo.list_by_conversation(conversation_id, user.id)
+    # Topic owners see every share for the conversation (any participant
+    # may have minted one). Non-topic conversations keep the per-creator
+    # filter — 1:1 behavior unchanged.
+    visible_to: str | None = user.id
+    if await _is_topic_owner_of_conversation(session, conversation_id, user.id):
+        visible_to = None
+    shares = await repo.list_by_conversation(conversation_id, visible_to)
     return [_serialize(s) for s in shares]
 
 
@@ -214,9 +242,22 @@ async def revoke_share(
 ) -> dict[str, object]:
     repo = ConversationShareRepository(session)
     share = await repo.revoke(share_id, user.id)
-    if not share:
+    if share is not None:
+        return _serialize(share)
+
+    # Topic owners may revoke shares created by any participant of their
+    # topic (e.g. after a transfer or to clean up a departed member's
+    # share). Look up the share unfiltered, then check topic ownership.
+    existing = await repo.get_active(share_id)
+    if existing is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Share not found")
-    return _serialize(share)
+    if not await _is_topic_owner_of_conversation(session, existing.conversation_id, user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Share not found")
+
+    existing.is_active = False
+    await session.commit()
+    await session.refresh(existing)
+    return _serialize(existing)
 
 
 @router.get("/{share_id}/artifacts/{artifact_id}/v{version:int}/{file_path:path}")

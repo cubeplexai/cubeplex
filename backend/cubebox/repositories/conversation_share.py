@@ -115,14 +115,22 @@ class ConversationShareRepository:
         return items, total
 
     async def list_by_conversation(
-        self, conversation_id: str, user_id: str
+        self, conversation_id: str, user_id: str | None
     ) -> list[ConversationShare]:
+        """List shares on a conversation.
+
+        ``user_id=None`` returns every share — used by topic owners who
+        need to see and revoke shares created by any participant. The
+        route handler authorizes whether to pass None or a specific id.
+        """
+        from typing import cast
+
+        clauses: list[Any] = [
+            cast(Any, ConversationShare.conversation_id) == conversation_id,
+        ]
+        if user_id is not None:
+            clauses.append(cast(Any, ConversationShare.creator_user_id) == user_id)
         stmt = (
-            select(ConversationShare)
-            .where(
-                ConversationShare.conversation_id == conversation_id,  # type: ignore[arg-type]
-                ConversationShare.creator_user_id == user_id,  # type: ignore[arg-type]
-            )
-            .order_by(desc(ConversationShare.created_at))  # type: ignore[arg-type]
+            select(ConversationShare).where(*clauses).order_by(desc(ConversationShare.created_at))  # type: ignore[arg-type]
         )
         return list((await self.session.execute(stmt)).scalars().all())

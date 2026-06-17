@@ -16,10 +16,15 @@ async function fetcher(url: string): Promise<SandboxFileContent> {
   return res.json() as Promise<SandboxFileContent>
 }
 
-export function useSandboxFileContent(workspaceId: string | null, path: string | null) {
+export function useSandboxFileContent(
+  workspaceId: string | null,
+  path: string | null,
+  conversationId?: string | null,
+) {
+  const convQs = conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : ''
   const key =
     workspaceId && path
-      ? `/api/v1/ws/${workspaceId}/sandbox/files/content` + `?path=${encodeURIComponent(path)}`
+      ? `/api/v1/ws/${workspaceId}/sandbox/files/content?path=${encodeURIComponent(path)}${convQs}`
       : null
   const { data, error, isLoading } = useSWR<SandboxFileContent>(key, fetcher, {
     revalidateOnFocus: false,

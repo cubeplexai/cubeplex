@@ -369,8 +369,10 @@ function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEn
     const convs = (byTopic.get(topic.id) ?? [])
       .slice()
       .sort((a, b) => ts(b.updated_at) - ts(a.updated_at))
+    // last_activity_at bumps on every message; updated_at only on metadata
+    // edits. Without this, topics freeze in place after the first message.
     const newest = convs.length > 0 ? ts(convs[0]!.updated_at) : 0
-    const sortKey = Math.max(ts(topic.updated_at), newest)
+    const sortKey = Math.max(ts(topic.last_activity_at), newest)
     entries.push({ kind: 'topic', topic, conversations: convs, sortKey })
   }
   entries.sort((a, b) => b.sortKey - a.sortKey)

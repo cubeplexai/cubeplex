@@ -1579,22 +1579,7 @@ class RunManager:
                 metadata=_user_msg_metadata,
             )
 
-            if ctx.is_group_chat and ctx.topic_id is not None:
-                from cubebox.db.engine import async_session_maker as _bump_sm
-                from cubebox.repositories.topic import TopicRepository as _BumpRepo
-
-                try:
-                    async with _bump_sm() as _bump_session:
-                        _bump_repo = _BumpRepo(
-                            _bump_session,
-                            org_id=ctx.org_id,
-                            workspace_id=ctx.workspace_id,
-                            user_id=ctx.user_id,
-                        )
-                        await _bump_repo.bump_activity(ctx.topic_id)
-                        await _bump_session.commit()
-                except Exception as _bump_exc:
-                    logger.warning("Failed to bump topic activity (user msg): {}", _bump_exc)
+            await self._bump_topic_activity(ctx)
             # Attach the process-level Tracer to this run via cubepi's
             # best-effort scope: it swallows every tracing fault (attach,
             # detach, flush) so tracing can never break the run, and is a
@@ -2991,14 +2976,14 @@ class RunManager:
         except Exception:
             logger.warning("memory consolidation gate failed", exc_info=True)
 
-    async def _bump_topic_activity_if_group_chat(self, ctx: RunContext) -> None:
-        """Bump ``Topic.last_activity_at`` for group-chat runs.
+    async def _bump_topic_activity(self, ctx: RunContext) -> None:
+        """Bump ``Topic.last_activity_at`` so the sidebar reflects new traffic.
 
+        Drives sidebar ordering and applies to any topic — solo or group.
         Uses a fresh session so it never bleeds into a caller's transaction.
-        Best-effort: any failure is swallowed with a warning. Skipped when
-        the run is not part of a topic (``topic_id is None``).
+        Best-effort: any failure is swallowed with a warning.
         """
-        if not ctx.is_group_chat or ctx.topic_id is None:
+        if ctx.topic_id is None:
             return
         from cubebox.db.engine import async_session_maker
         from cubebox.repositories.topic import TopicRepository
@@ -3014,7 +2999,26 @@ class RunManager:
                 await bump_repo.bump_activity(ctx.topic_id)
                 await bump_session.commit()
         except Exception as exc:
-            logger.warning("Failed to bump topic activity (assistant): {}", exc)
+            logger.warning("Failed to bump topic activity: {}", exc)
+
+    @staticmethod
+    def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str | None]:
+        """Resolve ``(user_id, topic_id)`` for sandbox lookup.
+
+        Gated on ``sandbox_mode``, NOT participant count: a solo topic
+        with ``sandbox_mode='dedicated'`` must still resolve to the
+        topic-keyed sandbox, otherwise the sandbox flips identity the
+        instant a second participant joins and earlier files are
+        stranded in the creator's personal sandbox.
+        """
+        if ctx.topic_id is None:
+            return ctx.user_id, None
+        if ctx.sandbox_mode == "dedicated":
+            # Audit owner is the topic creator; the topic_id keys the row.
+            return (ctx.topic_creator_user_id or ctx.user_id, ctx.topic_id)
+        if ctx.sandbox_mode == "creator":
+            return ctx.topic_creator_user_id or ctx.user_id, None
+        return ctx.user_id, None
 
     async def _execute_run(
         self,
@@ -3189,18 +3193,7 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
-                        sandbox_user_id = ctx.user_id
-                        sandbox_topic_id: str | None = None
-                        if ctx.is_group_chat and ctx.sandbox_mode == "dedicated":
-                            # Sandbox is keyed by topic — isolated from any
-                            # participant's personal sandbox. user_id is set
-                            # to the topic creator for audit only.
-                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
-                            sandbox_topic_id = ctx.topic_id
-                        elif ctx.is_group_chat and ctx.sandbox_mode == "creator":
-                            # Reuse the topic creator's personal sandbox.
-                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
-
+                        sandbox_user_id, sandbox_topic_id = self._resolve_sandbox_target(ctx)
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
                             user_id=sandbox_user_id,
@@ -3321,7 +3314,7 @@ class RunManager:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
-            await self._bump_topic_activity_if_group_chat(ctx)
+            await self._bump_topic_activity(ctx)
             # Indexing is enqueued AFTER the run finishes writing history to
             # the checkpointer — see _enqueue_search_index docstring. The
             # finally block re-enqueues on cancel/exception paths where
@@ -3858,7 +3851,7 @@ class RunManager:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
-            await self._bump_topic_activity_if_group_chat(ctx)
+            await self._bump_topic_activity(ctx)
             # Indexing is enqueued AFTER the resumed run finishes writing
             # history to the checkpointer — see _enqueue_search_index
             # docstring. The finally block re-enqueues on cancel/exception
