@@ -48,6 +48,18 @@ def sign_link_token(
     return jwt.encode(claims, secret, algorithm="HS256")
 
 
+def get_jwt_secret() -> str:
+    from cubebox.config import config
+
+    return str(config.get("auth.jwt_secret", "CHANGE_ME"))
+
+
+def get_frontend_base_url() -> str:
+    from cubebox.config import config
+
+    return str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
+
+
 def verify_link_token(token: str, *, secret: str) -> LinkClaims:
     try:
         payload = jwt.decode(

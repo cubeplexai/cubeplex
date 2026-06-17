@@ -1663,7 +1663,7 @@
         "headline": "Connect your team's IM to cubebox",
         "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right cubebox user by email.",
         "cta": "Connect a {platform} bot",
-        "comingNote": "Slack · Teams · DingTalk — coming later",
+        "comingNote": "Teams · DingTalk — coming later",
         "guideLink": "Setup guide"
       },
       "admin": {

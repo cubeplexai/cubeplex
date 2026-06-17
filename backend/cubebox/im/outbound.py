@@ -614,6 +614,14 @@ class OutboundRunTailer:
         return False
 
 
+def find_split_point(text: str, limit: int) -> int:
+    """Find a line-boundary split point at or before ``limit``."""
+    idx = text.rfind("\n", 0, limit)
+    if idx > limit // 2:
+        return idx + 1
+    return limit
+
+
 class _FloodSignal(Exception):
     """Marker the connector raises to tell the tailer to back off edits.
 

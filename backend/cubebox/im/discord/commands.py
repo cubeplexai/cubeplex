@@ -85,18 +85,6 @@ async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bo
     )
 
 
-def _get_jwt_secret() -> str:
-    from cubebox.config import config
-
-    return str(config.get("auth.jwt_secret", "CHANGE_ME"))
-
-
-def _get_frontend_base_url() -> str:
-    from cubebox.config import config
-
-    return str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
-
-
 async def _initiate_link(
     interaction: discord.Interaction,
     bot: commands.Bot,
@@ -113,7 +101,7 @@ async def _initiate_link(
         await interaction.followup.send("内部错误。", ephemeral=True)
         return
 
-    from cubebox.im.link import sign_link_token
+    from cubebox.im.link import get_frontend_base_url, get_jwt_secret, sign_link_token
 
     sender_ref = str(interaction.user.id)
     try:
@@ -123,14 +111,14 @@ async def _initiate_link(
             account_id=account_id,
             workspace_id=workspace_id,
             platform="discord",
-            secret=_get_jwt_secret(),
+            secret=get_jwt_secret(),
         )
     except Exception:
         logger.warning("[Discord] sign_link_token failed", exc_info=True)
         await interaction.followup.send("生成绑定链接失败。", ephemeral=True)
         return
 
-    base = _get_frontend_base_url()
+    base = get_frontend_base_url()
     url = f"{base}/im-link?token={token}"
     await interaction.followup.send(
         f"点击链接完成绑定：\n{url}",

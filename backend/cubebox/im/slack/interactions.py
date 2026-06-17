@@ -7,27 +7,6 @@ from typing import Any
 from loguru import logger
 
 
-async def _resolve_full_question_id(run_id: str, short_qid: str) -> str:
-    """Map truncated question_id back to the full value from DB pending."""
-    try:
-        from cubebox.im.resume import _resolve_run_context
-
-        resolved = await _resolve_run_context(run_id)
-        if resolved is None:
-            return short_qid
-        conversation_id = resolved[0]
-
-        from cubebox.agents.checkpointer import init_checkpointer
-
-        async with init_checkpointer() as cp:
-            pending = await cp.load_pending_request(conversation_id)
-        if pending is not None and pending.question_id.startswith(short_qid):
-            return pending.question_id
-    except Exception:
-        logger.warning("[Slack] _resolve_full_question_id failed", exc_info=True)
-    return short_qid
-
-
 async def handle_block_action(
     *,
     action: dict[str, Any],
@@ -48,7 +27,10 @@ async def handle_block_action(
         return
 
     _, kind, run_id, short_qid, answer_key, value = parts
-    question_id = await _resolve_full_question_id(run_id, short_qid)
+
+    from cubebox.im.resume import resolve_full_question_id
+
+    question_id = await resolve_full_question_id(run_id, short_qid)
 
     from cubebox.im.resume import resume_paused_run
 

@@ -48,6 +48,7 @@ class SlackConnector:
         self._client = client
         self._channel_id = channel_id
         self._thread_ts = thread_ts
+        self._mention_re = re.compile(rf"<@{re.escape(bot_user_id)}>") if bot_user_id else None
 
     # ------------------------------------------------------------------
     # Inbound
@@ -78,13 +79,8 @@ class SlackConnector:
         channel_type: str = raw.get("channel_type", "")
         event_type: str = raw.get("type", "")
 
-        # Strip the bot's own @mention from text
-        if self._bot_user_id:
-            text = re.sub(
-                rf"<@{re.escape(self._bot_user_id)}>",
-                "",
-                text,
-            ).strip()
+        if self._mention_re:
+            text = self._mention_re.sub("", text).strip()
 
         if not text:
             return None
@@ -120,7 +116,7 @@ class SlackConnector:
                 channel_id=channel,
                 scope_key=make_thread_participant_scope(user, thread_ts),
                 scope_kind="thread",
-                reply_to_id=ts,
+                reply_to_id=thread_ts,
                 inbound_message_id=ts,
                 sender_ref=sender_ref,
                 sender_open_id=sender_open_id,

@@ -331,7 +331,7 @@ class IMConnectorService:
             {
                 "bot_token": bot_token,
                 "app_token": app_token,
-                "bot_user_id": bot_user_id,
+                "bot_open_id": bot_user_id,
             }
         )
         try:
@@ -353,7 +353,7 @@ class IMConnectorService:
                 external_account_id=team_id,
                 acting_user_id=acting_user_id,
                 credential_id=credential_id,
-                delivery_mode="socket_mode",
+                delivery_mode="gateway",
                 config={
                     "bot_app_name": bot_name or None,
                     "bot_avatar_url": bot_avatar_url or None,
