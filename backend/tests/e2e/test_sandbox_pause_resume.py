@@ -120,6 +120,7 @@ async def shared_sandbox_id() -> AsyncIterator[str]:
             config.get("sandbox.image"),
             connection_config=_build_conn_config(),
             ready_timeout=timedelta(seconds=120),
+            timeout=timedelta(seconds=600),
         )
     except Exception as exc:
         pytest.skip(f"OpenSandbox service not available: {exc}")
