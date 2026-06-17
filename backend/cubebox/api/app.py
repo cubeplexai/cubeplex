@@ -526,6 +526,7 @@ def create_app(
         ws_scheduled_tasks,
         ws_settings,
         ws_skills,
+        ws_topics,
         ws_triggers,
     )
 
@@ -544,6 +545,7 @@ def create_app(
     app.include_router(artifact_share.router, prefix="/api/v1")
     app.include_router(im_ingress.router, prefix="/api/v1")
     app.include_router(ws_im.router, prefix="/api/v1")
+    app.include_router(ws_topics.router, prefix="/api/v1")
     app.include_router(admin_im.router, prefix="/api/v1")
     app.include_router(im_link.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
