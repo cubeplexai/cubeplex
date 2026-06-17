@@ -11,6 +11,7 @@ import {
   Database,
   Globe,
   KeyRound,
+  Shield,
   Layers,
   MessageSquare,
   Plug,
@@ -60,6 +61,7 @@ export function AdminSubNav() {
   const NATIVE_ITEMS: NavDef[] = [
     { href: '/admin/settings', label: t('settings'), icon: Settings },
     { href: '/admin/members', label: t('members'), icon: Users },
+    { href: '/admin/authentication', label: t('authentication'), icon: Shield },
     { href: '/admin/models', label: t('models'), icon: Cpu },
     { href: '/admin/presets', label: t('modelPresets'), icon: Layers },
     { href: '/admin/web-tools', label: t('webTools'), icon: Globe },
