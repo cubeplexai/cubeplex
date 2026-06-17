@@ -1677,8 +1677,7 @@
         "label": "Lark / Feishu"
       },
       "slack": {
-        "label": "Slack",
-        "coming": "Coming soon"
+        "label": "Slack"
       },
       "discord": {
         "label": "Discord"
@@ -1750,6 +1749,19 @@
         "field": {
           "botToken": "Bot Token",
           "applicationId": "Application ID"
+        }
+      },
+      "slack": {
+        "prereq": {
+          "app": "Create a Slack App at api.slack.com/apps",
+          "scopes": "Add these Bot Token Scopes in OAuth & Permissions",
+          "socketMode": "Enable Socket Mode in the app settings",
+          "appToken": "Generate an App-Level Token with this scope",
+          "install": "Install the app to your workspace and copy the Bot Token"
+        },
+        "field": {
+          "botToken": "Bot Token (xoxb-...)",
+          "appToken": "App Token (xapp-...)"
         }
       }
     },
