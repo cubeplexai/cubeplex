@@ -341,8 +341,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """System-scope query: find expired sandboxes across all workspaces.
 
         Only for background reapers — never expose to user-facing code. Sweeps
-        ``provisioning`` rows too so a crashed reserve can't pin the partial
-        unique slot forever.
+        ``provisioning`` rows (crashed reserve) and ``kill_pending`` rows
+        (failed provider kill) in addition to ``running``.
         """
         stmt = (
             select(UserSandbox)

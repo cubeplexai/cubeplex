@@ -1003,7 +1003,7 @@ class SandboxManager:
                 row = await poll_repo.get(record_id)
                 if row is None:
                     return None
-                if row.status in ("running", "paused", "failed", "terminated"):
+                if row.status in ("running", "paused", "failed", "terminated", "kill_pending"):
                     return row
                 last_status = row.status
             await asyncio.sleep(0.5)
