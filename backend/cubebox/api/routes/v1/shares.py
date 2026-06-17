@@ -106,6 +106,23 @@ async def create_share(
         if (await session.execute(org_check)).scalar_one_or_none() is None:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Org membership required for org scope")
 
+    # Topic conversations: only the topic owner may mint a share.
+    if conv.topic_id is not None:
+        from cubebox.repositories.topic import TopicRepository
+
+        topic_repo = TopicRepository(
+            session,
+            org_id=conv.org_id,
+            workspace_id=conv.workspace_id,
+            user_id=user.id,
+        )
+        participant = await topic_repo.get_participant(conv.topic_id, user.id)
+        if participant is None or participant.role != "owner":
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Only topic owner can share this conversation",
+            )
+
     messages = await build_snapshot(body.conversation_id)
 
     art_repo = ArtifactRepository(session, org_id=conv.org_id, workspace_id=conv.workspace_id)
