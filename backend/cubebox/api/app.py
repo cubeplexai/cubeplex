@@ -529,6 +529,9 @@ def create_app(
         ws_topics,
         ws_triggers,
     )
+    from cubebox.api.routes.v1 import (
+        sso as sso_routes,
+    )
 
     app.include_router(system.router, prefix="/api/v1")
     app.include_router(workspaces_router, prefix="/api/v1")
@@ -540,6 +543,7 @@ def create_app(
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
     app.include_router(shares.router, prefix="/api/v1")
+    app.include_router(sso_routes.router, prefix="/api/v1")
     from cubebox.api.routes.v1 import admin_im, artifact_share, im_ingress, im_link, ws_im
 
     app.include_router(artifact_share.router, prefix="/api/v1")
