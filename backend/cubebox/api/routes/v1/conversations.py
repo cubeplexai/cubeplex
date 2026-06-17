@@ -19,6 +19,7 @@ from sqlalchemy.pool import NullPool
 
 from cubebox.agents.schemas import AgentEvent
 from cubebox.api.exceptions import InvalidInputError
+from cubebox.api.schemas.ws_topics import UpgradeToTopicRequest
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.cache import RedisHandle, redis_dep
@@ -392,6 +393,108 @@ async def delete_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
+
+
+async def _conversation_has_external_binding(session: AsyncSession, conversation_id: str) -> bool:
+    """Return True if this conversation is referenced by an IM thread,
+    a scheduled task target, or a trigger target_ref. Upgrading such a
+    conversation to a topic would silently break those bindings (each
+    binding assumes a stable 1:1 conversation identity)."""
+    from sqlalchemy import String, func, select
+
+    from cubebox.models.im_connector import IMThreadLink
+    from cubebox.models.scheduled_task import ScheduledTask
+    from cubebox.models.trigger import Trigger
+
+    im_stmt = (
+        select(func.count())
+        .select_from(IMThreadLink)
+        .where(IMThreadLink.conversation_id == conversation_id)  # type: ignore[arg-type]
+    )
+    if (await session.execute(im_stmt)).scalar_one() > 0:
+        return True
+
+    sched_stmt = (
+        select(func.count())
+        .select_from(ScheduledTask)
+        .where(ScheduledTask.target_conversation_id == conversation_id)  # type: ignore[arg-type]
+    )
+    if (await session.execute(sched_stmt)).scalar_one() > 0:
+        return True
+
+    # Triggers reference their target via a JSON `target_ref` blob; match any
+    # trigger whose JSON serialises with this conversation id. False positives
+    # are acceptable for a guard — false negatives would silently break the
+    # trigger after upgrade.
+    trig_stmt = (
+        select(func.count())
+        .select_from(Trigger)
+        .where(Trigger.target_ref.cast(String).like(f"%{conversation_id}%"))  # type: ignore[attr-defined]
+    )
+    if (await session.execute(trig_stmt)).scalar_one() > 0:
+        return True
+
+    return False
+
+
+@router.post("/{conversation_id}/upgrade-to-topic", status_code=status.HTTP_201_CREATED)
+async def upgrade_conversation_to_topic(
+    conversation_id: str,
+    body: UpgradeToTopicRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, Any]:
+    from cubebox.api.routes.v1.ws_topics import (
+        _serialize_participant,
+        _serialize_topic,
+    )
+    from cubebox.repositories.topic import TopicRepository
+
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if conversation.topic_id is not None:
+        raise HTTPException(status_code=409, detail="Conversation already belongs to a topic")
+
+    if await _conversation_has_external_binding(session, conversation_id):
+        raise HTTPException(
+            status_code=409,
+            detail="Conversation has IM/schedule/trigger bindings; cannot upgrade",
+        )
+
+    topic_repo = TopicRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    topic = await topic_repo.create_topic(
+        title=body.title,
+        sandbox_mode=body.sandbox_mode,
+    )
+
+    conversation.topic_id = topic.id
+    session.add(conversation)
+
+    if body.member_user_ids:
+        await topic_repo.add_participants(topic.id, body.member_user_ids)
+
+    await session.commit()
+    await session.refresh(conversation)
+    participants = await topic_repo.list_participants(topic.id)
+
+    return {
+        "topic": _serialize_topic(topic),
+        "conversation": _serialize_conversation(conversation),
+        "participants": [_serialize_participant(p) for p in participants],
+    }
 
 
 class GenerateTitleRequest(BaseModel):

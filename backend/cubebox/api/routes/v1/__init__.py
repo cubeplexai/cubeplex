@@ -24,6 +24,7 @@ from cubebox.api.routes.v1 import (
     ws_scheduled_tasks,
     ws_settings,
     ws_skills,
+    ws_topics,
     ws_triggers,
 )
 from cubebox.api.routes.v1.admin import router as admin_router
@@ -66,5 +67,6 @@ __all__ = [
     "ws_scheduled_tasks",
     "ws_settings",
     "ws_skills",
+    "ws_topics",
     "ws_triggers",
 ]

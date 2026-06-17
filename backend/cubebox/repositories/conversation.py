@@ -94,6 +94,15 @@ class ConversationRepository(ScopedRepository[Conversation]):
         total = (await self.session.execute(count_stmt)).scalar_one()
         return items, total
 
+    async def list_by_topic(self, topic_id: str) -> list[Conversation]:
+        stmt = (
+            self._scoped_select()
+            .where(Conversation.topic_id == topic_id)
+            .order_by(Conversation.created_at.desc())  # type: ignore[attr-defined]
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def update_title(self, conversation_id: str, title: str) -> Conversation | None:
         conv = await self.get(conversation_id)
         if not conv:
