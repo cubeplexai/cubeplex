@@ -8,6 +8,7 @@ from cubebox.repositories.conversation_chunk import ConversationChunkRepository
 from cubebox.repositories.conversation_participant import ConversationParticipantRepository
 from cubebox.repositories.conversation_share import ConversationShareRepository
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
+from cubebox.repositories.external_identity import ExternalIdentityRepository
 from cubebox.repositories.invite_token import InviteTokenRepository
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
@@ -25,6 +26,8 @@ from cubebox.repositories.skill import (
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
+from cubebox.repositories.external_identity import ExternalIdentityRepository
+from cubebox.repositories.sso_connection import SSOConnectionRepository
 from cubebox.repositories.topic import TopicRepository
 from cubebox.repositories.trigger import TriggerEventRepository, TriggerRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
@@ -40,6 +43,7 @@ __all__ = [
     "ConversationRepository",
     "ConversationShareRepository",
     "EmbeddingJobRepository",
+    "ExternalIdentityRepository",
     "InviteTokenRepository",
     "MembershipRepository",
     "MCPConnectorInstallRepository",
@@ -52,6 +56,7 @@ __all__ = [
     "OrganizationRepository",
     "SkillRepository",
     "SkillVersionRepository",
+    "SSOConnectionRepository",
     "TopicRepository",
     "TriggerEventRepository",
     "TriggerRepository",
