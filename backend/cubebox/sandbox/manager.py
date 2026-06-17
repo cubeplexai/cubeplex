@@ -330,23 +330,24 @@ class SandboxManager:
         *,
         org_id: str,
         workspace_id: str,
+        topic_id: str | None = None,
     ) -> Sandbox:
-        """Get the user's active sandbox for this workspace, or create a new one.
+        """Get the active sandbox for this scope, or create a new one.
 
-        Flow:
-        1. Query DB for an existing RUNNING sandbox for this user in this workspace
-        2. If found, try to connect and health-check it
-        3. If healthy, return it (after refreshing egress env + refs); otherwise
-           mark terminated and create new
+        Scope selection:
+        - ``topic_id=None`` (default): personal scope; the sandbox is keyed by
+          ``user_id`` (the historical behaviour). At most one active row per
+          ``(org_id, workspace_id, user_id)``.
+        - ``topic_id="top-..."``: topic scope; the sandbox is keyed by
+          ``topic_id`` and shared by all topic participants. At most one
+          active row per ``(org_id, workspace_id, topic_id)``.
+
+        Flow (both scopes):
+        1. Query DB for an existing RUNNING sandbox in the chosen scope.
+        2. If found, try to connect and health-check it.
+        3. If healthy, return it (after refreshing egress env + refs);
+           otherwise mark terminated and create new.
         4. Skill sync is the LazySandbox's responsibility post-M3.
-
-        Args:
-            user_id: The user identifier
-            org_id: The active org scope
-            workspace_id: The active workspace scope
-
-        Returns:
-            An OpenSandbox backend instance ready for use
         """
         conn_config = self._build_connection_config()
 
@@ -358,7 +359,7 @@ class SandboxManager:
                 SandboxPolicyRepository(session, org_id=org_id),
                 default_image=self._image,
             ).resolve()
-            record = await repo.get_resumable_by_user(user_id)
+            record = await repo.get_resumable_for_scope(user_id=user_id, topic_id=topic_id)
 
             # Late arrival on a transient row (another caller is pausing or
             # resuming this sandbox). Trigger an inline reconciler sweep
@@ -384,7 +385,7 @@ class SandboxManager:
                         "Inline reconcile during get_or_create failed: {}",
                         exc,
                     )
-                record = await repo.get_resumable_by_user(user_id)
+                record = await repo.get_resumable_for_scope(user_id=user_id, topic_id=topic_id)
 
             if record and record.status in ("pausing", "resuming"):
                 stable = await self._await_stable_status(
@@ -418,11 +419,13 @@ class SandboxManager:
                     recheck_repo = UserSandboxRepository(
                         recheck_session, org_id=org_id, workspace_id=workspace_id
                     )
-                    record = await recheck_repo.get_resumable_by_user(user_id)
+                    record = await recheck_repo.get_resumable_for_scope(
+                        user_id=user_id, topic_id=topic_id
+                    )
                 if record is None or record.status != "running":
                     record = None
 
-            # `get_resumable_by_user` doesn't include `provisioning` rows; if a
+            # `get_resumable_for_scope` doesn't include `provisioning` rows; if a
             # sibling task is mid-reserve, the next branch (`record.status ==
             # 'running'`) won't fire and we'll fall through to the create
             # branch below, where `repo.reserve()` will collide on the partial
@@ -491,6 +494,7 @@ class SandboxManager:
                     user_id=user_id,
                     image=policy.default_image,
                     ttl_seconds=self._ttl,
+                    topic_id=topic_id,
                 )
             except Exception:
                 await session.rollback()
@@ -498,9 +502,13 @@ class SandboxManager:
                 # promote_to_running yet), so poll until it reaches `running` or a
                 # bounded timeout elapses — do NOT raise on a provisioning winner.
                 # Re-query in a fresh transaction each loop so we see the winner's
-                # committed promotion.
+                # committed promotion. In topic scope the winner row may have a
+                # different ``user_id`` (another participant), so the lookup
+                # MUST go through ``get_active_for_scope`` — keyed by topic_id
+                # when present — or the loser would never find the winner row
+                # and would time out with a spurious SandboxError.
                 deadline = time.monotonic() + self._reserve_wait_timeout
-                winner = await repo.get_active_by_user(user_id)
+                winner = await repo.get_active_for_scope(user_id=user_id, topic_id=topic_id)
                 while (
                     winner is not None
                     and winner.status == "provisioning"
@@ -508,7 +516,7 @@ class SandboxManager:
                 ):
                     await asyncio.sleep(self._reserve_poll_interval)
                     await session.rollback()  # drop the snapshot before re-reading
-                    winner = await repo.get_active_by_user(user_id)
+                    winner = await repo.get_active_for_scope(user_id=user_id, topic_id=topic_id)
                 if winner is not None and winner.status == "running":
                     raw_sandbox = await opensandbox.Sandbox.connect(
                         winner.sandbox_id, connection_config=conn_config
@@ -746,17 +754,21 @@ class SandboxManager:
         *,
         org_id: str,
         workspace_id: str,
+        topic_id: str | None = None,
     ) -> bool:
-        """Refresh activity for the user's *existing* active sandbox, if any.
+        """Refresh activity for the scope's *existing* active sandbox, if any.
 
         Unlike :meth:`touch` (keyed by sandbox_id) this never creates a sandbox —
         used by the browser keepalive so a dead/reaped sandbox isn't silently
         re-provisioned on every ping while the panel stays open. Returns whether
         an active sandbox was found. Bypasses the touch throttle.
+
+        ``topic_id`` follows the same scope convention as ``get_or_create``:
+        ``None`` -> personal scope, otherwise topic scope.
         """
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
-            record = await repo.get_active_by_user(user_id)
+            record = await repo.get_active_for_scope(user_id=user_id, topic_id=topic_id)
             if record is None:
                 return False
             await repo.update_activity(record.id)

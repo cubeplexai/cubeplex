@@ -71,6 +71,7 @@ class LazySandbox(Sandbox):
         workdir: str = "/workspace",
         catalog: SkillCatalogService | None = None,
         op_timeout_seconds: int | None = None,
+        topic_id: str | None = None,
     ) -> None:
         self._manager = manager
         self._user_id = user_id
@@ -78,6 +79,10 @@ class LazySandbox(Sandbox):
         self._workspace_id = workspace_id
         self._workdir = workdir
         self._catalog = catalog
+        # When set, the underlying sandbox is keyed by topic (shared by all
+        # participants of the dedicated-mode topic) instead of by user. None
+        # falls back to personal scope (existing behaviour).
+        self._topic_id = topic_id
         # Sizes the in-use lease window passed to ``manager.renew_lease``. None
         # falls back to the manager's default (``sandbox.lease_seconds``).
         self._op_timeout_seconds = op_timeout_seconds
@@ -117,11 +122,16 @@ class LazySandbox(Sandbox):
             if self._sandbox is not None:
                 return self._sandbox
 
-            logger.info("Lazy sandbox: creating sandbox for user {}", self._user_id)
+            logger.info(
+                "Lazy sandbox: creating sandbox for user {} (topic_id={})",
+                self._user_id,
+                self._topic_id,
+            )
             sandbox = await self._manager.get_or_create(
                 self._user_id,
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
+                topic_id=self._topic_id,
             )
             if self._catalog is not None:
                 try:

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.types import JSON
 from sqlmodel import Field
 
@@ -11,11 +11,15 @@ from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
 
 
 class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
-    """Tracks sandbox instances bound to (user_id, workspace_id).
+    """Tracks sandbox instances bound to (user_id, workspace_id, topic_id?).
 
-    Identity = user_id + workspace_id; one user can have one running
-    sandbox per workspace. This fixes the cross-workspace isolation
-    bug where a user with two workspaces previously shared one sandbox.
+    Two scoping modes coexist via two partial unique indexes:
+
+    - Personal scope: ``topic_id IS NULL`` — at most one active row per
+      ``(org_id, workspace_id, user_id)`` (the original isolation boundary).
+    - Topic scope: ``topic_id IS NOT NULL`` — at most one active row per
+      ``(org_id, workspace_id, topic_id)`` so a "dedicated" group-chat
+      topic owns its own sandbox shared across all participants.
     """
 
     _PREFIX: ClassVar[str] = "sbx"
@@ -29,12 +33,36 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
             "workspace_id",
             "user_id",
             unique=True,
-            postgresql_where=text("status IN ('provisioning','running')"),
-            sqlite_where=text("status IN ('provisioning','running')"),
+            postgresql_where=text("topic_id IS NULL AND status IN ('provisioning','running')"),
+            sqlite_where=text("topic_id IS NULL AND status IN ('provisioning','running')"),
+        ),
+        Index(
+            "uq_user_sandbox_active_topic",
+            "org_id",
+            "workspace_id",
+            "topic_id",
+            unique=True,
+            postgresql_where=text("topic_id IS NOT NULL AND status IN ('provisioning','running')"),
+            sqlite_where=text("topic_id IS NOT NULL AND status IN ('provisioning','running')"),
         ),
     )
 
     user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
+    # SET NULL on topic delete preserves the sandbox row + audit trail of
+    # who actually owned it; the row then drains via its normal GC path.
+    # Must use ``sa_column`` because SQLModel's ``foreign_key=`` shorthand
+    # cannot carry ``ondelete`` — and the default RESTRICT would make any
+    # topic with a once-provisioned sandbox row permanently undeletable.
+    topic_id: str | None = Field(
+        default=None,
+        sa_column=Column(
+            "topic_id",
+            String(20),
+            ForeignKey("topics.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
     sandbox_id: str = Field(max_length=255, unique=True)
     status: str = Field(default="running", max_length=20)
     image: str = Field(max_length=512)
