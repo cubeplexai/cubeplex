@@ -271,6 +271,9 @@ def write_worktree_env(
         f"BASE_URL=http://localhost:{fe}\n"
         f"NEXT_PUBLIC_AUTH_COOKIE_NAME={auth_cookie}\n"
         f"NEXT_PUBLIC_CSRF_COOKIE_NAME={csrf_cookie}\n"
+        f"\n"
+        f"# Backend: frontend URL for link generation (IM identity link etc.)\n"
+        f"CUBEBOX_FRONTEND_BASE_URL=http://localhost:{fe}\n"
     )
     env_file_path(worktree_root).write_text(content)
 
