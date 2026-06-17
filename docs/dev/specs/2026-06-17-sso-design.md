@@ -38,6 +38,7 @@ One active connection per organization.
   "authorization_endpoint": "https://acme.okta.com/oauth2/v1/authorize",
   "token_endpoint": "https://acme.okta.com/oauth2/v1/token",
   "userinfo_endpoint": "https://acme.okta.com/oauth2/v1/userinfo",
+  "jwks_uri": "https://acme.okta.com/oauth2/v1/keys",
   "client_id": "0oa...",
   "scopes": ["openid", "email", "profile"],
   "attribute_mapping": {
@@ -163,12 +164,31 @@ Browser                     cubebox                          IdP (Okta, etc.)
   |──────────────────────────>|                                |
   |                           | validate state                 |
   |                           | exchange code for tokens        |
+  |                           | validate ID token              |
   |                           | fetch userinfo                  |
   |                           | → Identity Resolution           |
   |                           | → issue JWT cookie              |
   |  302 → /w/{workspace}    |                                |
   |<──────────────────────────|                                |
 ```
+
+**ID token validation (mandatory).** Before any claim from the IdP is
+trusted, the OIDC callback must:
+
+1. Verify the ID token's JWS signature against the IdP's JWKS (fetched from
+   the connection's `jwks_uri`, cached with the JWKS' `Cache-Control`).
+2. Verify `iss` matches the connection's configured `issuer`.
+3. Verify `aud` contains the connection's `client_id`.
+4. Verify `exp` is in the future and `iat` is recent (within clock skew).
+5. Verify `nonce` matches the value that was issued at `/authorize` (the
+   nonce is generated at initiate time, stored in the signed state payload,
+   and recovered when the state token is consumed).
+6. If a `userinfo_endpoint` is configured, fetch userinfo and verify
+   `userinfo.sub == id_token.sub`; otherwise use the validated ID token
+   claims directly.
+
+The connection's OIDC config therefore also stores `jwks_uri`. Discovery
+populates it from `.well-known/openid-configuration` (`jwks_uri` field).
 
 ### SAML enterprise SSO
 
@@ -194,7 +214,11 @@ Browser                     cubebox (SP)                     IdP
   |                           |                                |
   | POST /sso/saml/acs        |                                |
   |──────────────────────────>|                                |
+  |                           | validate RelayState (state token) |
+  |                           | reload SSOConnection, check status |
   |                           | validate signature              |
+  |                           | verify InResponseTo == AuthnRequest ID |
+  |                           |   stored in state payload        |
   |                           | parse Assertion                 |
   |                           | extract NameID + attributes     |
   |                           | → Identity Resolution           |
@@ -202,6 +226,14 @@ Browser                     cubebox (SP)                     IdP
   |  302 → /w/{workspace}    |                                |
   |<──────────────────────────|                                |
 ```
+
+**SP-initiated only.** The state payload issued at `/initiate` stores the
+generated AuthnRequest ID; the ACS handler rejects any SAMLResponse whose
+`InResponseTo` does not match. This blocks unsolicited IdP-initiated
+assertions and replay of captured assertions. The handler also reloads the
+SSOConnection by `id` and refuses to proceed if `status` is not in
+`{"active", "testing"}` — so a deactivated connection cannot be used by an
+in-flight callback.
 
 ### Google social login
 
@@ -220,42 +252,74 @@ All SSO and social login flows converge on the same resolution logic.
 normalized via the connection's `attribute_mapping`:
 
 - OIDC: read claims dict, apply mapping (defaults: `sub` → id, `email` →
-  email, `name` → name).
+  email, `name` → name). Google social reuses the OIDC mapping with the
+  same defaults — no separate hardcoded branch.
 - SAML: read assertion attributes, apply mapping (no defaults — admin must
   configure).
-- Google social: hardcoded standard claims, no mapping needed.
 
 If `id` or `email` cannot be resolved after mapping, the login fails with a
-clear error ("missing required attribute").
+clear error ("missing required attribute"). Resolution also requires the
+IdP to mark the email as verified: OIDC/Google must return `email_verified: true`;
+SAML email is considered verified if it appears in the signed assertion's
+mapped `email` attribute. **Email-based account linking is refused whenever
+the IdP did not verify the email** — this prevents account takeover where a
+malicious or misconfigured IdP claims a victim's email.
 
 **Step 1–2 — Find or create user:**
 
 ```
-Input: (provider_type, provider_id, external_id, external_email, claims)
+Input: (provider_type, provider_id, external_id, external_email, email_verified, claims)
        ← all derived from the mapped attributes above
 
-1. Look up external_identities → found → sign in as linked user
+1. Look up external_identities by (provider_type, provider_id, external_id)
+   → found → re-check the linked user is still allowed to sign in:
+     - Enterprise SSO: require an active OrganizationMembership in the
+       sso_connection's org_id, and the SSOConnection.status ∈
+       {"active", "testing"}. Either check fails → reject login.
+     - Social login: just sign in.
 
-2. Not found → look up users by email
+2. Not found and email_verified is true → look up users by email
    a. User exists → create ExternalIdentity link → sign in
    b. User does not exist →
       - Enterprise SSO: check provisioning policy
-        - "auto" → create User + OrgMembership + Membership + ExternalIdentity → sign in
+        - "auto" → delegate user creation to UserManager (so the existing
+          on_after_register bootstrap fires: org membership, workspace,
+          agent config, audit row) then create ExternalIdentity → sign in
         - "invite_only" → reject, tell user to contact admin
-      - Social login: create User (no org) + ExternalIdentity → sign in
+      - Social login: delegate user creation to UserManager (same
+        on_after_register bootstrap creates a personal org + workspace in
+        multi-tenant mode) then create ExternalIdentity → sign in
+
+3. Not found and email_verified is false → reject with
+   "email_not_verified" — no auto-link, no auto-provision.
 ```
+
+**Why on_after_register matters:** `UserManager.on_after_register` is the
+single source of truth for new-user bootstrap (org/workspace creation, MCP
+enrollment, preinstalled skills, verification email). Identity Resolution
+calls it via `UserManager.create()` instead of inserting `User` rows
+directly — bypassing it would leave new social-login users with no
+workspace and broken downstream state.
 
 ## Enforcement
 
 ### Forced SSO
 
-When `sso_connections.status = 'active'`, password login is disabled for all
-org members:
+When `sso_connections.status = 'active'`, **all** non-SSO login paths into
+the org are disabled for its members:
 
-- User submits email + password at `/login` → backend checks user's org → if
-  org has active SSO → reject with `{"code": "sso_required", "message": "...",
+- **Password login** (`POST /auth/login`): backend looks up the user's orgs →
+  if any has active SSO → reject with `{"code": "sso_required", "message": "...",
   "login_url": "/login/{slug}"}`. The error is identical to "wrong password"
   for non-existent users to prevent user enumeration.
+- **Social login** (Google): Identity Resolution checks the resolved user's
+  org memberships → if any org has active SSO → reject with `sso_required`.
+  Forced SSO must not be bypassable by a Google account whose email matches
+  an org member.
+- **Cross-org SSO callbacks**: when a callback resolves to a user who is a
+  member of a different org with `status='active'` SSO, that callback is
+  also rejected — a user from Acme cannot enter via Globex's SSO just
+  because their email matches.
 - Org admins are also subject to forced SSO — no exceptions.
 
 ### Testing mode
