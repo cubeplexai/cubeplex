@@ -23,7 +23,6 @@ from cubebox.models.provider import Model, Provider
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.model import ModelRepository
 from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
 from cubebox.services.credential import CredentialService
 from cubebox.services.provider_service import ProviderService
@@ -59,7 +58,6 @@ def _make_svc(session: AsyncSession, org_id: str = CALLER_ORG) -> ProviderServic
         provider_repo=ProviderRepository(session, org_id=org_id),
         model_repo=ModelRepository(session),
         override_repo=OrgProviderOverrideRepository(session, org_id=org_id),
-        org_settings_repo=OrgSettingsRepository(session, org_id=org_id),
         credential_service=cred_service,
         session=session,
         org_id=org_id,

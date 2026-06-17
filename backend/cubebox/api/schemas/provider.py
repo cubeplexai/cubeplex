@@ -180,13 +180,3 @@ class ProviderOut(BaseModel):
     created_by_user_id: str | None
     created_at: datetime
     updated_at: datetime
-
-
-class OrgLLMSettingsOut(BaseModel):
-    default_model: str | None = None
-    fallback_models: list[str] = Field(default_factory=list)
-
-
-class OrgLLMSettingsUpdate(BaseModel):
-    default_model: str | None = None
-    fallback_models: list[str] | None = None

@@ -174,13 +174,3 @@ export interface ModelUpdate {
   extra_headers?: Record<string, unknown> | null
   enabled?: boolean | null
 }
-
-export interface OrgLLMSettings {
-  default_model: string | null
-  fallback_models: string[]
-}
-
-export interface OrgLLMSettingsUpdate {
-  default_model?: string | null
-  fallback_models?: string[] | null
-}

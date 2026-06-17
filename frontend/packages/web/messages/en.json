@@ -196,7 +196,7 @@
     "skillRegistries": "Skill Registries"
   },
   "adminNav": {
-    "settings": "Org Settings",
+    "settings": "General",
     "models": "Models",
     "modelPresets": "Model Presets",
     "webTools": "Web Tools",
@@ -718,27 +718,8 @@
     }
   },
   "adminSettings": {
-    "title": "Org Settings",
+    "title": "General",
     "subtitle": "Organization-wide configuration",
-    "llmTitle": "Default LLM",
-    "llmSubtitle": "Pick the org default model and fallback chain. All workspaces inherit this configuration.",
-    "loading": "Loading…",
-    "loadFailed": "Load failed: {message}",
-    "defaultModel": "Default model",
-    "defaultModelPlaceholder": "Select default model…",
-    "fallbackChain": "Fallback chain",
-    "fallbackEmpty": "No fallback models yet",
-    "fallbackAdd": "Add fallback",
-    "fallbackPlaceholder": "Select fallback model…",
-    "fallbackRemove": "Remove {model}",
-    "noModels": "No models available. Add a provider and models on the Models page first.",
-    "noMatchingModels": "No matching models",
-    "modelUnavailable": "Not usable",
-    "save": "Save",
-    "saving": "Saving…",
-    "saved": "Saved",
-    "saveFailed": "Save failed: {message}",
-    "discard": "Discard",
     "orgInfo": {
       "title": "Organization",
       "nameLabel": "Organization name",

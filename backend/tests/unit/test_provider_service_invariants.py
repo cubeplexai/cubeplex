@@ -38,7 +38,6 @@ async def db_session():
 def _make_svc(session: AsyncSession, org_id: str = "org-1") -> ProviderService:
     from cubebox.repositories.model import ModelRepository
     from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-    from cubebox.repositories.org_settings import OrgSettingsRepository
     from cubebox.repositories.provider import ProviderRepository
 
     backend = FernetBackend([Fernet.generate_key()])
@@ -52,7 +51,6 @@ def _make_svc(session: AsyncSession, org_id: str = "org-1") -> ProviderService:
         provider_repo=ProviderRepository(session, org_id=org_id),
         model_repo=ModelRepository(session),
         override_repo=OrgProviderOverrideRepository(session, org_id=org_id),
-        org_settings_repo=OrgSettingsRepository(session, org_id=org_id),
         credential_service=cred_service,
         session=session,
         org_id=org_id,
