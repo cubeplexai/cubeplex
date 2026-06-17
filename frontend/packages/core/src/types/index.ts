@@ -11,6 +11,7 @@ export type * from './mcp_ws_available'
 export type * from './memory'
 export * from './message'
 export type * from './skills'
+export type * from './topic'
 export type * from './workspace-settings'
 export type {
   CostAggregateRow,

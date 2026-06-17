@@ -17,6 +17,7 @@ export * from './members'
 export * from './sandboxPolicy'
 export * from './sandboxEnv'
 export * from './scheduled-tasks'
+export * from './topics'
 export * from './triggers'
 export {
   fetchCostSummary,
