@@ -342,7 +342,7 @@ async def _handle_feishu_link_command(
             await connector.send_to_chat(event.channel_id, event.reply_to_id, "生成绑定链接失败。")
         return
 
-    base = str(config.get("app.base_url", "http://localhost:3000")).rstrip("/")
+    base = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
     url = f"{base}/im-link?token={token}"
     text = f"点击链接完成绑定：\n{url}"
     if connector is not None:
