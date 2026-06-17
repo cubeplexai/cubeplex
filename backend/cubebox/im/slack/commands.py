@@ -36,7 +36,7 @@ def register_commands(
             return
 
         try:
-            from cubebox.im.link import sign_link_token
+            from cubebox.im.link import get_frontend_base_url, get_jwt_secret, sign_link_token
 
             token = sign_link_token(
                 im_user_id=sender_ref,
@@ -44,28 +44,16 @@ def register_commands(
                 account_id=account_id,
                 workspace_id=workspace_id,
                 platform="slack",
-                secret=_get_jwt_secret(),
+                secret=get_jwt_secret(),
             )
         except Exception:
             logger.warning("[Slack] sign_link_token failed", exc_info=True)
             await respond("Failed to generate link.", response_type="ephemeral")
             return
 
-        base = _get_frontend_base_url()
+        base = get_frontend_base_url()
         url = f"{base}/im-link?token={token}"
         await respond(
             f"Click to complete linking:\n{url}",
             response_type="ephemeral",
         )
-
-
-def _get_jwt_secret() -> str:
-    from cubebox.config import config
-
-    return str(config.get("auth.jwt_secret", "CHANGE_ME"))
-
-
-def _get_frontend_base_url() -> str:
-    from cubebox.config import config
-
-    return str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")

@@ -37,6 +37,7 @@ class SlackGateway:
         self._app: Any = None
         self._task: asyncio.Task[None] | None = None
         self._client: Any = None
+        self._handler: Any = None
 
     async def start(self) -> None:
         from slack_bolt.adapter.socket_mode.async_handler import (
@@ -84,6 +85,7 @@ class SlackGateway:
         )
 
         handler = AsyncSocketModeHandler(app, self._app_token)
+        self._handler = handler
 
         async def _run() -> None:
             try:
@@ -145,6 +147,11 @@ class SlackGateway:
             logger.exception("[Slack] ingest failed for {}", parsed.platform_event_id)
 
     async def stop(self) -> None:
+        if self._handler is not None:
+            try:
+                await self._handler.close_async()
+            except Exception:
+                pass
         if self._task is not None:
             self._task.cancel()
             try:

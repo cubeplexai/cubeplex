@@ -1663,7 +1663,7 @@
         "headline": "把团队 IM 接到 cubebox",
         "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 cubebox 用户。",
         "cta": "连接一个 {platform} bot",
-        "comingNote": "Slack · Teams · DingTalk — 后续支持",
+        "comingNote": "Teams · DingTalk — 后续支持",
         "guideLink": "查看部署指南"
       },
       "admin": {

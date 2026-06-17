@@ -17,7 +17,7 @@ from typing import Any
 from loguru import logger
 
 from cubebox.im.discord.connector import DiscordRateLimitError
-from cubebox.im.outbound import note_edit_success, note_flood_strike
+from cubebox.im.outbound import find_split_point, note_edit_success, note_flood_strike
 from cubebox.im.types import RenderState
 
 _DISCORD_MSG_LIMIT = 2000
@@ -45,7 +45,7 @@ class DiscordOpDispatcher:
             text = "..."
         current_segment = text[self.sent_char_offset :]
         if len(current_segment) > _SPLIT_THRESHOLD:
-            split_at = _find_split_point(current_segment, _SPLIT_THRESHOLD)
+            split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
             send_text = current_segment[:split_at]
             self.sent_char_offset += split_at
         else:
@@ -64,7 +64,7 @@ class DiscordOpDispatcher:
         full_content = s.card_state.streaming_content
         current_segment = full_content[self.sent_char_offset :]
         if len(current_segment) > _SPLIT_THRESHOLD:
-            split_at = _find_split_point(current_segment, _SPLIT_THRESHOLD)
+            split_at = find_split_point(current_segment, _SPLIT_THRESHOLD)
             finalize_text = current_segment[:split_at]
             try:
                 await self._connector.edit_message(s.bot_message_id, finalize_text)
@@ -207,11 +207,3 @@ class DiscordOpDispatcher:
 
     async def aclose(self) -> None:
         pass
-
-
-def _find_split_point(text: str, limit: int) -> int:
-    """Find a line-boundary split point at or before ``limit``."""
-    idx = text.rfind("\n", 0, limit)
-    if idx > limit // 2:
-        return idx + 1
-    return limit

@@ -22,9 +22,9 @@ async def test_link_generates_token_and_replies_ephemeral() -> None:
     bot._cubebox_workspace_id = "ws_xyz"
 
     with (
-        patch("cubebox.im.discord.commands._get_jwt_secret", return_value="test-secret"),
+        patch("cubebox.im.link.get_jwt_secret", return_value="test-secret"),
         patch(
-            "cubebox.im.discord.commands._get_frontend_base_url",
+            "cubebox.im.link.get_frontend_base_url",
             return_value="http://localhost:3000",
         ),
     ):

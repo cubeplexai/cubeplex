@@ -78,6 +78,7 @@ class TestSlackConnectorParseInbound:
         assert event is not None
         assert event.scope_key == "u:U111|t:1234567890.000000"
         assert event.scope_kind == "thread"
+        assert event.reply_to_id == "1234567890.000000"
         assert event.text == "explain more"
 
     def test_bot_message_ignored(self) -> None:
