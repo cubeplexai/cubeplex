@@ -12,6 +12,7 @@ from cubebox.models.conversation_share import ConversationShare, ShareScope
 from cubebox.models.credential import Credential
 from cubebox.models.egress_ref import EgressRef  # noqa: F401
 from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState
+from cubebox.models.external_identity import ExternalIdentity
 from cubebox.models.im_connector import (
     IMConnectorAccount,
     IMIdentityLink,
@@ -51,6 +52,8 @@ from cubebox.models.skill import (
     WorkspaceSkillBinding,
 )
 from cubebox.models.skill_registry import SkillRegistry
+from cubebox.models.sso_connection import SSOConnection
+from cubebox.models.external_identity import ExternalIdentity
 from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.models.trigger import Trigger, TriggerEvent
 from cubebox.models.user import User
@@ -71,6 +74,7 @@ __all__ = [
     "Credential",
     "EmbeddingJob",
     "EmbeddingJobState",
+    "ExternalIdentity",
     "InviteToken",
     "LlmBillingEvent",
     "MCPConnectorInstall",
@@ -107,6 +111,8 @@ __all__ = [
     "Skill",
     "SkillRegistry",
     "SkillVersion",
+    "SSOConnection",
+    "ExternalIdentity",
     "Topic",
     "TopicParticipant",
     "Trigger",
