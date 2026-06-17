@@ -41,6 +41,12 @@ class RunContext:
     org_id: str
     workspace_id: str
     trigger: str = "interactive"
+    topic_id: str | None = None
+    is_group_chat: bool = False
+    participant_ids: list[str] | None = None
+    sender_display_name: str | None = None
+    sandbox_mode: str | None = None
+    topic_creator_user_id: str | None = None
 
 
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
@@ -941,19 +947,31 @@ class RunManager:
 
         await self._redis.publish(self._ack_channel, json.dumps({"run_id": run_id}))
 
-    async def dispatch_steer(self, run_id: str, content: str, steer_id: str) -> str:
+    async def dispatch_steer(
+        self,
+        run_id: str,
+        content: str,
+        steer_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         agent = self._agents.get(run_id)
         if agent is not None:
             from cubepi.providers.base import TextContent, UserMessage
 
+            msg_metadata: dict[str, Any] = {"steer_id": steer_id}
+            if metadata:
+                msg_metadata.update(metadata)
             agent.steer(
                 UserMessage(
                     content=[TextContent(text=content)],
-                    metadata={"steer_id": steer_id},
+                    metadata=msg_metadata,
                 )
             )
             return "steered"
-        await self._publish_control(run_id, "steer", content, steer_id=steer_id)
+        extra: dict[str, Any] | None = None
+        if metadata:
+            extra = {"metadata": metadata}
+        await self._publish_control(run_id, "steer", content, steer_id=steer_id, extra=extra)
         return "published"
 
     async def resume_run_with_answer(
@@ -1183,10 +1201,14 @@ class RunManager:
             if agent is not None:
                 from cubepi.providers.base import TextContent, UserMessage
 
+                msg_metadata: dict[str, Any] = {"steer_id": data.get("steer_id") or ""}
+                extra_metadata = data.get("metadata")
+                if isinstance(extra_metadata, dict):
+                    msg_metadata.update(extra_metadata)
                 agent.steer(
                     UserMessage(
                         content=[TextContent(text=data.get("content") or "")],
-                        metadata={"steer_id": data.get("steer_id") or ""},
+                        metadata=msg_metadata,
                     )
                 )
         elif type_ == "cancel_steer":
@@ -1522,14 +1544,15 @@ class RunManager:
             from cubebox.middleware.memory import compute_relevance_snapshot as _compute_snap
 
             _user_msg_metadata: dict[str, Any] = {}
-            try:
-                _mem_repo_factory = extra_ref_holder["mem_repo_factory"]
-                async with _mem_repo_factory() as _snap_repo:
-                    _snapshot = await _compute_snap(_snap_repo)
-                if _snapshot is not None:
-                    _user_msg_metadata["memory_snapshot"] = _snapshot
-            except Exception as _snap_exc:
-                logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
+            if not ctx.is_group_chat:
+                try:
+                    _mem_repo_factory = extra_ref_holder["mem_repo_factory"]
+                    async with _mem_repo_factory() as _snap_repo:
+                        _snapshot = await _compute_snap(_snap_repo)
+                    if _snapshot is not None:
+                        _user_msg_metadata["memory_snapshot"] = _snapshot
+                except Exception as _snap_exc:
+                    logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
 
             # Build attachment metadata blocks and inject into user message so
             # AttachmentHintMiddleware can render the [Attachments] hint.
@@ -1546,11 +1569,32 @@ class RunManager:
                 except Exception as _att_exc:
                     logger.warning("Failed to build attachment blocks for cubepi run: {}", _att_exc)
 
+            if ctx.is_group_chat and ctx.sender_display_name:
+                _user_msg_metadata["sender_user_id"] = ctx.user_id
+                _user_msg_metadata["sender_display_name"] = ctx.sender_display_name
+
             _user_msg = _UserMessage(
                 content=[_TextContent(text=content)],
                 timestamp=_time.time(),
                 metadata=_user_msg_metadata,
             )
+
+            if ctx.is_group_chat and ctx.topic_id is not None:
+                from cubebox.db.engine import async_session_maker as _bump_sm
+                from cubebox.repositories.topic import TopicRepository as _BumpRepo
+
+                try:
+                    async with _bump_sm() as _bump_session:
+                        _bump_repo = _BumpRepo(
+                            _bump_session,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            user_id=ctx.user_id,
+                        )
+                        await _bump_repo.bump_activity(ctx.topic_id)
+                        await _bump_session.commit()
+                except Exception as _bump_exc:
+                    logger.warning("Failed to bump topic activity (user msg): {}", _bump_exc)
             # Attach the process-level Tracer to this run via cubepi's
             # best-effort scope: it swallows every tracing fault (attach,
             # detach, flush) so tracing can never break the run, and is a
@@ -2947,6 +2991,31 @@ class RunManager:
         except Exception:
             logger.warning("memory consolidation gate failed", exc_info=True)
 
+    async def _bump_topic_activity_if_group_chat(self, ctx: RunContext) -> None:
+        """Bump ``Topic.last_activity_at`` for group-chat runs.
+
+        Uses a fresh session so it never bleeds into a caller's transaction.
+        Best-effort: any failure is swallowed with a warning. Skipped when
+        the run is not part of a topic (``topic_id is None``).
+        """
+        if not ctx.is_group_chat or ctx.topic_id is None:
+            return
+        from cubebox.db.engine import async_session_maker
+        from cubebox.repositories.topic import TopicRepository
+
+        try:
+            async with async_session_maker() as bump_session:
+                bump_repo = TopicRepository(
+                    bump_session,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                )
+                await bump_repo.bump_activity(ctx.topic_id)
+                await bump_session.commit()
+        except Exception as exc:
+            logger.warning("Failed to bump topic activity (assistant): {}", exc)
+
     async def _execute_run(
         self,
         *,
@@ -3120,9 +3189,22 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
+                        sandbox_user_id = ctx.user_id
+                        sandbox_topic_id: str | None = None
+                        if ctx.is_group_chat and ctx.sandbox_mode == "dedicated":
+                            # Sandbox is keyed by topic — isolated from any
+                            # participant's personal sandbox. user_id is set
+                            # to the topic creator for audit only.
+                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
+                            sandbox_topic_id = ctx.topic_id
+                        elif ctx.is_group_chat and ctx.sandbox_mode == "creator":
+                            # Reuse the topic creator's personal sandbox.
+                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
+
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
-                            user_id=ctx.user_id,
+                            user_id=sandbox_user_id,
+                            topic_id=sandbox_topic_id,
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
@@ -3239,6 +3321,7 @@ class RunManager:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
+            await self._bump_topic_activity_if_group_chat(ctx)
             # Indexing is enqueued AFTER the run finishes writing history to
             # the checkpointer — see _enqueue_search_index docstring. The
             # finally block re-enqueues on cancel/exception paths where
@@ -3660,9 +3743,18 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
+                        sandbox_user_id = ctx.user_id
+                        sandbox_topic_id: str | None = None
+                        if ctx.is_group_chat and ctx.sandbox_mode == "dedicated":
+                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
+                            sandbox_topic_id = ctx.topic_id
+                        elif ctx.is_group_chat and ctx.sandbox_mode == "creator":
+                            sandbox_user_id = ctx.topic_creator_user_id or ctx.user_id
+
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
-                            user_id=ctx.user_id,
+                            user_id=sandbox_user_id,
+                            topic_id=sandbox_topic_id,
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
@@ -3766,6 +3858,7 @@ class RunManager:
                 workspace_id=ctx.workspace_id,
                 user_id=ctx.user_id,
             )
+            await self._bump_topic_activity_if_group_chat(ctx)
             # Indexing is enqueued AFTER the resumed run finishes writing
             # history to the checkpointer — see _enqueue_search_index
             # docstring. The finally block re-enqueues on cancel/exception

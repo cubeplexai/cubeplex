@@ -73,6 +73,74 @@ def _serialize_conversation(c: Conversation) -> dict[str, object]:
     }
 
 
+def _require_participant_if_topic(
+    conversation: Conversation,
+    ctx: RequestContext,
+    participant_ids: list[str] | None,
+) -> None:
+    """For topic conversations, raise 404 unless the caller is a participant.
+
+    Returns 404 (not 403) to match GET behavior — ``_scoped_select`` already
+    hides this row from a non-participant on read. A 403 with a topic-specific
+    message would leak conversation existence and prior-membership history.
+    """
+    if conversation.topic_id is None:
+        return
+    if ctx.user.id not in (participant_ids or []):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation.id} not found",
+        )
+
+
+async def _resolve_topic_run_context(
+    conversation: Conversation,
+    ctx: RequestContext,
+) -> tuple[str | None, bool, list[str] | None, str | None, str | None, str | None]:
+    """Resolve topic fields needed to build a RunContext.
+
+    Returns ``(topic_id, is_group_chat, participant_ids, sender_display_name,
+    sandbox_mode, topic_creator_user_id)``. For personal (non-topic)
+    conversations, all topic fields are ``None`` / ``False``.
+    """
+    topic_id: str | None = conversation.topic_id
+    is_group_chat = False
+    participant_ids: list[str] | None = None
+    sender_display_name: str | None = None
+    sandbox_mode: str | None = None
+    topic_creator_user_id: str | None = None
+
+    if topic_id is not None:
+        from cubebox.repositories.topic import TopicRepository
+
+        async with async_session_maker() as topic_session:
+            topic_repo = TopicRepository(
+                topic_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user.id,
+            )
+            topic_obj = await topic_repo.get(topic_id)
+            participants = await topic_repo.list_participants(topic_id)
+            participant_ids = [p.user_id for p in participants]
+            is_group_chat = len(participants) > 1
+            if topic_obj:
+                sandbox_mode = topic_obj.sandbox_mode
+                topic_creator_user_id = topic_obj.creator_user_id
+
+        if is_group_chat:
+            sender_display_name = ctx.user.display_name or ctx.user.email
+
+    return (
+        topic_id,
+        is_group_chat,
+        participant_ids,
+        sender_display_name,
+        sandbox_mode,
+        topic_creator_user_id,
+    )
+
+
 async def _require_topic_owner_if_topic(
     session: AsyncSession,
     ctx: RequestContext,
@@ -817,6 +885,16 @@ async def send_message(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    (
+        _topic_id,
+        _is_group_chat,
+        _participant_ids,
+        _sender_display_name,
+        _sandbox_mode,
+        _topic_creator_user_id,
+    ) = await _resolve_topic_run_context(conversation, ctx)
+    _require_participant_if_topic(conversation, ctx, _participant_ids)
+
     if not (request_obj.content and request_obj.content.strip()) and not request_obj.attachments:
         raise InvalidInputError(
             message="Message must include content or attachments",
@@ -1041,6 +1119,12 @@ async def send_message(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
+        topic_id=_topic_id,
+        is_group_chat=_is_group_chat,
+        participant_ids=_participant_ids,
+        sender_display_name=_sender_display_name,
+        sandbox_mode=_sandbox_mode,
+        topic_creator_user_id=_topic_creator_user_id,
     )
 
     try:
@@ -1473,6 +1557,16 @@ async def steer_active_run(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    (
+        _topic_id,
+        _is_group_chat,
+        _participant_ids,
+        _sender_display_name,
+        _sandbox_mode,
+        _topic_creator_user_id,
+    ) = await _resolve_topic_run_context(conversation, ctx)
+    _require_participant_if_topic(conversation, ctx, _participant_ids)
+
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
@@ -1487,9 +1581,17 @@ async def steer_active_run(
     if active_run is None or active_run.status != "running":
         return {"status": "no_active_run", "run_id": None}
 
+    steer_metadata: dict[str, Any] = {}
+    if _is_group_chat and _sender_display_name:
+        steer_metadata["sender_user_id"] = ctx.user.id
+        steer_metadata["sender_display_name"] = _sender_display_name
+
     run_manager = raw_request.app.state.run_manager
     dispatch_status = await run_manager.dispatch_steer(
-        active_run.run_id, body.content, steer_id=body.steer_id
+        active_run.run_id,
+        body.content,
+        steer_id=body.steer_id,
+        metadata=steer_metadata or None,
     )
     return {"status": dispatch_status, "run_id": active_run.run_id}
 
@@ -1563,6 +1665,16 @@ async def submit_sandbox_confirm(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    (
+        _topic_id,
+        _is_group_chat,
+        _participant_ids,
+        _sender_display_name,
+        _sandbox_mode,
+        _topic_creator_user_id,
+    ) = await _resolve_topic_run_context(conversation, ctx)
+    _require_participant_if_topic(conversation, ctx, _participant_ids)
+
     from cubepi.hitl.types import ApproveAnswer
 
     from cubebox.agents.checkpointer import init_checkpointer
@@ -1595,6 +1707,12 @@ async def submit_sandbox_confirm(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
+        topic_id=_topic_id,
+        is_group_chat=_is_group_chat,
+        participant_ids=_participant_ids,
+        sender_display_name=_sender_display_name,
+        sandbox_mode=_sandbox_mode,
+        topic_creator_user_id=_topic_creator_user_id,
     )
     try:
         new_run_id = await run_manager.resume_run_with_answer(
@@ -1642,6 +1760,16 @@ async def submit_ask_user_answer(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    (
+        _topic_id,
+        _is_group_chat,
+        _participant_ids,
+        _sender_display_name,
+        _sandbox_mode,
+        _topic_creator_user_id,
+    ) = await _resolve_topic_run_context(conversation, ctx)
+    _require_participant_if_topic(conversation, ctx, _participant_ids)
+
     from cubebox.agents.checkpointer import init_checkpointer
 
     active_run = await get_active_run(
@@ -1671,6 +1799,12 @@ async def submit_ask_user_answer(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
+        topic_id=_topic_id,
+        is_group_chat=_is_group_chat,
+        participant_ids=_participant_ids,
+        sender_display_name=_sender_display_name,
+        sandbox_mode=_sandbox_mode,
+        topic_creator_user_id=_topic_creator_user_id,
     )
     try:
         new_run_id = await run_manager.resume_run_with_answer(

@@ -101,6 +101,30 @@ async def process_one_queue_item(
             ).scalar_one_or_none()
             if link is not None:
                 effective_user_id = link.user_id
+        # Refuse to dispatch IM messages against topic conversations — the
+        # group-chat topic-aware path is not implemented for IM in v1, so
+        # silently running with is_group_chat=False would leak personal
+        # memory and drop sender attribution.
+        from cubebox.models.conversation import Conversation
+
+        conv_row = (
+            await session.execute(
+                select(Conversation).where(
+                    Conversation.id == item.conversation_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if conv_row is not None and conv_row.topic_id is not None:
+            logger.warning(
+                "[IM worker] refusing to dispatch run for queue item {} — "
+                "conversation {} is a topic (v1 scope)",
+                item.id,
+                item.conversation_id,
+            )
+            await mark_queue_item_completed(session, item_id=item.id)
+            await mark_receipt_failed(session, receipt_id=item.receipt_id)
+            await session.commit()
+            return True
         await session.commit()
         captured = {
             "conversation_id": item.conversation_id,

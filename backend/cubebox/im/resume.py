@@ -15,8 +15,10 @@ from typing import Any
 from loguru import logger
 
 
-async def _resolve_run_context(run_id: str) -> tuple[str, str, str, str] | None:
-    """Look up ``(conversation_id, user_id, org_id, workspace_id)`` for a run.
+async def _resolve_run_context(
+    run_id: str,
+) -> tuple[str, str, str, str, str | None] | None:
+    """Look up ``(conversation_id, user_id, org_id, workspace_id, topic_id)`` for a run.
 
     Two-step lookup:
 
@@ -25,7 +27,7 @@ async def _resolve_run_context(run_id: str) -> tuple[str, str, str, str] | None:
        TTL (12h by default) which more than covers a paused HITL window.
     2. Load the ``Conversation`` row by id (unscoped — we don't yet know
        which workspace it lives in) to read ``creator_user_id``,
-       ``workspace_id``, ``org_id``.
+       ``workspace_id``, ``org_id``, ``topic_id``.
 
     Returns None when either step fails. The caller treats None as
     "session ended" and surfaces a toast.
@@ -66,6 +68,7 @@ async def _resolve_run_context(run_id: str) -> tuple[str, str, str, str] | None:
             str(row.creator_user_id),
             str(row.org_id),
             str(row.workspace_id),
+            str(row.topic_id) if row.topic_id is not None else None,
         )
     except Exception:
         logger.warning("[resume] _resolve_run_context failed for {}", run_id, exc_info=True)
@@ -94,7 +97,15 @@ async def resume_paused_run(
     if resolved is None:
         logger.warning("[resume] cannot resolve run_id={}", run_id)
         return False
-    conversation_id, user_id, org_id, workspace_id = resolved
+    conversation_id, user_id, org_id, workspace_id, topic_id = resolved
+    if topic_id is not None:
+        logger.warning(
+            "[resume] refusing IM resume for topic conversation {} "
+            "(run_id={}) — topic-aware IM resume not implemented (v1 scope)",
+            conversation_id,
+            run_id,
+        )
+        return False
 
     answer: Any
     if input_kind == "sandbox_confirm":

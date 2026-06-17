@@ -68,6 +68,13 @@ async def resolve_target(task: ScheduledTask) -> str:
             conv = await repo.get_by_id(task.target_conversation_id)
             if conv is None:
                 raise TargetUnavailableError("fixed target not found or not owner-owned")
+            if conv.topic_id is not None:
+                # Topic-aware schedule dispatch is not implemented in v1; refuse
+                # rather than silently running with is_group_chat=False.
+                raise TargetUnavailableError(
+                    "fixed target is a topic conversation; topic-aware schedule "
+                    "dispatch is not implemented in v1"
+                )
             return conv.id
         conv = await repo.create(title=task.name)
         return conv.id
