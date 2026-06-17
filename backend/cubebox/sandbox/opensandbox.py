@@ -158,6 +158,10 @@ class OpenSandbox(Sandbox):
         with _as_sandbox_error():
             await self._sandbox.pause()
 
+    async def renew(self, timeout_seconds: int) -> None:
+        with _as_sandbox_error():
+            await self._sandbox.renew(timedelta(seconds=timeout_seconds))
+
     @classmethod
     async def connect_or_resume(  # type: ignore[override]
         cls,
