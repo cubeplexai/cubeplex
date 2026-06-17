@@ -1785,6 +1785,10 @@
         "rejected": "{count} 拒绝"
       }
     },
+    "identityLinks": {
+      "title": "已关联用户",
+      "empty": "暂无关联用户。IM 用户可使用 /link 命令绑定账号。"
+    },
     "deleteDialog": {
       "title": "删除这个 bot 绑定？",
       "body": "会删除凭据并断开当前 long-connection。飞书侧的应用本身不动。",

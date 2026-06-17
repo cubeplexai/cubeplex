@@ -1785,6 +1785,10 @@
         "rejected": "{count} rejected"
       }
     },
+    "identityLinks": {
+      "title": "Linked users",
+      "empty": "No users linked yet. IM users can run /link to bind their account."
+    },
     "deleteDialog": {
       "title": "Delete this bot connection?",
       "body": "This removes the credential and stops any active long-connection. The Feishu app itself is untouched.",

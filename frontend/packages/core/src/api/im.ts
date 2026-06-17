@@ -123,7 +123,32 @@ export async function adminEnableImAccount(
   return (await res.json()) as ImAccount
 }
 
-// ── Identity link ────────────────────────────────────────────────────────────
+// ── Identity links (read) ────────────────────────────────────────────────────
+
+export interface ImIdentityLink {
+  id: string
+  im_user_id: string
+  user_id: string
+  user_email: string
+  user_display_name: string
+  created_at: string
+}
+
+export interface ImIdentityLinkListOut {
+  links: ImIdentityLink[]
+}
+
+export async function wsListIdentityLinks(
+  client: ApiClient,
+  wsId: string,
+  accountId: string,
+): Promise<ImIdentityLinkListOut> {
+  const res = await client.get(`/api/v1/ws/${wsId}/im/accounts/${accountId}/identity-links`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ImIdentityLinkListOut
+}
+
+// ── Identity link (confirm) ─────────────────────────────────────────────────
 
 export interface ImLinkConfirmResult {
   ok: boolean
