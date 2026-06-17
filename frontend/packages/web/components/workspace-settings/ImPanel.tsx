@@ -50,6 +50,7 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
   const [deleteCandidate, setDeleteCandidate] = useState<ImAccount | null>(null)
   const [deleteText, setDeleteText] = useState('')
   const wizardOpen = search?.get('action') === 'connect'
+  const connectPlatform = search?.get('platform') ?? undefined
   const selectedId = search?.get('account') ?? null
 
   const load = useCallback(async () => {
@@ -83,7 +84,11 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
         title={t('nav.workspaceTab')}
         description={t('panel.description')}
         action={
-          <Button size="sm" className="gap-1.5" onClick={() => updateUrl({ action: 'connect' })}>
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => updateUrl({ action: 'connect', platform: null })}
+          >
             <Plus className="size-3.5" />
             {t('action.connect')}
           </Button>
@@ -110,7 +115,9 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
                       <button
                         key={platform.id}
                         disabled={!platform.live}
-                        onClick={() => platform.live && updateUrl({ action: 'connect' })}
+                        onClick={() =>
+                          platform.live && updateUrl({ action: 'connect', platform: platform.id })
+                        }
                         className={cn(
                           'flex w-28 flex-col items-center gap-2 rounded-xl border px-5 py-4 transition-all',
                           platform.live
@@ -179,9 +186,10 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
         <ImConnectWizard
           wsId={wsId}
           open
-          onClose={() => updateUrl({ action: null })}
+          initialPlatformId={connectPlatform}
+          onClose={() => updateUrl({ action: null, platform: null })}
           onSuccess={() => {
-            updateUrl({ action: null })
+            updateUrl({ action: null, platform: null })
             void load()
           }}
         />

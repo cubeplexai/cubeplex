@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 
 import { StepPlatform } from './steps/StepPlatform'
 import { useConnectMutation } from './useConnectMutation'
+import { ALL_PLATFORMS } from './platforms'
 import type { FormState, PlatformDescriptor } from './platforms/types'
 
 type DynamicT = (key: string, values?: Record<string, string | number>) => string
@@ -18,14 +19,26 @@ type DynamicT = (key: string, values?: Record<string, string | number>) => strin
 interface Props {
   wsId: string
   open: boolean
+  /** When set to a live platform id, skip the platform-picker and open its config directly. */
+  initialPlatformId?: string
   onClose: () => void
   onSuccess: () => void
 }
 
-export function ImConnectWizard({ wsId, open, onClose, onSuccess }: Props): React.ReactElement {
+export function ImConnectWizard({
+  wsId,
+  open,
+  initialPlatformId,
+  onClose,
+  onSuccess,
+}: Props): React.ReactElement {
   const t = useTranslations() as unknown as DynamicT
   const client = useMemo(() => createApiClient(''), [])
-  const [platform, setPlatform] = useState<PlatformDescriptor | null>(null)
+  const [platform, setPlatform] = useState<PlatformDescriptor | null>(() => {
+    if (!initialPlatformId) return null
+    const p = ALL_PLATFORMS.find((x) => x.id === initialPlatformId)
+    return p && p.live ? p : null
+  })
   const [stepIdx, setStepIdx] = useState(0)
   const [form, setForm] = useState<FormState>({})
   const mut = useConnectMutation(client, wsId)
@@ -53,7 +66,7 @@ export function ImConnectWizard({ wsId, open, onClose, onSuccess }: Props): Reac
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
+    <Dialog open={open} disablePointerDismissal onOpenChange={(o) => !o && handleClose()}>
       <DialogContent role="dialog" aria-labelledby="wizard-title">
         <DialogHeader>
           <DialogTitle id="wizard-title">{t('im.wizard.title')}</DialogTitle>
