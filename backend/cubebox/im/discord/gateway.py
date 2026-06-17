@@ -88,11 +88,22 @@ class DiscordGateway:
             if event is None:
                 return
             event.account_external_id = account.external_account_id
+
+            from cubebox.im.identity import NullIdentityResolver
+
+            gate_connector = DiscordConnector(
+                bot_user_id=bot.user.id,
+                bot=bot,
+                channel_id=event.channel_id,
+                reply_to_id=event.reply_to_id,
+            )
             try:
                 result = await ingest(
                     event,
                     account=account,
                     session_maker=session_maker,
+                    identity_resolver=NullIdentityResolver(),
+                    rejection_notifier=gate_connector,
                 )
                 logger.info("[Discord] inbound {}: {}", event.platform_event_id, result.outcome)
             except Exception:

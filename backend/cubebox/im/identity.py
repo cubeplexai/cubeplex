@@ -1,14 +1,15 @@
 """Sender identity resolution + workspace-member gate.
 
-Maps a Feishu sender (open_id) onto the cubebox user that should drive the
-run, gated by workspace membership. The mapping is cached in
-``im_identity_links`` so steady-state we don't hit the Feishu contact API
-on every inbound.
+Maps an IM sender onto the cubebox user that should drive the run, gated
+by workspace membership. The mapping is cached in ``im_identity_links``
+so steady-state we don't hit external APIs on every inbound.
 
-Policy (per spec: A+C):
-- If the sender's email matches a cubebox user AND that user is a member
-  of the bot's workspace → run as that user.
-- Otherwise → reject with a one-shot reply, drop the event.
+Resolution order:
+1. Cache hit in ``im_identity_links`` (by account_id + im_user_id).
+2. Platform-specific email resolution (e.g. Feishu contact API).
+3. ``/link`` command fallback — platforms without email APIs (Discord)
+   use ``NullIdentityResolver`` which always returns None, forcing
+   users to link manually via ``/link <email>``.
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from cubebox.models.user import User
 
 
 class IdentityResolver(Protocol):
-    """Resolve a Feishu sender's email; one method only."""
+    """Resolve an IM sender's email from their platform ID."""
 
     async def resolve_email(self, open_id: str) -> str | None: ...
 
@@ -40,9 +41,22 @@ class RejectionNotifier(Protocol):
     ) -> str | None: ...
 
 
-_REJECTION_TEXT = (
-    "Sorry — your account isn't a member of this workspace, so I can't help "
-    "here. Ask the workspace admin to add you, then try again."
+class NullIdentityResolver:
+    """Always returns None — for platforms without email resolution APIs."""
+
+    async def resolve_email(self, open_id: str) -> str | None:
+        return None
+
+
+_REJECTION_NOT_MEMBER = (
+    "Sorry — your account isn't a member of this workspace, so I can't "
+    "help here. Ask the workspace admin to add you, then try again."
+)
+
+_REJECTION_LINK_REQUIRED = (
+    "I don't know who you are yet. Please run:\n"
+    "  /link <your-cubebox-email>\n"
+    "to bind your IM account, then try again."
 )
 
 
@@ -69,9 +83,12 @@ async def resolve_or_reject(
     """
     im_user_id = event.sender_ref or event.sender_open_id or ""
     if not im_user_id:
-        # No stable handle — can't even cache. Reject loudly.
         logger.warning("[IM identity] inbound event has no sender_ref or sender_open_id")
-        await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+        await notifier.send_to_chat(
+            event.channel_id,
+            event.reply_to_id,
+            _REJECTION_LINK_REQUIRED,
+        )
         return None
 
     cached = (
@@ -109,12 +126,19 @@ async def resolve_or_reject(
         )
         await session.delete(cached)
         await session.flush()
-        await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+        await notifier.send_to_chat(
+            event.channel_id,
+            event.reply_to_id,
+            _REJECTION_NOT_MEMBER,
+        )
         return None
 
     if not event.sender_open_id:
-        # No open_id → can't ask Feishu. Reject.
-        await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+        await notifier.send_to_chat(
+            event.channel_id,
+            event.reply_to_id,
+            _REJECTION_LINK_REQUIRED,
+        )
         return None
 
     email = await resolver.resolve_email(event.sender_open_id)
@@ -124,7 +148,11 @@ async def resolve_or_reject(
             event.sender_open_id,
             account.id,
         )
-        await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+        await notifier.send_to_chat(
+            event.channel_id,
+            event.reply_to_id,
+            _REJECTION_LINK_REQUIRED,
+        )
         return None
 
     # Email is stored lower-cased in cubebox; normalize on lookup to match
@@ -139,7 +167,11 @@ async def resolve_or_reject(
             normalized,
             event.sender_open_id,
         )
-        await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+        await notifier.send_to_chat(
+            event.channel_id,
+            event.reply_to_id,
+            _REJECTION_LINK_REQUIRED,
+        )
         return None
 
     membership = (
@@ -157,7 +189,11 @@ async def resolve_or_reject(
             normalized,
             account.workspace_id,
         )
-        await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+        await notifier.send_to_chat(
+            event.channel_id,
+            event.reply_to_id,
+            _REJECTION_NOT_MEMBER,
+        )
         return None
 
     # Cache. Wrap the INSERT in a SAVEPOINT so a unique-key race against
@@ -199,5 +235,9 @@ async def resolve_or_reject(
         account.id,
         im_user_id,
     )
-    await notifier.send_to_chat(event.channel_id, event.reply_to_id, _REJECTION_TEXT)
+    await notifier.send_to_chat(
+        event.channel_id,
+        event.reply_to_id,
+        _REJECTION_LINK_REQUIRED,
+    )
     return None
