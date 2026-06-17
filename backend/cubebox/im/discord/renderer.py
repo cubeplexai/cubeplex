@@ -129,13 +129,19 @@ class DiscordOpDispatcher:
         view = discord.ui.View(timeout=600)
         qid = pending.question_id or ""
         akey = pending.answer_key or ""
+        # Discord custom_id max is 100 chars.  Full question_id can be
+        # 33+ chars; combined with run_id (36) and answer_key the id
+        # overflows, truncating value and making all buttons identical
+        # (→ 400).  Cap qid to 8 chars; the interaction handler loads
+        # the full question_id from the DB pending.
+        short_qid = qid[:8]
         for label, value, btn_type in pending.choices:
             style = discord.ButtonStyle.primary
             if btn_type == "danger":
                 style = discord.ButtonStyle.danger
             elif btn_type == "default":
                 style = discord.ButtonStyle.secondary
-            cid = f"im:{pending.kind}:{pending.run_id}:{qid}:{akey}:{value}"
+            cid = f"im:{pending.kind}:{pending.run_id}:{short_qid}:{akey}:{value}"
             if len(cid) > 100:
                 cid = cid[:100]
             button: discord.ui.Button[discord.ui.View] = discord.ui.Button(
