@@ -101,7 +101,18 @@ export const useTopicStore = create<TopicStore>((set) => ({
 
   async remove(client, topicId) {
     await deleteTopic(client, topicId)
-    set((s) => ({ topics: s.topics.filter((t) => t.id !== topicId) }))
+    set((s) => {
+      // Drop the topic's participants too so a future panel mount for
+      // the same id doesn't render stale state, and let the
+      // conversationStore drop child conversations whose backend rows
+      // just became inaccessible (_scoped_select joins is_archived).
+      const nextParticipants = { ...s.topicParticipants }
+      delete nextParticipants[topicId]
+      return {
+        topics: s.topics.filter((t) => t.id !== topicId),
+        topicParticipants: nextParticipants,
+      }
+    })
   },
 
   async addMembers(client, topicId, userIds) {

@@ -28,11 +28,13 @@ export function ChatHeaderGroupBadge({
   const fetchDetail = useTopicStore((s) => s.fetchDetail)
   const participants: TopicParticipant[] = useTopicStore((s) => s.topicParticipants[topicId] ?? [])
 
+  // Refetch on every topic change rather than gating on participants.length:
+  // a legitimately empty response (user just left) would otherwise be
+  // indistinguishable from "never fetched" and lock the badge in a stale
+  // state. fetchDetail is cheap (single GET) so this is fine.
   useEffect(() => {
-    if (participants.length === 0) {
-      void fetchDetail(client, topicId).catch(() => undefined)
-    }
-  }, [client, topicId, participants.length, fetchDetail])
+    void fetchDetail(client, topicId).catch(() => undefined)
+  }, [client, topicId, fetchDetail])
 
   // Group UI only renders when there are 2+ participants — otherwise the
   // conversation is effectively a 1:1 even though it has a topic_id.
