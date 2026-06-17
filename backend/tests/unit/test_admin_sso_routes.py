@@ -50,6 +50,23 @@ def _make_aware(value: Any) -> Any:
 
 
 @pytest.fixture(autouse=True)
+def _bypass_ssrf_guard_for_test_idp_hosts(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> None:
+    """Unit tests use idp.example.com / a.example.com / corp.example.com etc.
+    Those resolve in production but the unit-test runner has no internet, so
+    the SSRF guard's DNS lookup fails-closed and turns every admin-route test
+    into a config_url_refused 400. The guard itself is exercised in
+    ``test_discover_oidc_refuses_loopback_target`` against real refuseable
+    inputs — skip the bypass for those tests via the ``real_ssrf_guard``
+    marker.
+    """
+    if request.node.get_closest_marker("real_ssrf_guard"):
+        return
+    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+
+
+@pytest.fixture(autouse=True)
 def _force_tz_aware_on_load() -> Any:
     """SQLite drops tzinfo on roundtrip; force-tag loaded datetimes as UTC.
 
@@ -706,6 +723,7 @@ async def test_discover_oidc_400_on_missing_field(
 # --- SSRF + cross-org regressions ------------------------------------------
 
 
+@pytest.mark.real_ssrf_guard
 async def test_discover_oidc_refuses_loopback_target(
     admin_setup: tuple[Organization, User],
 ) -> None:

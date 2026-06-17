@@ -160,6 +160,7 @@ async def google_callback(
             external_email=userinfo.email,
             email_verified=userinfo.email_verified,
             claims=userinfo.claims or {},
+            request=request,
         )
     except SSOLoginRejected as exc:
         raise HTTPException(403, detail=exc.code) from exc

@@ -830,7 +830,15 @@
         "sso_already_configured": "该组织已存在 SSO 连接。",
         "invalid_issuer_url": "该 Issuer URL 未返回有效的 OIDC discovery 文档。",
         "oidc_discovery_failed": "OIDC 自动发现失败，请检查 Issuer URL。",
+        "oidc_discovery_refused": "拒绝访问：URL 必须使用 https，且解析到公网地址。",
         "invalid_config": "SSO 配置无效，请检查上方字段。",
+        "config_missing_fields": "缺少必填的配置字段。",
+        "config_url_refused": "配置中存在非公网地址，请使用公网 https 接口。",
+        "client_secret_required_for_oidc": "启用 OIDC 连接前需先配置 Client Secret。",
+        "client_secret_empty": "Client Secret 不能为空。",
+        "deactivate_before_delete": "请先停用 SSO 连接再删除。",
+        "invalid_status_transition": "当前状态下不允许此状态切换。",
+        "app_base_url_missing_scheme": "部署的 app_base_url 缺少协议前缀，请联系运维。",
         "unauthorized": "无权修改 SSO 设置。",
         "forbidden": "无权修改 SSO 设置。"
       }

@@ -830,7 +830,15 @@
         "sso_already_configured": "An SSO connection already exists for this organization.",
         "invalid_issuer_url": "The issuer URL didn't return a valid OIDC discovery document.",
         "oidc_discovery_failed": "OIDC discovery failed. Check the issuer URL.",
+        "oidc_discovery_refused": "Refused: the URL must use https and resolve to a public address.",
         "invalid_config": "The SSO configuration is invalid. Review the fields above.",
+        "config_missing_fields": "Required configuration fields are missing.",
+        "config_url_refused": "A configured URL points to a non-public address. Use a public https endpoint.",
+        "client_secret_required_for_oidc": "OIDC connections need a client secret before activation.",
+        "client_secret_empty": "Client secret cannot be empty.",
+        "deactivate_before_delete": "Deactivate the SSO connection before deleting it.",
+        "invalid_status_transition": "That status change isn't allowed from the current state.",
+        "app_base_url_missing_scheme": "The deployment's app base URL is missing a scheme. Contact your operator.",
         "unauthorized": "You don't have permission to change SSO settings.",
         "forbidden": "You don't have permission to change SSO settings."
       }

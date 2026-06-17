@@ -43,6 +43,12 @@ from tests.e2e.helpers import csrf_cookie_name
 pytestmark = pytest.mark.e2e
 
 
+@pytest.fixture(autouse=True)
+def _bypass_ssrf_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """See tests/e2e/test_sso_admin.py — same rationale."""
+    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+
+
 def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.setdefault("ENV_FOR_DYNACONF", "test")
