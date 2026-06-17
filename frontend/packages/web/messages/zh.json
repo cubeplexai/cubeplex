@@ -196,7 +196,7 @@
     "skillRegistries": "技能仓库"
   },
   "adminNav": {
-    "settings": "组织设置",
+    "settings": "通用",
     "models": "模型",
     "modelPresets": "模型预设",
     "webTools": "Web 工具",
@@ -718,27 +718,8 @@
     }
   },
   "adminSettings": {
-    "title": "组织设置",
+    "title": "通用",
     "subtitle": "组织范围内的全局配置",
-    "llmTitle": "默认 LLM",
-    "llmSubtitle": "选择组织默认模型与 fallback 链；所有 Workspace 都将沿用此配置",
-    "loading": "加载中…",
-    "loadFailed": "加载失败：{message}",
-    "defaultModel": "默认模型",
-    "defaultModelPlaceholder": "选择默认模型…",
-    "fallbackChain": "Fallback 链",
-    "fallbackEmpty": "暂无 fallback 模型",
-    "fallbackAdd": "添加 fallback",
-    "fallbackPlaceholder": "选择 fallback 模型…",
-    "fallbackRemove": "移除 {model}",
-    "noModels": "暂无可用模型，请先在「模型」页面添加 Provider 与模型",
-    "noMatchingModels": "无匹配模型",
-    "modelUnavailable": "不可用",
-    "save": "保存",
-    "saving": "保存中…",
-    "saved": "已保存",
-    "saveFailed": "保存失败：{message}",
-    "discard": "放弃修改",
     "orgInfo": {
       "title": "组织信息",
       "nameLabel": "组织名称",

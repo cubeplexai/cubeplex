@@ -6,7 +6,6 @@ export type * from './types/provider'
 export * from './api/providers'
 export { useProvidersStore } from './stores/providersStore'
 export { useModelsStore } from './stores/modelsStore'
-export { useOrgModelSettingsStore } from './stores/orgModelSettingsStore'
 export * from './oauth'
 export { useOrgAdminFlag } from './hooks/useOrgAdminFlag'
 

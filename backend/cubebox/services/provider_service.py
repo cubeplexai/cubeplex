@@ -14,8 +14,6 @@ from cubebox.api.exceptions import ModelInUseByPresetError
 from cubebox.api.schemas.provider import (
     ModelCreate,
     ModelUpdate,
-    OrgLLMSettingsOut,
-    OrgLLMSettingsUpdate,
     ProviderCreate,
     ProviderLivenessRequest,
     ProviderTestRequest,
@@ -30,7 +28,6 @@ from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.provider import Model, Provider
 from cubebox.repositories.model import ModelRepository
 from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
 from cubebox.services import provider_probe
 from cubebox.services.credential import CredentialService
@@ -94,7 +91,6 @@ class ProviderService:
         provider_repo: ProviderRepository,
         model_repo: ModelRepository,
         override_repo: OrgProviderOverrideRepository,
-        org_settings_repo: OrgSettingsRepository,
         credential_service: CredentialService,
         session: AsyncSession,
         org_id: str,
@@ -103,7 +99,6 @@ class ProviderService:
         self._providers = provider_repo
         self._models = model_repo
         self._overrides = override_repo
-        self._org_settings = org_settings_repo
         self._credentials = credential_service
         self._session = session
         self.org_id = org_id
@@ -620,42 +615,3 @@ class ProviderService:
         if p.org_id is not None:
             raise ProviderOverrideNotApplicableError("Override only applies to system providers")
         return await self._overrides.set(provider_id, enabled)
-
-    # -- Org settings -----------------------------------------------------------
-
-    async def get_llm_settings(self) -> OrgLLMSettingsOut:
-        default = await self._org_settings.get("default_model")
-        fallback = await self._org_settings.get("fallback_models")
-        return OrgLLMSettingsOut(
-            default_model=default.value.get("model_ref") if default else None,
-            fallback_models=fallback.value.get("models", []) if fallback else [],
-        )
-
-    async def update_llm_settings(self, data: OrgLLMSettingsUpdate) -> OrgLLMSettingsOut:
-        if data.default_model is not None:
-            await self._validate_model_ref(data.default_model)
-            await self._org_settings.set("default_model", {"model_ref": data.default_model})
-        if data.fallback_models is not None:
-            for ref in data.fallback_models:
-                await self._validate_model_ref(ref)
-            await self._org_settings.set("fallback_models", {"models": data.fallback_models})
-        return await self.get_llm_settings()
-
-    async def _validate_model_ref(self, model_ref: str) -> None:
-        """Verify a provider/model-id reference points to a visible, enabled model."""
-        parts = model_ref.split("/", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Invalid model ref format: '{model_ref}'")
-        slug, model_id = parts
-        provider = await self._providers.get_by_slug(slug)  # was get_by_name(provider_name)
-        if provider is None:
-            raise ValueError(f"Provider slug '{slug}' not found")
-        if provider.org_id is None:
-            override = await self._overrides.get(provider.id)
-            if override and not override.enabled:
-                raise ValueError(f"Provider '{slug}' is disabled by org")
-        model = await self._models.get_by_model_id(provider.id, model_id)
-        if model is None:
-            raise ValueError(f"Model '{model_id}' not found in provider '{slug}'")
-        if not model.enabled:
-            raise ValueError(f"Model '{model_id}' is disabled")

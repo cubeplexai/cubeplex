@@ -7,8 +7,6 @@ import type {
   Model,
   ModelCreate,
   ModelUpdate,
-  OrgLLMSettings,
-  OrgLLMSettingsUpdate,
   VendorPreset,
   ProbeStep,
   ProbeResult,
@@ -75,21 +73,6 @@ export async function deleteModel(
 ): Promise<void> {
   const res = await client.del(`/api/v1/admin/providers/${providerId}/models/${modelId}`)
   if (!res.ok) throw await toApiError(res)
-}
-
-export async function fetchOrgLLMSettings(client: ApiClient): Promise<OrgLLMSettings> {
-  const res = await client.get('/api/v1/admin/settings/llm')
-  if (!res.ok) throw await toApiError(res)
-  return res.json() as Promise<OrgLLMSettings>
-}
-
-export async function updateOrgLLMSettings(
-  client: ApiClient,
-  body: OrgLLMSettingsUpdate,
-): Promise<OrgLLMSettings> {
-  const res = await client.put('/api/v1/admin/settings/llm', body)
-  if (!res.ok) throw await toApiError(res)
-  return res.json() as Promise<OrgLLMSettings>
 }
 
 export async function listPresets(client: ApiClient): Promise<VendorPreset[]> {

@@ -207,23 +207,6 @@ async def test_delete_model_blocked_by_preset_reference(
     await client.delete(f"/api/v1/admin/providers/{pid}")
 
 
-async def test_org_settings(admin_client: tuple[AsyncClient, str]) -> None:
-    """Admin can set and read org LLM settings."""
-    client, _ws_id = admin_client
-
-    res = await client.get("/api/v1/admin/settings/llm")
-    assert res.status_code == 200
-
-    res = await client.put(
-        "/api/v1/admin/settings/llm",
-        json={
-            "default_model": None,
-            "fallback_models": [],
-        },
-    )
-    assert res.status_code == 200
-
-
 async def test_system_provider_not_deletable(
     admin_client: tuple[AsyncClient, str],
 ) -> None:
@@ -457,36 +440,3 @@ async def test_provider_slug_round_trips(
     fetched = (await client.get(f"/api/v1/admin/providers/{created['id']}")).json()
     assert fetched["slug"] == "round-trip"
     await client.delete(f"/api/v1/admin/providers/{created['id']}")
-
-
-async def test_default_model_accepts_slug_ref_and_rejects_unknown(
-    admin_client: tuple[AsyncClient, str],
-) -> None:
-    # Create provider + model, then set default_model by slug ref. The write-path
-    # validation must resolve the provider by slug, not name.
-    client, _ = admin_client
-    pbody = {
-        "name": "Routed Provider",
-        "provider_type": "openai-completions",
-        "base_url": "https://x.test/v1",
-        "auth_type": "api_key",
-        "api_key": "k",
-    }
-    prov = (await client.post("/api/v1/admin/providers", json=pbody)).json()
-    assert prov["slug"] == "routed-provider"
-    mbody = {"model_id": "m-1", "display_name": "M1", "context_window": 8000, "max_tokens": 1000}
-    await client.post(f"/api/v1/admin/providers/{prov['id']}/models", json=mbody)
-
-    ok = await client.put(
-        "/api/v1/admin/settings/llm", json={"default_model": "routed-provider/m-1"}
-    )
-    assert ok.status_code == 200, ok.text
-
-    bad = await client.put(
-        "/api/v1/admin/settings/llm", json={"default_model": "Routed Provider/m-1"}
-    )
-    assert bad.status_code >= 400  # the old display-name ref no longer resolves
-
-    # Cleanup: reset settings and remove provider
-    await client.put("/api/v1/admin/settings/llm", json={"default_model": None})
-    await client.delete(f"/api/v1/admin/providers/{prov['id']}")

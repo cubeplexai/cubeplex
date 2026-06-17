@@ -15,8 +15,6 @@ from cubebox.api.schemas.provider import (
     ModelReadinessOut,
     ModelTest,
     ModelUpdate,
-    OrgLLMSettingsOut,
-    OrgLLMSettingsUpdate,
     OrgProviderOverrideOut,
     OrgProviderOverrideUpdate,
     ProviderCreate,
@@ -35,7 +33,6 @@ from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.provider import Model, Provider
 from cubebox.repositories.model import ModelRepository
 from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-from cubebox.repositories.org_settings import OrgSettingsRepository
 from cubebox.repositories.provider import ProviderRepository
 from cubebox.services.provider_probe import ProbeResult, ProbeStep
 from cubebox.services.provider_service import (
@@ -66,7 +63,6 @@ async def _svc(user: User, session: AsyncSession, request: Request) -> ProviderS
         provider_repo=ProviderRepository(session, org_id=org_id),
         model_repo=ModelRepository(session),
         override_repo=OrgProviderOverrideRepository(session, org_id=org_id),
-        org_settings_repo=OrgSettingsRepository(session, org_id=org_id),
         credential_service=cred_service,
         session=session,
         org_id=org_id,
@@ -537,32 +533,3 @@ async def set_provider_override(
             status_code=400, detail={"code": "provider_override_not_applicable"}
         ) from e
     return OrgProviderOverrideOut(enabled=override.enabled)
-
-
-# -- Org LLM settings --------------------------------------------------------------
-
-
-@router.get("/settings/llm", response_model=OrgLLMSettingsOut)
-async def get_llm_settings(
-    *,
-    request: Request,
-    user: Annotated[User, Depends(require_org_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> OrgLLMSettingsOut:
-    svc = await _svc(user, session, request)
-    return await svc.get_llm_settings()
-
-
-@router.put("/settings/llm", response_model=OrgLLMSettingsOut)
-async def update_llm_settings(
-    body: OrgLLMSettingsUpdate,
-    *,
-    request: Request,
-    user: Annotated[User, Depends(require_org_admin)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> OrgLLMSettingsOut:
-    svc = await _svc(user, session, request)
-    try:
-        return await svc.update_llm_settings(body)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
