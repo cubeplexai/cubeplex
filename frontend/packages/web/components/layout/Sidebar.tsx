@@ -6,7 +6,13 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { cn } from '@/lib/utils'
 import { Tooltip as BaseTooltip } from '@base-ui/react'
-import { type Conversation, createApiClient, useConversationStore } from '@cubebox/core'
+import {
+  type Conversation,
+  type Topic,
+  createApiClient,
+  useConversationStore,
+  useTopicStore,
+} from '@cubebox/core'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +23,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
+import { TopicNode } from '@/components/sidebar/TopicNode'
 import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
 import { VscMcp } from 'react-icons/vsc'
 import {
@@ -330,6 +337,44 @@ function WorkspaceNav({
   )
 }
 
+type MixedEntry =
+  | { kind: 'conversation'; conversation: Conversation; sortKey: number }
+  | { kind: 'topic'; topic: Topic; conversations: Conversation[]; sortKey: number }
+
+function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEntry[] {
+  const ts = (iso: string): number => {
+    const t = new Date(iso).getTime()
+    return Number.isNaN(t) ? 0 : t
+  }
+
+  const byTopic = new Map<string, Conversation[]>()
+  const standalone: Conversation[] = []
+  for (const c of conversations) {
+    if (c.topic_id) {
+      const list = byTopic.get(c.topic_id) ?? []
+      list.push(c)
+      byTopic.set(c.topic_id, list)
+    } else {
+      standalone.push(c)
+    }
+  }
+
+  const entries: MixedEntry[] = []
+  for (const c of standalone) {
+    entries.push({ kind: 'conversation', conversation: c, sortKey: ts(c.updated_at) })
+  }
+  for (const topic of topics) {
+    const convs = (byTopic.get(topic.id) ?? [])
+      .slice()
+      .sort((a, b) => ts(b.updated_at) - ts(a.updated_at))
+    const newest = convs.length > 0 ? ts(convs[0]!.updated_at) : 0
+    const sortKey = Math.max(ts(topic.updated_at), newest)
+    entries.push({ kind: 'topic', topic, conversations: convs, sortKey })
+  }
+  entries.sort((a, b) => b.sortKey - a.sortKey)
+  return entries
+}
+
 interface SidebarProps {
   onCollapse?: () => void
   onExpand?: () => void
@@ -340,12 +385,17 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
   const tSidebar = useTranslations('sidebar')
   const tShell = useTranslations('shellLayout')
   const { conversations, activeId } = useConversationStore()
+  const { topics } = useTopicStore()
   const pathname = usePathname()
 
   // Current workspace inferred from URL (no WorkspaceContext dependency).
   const wsMatch = pathname?.match(/^\/w\/([^/]+)/)
   const currentWsId = wsMatch ? wsMatch[1] : null
   const newChatHref = currentWsId ? `/w/${currentWsId}` : '/'
+
+  // Build a mixed list: standalone conversations (no topic_id) and topics with
+  // their grouped conversations, ordered by most-recent activity in the group.
+  const mixedList = buildMixedList(topics, conversations)
 
   return (
     <aside
@@ -468,18 +518,36 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
           </p>
         </div>
         <ScrollArea className="flex-1 px-2">
-          {conversations.length === 0 ? (
+          {mixedList.length === 0 ? (
             <p className="px-2 py-1.5 text-xs text-faint">{tSidebar('noRecentChats')}</p>
           ) : (
             <ul className="space-y-0.5">
-              {conversations.map((convo) => (
-                <ConversationRow
-                  key={convo.id}
-                  convo={convo}
-                  isActive={activeId === convo.id}
-                  currentWsId={currentWsId}
-                />
-              ))}
+              {mixedList.map((entry) =>
+                entry.kind === 'conversation' ? (
+                  <ConversationRow
+                    key={`c-${entry.conversation.id}`}
+                    convo={entry.conversation}
+                    isActive={activeId === entry.conversation.id}
+                    currentWsId={currentWsId}
+                  />
+                ) : (
+                  <TopicNode
+                    key={`t-${entry.topic.id}`}
+                    topic={entry.topic}
+                    conversations={entry.conversations}
+                    activeConvId={activeId}
+                    currentWsId={currentWsId}
+                    renderConversationRow={(convo) => (
+                      <ConversationRow
+                        key={`c-${convo.id}`}
+                        convo={convo}
+                        isActive={activeId === convo.id}
+                        currentWsId={currentWsId}
+                      />
+                    )}
+                  />
+                ),
+              )}
             </ul>
           )}
         </ScrollArea>

@@ -6,6 +6,7 @@ import {
   useArtifactStore,
   useConversationStore,
   useMcpToolRegistryStore,
+  useTopicStore,
   useWorkspaceSettingsStore,
 } from '@cubebox/core'
 import { WorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -26,6 +27,7 @@ export default function WorkspaceLayout({
     // the new workspace's conversation list so the sidebar is populated on
     // every page within the workspace (including the home page).
     useConversationStore.setState({ conversations: [], activeId: null })
+    useTopicStore.setState({ topics: [], topicParticipants: {} })
     useArtifactStore.setState({ artifacts: {} })
     useWorkspaceSettingsStore.setState({
       agentConfig: null,
@@ -38,6 +40,7 @@ export default function WorkspaceLayout({
     const client = createApiClient('')
     client.setWorkspaceId(wsId)
     useConversationStore.getState().fetchList(client)
+    useTopicStore.getState().fetchList(client)
     useMcpToolRegistryStore.getState().loadForWorkspace(client, wsId)
   }, [wsId])
 
