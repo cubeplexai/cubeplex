@@ -325,12 +325,12 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def list_expired(self) -> list[UserSandbox]:
         """List sandboxes that have exceeded their TTL since last activity.
 
-        Sweeps both ``running`` and ``provisioning`` rows so a crash mid-create
-        cannot orphan a reserved slot past its TTL.
+        Sweeps ``running``, ``provisioning``, and ``kill_pending`` rows so
+        neither a crash mid-create nor a failed kill can orphan a sandbox.
         """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
+            .where(UserSandbox.status.in_(self._REAPABLE_STATUSES))  # type: ignore[attr-defined]
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await self.session.execute(stmt)
