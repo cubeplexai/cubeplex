@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
-import { createApiClient, confirmImLink } from '@cubebox/core'
+import { ApiError, createApiClient, confirmImLink } from '@cubebox/core'
 
 type Status = 'verifying' | 'success' | 'error'
 
@@ -30,16 +30,16 @@ export function ImLinkPage() {
         setStatus('success')
         setPlatform(result.platform)
       })
-      .catch((err) => {
-        if (err?.status === 401) {
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 401) {
           const returnUrl = `/im-link?token=${encodeURIComponent(token)}`
           router.replace(`/login?redirect=${encodeURIComponent(returnUrl)}`)
           return
         }
         setStatus('error')
-        setErrorMsg(err?.detail || t('error'))
+        setErrorMsg(err instanceof ApiError ? err.message : t('error'))
       })
-  }, [client, token, router, t])
+  }, [client, token])
 
   if (status === 'verifying') {
     return <p className="text-center text-sm text-muted-foreground">{t('verifying')}</p>
