@@ -42,6 +42,11 @@ export interface ApiClient {
 
 const WS_NEUTRAL_PREFIXES = [
   '/api/v1/auth/',
+  // SSO + social-login are pre-login flows under /auth/ — listed explicitly
+  // so they're discoverable when reviewing neutral surface area.
+  '/api/v1/auth/sso/',
+  '/api/v1/auth/social/',
+  '/api/v1/auth/org-info/',
   '/api/v1/workspaces',
   '/api/v1/admin',
   '/api/v1/shares',
