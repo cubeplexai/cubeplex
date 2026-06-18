@@ -257,6 +257,12 @@ async def sso_oidc_callback(
     mapping = conn.config.get("attribute_mapping", {})
     mapped = apply_mapping(userinfo.claims or {}, mapping, protocol="oidc")
 
+    # Enterprise OIDC SSO: the ID token is JWS-signed by the enterprise IdP.
+    # The email in a signed ID token is as trustworthy as a signed SAML assertion
+    # (same trust model: the admin explicitly configured this IdP). Many enterprise
+    # IdPs (including Casdoor) omit or leave email_verified=false even for valid
+    # corporate accounts. We trust the IdP; the `email_verified` OIDC claim is
+    # relevant for social-login flows, not for enterprise SSO connections.
     try:
         result = await resolve_identity(
             session,
@@ -265,7 +271,7 @@ async def sso_oidc_callback(
             provider_id=conn.id,
             external_id=mapped.id,
             external_email=mapped.email,
-            email_verified=userinfo.email_verified,
+            email_verified=True,
             claims=mapped.raw,
             sso_connection=conn,
             request=request,

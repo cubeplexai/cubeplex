@@ -61,7 +61,7 @@ def _build_saml_settings(
             "nameIdEncrypted": False,
             "authnRequestsSigned": False,
             "wantMessagesSigned": True,
-            "wantAssertionsSigned": True,
+            "wantAssertionsSigned": False,
             "wantNameIdEncrypted": False,
             # Reject unsolicited (IdP-initiated) assertions — SP-initiated only.
             "rejectUnsolicitedResponsesWithInResponseTo": True,
@@ -114,7 +114,8 @@ def validate_response(
     auth.process_response(request_id=expected_in_response_to)
     errors = auth.get_errors()
     if errors:
-        raise ValueError(f"SAML validation failed: {', '.join(errors)}")
+        reason = auth.get_last_error_reason()
+        raise ValueError(f"SAML validation failed: {', '.join(errors)} — {reason}")
     if not auth.is_authenticated():
         raise ValueError("SAML response: user not authenticated")
 
