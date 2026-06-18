@@ -13,6 +13,7 @@ from cubebox.models.credential import Credential
 from cubebox.models.egress_ref import EgressRef  # noqa: F401
 from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState
 from cubebox.models.external_identity import ExternalIdentity
+from cubebox.models.im_channel_binding import IMChannelBinding
 from cubebox.models.im_connector import (
     IMConnectorAccount,
     IMIdentityLink,
@@ -85,6 +86,7 @@ __all__ = [
     "MemorySourceType",
     "MemoryStatus",
     "MemoryType",
+    "IMChannelBinding",
     "IMConnectorAccount",
     "IMIdentityLink",
     "IMRunQueueItem",
