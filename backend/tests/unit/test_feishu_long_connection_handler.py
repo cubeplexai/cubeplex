@@ -12,14 +12,30 @@ network boundary covered by the manual smoke checklist in Task 16.
 import asyncio
 import json
 import threading
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from cubebox.im.feishu.long_connection import build_event_handler
 
 pytestmark = pytest.mark.asyncio
+
+
+def _make_fake_session_maker() -> Any:
+    """Return a session_maker whose session always returns no binding row."""
+
+    @asynccontextmanager
+    async def _session_ctx() -> Any:  # type: ignore[misc]
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        session = AsyncMock()
+        session.execute.return_value = result
+        yield session
+
+    return _session_ctx
 
 
 def _sdk_event_object() -> Any:
@@ -76,13 +92,13 @@ async def test_handler_marshals_envelope_and_dispatches_ingest_via_threadsafe() 
         barrier.set()
         return _Outcome()
 
-    account = SimpleNamespace(external_account_id="cli_test")
+    account = SimpleNamespace(id="acc_test", external_account_id="cli_test")
     loop = asyncio.get_running_loop()
     handler = build_event_handler(
         account=account,
         bot_open_id="ou_bot",
         ingest=fake_ingest,
-        session_maker=None,
+        session_maker=_make_fake_session_maker(),
         loop=loop,
         run_manager=None,
         redis_key_prefix="test",
@@ -126,12 +142,12 @@ async def test_handler_drops_event_when_parser_returns_none() -> None:
         captured.append(event)
         return SimpleNamespace(outcome="enqueued")
 
-    account = SimpleNamespace(external_account_id="cli_test")
+    account = SimpleNamespace(id="acc_test", external_account_id="cli_test")
     handler = build_event_handler(
         account=account,
         bot_open_id="ou_bot",
         ingest=fake_ingest,
-        session_maker=None,
+        session_maker=_make_fake_session_maker(),
         loop=asyncio.get_running_loop(),
         run_manager=None,
         redis_key_prefix="test",

@@ -158,13 +158,18 @@ def build_event_handler(
             "header": {"event_id": event_id, "event_type": "im.message.receive_v1"},
             "event": event_dict,
         }
-        event = connector.parse_inbound(raw)
-        if event is None:
-            return
-        # The long-connection delivery is by definition bound to one account.
-        event.account_external_id = account.external_account_id
 
         async def _do_ingest() -> None:
+            from cubebox.im.types import BindingMode, lookup_binding_mode
+
+            channel_id = event_dict.get("message", {}).get("chat_id", "")
+            bm: BindingMode = "isolated"
+            if channel_id:
+                bm = await lookup_binding_mode(session_maker, account.id, channel_id)
+            event = connector.parse_inbound(raw, binding_mode=bm)
+            if event is None:
+                return
+            event.account_external_id = account.external_account_id
             try:
                 kwargs: dict[str, Any] = {}
                 if gate_connector is not None:
@@ -176,9 +181,16 @@ def build_event_handler(
                     session_maker=session_maker,
                     **kwargs,
                 )
-                logger.info("[Feishu LC] inbound {}: {}", event.platform_event_id, res.outcome)
+                logger.info(
+                    "[Feishu LC] inbound {}: {}",
+                    event.platform_event_id,
+                    res.outcome,
+                )
             except Exception:
-                logger.exception("[Feishu LC] ingest failed for {}", event.platform_event_id)
+                logger.exception(
+                    "[Feishu LC] ingest failed for {}",
+                    event.platform_event_id,
+                )
 
         # Cross the thread boundary against the captured loop. Attach a
         # done_callback so failures BEFORE the coroutine starts running
