@@ -60,12 +60,13 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         so the loser never provisions a provider sandbox. ``sandbox_id`` gets a
         unique ``pending-<row id>`` placeholder until promote overwrites it.
 
-        ``topic_id`` selects which of the two partial uniques arms the row:
-        ``None`` arms ``uq_user_sandbox_active`` (personal scope, keyed by
-        ``user_id``); a topic id arms ``uq_user_sandbox_active_topic`` (topic
-        scope, keyed by ``topic_id``). Without persisting it here the topic
-        index is never armed and dedicated mode silently collapses to per-user.
+        ``topic_id`` selects scope: ``None`` -> ``('user', user_id)``;
+        a topic id -> ``('topic', topic_id)``. The polymorphic scope key
+        feeds into the single ``uq_user_sandbox_active_scope`` partial
+        unique, ensuring at most one active row per scope tuple.
         """
+        scope_type = "topic" if topic_id is not None else "user"
+        scope_id = topic_id if topic_id is not None else user_id
         record = UserSandbox(
             user_id=user_id,
             sandbox_id="",  # set below once the row id is minted
@@ -73,7 +74,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             image=image,
             volumes_config=volumes_config,
             ttl_seconds=ttl_seconds,
-            topic_id=topic_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
         )
         record.sandbox_id = f"pending-{record.id}"
         return await self.add(record)
@@ -91,17 +93,16 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
 
     async def get_active_by_user(self, user_id: str) -> UserSandbox | None:
         """Return the active (provisioning OR running) PERSONAL sandbox for
-        this user — i.e. the row where ``topic_id IS NULL``.
+        this user — i.e. the row with ``scope_type='user'`` and
+        ``scope_id=user_id``.
 
-        ``uq_user_sandbox_active`` (which only fires on ``topic_id IS NULL``)
-        guarantees at most one matching row, so no ``order_by/limit`` "newest
-        wins" is needed. The same user may also own / participate in topic-
-        scoped rows; those are reached via ``get_active_by_topic`` instead.
+        ``uq_user_sandbox_active_scope`` guarantees at most one matching
+        row, so no ``order_by/limit`` "newest wins" is needed.
         """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.user_id == user_id)
-            .where(UserSandbox.topic_id.is_(None))  # type: ignore[union-attr]
+            .where(UserSandbox.scope_type == "user")
+            .where(UserSandbox.scope_id == user_id)
             .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
         )
         result = await self.session.execute(stmt)
@@ -119,8 +120,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.user_id == user_id)
-            .where(UserSandbox.topic_id.is_(None))  # type: ignore[union-attr]
+            .where(UserSandbox.scope_type == "user")
+            .where(UserSandbox.scope_id == user_id)
             .where(UserSandbox.status.in_(("running", "paused", "pausing", "resuming")))  # type: ignore[attr-defined]
             .order_by(UserSandbox.created_at.desc())  # type: ignore[attr-defined]
             .limit(1)
@@ -131,13 +132,15 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def get_active_by_topic(self, topic_id: str) -> UserSandbox | None:
         """Return the active (provisioning OR running) sandbox for this topic.
 
-        ``uq_user_sandbox_active_topic`` guarantees at most one matching row.
-        Used for the dedicated topic-sandbox mode where all participants share
-        a single sandbox keyed by topic rather than per-user.
+        ``uq_user_sandbox_active_scope`` guarantees at most one matching
+        row for ``('topic', topic_id)``. Used for the dedicated topic-
+        sandbox mode where all participants share a single sandbox keyed
+        by topic rather than per-user.
         """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.topic_id == topic_id)
+            .where(UserSandbox.scope_type == "topic")
+            .where(UserSandbox.scope_id == topic_id)
             .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
         )
         result = await self.session.execute(stmt)
@@ -147,7 +150,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """Topic-scope counterpart to :meth:`get_resumable_by_user`."""
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.topic_id == topic_id)
+            .where(UserSandbox.scope_type == "topic")
+            .where(UserSandbox.scope_id == topic_id)
             .where(UserSandbox.status.in_(("running", "paused", "pausing", "resuming")))  # type: ignore[attr-defined]
             .order_by(UserSandbox.created_at.desc())  # type: ignore[attr-defined]
             .limit(1)

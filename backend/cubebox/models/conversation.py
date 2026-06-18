@@ -43,6 +43,7 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
     title: str = Field(max_length=255)
     has_messages: bool = Field(default=False, index=True)
     is_pinned: bool = Field(default=False)
+    is_group_chat: bool = Field(default=False)
     deleted_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

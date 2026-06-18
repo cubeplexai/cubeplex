@@ -7,6 +7,7 @@ from cubebox.models.attachment import Attachment
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 from cubebox.models.conversation import Conversation
 from cubebox.models.conversation_chunk import ConversationChunk
+from cubebox.models.conversation_participant import ConversationParticipant
 from cubebox.models.conversation_share import ConversationShare, ShareScope
 from cubebox.models.credential import Credential
 from cubebox.models.egress_ref import EgressRef  # noqa: F401
@@ -65,6 +66,7 @@ __all__ = [
     "BillingEvent",
     "Conversation",
     "ConversationChunk",
+    "ConversationParticipant",
     "ConversationShare",
     "Credential",
     "EmbeddingJob",
