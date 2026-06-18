@@ -1,0 +1,109 @@
+name: Nightly real-LLM E2E
+
+# Runs the 10 tests marked `@pytest.mark.real_llm` against the live LLM
+# gateway. These are intentionally deselected from the PR-trigger backend-e2e
+# lane (`make backend-test-e2e` -> `pytest -m "not real_llm"`) because they
+# burn vendor tokens and take ~5-10× longer than mock-path tests. They still
+# need to run somewhere — prompt-cache discipline, journey middleware, and
+# the streaming send-message path all depend on the real LLM contract.
+#
+# Triggers:
+#   - 04:30 UTC daily cron (off-peak for vendor APIs)
+#   - workflow_dispatch (manual run when investigating a regression)
+
+on:
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-real-llm
+  cancel-in-progress: false
+
+jobs:
+  real-llm:
+    name: real_llm pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ENV_FOR_DYNACONF: test
+      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
+      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
+      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
+      # Opts the prompt-cache test into its strict assertion branch. Leave
+      # unset to fall back to the lenient "cache may not be wired" path.
+      CUBEBOX_E2E_LLM_CACHE_CAPABLE: "true"
+      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
+      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
+      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      CUBEBOX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
+    services:
+      postgres:
+        image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: cubebox_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          prune-cache: false
+
+      - name: Install backend
+        run: make backend-install
+
+      - name: Prepare RustFS data dirs
+        run: |
+          mkdir -p /tmp/rustfs/data /tmp/rustfs/logs
+          sudo chown -R 10001:10001 /tmp/rustfs
+
+      - name: Start RustFS
+        run: |
+          docker run -d --name rustfs \
+            -p 9000:9000 -p 9001:9001 \
+            -v /tmp/rustfs/data:/data \
+            -v /tmp/rustfs/logs:/logs \
+            rustfs/rustfs:1.0.0-alpha.97
+          for i in {1..30}; do
+            if curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ | grep -qE '^(2|3|4)'; then
+              echo "RustFS ready"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Create RustFS test bucket
+        env:
+          AWS_ACCESS_KEY_ID: rustfsadmin
+          AWS_SECRET_ACCESS_KEY: rustfsadmin
+        run: |
+          aws --endpoint-url http://127.0.0.1:9000 \
+            s3 mb s3://cubebox-test --region us-east-1
+
+      - name: Alembic migrate
+        run: make backend-migrate
+
+      - name: Pytest real_llm
+        working-directory: backend
+        run: make test-real-llm
+
+      - name: Cleanup leftover test sandboxes
+        if: always()
+        run: make backend-cleanup-sandboxes

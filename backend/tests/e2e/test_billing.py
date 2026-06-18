@@ -1,6 +1,5 @@
 """E2E tests for billing — assert billing rows are written on real LLM calls."""
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -13,6 +12,7 @@ from sqlalchemy.pool import NullPool
 from cubebox.db.engine import _build_database_url
 from cubebox.models.billing import BillingEvent, LlmBillingEvent
 from tests.e2e.conftest import DEFAULT_WS_ID
+from tests.e2e.helpers import await_until
 
 pytestmark = pytest.mark.e2e
 
@@ -66,13 +66,19 @@ async def test_send_message_creates_billing_event(
             if line.startswith("data: ") and '"type":"done"' in line:
                 break
 
-    # Give fire-and-forget write a moment to complete
-    await asyncio.sleep(0.5)
+    # Billing is a fire-and-forget DB write triggered on stream `done`. Poll
+    # until the row lands instead of guessing at a sleep duration.
+    async def _has_billing_row() -> int:
+        async with _db_session() as s:
+            return await _count_billing_rows(s, conv_id)
+
+    await await_until(
+        _has_billing_row,
+        timeout=5.0,
+        message=f"billing row never appeared for conversation {conv_id}",
+    )
 
     async with _db_session() as session:
-        count = await _count_billing_rows(session, conv_id)
-        assert count >= 1, "Expected at least one billing row after LLM call"
-
         # Verify child row exists and has non-zero tokens
         result = await session.execute(
             select(BillingEvent, LlmBillingEvent)
@@ -112,9 +118,13 @@ async def test_cost_summary_endpoint_returns_data(
             if line.startswith("data: ") and '"type":"done"' in line:
                 break
 
-    await asyncio.sleep(0.5)
+    async def _summary_has_calls() -> int:
+        s = await async_client.get("/api/v1/admin/cost/summary")
+        assert s.status_code == 200
+        return int(s.json().get("total_calls", 0))
 
-    summary = await async_client.get("/api/v1/admin/cost/summary")
-    assert summary.status_code == 200
-    data = summary.json()
-    assert data["total_calls"] >= 1
+    await await_until(
+        _summary_has_calls,
+        timeout=5.0,
+        message="/admin/cost/summary stayed at total_calls=0 after stream done",
+    )

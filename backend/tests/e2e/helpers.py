@@ -1,7 +1,44 @@
+import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TypeVar
 
 from cubebox.agents.schemas import AgentEvent
+
+T = TypeVar("T")
+
+
+async def await_until(
+    predicate: Callable[[], Awaitable[T] | T],
+    *,
+    timeout: float = 5.0,
+    interval: float = 0.05,
+    message: str = "predicate did not become truthy",
+) -> T:
+    """Poll ``predicate`` until it returns a truthy value or ``timeout`` elapses.
+
+    Use this instead of ``await asyncio.sleep(X)`` whenever a test is waiting
+    on a fire-and-forget side effect (background DB write, SSE subscriber
+    registration, debounced flush) — the wall-clock cost stays low when the
+    side effect is fast and the test fails loudly with ``message`` instead of
+    silently moving on past a still-pending state.
+
+    ``predicate`` may be sync or async. The first truthy return value is
+    returned to the caller so it can be used directly (e.g. a row count or a
+    populated dict).
+    """
+    deadline = asyncio.get_event_loop().time() + timeout
+    last: T | None = None
+    while True:
+        result = predicate()
+        if asyncio.iscoroutine(result):
+            result = await result
+        if result:
+            return result  # type: ignore[return-value]
+        last = result  # type: ignore[assignment]
+        if asyncio.get_event_loop().time() >= deadline:
+            raise AssertionError(f"{message} (last value: {last!r}, waited {timeout:.1f}s)")
+        await asyncio.sleep(interval)
 
 
 def _parse_sse_event(event_str: str) -> AgentEvent | None:

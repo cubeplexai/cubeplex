@@ -6,11 +6,12 @@ import hashlib
 import json
 from collections.abc import AsyncIterator
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -24,6 +25,7 @@ from cubebox.models.im_connector import (
     IMRunQueueItem,
 )
 from tests.e2e.conftest import _build_database_url
+from tests.e2e.im_fixtures import im_cleanup, im_seed_account, im_seed_org_ws_user
 
 pytestmark = pytest.mark.asyncio
 
@@ -61,30 +63,10 @@ async def _seeded_feishu_account(
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     try:
-        # Seed the FK targets.
+        # 1) Seed the FK targets.
         async with maker() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO organizations (id, name, slug, created_at)"
-                    " VALUES (:id, :id, :id, NOW()) ON CONFLICT (id) DO NOTHING"
-                ),
-                {"id": _ORG_ID},
-            )
-            await session.execute(
-                text(
-                    "INSERT INTO workspaces (id, org_id, name, created_at)"
-                    " VALUES (:id, :org, :id, NOW()) ON CONFLICT (id) DO NOTHING"
-                ),
-                {"id": _WS_ID, "org": _ORG_ID},
-            )
-            await session.execute(
-                text(
-                    "INSERT INTO users (id, email, hashed_password, is_active,"
-                    " is_superuser, is_verified, created_at, language)"
-                    " VALUES (:id, :email, 'x', true, false, false, NOW(), 'en')"
-                    " ON CONFLICT (id) DO NOTHING"
-                ),
-                {"id": _USER_ID, "email": f"{_USER_ID}@example.com"},
+            await im_seed_org_ws_user(
+                session, org_id=_ORG_ID, ws_id=_WS_ID, user_id=_USER_ID
             )
             await session.commit()
 
@@ -107,25 +89,18 @@ async def _seeded_feishu_account(
             )
             await session.commit()
 
-        # 3) Insert the IMConnectorAccount referencing it.
+        # 3) Insert the IMConnectorAccount referencing the encrypted credential.
+        account_id = f"imac-ingA-{cred_id[:8]}"
         async with maker() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO im_connector_accounts (id, org_id, workspace_id,"
-                    " platform, external_account_id, acting_user_id, credential_id,"
-                    " delivery_mode, enabled, config, created_at, updated_at)"
-                    " VALUES (:id, :org, :ws, 'feishu', :ext, :uid, :cred,"
-                    " 'webhook', true, '{}'::jsonb, NOW(), NOW())"
-                    " ON CONFLICT (id) DO NOTHING"
-                ),
-                {
-                    "id": f"imac-ingA-{cred_id[:8]}",
-                    "org": _ORG_ID,
-                    "ws": _WS_ID,
-                    "ext": _APP_ID,
-                    "uid": _USER_ID,
-                    "cred": cred_id,
-                },
+            await im_seed_account(
+                session,
+                account_id=account_id,
+                org_id=_ORG_ID,
+                ws_id=_WS_ID,
+                user_id=_USER_ID,
+                credential_id=cred_id,
+                external_account_id=_APP_ID,
+                delivery_mode="webhook",
             )
             await session.commit()
 
@@ -133,37 +108,12 @@ async def _seeded_feishu_account(
             yield None
         finally:
             async with maker() as session:
-                await session.execute(
-                    text(
-                        "DELETE FROM im_run_queue WHERE account_id IN"
-                        " (SELECT id FROM im_connector_accounts WHERE external_account_id = :ext)"
-                    ),
-                    {"ext": _APP_ID},
-                )
-                await session.execute(
-                    text(
-                        "DELETE FROM im_webhook_receipts WHERE account_id IN"
-                        " (SELECT id FROM im_connector_accounts WHERE external_account_id = :ext)"
-                    ),
-                    {"ext": _APP_ID},
-                )
-                await session.execute(
-                    text(
-                        "DELETE FROM im_thread_links WHERE account_id IN"
-                        " (SELECT id FROM im_connector_accounts WHERE external_account_id = :ext)"
-                    ),
-                    {"ext": _APP_ID},
-                )
-                await session.execute(
-                    text("DELETE FROM im_connector_accounts WHERE external_account_id = :ext"),
-                    {"ext": _APP_ID},
-                )
-                await session.execute(
-                    text("DELETE FROM credentials WHERE id = :id"), {"id": cred_id}
-                )
-                await session.execute(
-                    text("DELETE FROM conversations WHERE workspace_id = :id"),
-                    {"id": _WS_ID},
+                await im_cleanup(
+                    session,
+                    account_ids=[account_id],
+                    credential_ids=[cred_id],
+                    ws_ids=[_WS_ID],
+                    cleanup_conversations_in_ws=True,
                 )
                 await session.commit()
     finally:
@@ -197,7 +147,12 @@ def _ev_callback_body(*, event_id: str = "ev_iA1", text_: str = "hello") -> byte
     ).encode()
 
 
+@patch(
+    "cubebox.api.routes.v1.im_ingress._build_gate_connector",
+    return_value=None,
+)
 async def test_event_callback_enqueues_run(
+    _mock_gate: Any,
     async_client: httpx.AsyncClient,
     _seeded_feishu_account: None,
 ) -> None:
@@ -339,7 +294,12 @@ def _encrypt_body_for_test(plaintext: bytes, encrypt_key: str) -> str:
     return base64.b64encode(iv + ct).decode()
 
 
+@patch(
+    "cubebox.api.routes.v1.im_ingress._build_gate_connector",
+    return_value=None,
+)
 async def test_encrypted_event_callback_decrypts_and_enqueues(
+    _mock_gate: Any,
     async_client: httpx.AsyncClient,
     _seeded_feishu_account: None,
 ) -> None:

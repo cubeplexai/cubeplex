@@ -10,6 +10,29 @@ pytestmark = pytest.mark.e2e
 BASE = f"/api/v1/ws/{DEFAULT_WS_ID}/scheduled-tasks"
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_scheduled_tasks(client: TestClient):  # type: ignore[no-untyped-def]
+    """Wipe scheduled tasks in DEFAULT_WS before and after each test.
+
+    Every test in this file creates tasks under the shared default workspace.
+    Without this, rows accumulate across the run — any future "list returns N"
+    assertion turns flaky, and ordering-by-created_at becomes nondeterministic.
+    Cheap (one list + per-row delete) and the suite is < 50 tests, so the
+    O(n) cost is negligible.
+    """
+
+    def _clear() -> None:
+        r = client.get(BASE)
+        if r.status_code != 200:
+            return
+        for t in r.json().get("tasks", []):
+            client.delete(f"{BASE}/{t['id']}")
+
+    _clear()
+    yield
+    _clear()
+
+
 def _make(client: TestClient, **over):  # type: ignore[no-untyped-def]
     body = {
         "name": "report",
