@@ -24,9 +24,9 @@ async def test_resume_paused_run_sandbox_confirm_calls_run_manager(
             seen.append(kwargs)
             return "new_run_xyz"
 
-    async def fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None] | None:
+    async def fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None, bool] | None:
         if run_id == "run_1":
-            return ("conv_1", "user_1", "org_1", "ws_1", None)
+            return ("conv_1", "user_1", "org_1", "ws_1", None, False)
         return None
 
     monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
@@ -62,8 +62,8 @@ async def test_resume_paused_run_sandbox_confirm_deny(
             seen.append(kwargs)
             return "new_run_xyz"
 
-    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None] | None:
-        return ("conv_1", "user_1", "org_1", "ws_1", None)
+    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None, bool] | None:
+        return ("conv_1", "user_1", "org_1", "ws_1", None, False)
 
     monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
 
@@ -93,8 +93,8 @@ async def test_resume_paused_run_ask_user_passes_choice_dict(
             seen.append(kwargs)
             return "new_run_xyz"
 
-    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None] | None:
-        return ("conv_1", "user_1", "org_1", "ws_1", None)
+    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None, bool] | None:
+        return ("conv_1", "user_1", "org_1", "ws_1", None, False)
 
     monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
 
@@ -128,8 +128,8 @@ async def test_resume_paused_run_ask_user_falls_back_to_choice_key_when_no_answe
             seen.append(kwargs)
             return "new_run_xyz"
 
-    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None] | None:
-        return ("conv_1", "user_1", "org_1", "ws_1", None)
+    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None, bool] | None:
+        return ("conv_1", "user_1", "org_1", "ws_1", None, False)
 
     monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
     ok = await resume_mod.resume_paused_run(
@@ -154,7 +154,7 @@ async def test_resume_paused_run_returns_false_when_run_not_resolvable(
         async def resume_run_with_answer(self, **_: Any) -> str:
             raise AssertionError("must not be called when run unresolvable")
 
-    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None] | None:
+    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None, bool] | None:
         return None
 
     monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
@@ -181,8 +181,8 @@ async def test_resume_paused_run_returns_false_on_resume_exception(
         async def resume_run_with_answer(self, **_: Any) -> str:
             raise ResumeNoPending("no pending")
 
-    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None] | None:
-        return ("conv_1", "user_1", "org_1", "ws_1", None)
+    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None, bool] | None:
+        return ("conv_1", "user_1", "org_1", "ws_1", None, False)
 
     monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
 
@@ -207,8 +207,8 @@ async def test_resume_paused_run_returns_false_on_unknown_input_kind(
         async def resume_run_with_answer(self, **_: Any) -> str:
             raise AssertionError("must not be called for unknown input_kind")
 
-    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None] | None:
-        return ("conv_1", "user_1", "org_1", "ws_1", None)
+    async def fake_resolve(_: str) -> tuple[str, str, str, str, str | None, bool] | None:
+        return ("conv_1", "user_1", "org_1", "ws_1", None, False)
 
     monkeypatch.setattr(resume_mod, "_resolve_run_context", fake_resolve)
 

@@ -648,10 +648,11 @@ async def _hydrate_conv_participants(
 ) -> list[dict[str, Any]]:
     """Single-query enrichment of conv participants with display_name (+ optional email).
 
-    ``include_email`` defaults to ``False`` — the GET /participants
-    endpoint does not need to expose email to non-self callers. The
-    invite-response path opts in because the caller just selected those
-    user ids and already saw their emails.
+    ``include_email`` defaults to ``False`` and every current call site uses
+    the default — emails are dropped from all participant responses (GET
+    /participants, POST /invite-to-group). The parameter stays as a hook for
+    a future invite-confirmation UI that wants to echo back the addresses
+    the caller just selected; until that lands, no response exposes email.
     """
     if not participants:
         return []
@@ -1113,11 +1114,12 @@ async def send_message(
     # Do NOT use Depends(get_session) here — it would hold a pooled connection
     # for the entire SSE stream duration, causing connection leaks on cancellation.
     #
-    # The auto-join MUST run after all request-level validation (content,
-    # preset, attachments), otherwise a malicious caller with topic-only
-    # access could repeatedly hit /messages with a bogus preset and have
-    # the partial commit elevate them to P(conv) — which the spec gates
-    # HITL on. The validations below all raise without touching DB state.
+    # Auto-join sequencing: ensure_participant runs right after the empty-body
+    # validation and BEFORE the install-fallback branch and preset validation.
+    # The install-fallback path commits to the checkpointer and returns early,
+    # so deferring auto-join past it would let a topic-only caller mutate
+    # history without becoming P(conv). All validations below either run-AFTER
+    # auto-join (preset / attachments / etc.) or are pure read-only.
     async with async_session_maker() as session:
         conv_repo = ConversationRepository(
             session,
@@ -1137,6 +1139,31 @@ async def send_message(
             message="Message must include content or attachments",
             details="Provide content text and/or one or more file attachments",
         )
+
+    # Auto-join runs BEFORE the install-fallback short-circuit so a topic-only
+    # caller can't mutate conversation history via `install ...` without
+    # becoming P(conv). The install-fallback path commits messages directly to
+    # the checkpointer and returns early — if auto-join only fires after preset
+    # validation (the round-1 placement), a topic-only caller hitting the
+    # install path skips it entirely. Auto-join is idempotent and never fails
+    # in a way that would let a malformed install elevate participation, so
+    # the round-1 concern (bogus-preset hammering) is moot here: there is no
+    # preset to validate on the install-fallback path.
+    async with async_session_maker() as autojoin_session:
+        cp_repo = ConversationParticipantRepository(
+            autojoin_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        )
+        await cp_repo.ensure_participant(conversation.id, ctx.user.id)
+        await autojoin_session.commit()
+        refreshed_conv_repo = ConversationRepository(
+            autojoin_session,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user.id,
+        )
+        refreshed = await refreshed_conv_repo.get_by_id(conversation.id)
+        if refreshed is not None:
+            conversation = refreshed
 
     # Chat-fallback skill-install parser: `install <canonical_name>` short-circuits the
     # agent loop — persists a user + assistant message pair directly to the checkpointer
@@ -1320,30 +1347,6 @@ async def send_message(
     # NoDefaultPresetError, all of which are APIException subclasses with the
     # right status_code; the registered handler maps them to HTTP responses.
     resolve_preset(_snap, request_obj.preset_label)
-
-    # Auto-join is committed AFTER request-level validation passes.
-    # Anyone with view access (P(topic) ∨ P(conv)) who sends a valid
-    # message becomes a conv participant atomically with the send. A
-    # request that fails validation rolls back the participant insert
-    # (this block never runs), so a bogus-preset hammer can't elevate
-    # a topic-only caller to P(conv).
-    async with async_session_maker() as autojoin_session:
-        cp_repo = ConversationParticipantRepository(
-            autojoin_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-        )
-        await cp_repo.ensure_participant(conversation.id, ctx.user.id)
-        await autojoin_session.commit()
-        # Re-fetch the conversation row in this session so
-        # ``is_group_chat`` reflects the just-committed update.
-        refreshed_conv_repo = ConversationRepository(
-            autojoin_session,
-            org_id=ctx.org_id,
-            workspace_id=ctx.workspace_id,
-            user_id=ctx.user.id,
-        )
-        refreshed = await refreshed_conv_repo.get_by_id(conversation.id)
-        if refreshed is not None:
-            conversation = refreshed
 
     (
         _topic_id,

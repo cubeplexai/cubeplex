@@ -11,12 +11,15 @@ from __future__ import annotations
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.api.routes.v1.ws_sandbox import _resolve_sandbox_scope
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
+from cubebox.db.session import get_session
 from cubebox.sandbox import SandboxError
 from cubebox.sandbox.manager import get_sandbox_manager
 
@@ -49,15 +52,25 @@ class BrowserLiveViewResponse(BaseModel):
 @router.get("/live-view", response_model=BrowserLiveViewResponse)
 async def get_live_view(
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    conversation_id: str | None = Query(default=None),
 ) -> BrowserLiveViewResponse:
     """Resolve the caller's sandbox, ensure the browser stack is running, and
-    return an embeddable live-view URL."""
+    return an embeddable live-view URL.
+
+    ``conversation_id`` routes the lookup through ``_resolve_sandbox_scope`` so
+    a participant of a standalone group chat or a topic conversation sees the
+    shared sandbox's browser, not their own personal one.
+    """
     manager = get_sandbox_manager()
+    scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
+        session, ctx, conversation_id
+    )
     try:
         sandbox = await manager.get_or_create(
-            scope_type="user",
-            scope_id=ctx.user.id,
-            user_id=ctx.user.id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
@@ -102,6 +115,8 @@ async def get_live_view(
 @router.post("/keepalive", status_code=status.HTTP_204_NO_CONTENT)
 async def keepalive(
     ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    conversation_id: str | None = Query(default=None),
 ) -> None:
     """Mark the sandbox active during a live-view/takeover session.
 
@@ -112,9 +127,12 @@ async def keepalive(
     Touches only the *existing* sandbox — never provisions one — so a dead/reaped
     sandbox isn't silently re-created (and kept alive) behind a stale iframe."""
     manager = get_sandbox_manager()
+    scope_type, scope_id, _owner_user_id = await _resolve_sandbox_scope(
+        session, ctx, conversation_id
+    )
     await manager.touch_active(
-        scope_type="user",
-        scope_id=ctx.user.id,
+        scope_type=scope_type,
+        scope_id=scope_id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
     )

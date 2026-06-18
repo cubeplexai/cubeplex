@@ -21,6 +21,8 @@ interface BrowserViewProps {
   hideHeader?: boolean
   /** Expose the refresh function to a parent component. */
   refreshRef?: React.MutableRefObject<(() => void) | null>
+  /** Route live-view + keepalive to the conversation's shared sandbox (group chat / topic). */
+  conversationId?: string | null
 }
 
 /**
@@ -37,8 +39,9 @@ export function BrowserView({
   enabled = true,
   hideHeader,
   refreshRef,
+  conversationId,
 }: BrowserViewProps) {
-  const { url, loading, error, refresh } = useBrowserLiveView(workspaceId, enabled)
+  const { url, loading, error, refresh } = useBrowserLiveView(workspaceId, enabled, conversationId)
   const close = usePanelStore((s) => s.close)
   const [takeover, setTakeover] = useState(false)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -60,9 +63,10 @@ export function BrowserView({
   // the backend, so without this a long takeover could be TTL-reaped).
   useEffect(() => {
     if (!workspaceId || !url) return
+    const convQs = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''
     const ping = () => {
       // Must carry the CSRF token or CSRFMiddleware rejects the authenticated POST.
-      void fetch(`/api/v1/ws/${workspaceId}/browser/keepalive`, {
+      void fetch(`/api/v1/ws/${workspaceId}/browser/keepalive${convQs}`, {
         method: 'POST',
         credentials: 'include',
         headers: csrfHeaders(),
@@ -70,7 +74,7 @@ export function BrowserView({
     }
     const id = setInterval(ping, KEEPALIVE_MS)
     return () => clearInterval(id)
-  }, [workspaceId, url])
+  }, [workspaceId, url, conversationId])
 
   if (!workspaceId) return null
 
