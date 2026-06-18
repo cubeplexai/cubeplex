@@ -66,6 +66,11 @@
       "inviting": "Inviting…",
       "inviteError": "Failed to invite members.",
       "emptyMembers": "No other workspace members to invite."
+    },
+    "members": {
+      "openLabel": "Conversation participants",
+      "title": "{count} participants",
+      "participantTag": "Participant"
     }
   },
   "topics": {

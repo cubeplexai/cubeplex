@@ -18,6 +18,7 @@ import { useConversationStore, usePanelStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 import { SharePanel } from '@/components/chat/SharePanel'
 import { ChatHeaderGroupBadge } from '@/components/chat/ChatHeaderGroupBadge'
+import { ConversationMemberStrip } from '@/components/chat/ConversationMemberStrip'
 import { UpgradeToTopicDialog } from '@/components/dialogs/UpgradeToTopicDialog'
 import { InviteToConversationDialog } from '@/components/dialogs/InviteToConversationDialog'
 
@@ -136,6 +137,9 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         </button>
         <span className="text-sm text-muted-foreground truncate flex-1">{headerTitle || ''}</span>
         {workspaceId && topicId && <ChatHeaderGroupBadge wsId={workspaceId} topicId={topicId} />}
+        {workspaceId && conversation?.is_group_chat && (
+          <ConversationMemberStrip wsId={workspaceId} conversationId={conversation.id} />
+        )}
         {canUpgrade && (
           <button
             type="button"
