@@ -116,8 +116,9 @@
     },
     "upgradeDialog": {
       "openLabel": "Invite members",
-      "title": "Upgrade to group chat",
-      "irreversibleWarning": "Upgrade is irreversible. All current participants will be visible to invited members.",
+      "promoteLabel": "Promote to topic",
+      "title": "Promote conversation to topic",
+      "irreversibleWarning": "Promotion is irreversible. A topic creates a persistent container with the same participants (including those in this group chat) and will be visible to anyone you invite.",
       "titleLabel": "Title",
       "titlePlaceholder": "Project sync, design review…",
       "membersLabel": "Invite members",
