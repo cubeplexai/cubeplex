@@ -73,6 +73,7 @@ logger = logging.getLogger(__name__)
 async def _resolve_topic_run_context(
     conversation: Conversation,
     ctx: RequestContext,
+    session: AsyncSession | None = None,
 ) -> tuple[str | None, bool, str | None, str | None, str | None]:
     """Resolve topic fields needed to build a RunContext.
 
@@ -81,6 +82,11 @@ async def _resolve_topic_run_context(
     conversation row — ``Conversation.is_group_chat`` is the source of
     truth. For personal (non-topic) conversations, topic-only fields are
     ``None``.
+
+    Pass ``session`` to reuse the caller's existing transaction (steer /
+    HITL endpoints). ``send_message`` calls this without ``session`` —
+    its request session is deliberately closed before SSE starts, so a
+    fresh short-lived session is required.
     """
     topic_id: str | None = conversation.topic_id
     is_group_chat = bool(conversation.is_group_chat)
@@ -91,7 +97,7 @@ async def _resolve_topic_run_context(
     if topic_id is not None:
         from cubebox.repositories.topic import TopicRepository
 
-        async with async_session_maker() as topic_session:
+        async def _read(topic_session: AsyncSession) -> tuple[str | None, str | None]:
             topic_repo = TopicRepository(
                 topic_session,
                 org_id=ctx.org_id,
@@ -99,9 +105,15 @@ async def _resolve_topic_run_context(
                 user_id=ctx.user.id,
             )
             topic_obj = await topic_repo.get(topic_id)
-            if topic_obj:
-                sandbox_mode = topic_obj.sandbox_mode
-                topic_creator_user_id = topic_obj.creator_user_id
+            if topic_obj is None:
+                return None, None
+            return topic_obj.sandbox_mode, topic_obj.creator_user_id
+
+        if session is not None:
+            sandbox_mode, topic_creator_user_id = await _read(session)
+        else:
+            async with async_session_maker() as topic_session:
+                sandbox_mode, topic_creator_user_id = await _read(topic_session)
 
     if is_group_chat:
         sender_display_name = ctx.user.display_name or ctx.user.email
@@ -1858,7 +1870,7 @@ async def steer_active_run(
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
-    ) = await _resolve_topic_run_context(conversation, ctx)
+    ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
@@ -1978,7 +1990,7 @@ async def submit_sandbox_confirm(
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
-    ) = await _resolve_topic_run_context(conversation, ctx)
+    ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
     from cubepi.hitl.types import ApproveAnswer
 
@@ -2086,7 +2098,7 @@ async def submit_ask_user_answer(
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
-    ) = await _resolve_topic_run_context(conversation, ctx)
+    ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
     from cubebox.agents.checkpointer import init_checkpointer
 
