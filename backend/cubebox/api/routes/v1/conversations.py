@@ -19,6 +19,7 @@ from sqlalchemy.pool import NullPool
 
 from cubebox.agents.schemas import AgentEvent
 from cubebox.api.exceptions import InvalidInputError
+from cubebox.api.schemas.conversations import InviteToGroupRequest
 from cubebox.api.schemas.ws_topics import UpgradeToTopicRequest
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
@@ -27,7 +28,13 @@ from cubebox.config import config as _config
 from cubebox.db import get_session
 from cubebox.db.engine import _build_database_url, async_session_maker
 from cubebox.models import Conversation
-from cubebox.repositories import ConversationRepository
+from cubebox.models.conversation_participant import ConversationParticipant
+from cubebox.repositories import (
+    ConversationParticipantRepository,
+    ConversationRepository,
+    MembershipRepository,
+    UserSandboxRepository,
+)
 from cubebox.skills.cache import SkillCache
 from cubebox.streams.replay_coalescer import ReplayCoalescer
 from cubebox.streams.run_events import (
@@ -68,6 +75,7 @@ def _serialize_conversation(c: Conversation) -> dict[str, object]:
         "title": c.title,
         "is_pinned": c.is_pinned,
         "topic_id": c.topic_id,
+        "is_group_chat": c.is_group_chat,
         "created_at": utc_isoformat(c.created_at),
         "updated_at": utc_isoformat(c.updated_at),
     }
@@ -540,6 +548,8 @@ async def upgrade_conversation_to_topic(
     # Re-read into our working object after the lock so subsequent
     # mutations apply to the freshly-locked row.
     conversation = locked
+    was_group_chat = bool(conversation.is_group_chat)
+    creator_user_id = conversation.creator_user_id
 
     if await _conversation_has_external_binding(session, conversation_id):
         raise HTTPException(
@@ -564,6 +574,41 @@ async def upgrade_conversation_to_topic(
     if body.member_user_ids:
         await topic_repo.add_participants(topic.id, body.member_user_ids)
 
+    # Copy current topic_participants into the conversation's
+    # conversation_participants so the upgraded conv keeps the actor list
+    # under the same per-conv tag the new ACL relies on.
+    topic_participants = await topic_repo.list_participants(topic.id)
+    cp_repo = ConversationParticipantRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    for tp in topic_participants:
+        await cp_repo.ensure_participant(conversation_id, tp.user_id)
+
+    # Sandbox rekey: standalone group chat (or personal) -> topic. The
+    # running sandbox row (if any) is re-scoped in place under the topic
+    # so subsequent operations from any participant hit the same row.
+    sbx_repo = UserSandboxRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    if was_group_chat:
+        await sbx_repo.rekey(
+            from_scope_type="conversation",
+            from_scope_id=conversation_id,
+            to_scope_type="topic",
+            to_scope_id=topic.id,
+        )
+    else:
+        await sbx_repo.rekey(
+            from_scope_type="user",
+            from_scope_id=creator_user_id,
+            to_scope_type="topic",
+            to_scope_id=topic.id,
+        )
+
     await session.commit()
     await session.refresh(conversation)
     participants = await topic_repo.list_participants(topic.id)
@@ -573,6 +618,165 @@ async def upgrade_conversation_to_topic(
         "conversation": _serialize_conversation(conversation),
         "participants": await _hydrate_participants(session, list(participants)),
     }
+
+
+def _serialize_conv_participant(
+    p: ConversationParticipant, users_by_id: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    user = (users_by_id or {}).get(p.user_id)
+    return {
+        "id": p.id,
+        "conversation_id": p.conversation_id,
+        "user_id": p.user_id,
+        "joined_at": utc_isoformat(p.joined_at),
+        "display_name": (user.display_name if user else None) or None,
+        "email": user.email if user else None,
+    }
+
+
+async def _hydrate_conv_participants(
+    session: AsyncSession, participants: list[ConversationParticipant]
+) -> list[dict[str, Any]]:
+    """Single-query enrichment of conv participants with display_name + email."""
+    if not participants:
+        return []
+    from sqlalchemy import select as _select
+
+    from cubebox.models.user import User
+
+    user_ids = list({p.user_id for p in participants})
+    stmt = _select(User).where(User.id.in_(user_ids))  # type: ignore[attr-defined]
+    users = (await session.execute(stmt)).scalars().all()
+    users_by_id = {u.id: u for u in users}
+    return [_serialize_conv_participant(p, users_by_id) for p in participants]
+
+
+async def _hydrate_conv_participants_by_uids(
+    session: AsyncSession,
+    conversation_id: str,
+    user_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Load + hydrate ConversationParticipant rows for the given users."""
+    if not user_ids:
+        return []
+    from sqlalchemy import select as _select
+
+    stmt = (
+        _select(ConversationParticipant)
+        .where(
+            ConversationParticipant.conversation_id == conversation_id,  # type: ignore[arg-type]
+            ConversationParticipant.user_id.in_(user_ids),  # type: ignore[attr-defined]
+        )
+        .order_by(ConversationParticipant.joined_at)  # type: ignore[arg-type]
+    )
+    rows = list((await session.execute(stmt)).scalars().all())
+    return await _hydrate_conv_participants(session, rows)
+
+
+@router.post(
+    "/{conversation_id}/invite-to-group",
+    status_code=status.HTTP_201_CREATED,
+)
+async def invite_to_conversation(
+    conversation_id: str,
+    body: InviteToGroupRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, Any]:
+    """Add workspace members to a conversation as conversation_participants.
+
+    On the 1 -> 2 transition for a personal (non-topic) conv, the running
+    sandbox is re-scoped from user-key to conversation-key in the same
+    transaction so subsequent file ops from any participant hit the same
+    row.
+    """
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    cp_repo = ConversationParticipantRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+
+    # Seed the creator FIRST so a personal 1:1 becoming a group chat keeps
+    # the original owner tagged as P(conv); without this the count crosses
+    # 0 -> 1 on first invite and never flips is_group_chat.
+    if not await cp_repo.is_participant(conversation_id, conversation.creator_user_id):
+        await cp_repo.ensure_participant(conversation_id, conversation.creator_user_id)
+
+    membership_repo = MembershipRepository(session)
+    for uid in body.user_ids:
+        role = await membership_repo.get_role(user_id=uid, workspace_id=ctx.workspace_id)
+        if role is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"User {uid} is not a member of this workspace",
+            )
+
+    added = await cp_repo.add_many(conversation_id, body.user_ids)
+
+    # Sandbox rekey on the 1 -> 2 transition. Only applies to personal
+    # (non-topic) conversations: topic conversations have their sandbox
+    # keyed by topic_id and don't move.
+    if conversation.topic_id is None:
+        await session.refresh(conversation)
+        if conversation.is_group_chat:
+            sbx_repo = UserSandboxRepository(
+                session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+            )
+            await sbx_repo.rekey(
+                from_scope_type="user",
+                from_scope_id=conversation.creator_user_id,
+                to_scope_type="conversation",
+                to_scope_id=conversation_id,
+            )
+
+    await session.commit()
+    await session.refresh(conversation)
+    return {
+        "participants": await _hydrate_conv_participants(session, added),
+        "conversation": _serialize_conversation(conversation),
+    }
+
+
+@router.get("/{conversation_id}/participants")
+async def list_conversation_participants(
+    conversation_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, Any]:
+    """List the participants of a conversation.
+
+    Visibility is gated by the conversation's ``_scoped_select``; whoever
+    can view the conversation can see its participants.
+    """
+    conv_repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    conversation = await conv_repo.get_by_id(conversation_id)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    cp_repo = ConversationParticipantRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    user_ids = await cp_repo.list_user_ids(conversation_id)
+    return {"items": await _hydrate_conv_participants_by_uids(session, conversation_id, user_ids)}
 
 
 class GenerateTitleRequest(BaseModel):

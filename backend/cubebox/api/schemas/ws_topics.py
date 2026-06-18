@@ -29,3 +29,4 @@ class UpgradeToTopicRequest(BaseModel):
 
 class TopicConversationCreateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
+    member_user_ids: list[str] = Field(default_factory=list)
