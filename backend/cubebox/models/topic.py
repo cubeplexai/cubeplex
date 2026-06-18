@@ -22,6 +22,7 @@ class Topic(CubeboxBase, OrgScopedMixin, table=True):
     sandbox_mode: str | None = Field(default=None, max_length=20)
     max_participants: int = Field(default=20)
     is_archived: bool = Field(default=False)
+    is_pinned: bool = Field(default=False)
     # Bumped on every message insert into any child conversation. Drives
     # sidebar ordering ("topic with the most recent message floats up").
     # Without this column, topics rank by Topic.updated_at which only

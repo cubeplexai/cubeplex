@@ -38,6 +38,15 @@ export async function deleteTopic(client: ApiClient, topicId: string): Promise<v
   await client.del(`/api/v1/topics/${topicId}`)
 }
 
+export async function setTopicPin(
+  client: ApiClient,
+  topicId: string,
+  isPinned: boolean,
+): Promise<{ topic: Topic }> {
+  const res = await client.patch(`/api/v1/topics/${topicId}/pin`, { is_pinned: isPinned })
+  return await res.json()
+}
+
 export async function addTopicParticipants(
   client: ApiClient,
   topicId: string,

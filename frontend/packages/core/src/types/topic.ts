@@ -5,6 +5,7 @@ export interface Topic {
   max_participants: number
   creator_user_id: string
   is_archived: boolean
+  is_pinned: boolean
   created_at: string
   updated_at: string
   last_activity_at: string
