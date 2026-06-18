@@ -33,3 +33,6 @@ class SSOConnection(CubeboxBase, table=True):
     credential_id: str | None = Field(
         default=None, foreign_key="credentials.id", max_length=20, nullable=True
     )
+    last_idp_attributes: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )

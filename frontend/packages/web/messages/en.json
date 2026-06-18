@@ -861,7 +861,13 @@
       "deleteConfirmTitle": "Delete SSO connection?",
       "deleteConfirmBody": "This permanently removes the IdP configuration. Linked identities will be unlinked, but member accounts remain.",
       "deleteConfirm": "Delete",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "validate": "Validate connection",
+      "validating": "Validating…",
+      "validateAllPassed": "All checks passed",
+      "validateFailed": "Some checks failed — see details below",
+      "validateResults": "Validation results",
+      "lastIdpAttributes": "Last IdP attributes (from test login)"
     },
     "identities": {
       "title": "Linked identities",

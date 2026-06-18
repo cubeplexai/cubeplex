@@ -48,8 +48,20 @@ export interface SsoConnectionResponse {
   status: string
   provisioning: string
   config: Record<string, unknown>
+  last_idp_attributes: Record<string, unknown> | null
   created_at: string
   updated_at: string
+}
+
+export interface SsoValidateCheck {
+  name: string
+  passed: boolean
+  detail: string
+}
+
+export interface SsoValidateResponse {
+  checks: SsoValidateCheck[]
+  all_passed: boolean
 }
 
 export interface SsoConnectionCreate {
@@ -197,4 +209,13 @@ export async function discoverOidcEndpoints(
   const res = await client.post('/api/v1/admin/sso/discover-oidc', { issuer_url: issuerUrl })
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as OidcDiscoveryResponse
+}
+
+export async function validateSsoConnection(
+  client: ApiClient,
+  ssoId: string,
+): Promise<SsoValidateResponse> {
+  const res = await client.post(`/api/v1/admin/sso/${encodeURIComponent(ssoId)}/validate`, {})
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as SsoValidateResponse
 }

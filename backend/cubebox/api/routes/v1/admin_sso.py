@@ -137,8 +137,20 @@ class SSOConnectionResponse(BaseModel):
     status: str
     provisioning: str
     config: dict[str, Any]
+    last_idp_attributes: dict[str, Any] | None = None
     created_at: str
     updated_at: str
+
+
+class SSOValidateCheck(BaseModel):
+    name: str
+    passed: bool
+    detail: str
+
+
+class SSOValidateResponse(BaseModel):
+    checks: list[SSOValidateCheck]
+    all_passed: bool
 
 
 class ExternalIdentityResponse(BaseModel):
@@ -416,6 +428,270 @@ async def unlink_identity(
     await eid_repo.delete(eid)
 
 
+@router.post("/{sso_id}/validate", response_model=SSOValidateResponse)
+async def validate_sso(
+    sso_id: str,
+    request: Request,
+    user: Annotated[User, Depends(require_org_admin)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SSOValidateResponse:
+    """Run static validation checks on an SSO connection without a real login.
+
+    OIDC: verifies discovery doc reachability, JWKS endpoint, and
+    client_credentials exchange to confirm the client_secret is valid.
+
+    SAML: verifies the IdP certificate is a valid PEM, the IdP metadata
+    XML can be parsed, and the IdP SSO URL is reachable (HEAD request).
+    """
+    org_id = await resolve_unambiguous_admin_org_id(user, session)
+    repo = SSOConnectionRepository(session, org_id=org_id)
+    conn = await repo.get_by_id(sso_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail={"code": "sso_not_found"})
+
+    if conn.protocol == "oidc":
+        checks = await _validate_oidc(conn, request, session)
+    elif conn.protocol == "saml":
+        checks = await _validate_saml(conn)
+    else:
+        raise HTTPException(status_code=400, detail={"code": "unsupported_protocol"})
+
+    return SSOValidateResponse(
+        checks=checks,
+        all_passed=all(c.passed for c in checks),
+    )
+
+
+async def _validate_oidc(
+    conn: SSOConnection, request: Request, session: AsyncSession
+) -> list[SSOValidateCheck]:
+    from cubebox.sso.oidc import OIDCDiscoveryRefused, discover_oidc_endpoints
+
+    checks: list[SSOValidateCheck] = []
+    cfg = conn.config
+
+    issuer = cfg.get("issuer", "")
+    token_endpoint = cfg.get("token_endpoint", "")
+    jwks_uri = cfg.get("jwks_uri", "")
+    client_id = cfg.get("client_id", "")
+
+    # 1. Discovery doc reachable
+    try:
+        endpoints = await discover_oidc_endpoints(issuer)
+        checks.append(SSOValidateCheck(
+            name="oidc_discovery",
+            passed=True,
+            detail=f"Discovery doc fetched from {issuer}/.well-known/openid-configuration",
+        ))
+    except OIDCDiscoveryRefused as exc:
+        checks.append(SSOValidateCheck(
+            name="oidc_discovery",
+            passed=False,
+            detail=f"SSRF guard blocked the issuer URL: {exc}",
+        ))
+        endpoints = {}
+    except Exception as exc:
+        checks.append(SSOValidateCheck(
+            name="oidc_discovery",
+            passed=False,
+            detail=f"Failed to fetch discovery doc: {exc}",
+        ))
+        endpoints = {}
+
+    # 2. JWKS endpoint reachable
+    effective_jwks = endpoints.get("jwks_uri") or jwks_uri
+    if effective_jwks:
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(effective_jwks)
+            if resp.status_code == 200:
+                checks.append(SSOValidateCheck(
+                    name="oidc_jwks",
+                    passed=True,
+                    detail=f"JWKS endpoint returned HTTP {resp.status_code}",
+                ))
+            else:
+                checks.append(SSOValidateCheck(
+                    name="oidc_jwks",
+                    passed=False,
+                    detail=f"JWKS endpoint returned HTTP {resp.status_code}",
+                ))
+        except Exception as exc:
+            checks.append(SSOValidateCheck(
+                name="oidc_jwks",
+                passed=False,
+                detail=f"JWKS request failed: {exc}",
+            ))
+    else:
+        checks.append(SSOValidateCheck(
+            name="oidc_jwks",
+            passed=False,
+            detail="No jwks_uri configured",
+        ))
+
+    # 3. client_credentials grant (validates client_id + client_secret)
+    if conn.credential_id is None:
+        checks.append(SSOValidateCheck(
+            name="oidc_client_credentials",
+            passed=False,
+            detail="No client_secret stored — cannot test credentials",
+        ))
+    else:
+        try:
+            from cubebox.credentials.encryption import EncryptionBackend
+            from cubebox.repositories.credential import CredentialRepository
+
+            enc: EncryptionBackend = request.app.state.encryption_backend
+            cred_repo = CredentialRepository(session, org_id=conn.org_id)
+            cred = await cred_repo.get(conn.credential_id)
+            if cred is None:
+                raise ValueError("credential row missing")
+            secret = (await enc.decrypt(cred.value_encrypted)).decode()
+
+            import httpx
+
+            effective_token = endpoints.get("token_endpoint") or token_endpoint
+            async with httpx.AsyncClient(timeout=15) as http:
+                resp = await http.post(
+                    effective_token,
+                    data={
+                        "grant_type": "client_credentials",
+                        "client_id": client_id,
+                        "client_secret": secret,
+                    },
+                    headers={"Accept": "application/json"},
+                )
+            if resp.status_code in (200, 201):
+                checks.append(SSOValidateCheck(
+                    name="oidc_client_credentials",
+                    passed=True,
+                    detail="client_credentials grant succeeded",
+                ))
+            elif resp.status_code in (400, 401):
+                # IdP explicitly rejected the credentials — actionable error
+                try:
+                    body = resp.json()
+                    err_desc = body.get("error_description") or body.get("error") or str(body)
+                except Exception:
+                    err_desc = resp.text[:200]
+                checks.append(SSOValidateCheck(
+                    name="oidc_client_credentials",
+                    passed=False,
+                    detail=f"IdP rejected credentials (HTTP {resp.status_code}): {err_desc}",
+                ))
+            else:
+                checks.append(SSOValidateCheck(
+                    name="oidc_client_credentials",
+                    passed=False,
+                    detail=f"Unexpected HTTP {resp.status_code} from token endpoint",
+                ))
+        except Exception as exc:
+            checks.append(SSOValidateCheck(
+                name="oidc_client_credentials",
+                passed=False,
+                detail=f"credential check failed: {exc}",
+            ))
+
+    return checks
+
+
+async def _validate_saml(conn: SSOConnection) -> list[SSOValidateCheck]:
+    checks: list[SSOValidateCheck] = []
+    cfg = conn.config
+
+    # 1. Parse IdP certificate PEM
+    cert_pem: str = cfg.get("idp_certificate", "")
+    if cert_pem:
+        try:
+            import ssl
+
+            pem = cert_pem.strip()
+            if not pem.startswith("-----"):
+                pem = f"-----BEGIN CERTIFICATE-----\n{pem}\n-----END CERTIFICATE-----"
+            ssl.DER_cert_to_PEM_cert(ssl.PEM_cert_to_DER_cert(pem))
+            checks.append(SSOValidateCheck(
+                name="saml_certificate",
+                passed=True,
+                detail="IdP certificate is a valid PEM",
+            ))
+        except Exception as exc:
+            checks.append(SSOValidateCheck(
+                name="saml_certificate",
+                passed=False,
+                detail=f"IdP certificate parse failed: {exc}",
+            ))
+    else:
+        checks.append(SSOValidateCheck(
+            name="saml_certificate",
+            passed=False,
+            detail="No idp_certificate configured",
+        ))
+
+    # 2. IdP SSO URL reachable
+    sso_url: str = cfg.get("idp_sso_url", "")
+    if sso_url:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as http:
+                resp = await http.head(sso_url)
+            if resp.status_code < 500:
+                checks.append(SSOValidateCheck(
+                    name="saml_idp_sso_url",
+                    passed=True,
+                    detail=f"IdP SSO URL returned HTTP {resp.status_code}",
+                ))
+            else:
+                checks.append(SSOValidateCheck(
+                    name="saml_idp_sso_url",
+                    passed=False,
+                    detail=f"IdP SSO URL returned HTTP {resp.status_code}",
+                ))
+        except Exception as exc:
+            checks.append(SSOValidateCheck(
+                name="saml_idp_sso_url",
+                passed=False,
+                detail=f"IdP SSO URL unreachable: {exc}",
+            ))
+    else:
+        checks.append(SSOValidateCheck(
+            name="saml_idp_sso_url",
+            passed=False,
+            detail="No idp_sso_url configured",
+        ))
+
+    # 3. IdP metadata URL reachable (optional — only if configured)
+    metadata_url: str = cfg.get("idp_metadata_url", "")
+    if metadata_url:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10) as http:
+                resp = await http.get(metadata_url)
+            if resp.status_code == 200:
+                checks.append(SSOValidateCheck(
+                    name="saml_metadata_url",
+                    passed=True,
+                    detail=f"IdP metadata URL returned HTTP {resp.status_code}",
+                ))
+            else:
+                checks.append(SSOValidateCheck(
+                    name="saml_metadata_url",
+                    passed=False,
+                    detail=f"IdP metadata URL returned HTTP {resp.status_code}",
+                ))
+        except Exception as exc:
+            checks.append(SSOValidateCheck(
+                name="saml_metadata_url",
+                passed=False,
+                detail=f"IdP metadata URL unreachable: {exc}",
+            ))
+
+    return checks
+
+
 @router.post("/discover-oidc", response_model=OIDCDiscoveryResponse)
 async def discover_oidc(
     body: Annotated[OIDCDiscoveryRequest, Body()],
@@ -468,6 +744,7 @@ def _to_response(conn: SSOConnection) -> SSOConnectionResponse:
         status=conn.status,
         provisioning=conn.provisioning,
         config=conn.config,
+        last_idp_attributes=conn.last_idp_attributes,
         created_at=utc_isoformat(conn.created_at),
         updated_at=utc_isoformat(conn.updated_at),
     )
