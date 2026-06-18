@@ -40,13 +40,62 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Surface the full tool-call stream so we can diagnose empty-buffer
-          # runs (the `permission_denials_count` from the SDK summary is
-          # otherwise opaque). Drop this once the review is reliably posting.
+          # Surface the full tool-call stream so empty-buffer runs are
+          # diagnosable. Drop this once the review is reliably posting.
           show_full_output: true
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # Two config gotchas that together made earlier runs post nothing,
+          # even after they produced real findings:
+          #
+          # 1. The `--comment` flag on the slash command. The plugin's
+          #    commands/code-review.md (step 7) explicitly stops without
+          #    posting unless `--comment` is passed. Without it the plugin
+          #    runs the review, prints findings to the terminal, and exits.
+          #
+          # 2. The inline-comment MCP server is mounted by the action ONLY
+          #    when the user's allowed-tools list contains a matching tool
+          #    name (claude-code-action/src/mcp/install-mcp-server.ts ~138).
+          #    Without --allowedTools "mcp__github_inline_comment__create_
+          #    inline_comment" the server never starts, so even if the
+          #    plugin asked for the tool there's no implementation behind
+          #    it and every post attempt would fail silently.
+          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
 
+      - name: Fallback — post review summary if inline-comment buffer is empty
+        # Safety net for the case where the proper inline-comment path
+        # above fails: still surface the SDK's final assistant text as a
+        # single PR comment so a run that found something isn't silently
+        # swallowed. Skipped when the buffer has entries (the action's
+        # own post step will publish them as proper inline comments).
+        if: always() && steps.claude-review.conclusion != 'cancelled'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OUTPUT_FILE: /home/runner/work/_temp/claude-execution-output.json
+          BUFFER_FILE: /tmp/inline-comments-buffer.jsonl
+        run: |
+          set -euo pipefail
+          if [ -s "$BUFFER_FILE" ]; then
+            echo "Inline-comment buffer has entries — skipping fallback summary."
+            exit 0
+          fi
+          if [ ! -s "$OUTPUT_FILE" ]; then
+            echo "No execution output file at $OUTPUT_FILE — skipping fallback summary."
+            exit 0
+          fi
+          RESULT_TEXT=$(jq -r '.result // empty' "$OUTPUT_FILE")
+          if [ -z "$RESULT_TEXT" ]; then
+            echo "No .result text in SDK output — likely an api_error before completion."
+            exit 0
+          fi
+          {
+            echo "## :robot: Claude Code Review (fallback summary)"
+            echo ""
+            echo "<sub>The inline-comment MCP server returned no buffered comments; this is the SDK's final text output. See .github/workflows/claude-code-review.yml for context.</sub>"
+            echo ""
+            printf '%s\n' "$RESULT_TEXT"
+          } > /tmp/review-comment.md
+          gh pr comment "$PR_NUMBER" --body-file /tmp/review-comment.md

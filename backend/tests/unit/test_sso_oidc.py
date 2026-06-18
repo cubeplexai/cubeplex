@@ -410,6 +410,40 @@ async def test_exchange_code_rejects_userinfo_sub_mismatch(
 
 
 # ----------------------------------------------------------------------
+# _coerce_email_verified — string "false" must NOT be truthy
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (True, True),
+        ("true", True),
+        ("True", True),
+        ("TRUE", True),
+        (" true ", True),
+        # The bug being regressed: bool("false") is True in Python.
+        ("false", False),
+        ("False", False),
+        ("", False),
+        (False, False),
+        (None, False),
+        (1, False),
+        (0, False),
+        ("yes", False),
+    ],
+)
+def test_coerce_email_verified_normalizes_strings(raw: Any, expected: bool) -> None:
+    """Non-spec OIDC IdPs (and SAML→OIDC bridges) emit ``email_verified``
+    as a JSON string. ``bool("false")`` is ``True`` in Python — without
+    explicit coercion an attacker-controlled IdP claiming
+    ``email_verified: "false"`` would be treated as verified."""
+    from cubebox.sso.oidc import _coerce_email_verified
+
+    assert _coerce_email_verified(raw) is expected
+
+
+# ----------------------------------------------------------------------
 # discover_oidc_endpoints
 # ----------------------------------------------------------------------
 
