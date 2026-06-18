@@ -143,9 +143,11 @@ async def test_live_view_returns_503_when_sandbox_unavailable(monkeypatch) -> No
             raise SandboxError("sandbox provider timed out")
 
     monkeypatch.setattr(ws_browser, "get_sandbox_manager", lambda: _Manager())
+    # Resolver short-circuits to (user, ctx.user.id, ctx.user.id) when
+    # conversation_id is None, so we don't need a real session for that path.
     ctx = SimpleNamespace(user=SimpleNamespace(id="usr-1"), org_id="org-1", workspace_id="ws-1")
 
     with pytest.raises(HTTPException) as exc_info:
-        await ws_browser.get_live_view(ctx)  # type: ignore[arg-type]
+        await ws_browser.get_live_view(ctx, session=None, conversation_id=None)  # type: ignore[arg-type]
 
     assert exc_info.value.status_code == 503
