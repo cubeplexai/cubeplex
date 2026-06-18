@@ -66,6 +66,11 @@
       "inviting": "邀请中…",
       "inviteError": "邀请成员失败。",
       "emptyMembers": "没有其他工作区成员可邀请。"
+    },
+    "members": {
+      "openLabel": "对话参与者",
+      "title": "{count} 位参与者",
+      "participantTag": "参与者"
     }
   },
   "topics": {
