@@ -1220,7 +1220,11 @@
     "delete": "Delete",
     "deleted": "Deleted",
     "undo": "Undo",
-    "deleteFailed": "Delete failed"
+    "deleteFailed": "Delete failed",
+    "clear": "Clear",
+    "noResults": "No matches",
+    "searchMembers": "Search by name or email…",
+    "selectedCount": "{count} selected"
   },
   "chatExtras": {
     "imageClose": "Close",

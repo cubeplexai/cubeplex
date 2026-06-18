@@ -1220,7 +1220,11 @@
     "delete": "删除",
     "deleted": "已删除",
     "undo": "撤销",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "clear": "清除",
+    "noResults": "没有匹配项",
+    "searchMembers": "按姓名或邮箱搜索…",
+    "selectedCount": "已选 {count} 个"
   },
   "chatExtras": {
     "imageClose": "关闭",
