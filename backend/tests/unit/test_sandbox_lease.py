@@ -126,7 +126,9 @@ async def test_get_live_view_renews_lease_without_releasing(
 
     ctx = _FakeCtx(user=_FakeUser(id="user-1"), org_id="org-1", workspace_id="ws-1")
 
-    resp = await ws_browser_routes.get_live_view(ctx)  # type: ignore[arg-type]
+    # session arg is unused on the no-conversation path; the resolver
+    # short-circuits to (user, ctx.user.id, ctx.user.id).
+    resp = await ws_browser_routes.get_live_view(ctx, session=None, conversation_id=None)  # type: ignore[arg-type]
 
     assert resp.url.startswith("http://neko.example/")
 
