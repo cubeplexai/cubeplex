@@ -10,6 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.routes.v1._im_runtime import build_im_list_out
+from cubebox.api.schemas.im_channel_binding import (
+    ChannelBindingCreateIn,
+    ChannelBindingListOut,
+    ChannelBindingOut,
+    ChannelBindingUpdateIn,
+)
 from cubebox.api.schemas.im_connector import (
     ConnectDiscordAccountIn,
     ConnectFeishuAccountIn,
@@ -29,12 +35,15 @@ from cubebox.credentials.dependencies import (
 )
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
+from cubebox.models.im_channel_binding import IMChannelBinding
 from cubebox.models.im_connector import IMConnectorAccount, IMIdentityLink
 from cubebox.models.membership import Role
 from cubebox.models.user import User
+from cubebox.repositories.im_channel_binding import IMChannelBindingRepository
 from cubebox.repositories.membership import MembershipRepository
 from cubebox.repositories.organization_membership import OrganizationMembershipRepository
 from cubebox.services.im_connector import IMConnectorService
+from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/im", tags=["ws-im"])
 
@@ -388,8 +397,6 @@ async def list_identity_links(
             .order_by(IMIdentityLink.created_at.desc())  # type: ignore[attr-defined]
         )
     ).all()
-    from cubebox.utils.time import utc_isoformat
-
     return IdentityLinkListOut(
         links=[
             IdentityLinkOut(
@@ -403,3 +410,141 @@ async def list_identity_links(
             for link, email, display_name in rows
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Channel binding CRUD
+# ---------------------------------------------------------------------------
+
+
+def _binding_to_out(b: IMChannelBinding) -> ChannelBindingOut:
+    return ChannelBindingOut(
+        id=b.id,
+        account_id=b.account_id,
+        channel_id=b.channel_id,
+        channel_name=b.channel_name,
+        mode=b.mode,
+        sandbox_mode=b.sandbox_mode,
+        topic_id=b.topic_id,
+        created_at=utc_isoformat(b.created_at),
+        updated_at=utc_isoformat(b.updated_at),
+    )
+
+
+@router.get(
+    "/accounts/{account_id}/channel-bindings",
+    response_model=ChannelBindingListOut,
+)
+async def list_channel_bindings(
+    workspace_id: str,
+    account_id: str,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ChannelBindingListOut:
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace mismatch",
+        )
+    repo = IMChannelBindingRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    bindings = await repo.list_by_account(account_id=account_id)
+    return ChannelBindingListOut(bindings=[_binding_to_out(b) for b in bindings])
+
+
+@router.post(
+    "/accounts/{account_id}/channel-bindings",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ChannelBindingOut,
+)
+async def create_channel_binding(
+    workspace_id: str,
+    account_id: str,
+    body: ChannelBindingCreateIn,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ChannelBindingOut:
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace mismatch",
+        )
+    if body.mode == "shared" and body.sandbox_mode is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="sandbox_mode is required when mode is shared",
+        )
+    repo = IMChannelBindingRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    try:
+        binding = await repo.create(
+            account_id=account_id,
+            channel_id=body.channel_id,
+            channel_name=body.channel_name,
+            mode=body.mode,
+            sandbox_mode=body.sandbox_mode,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    await session.commit()
+    return _binding_to_out(binding)
+
+
+@router.patch(
+    "/accounts/{account_id}/channel-bindings/{binding_id}",
+    response_model=ChannelBindingOut,
+)
+async def update_channel_binding(
+    workspace_id: str,
+    account_id: str,
+    binding_id: str,
+    body: ChannelBindingUpdateIn,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ChannelBindingOut:
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace mismatch",
+        )
+    repo = IMChannelBindingRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    updated = await repo.update(
+        binding_id=binding_id,
+        mode=body.mode,
+        sandbox_mode=body.sandbox_mode,
+        channel_name=body.channel_name,
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="binding not found",
+        )
+    await session.commit()
+    return _binding_to_out(updated)
+
+
+@router.delete(
+    "/accounts/{account_id}/channel-bindings/{binding_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_channel_binding(
+    workspace_id: str,
+    account_id: str,
+    binding_id: str,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace mismatch",
+        )
+    repo = IMChannelBindingRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    deleted = await repo.delete(id_=binding_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="binding not found",
+        )
+    await session.commit()
