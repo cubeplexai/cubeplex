@@ -65,9 +65,7 @@ async def _seeded_feishu_account(
     try:
         # 1) Seed the FK targets.
         async with maker() as session:
-            await im_seed_org_ws_user(
-                session, org_id=_ORG_ID, ws_id=_WS_ID, user_id=_USER_ID
-            )
+            await im_seed_org_ws_user(session, org_id=_ORG_ID, ws_id=_WS_ID, user_id=_USER_ID)
             await session.commit()
 
         # 2) Create the credential via the real service (so the bytes are

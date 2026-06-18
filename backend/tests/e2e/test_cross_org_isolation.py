@@ -144,7 +144,9 @@ _CROSS_ORG_GET_CASES = [
 ]
 
 _CROSS_ORG_RESOURCE_CASES = [
-    _case("conversation:get", "GET", "/api/v1/ws/{ws}/conversations/{conversation}", leaks_403=True),
+    _case(
+        "conversation:get", "GET", "/api/v1/ws/{ws}/conversations/{conversation}", leaks_403=True
+    ),
     _case(
         "conversation:messages",
         "GET",

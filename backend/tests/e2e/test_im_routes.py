@@ -28,9 +28,7 @@ async def test_workspace_connect_list_delete_feishu_account(
     we still exercise the credential store + the IMConnectorService end to end.
     """
 
-    async def _fake_hydrate(
-        app_id: str, app_secret: str, domain: str
-    ) -> tuple[str, str, str]:
+    async def _fake_hydrate(app_id: str, app_secret: str, domain: str) -> tuple[str, str, str]:
         return "ou_hydrated_bot", "", ""
 
     mock_hydrate.side_effect = _fake_hydrate
@@ -82,9 +80,7 @@ async def test_admin_can_list_and_toggle_enabled(
     drive both the workspace POST/DELETE and the admin list/enable/disable
     routes from the same client."""
 
-    async def _fake_hydrate(
-        app_id: str, app_secret: str, domain: str
-    ) -> tuple[str, str, str]:
+    async def _fake_hydrate(app_id: str, app_secret: str, domain: str) -> tuple[str, str, str]:
         return "ou_hydrated_admin", "", ""
 
     mock_hydrate.side_effect = _fake_hydrate
@@ -136,9 +132,7 @@ async def test_workspace_delete_refuses_account_from_sibling_workspace(
     sibling workspace's connector inside their org.
     """
 
-    async def _fake_hydrate(
-        app_id: str, app_secret: str, domain: str
-    ) -> tuple[str, str, str]:
+    async def _fake_hydrate(app_id: str, app_secret: str, domain: str) -> tuple[str, str, str]:
         return "ou_isolation", "", ""
 
     mock_hydrate.side_effect = _fake_hydrate

@@ -45,9 +45,7 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     try:
         async with maker() as session:
-            await im_seed_org_ws_user(
-                session, org_id=_ORG_ID, ws_id=_WS_ID, user_id=_USER_ID
-            )
+            await im_seed_org_ws_user(session, org_id=_ORG_ID, ws_id=_WS_ID, user_id=_USER_ID)
             await im_seed_stub_credential(
                 session,
                 credential_id=_CRED_ID,

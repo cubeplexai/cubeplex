@@ -26,7 +26,6 @@ from cubebox.repositories.skill import (
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubebox.repositories.external_identity import ExternalIdentityRepository
 from cubebox.repositories.sso_connection import SSOConnectionRepository
 from cubebox.repositories.topic import TopicRepository
 from cubebox.repositories.trigger import TriggerEventRepository, TriggerRepository
