@@ -53,7 +53,6 @@ from cubebox.models.skill import (
 )
 from cubebox.models.skill_registry import SkillRegistry
 from cubebox.models.sso_connection import SSOConnection
-from cubebox.models.external_identity import ExternalIdentity
 from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.models.trigger import Trigger, TriggerEvent
 from cubebox.models.user import User

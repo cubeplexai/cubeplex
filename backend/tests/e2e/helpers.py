@@ -1,14 +1,11 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TypeVar
 
 from cubebox.agents.schemas import AgentEvent
 
-T = TypeVar("T")
 
-
-async def await_until(
+async def await_until[T](
     predicate: Callable[[], Awaitable[T] | T],
     *,
     timeout: float = 5.0,
