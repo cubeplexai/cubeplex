@@ -65,7 +65,9 @@
       "invite": "邀请",
       "inviting": "邀请中…",
       "inviteError": "邀请成员失败。",
-      "emptyMembers": "没有其他工作区成员可邀请。"
+      "emptyMembers": "没有其他工作区成员可邀请。",
+      "noteMemory": "变成群聊之后，你的个人记忆将不再注入到对话中。",
+      "noteSandbox": "其他参与者将能查看并修改你当前沙盒中的文件。"
     },
     "members": {
       "openLabel": "对话参与者",

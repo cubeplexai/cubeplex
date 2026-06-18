@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { X } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 import {
   createApiClient,
   useAuthStore,
@@ -40,6 +40,12 @@ export function InviteToConversationDialog({
   const inviteToGroup = useConversationStore((s) => s.inviteToGroup)
   const fetchParticipants = useConversationStore((s) => s.fetchConversationParticipants)
   const participants = useConversationStore((s) => s.conversationParticipants[conversationId])
+  const conversation = useConversationStore((s) =>
+    s.conversations.find((c) => c.id === conversationId),
+  )
+  // The note only matters on the 1:1 → group chat transition (memory turns
+  // off, sandbox starts being shared). Already-group chats don't change.
+  const showPromotionNote = conversation && !conversation.is_group_chat
 
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [submitting, setSubmitting] = useState(false)
@@ -140,6 +146,21 @@ export function InviteToConversationDialog({
           <p className="mt-1 text-xs text-muted-foreground">{t('description')}</p>
 
           <div className="mt-4 flex flex-col gap-4">
+            {showPromotionNote && (
+              <div
+                className={cn(
+                  'flex items-start gap-2 rounded-md border border-info-border',
+                  'bg-info-surface px-2.5 py-2 text-xs text-info-fg leading-relaxed',
+                )}
+              >
+                <Info className="size-3.5 shrink-0 mt-0.5" />
+                <ul className="flex flex-col gap-1 list-disc list-inside marker:text-info-fg/70">
+                  <li>{t('noteMemory')}</li>
+                  <li>{t('noteSandbox')}</li>
+                </ul>
+              </div>
+            )}
+
             <div className="flex flex-col gap-1.5">
               <Label>{t('button')}</Label>
               <WorkspaceMemberPicker

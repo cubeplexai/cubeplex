@@ -65,7 +65,9 @@
       "invite": "Invite",
       "inviting": "Inviting…",
       "inviteError": "Failed to invite members.",
-      "emptyMembers": "No other workspace members to invite."
+      "emptyMembers": "No other workspace members to invite.",
+      "noteMemory": "Once it becomes a group chat, your personal memory will no longer be injected.",
+      "noteSandbox": "Other participants will be able to see and modify files in your current sandbox."
     },
     "members": {
       "openLabel": "Conversation participants",

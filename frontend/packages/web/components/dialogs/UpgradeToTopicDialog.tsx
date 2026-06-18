@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { X } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 import {
   ApiError,
   createApiClient,
@@ -164,9 +164,15 @@ export function UpgradeToTopicDialog({
           </div>
 
           <div className="mt-4 flex flex-col gap-4">
-            <p className="text-xs text-muted-foreground leading-relaxed">
-              {tDialog('irreversibleWarning')}
-            </p>
+            <div
+              className={cn(
+                'flex items-start gap-2 rounded-md border border-info-border',
+                'bg-info-surface px-2.5 py-2 text-xs text-info-fg leading-relaxed',
+              )}
+            >
+              <Info className="size-3.5 shrink-0 mt-0.5" />
+              <span>{tDialog('irreversibleWarning')}</span>
+            </div>
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="upgrade-topic-title">{tDialog('titleLabel')}</Label>
