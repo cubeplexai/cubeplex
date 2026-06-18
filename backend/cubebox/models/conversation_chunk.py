@@ -3,7 +3,7 @@
 from typing import Any, ClassVar
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Column, Index
+from sqlalchemy import BigInteger, Column, Index, Text
 from sqlmodel import Field
 
 from cubebox.config import config
@@ -35,7 +35,7 @@ class ConversationChunk(CubeboxBase, OrgScopedMixin, table=True):
     chunk_seq: int = Field(ge=0)
     seq_lo: int = Field(sa_column=Column(BigInteger, nullable=False))
     seq_hi: int = Field(sa_column=Column(BigInteger, nullable=False))
-    text: str
+    text: str = Field(sa_column=Column(Text, nullable=False))
     # Nullable: when no embedding provider is configured the worker writes
     # chunks with embedding=NULL so the lexical leg still has rows to query.
     embedding: Any | None = Field(
