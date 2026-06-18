@@ -15,6 +15,7 @@ export interface MeResult {
   id: string
   email: string
   display_name: string | null
+  avatar_url: string | null
   language: string
   is_verified: boolean
   needs_org_setup?: boolean

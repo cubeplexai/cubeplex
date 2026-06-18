@@ -49,6 +49,7 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
   }, [])
 
   const displayName = user?.display_name ?? null
+  const avatarUrl = user?.avatar_url ?? null
   const initials = displayName
     ? displayName[0]?.toUpperCase()
     : user?.email
@@ -89,8 +90,13 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
             : 'w-full min-w-0 flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent transition-colors duration-fast group'
         }
       >
-        <div className="size-7 rounded bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-2xs font-semibold shrink-0">
-          {initials}
+        <div className="size-7 rounded overflow-hidden bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-2xs font-semibold shrink-0">
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatarUrl} alt={displayName ?? user?.email ?? ''} className="size-full object-cover" />
+          ) : (
+            initials
+          )}
         </div>
         {!collapsed && (
           <span className="text-xs truncate flex-1 text-left text-foreground">

@@ -56,6 +56,7 @@ async def resolve_identity(
     external_id: str,
     external_email: str,
     email_verified: bool,
+    avatar_url: str | None = None,
     claims: dict[str, Any] | None = None,
     sso_connection: SSOConnection | None = None,
     request: Request | None = None,
@@ -114,6 +115,10 @@ async def resolve_identity(
         existing.external_email = external_email
         existing.metadata_ = claims or {}
         session.add(existing)
+        # Sync avatar from IdP on every login so profile picture stays current.
+        if avatar_url is not None and user.avatar_url != avatar_url:
+            user.avatar_url = avatar_url
+            session.add(user)
         await session.commit()
         return ResolvedIdentity(user=user, external_identity=existing, created=False)
 
@@ -158,6 +163,9 @@ async def resolve_identity(
             request=request,
         )
         created = True
+        if avatar_url is not None:
+            user.avatar_url = avatar_url
+            session.add(user)
 
         if sso_connection is not None:
             await _provision_org_membership(session, user, sso_connection)
@@ -181,6 +189,10 @@ async def resolve_identity(
                     "Contact your administrator."
                 )
             await _provision_org_membership(session, user, sso_connection)
+
+    if not created and avatar_url is not None and user.avatar_url != avatar_url:
+        user.avatar_url = avatar_url
+        session.add(user)
 
     identity = ExternalIdentity(
         user_id=user.id,
