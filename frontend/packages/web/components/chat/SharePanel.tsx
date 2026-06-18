@@ -64,6 +64,7 @@ export function SharePanel({ conversationId }: SharePanelProps) {
   }, [client, conversationId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load when panel opens
     if (open) void loadShares()
   }, [open, loadShares])
 

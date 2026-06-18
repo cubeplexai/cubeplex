@@ -28,7 +28,11 @@ function copyText(text: string): Promise<void> {
       el.select()
       const ok = document.execCommand('copy')
       document.body.removeChild(el)
-      ok ? resolve() : reject(new Error('execCommand failed'))
+      if (ok) {
+        resolve()
+      } else {
+        reject(new Error('execCommand failed'))
+      }
     } catch (e) {
       reject(e)
     }

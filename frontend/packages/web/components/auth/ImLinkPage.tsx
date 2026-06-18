@@ -28,6 +28,7 @@ export function ImLinkPage() {
 
   useEffect(() => {
     if (!token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- mount-time validation
       setStatus('error')
       setErrorMsg(t('invalidToken'))
       return
@@ -47,6 +48,7 @@ export function ImLinkPage() {
         const key = err instanceof ApiError && err.code ? CODE_TO_KEY[err.code] : undefined
         setErrorMsg(key ? t(key) : t('error'))
       })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- router/t are stable
   }, [client, token])
 
   if (status === 'verifying') {

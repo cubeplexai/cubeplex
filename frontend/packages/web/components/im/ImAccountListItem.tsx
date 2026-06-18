@@ -55,6 +55,7 @@ export function ImAccountListItem({
       onSelect={() => onSelect(account.id)}
       leading={
         account.bot_avatar_url ? (
+          // eslint-disable-next-line @next/next/no-img-element -- external IdP avatars; next/image needs remote-pattern config
           <img
             src={account.bot_avatar_url}
             alt={title}

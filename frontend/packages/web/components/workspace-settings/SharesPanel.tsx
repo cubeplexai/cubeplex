@@ -49,6 +49,7 @@ export function SharesPanel({ wsId }: SharesPanelProps) {
   }, [client, wsId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load-on-mount
     void load()
   }, [load])
 

@@ -271,6 +271,7 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
 
   useEffect(() => {
     let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load-on-mount; cascading render is intentional
     setLoading(true)
     setError(null)
     getPublicShare(shrId)
