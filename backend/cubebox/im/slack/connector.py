@@ -15,9 +15,12 @@ from cubebox.im.outbound import _FloodSignal
 from cubebox.im.slack.format import markdown_to_slack_mrkdwn
 from cubebox.im.types import (
     DM_SCOPE_KEY,
+    BindingMode,
     InboundEvent,
+    make_channel_scope,
     make_participant_scope,
     make_thread_participant_scope,
+    make_thread_scope,
 )
 
 _SECTION_CHAR_LIMIT = 3000
@@ -54,7 +57,9 @@ class SlackConnector:
     # Inbound
     # ------------------------------------------------------------------
 
-    def parse_inbound(self, raw: dict[str, Any]) -> InboundEvent | None:
+    def parse_inbound(
+        self, raw: dict[str, Any], *, binding_mode: BindingMode = "isolated"
+    ) -> InboundEvent | None:
         """Normalize a slack-bolt event dict into an InboundEvent.
 
         Returns None for messages we should ignore: subtypes, bot messages,
@@ -109,12 +114,16 @@ class SlackConnector:
 
         # Thread replies (thread_ts present and different from ts)
         if event_type == "app_mention" and thread_ts and thread_ts != ts:
+            if binding_mode == "shared":
+                scope_key = make_thread_scope(thread_ts)
+            else:
+                scope_key = make_thread_participant_scope(user, thread_ts)
             return InboundEvent(
                 platform="slack",
                 account_external_id="",
                 platform_event_id=platform_event_id,
                 channel_id=channel,
-                scope_key=make_thread_participant_scope(user, thread_ts),
+                scope_key=scope_key,
                 scope_kind="thread",
                 reply_to_id=thread_ts,
                 inbound_message_id=ts,
@@ -125,12 +134,16 @@ class SlackConnector:
 
         # Channel @mention (not in a thread)
         if event_type == "app_mention":
+            if binding_mode == "shared":
+                scope_key = make_channel_scope()
+            else:
+                scope_key = make_participant_scope(user)
             return InboundEvent(
                 platform="slack",
                 account_external_id="",
                 platform_event_id=platform_event_id,
                 channel_id=channel,
-                scope_key=make_participant_scope(user),
+                scope_key=scope_key,
                 scope_kind="channel",
                 reply_to_id=ts,
                 inbound_message_id=ts,
