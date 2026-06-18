@@ -40,6 +40,7 @@ async def shared_sandbox_id():
                 domain=config.sandbox.domain,
                 request_timeout=timedelta(seconds=60),
             ),
+            timeout=timedelta(seconds=600),
         )
         _shared_sandbox_id = raw_sandbox.id
         print(f"\n[Module Setup] Created shared sandbox: {_shared_sandbox_id}")

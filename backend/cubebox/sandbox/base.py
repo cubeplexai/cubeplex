@@ -116,6 +116,10 @@ class Sandbox(ABC):
         """Suspend this sandbox, preserving state. Override in capable drivers."""
         raise NotImplementedError("pause is not supported by this sandbox backend")
 
+    async def renew(self, timeout_seconds: int) -> None:
+        """Extend the provider-side expiration. No-op for backends without TTL."""
+        return  # no-op default; backends with TTL override
+
     @classmethod
     async def connect_or_resume(cls, sandbox_id: str, **kwargs: object) -> Sandbox:
         """Connect to a sandbox, resuming it from `paused` if necessary, and

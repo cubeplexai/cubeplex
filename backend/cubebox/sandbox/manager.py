@@ -22,7 +22,12 @@ from typing import Any
 import opensandbox
 from loguru import logger
 from opensandbox.config import ConnectionConfig
-from opensandbox.exceptions import SandboxException as ProviderSandboxError
+from opensandbox.exceptions import (
+    SandboxApiException as ProviderApiError,
+)
+from opensandbox.exceptions import (
+    SandboxException as ProviderSandboxError,
+)
 from opensandbox.models.sandboxes import PVC, Volume
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -207,6 +212,27 @@ class SandboxManager:
             request_timeout=timedelta(seconds=request_timeout or self._request_timeout),
             use_server_proxy=self._use_server_proxy,
         )
+
+    async def _renew_provider_ttl(self, sandbox_id: str) -> None:
+        """Best-effort extend the provider-side expiration so the OpenSandbox
+        controller won't GC an actively-used sandbox. Non-fatal on failure."""
+        conn_config = self._build_connection_config()
+        raw: opensandbox.Sandbox | None = None
+        try:
+            raw = await opensandbox.Sandbox.connect(
+                sandbox_id,
+                connection_config=conn_config,
+                skip_health_check=True,
+            )
+            await raw.renew(timedelta(seconds=self._ttl))
+        except Exception:
+            logger.debug("Provider-side renew failed for {} (non-fatal)", sandbox_id)
+        finally:
+            if raw is not None:
+                try:
+                    await raw.close()
+                except Exception:
+                    pass
 
     def _build_user_volume(self, workspace_id: str, user_id: str) -> Volume:
         """Build a PVC Volume keyed on (workspace_id, user_id).
@@ -575,7 +601,7 @@ class SandboxManager:
                 raw_sandbox = await opensandbox.Sandbox.create(
                     policy.default_image,
                     connection_config=create_conn_config,
-                    timeout=None,
+                    timeout=timedelta(seconds=self._ttl),
                     ready_timeout=timedelta(seconds=self._ready_timeout),
                     volumes=volumes,
                     resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
@@ -720,6 +746,8 @@ class SandboxManager:
                     sandbox_id, now + timedelta(seconds=self._ttl)
                 )
 
+        await self._renew_provider_ttl(sandbox_id)
+
     async def touch_active(
         self,
         user_id: str,
@@ -751,7 +779,8 @@ class SandboxManager:
                     record.sandbox_id, datetime.now(UTC) + timedelta(seconds=self._ttl)
                 )
             self._touch_cache[record.sandbox_id] = datetime.now(UTC)
-            return True
+        await self._renew_provider_ttl(record.sandbox_id)
+        return True
 
     async def renew_lease(
         self,
@@ -948,6 +977,10 @@ class SandboxManager:
                 await repo.mark_terminated(record.id)
                 await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
                 raise
+        try:
+            await backend.renew(self._ttl)
+        except Exception:
+            logger.debug("Provider-side renew failed for {} (non-fatal)", record.sandbox_id)
         return backend
 
     async def _await_stable_status(
@@ -982,7 +1015,7 @@ class SandboxManager:
                 row = await poll_repo.get(record_id)
                 if row is None:
                     return None
-                if row.status in ("running", "paused", "failed", "terminated"):
+                if row.status in ("running", "paused", "failed", "terminated", "kill_pending"):
                     return row
                 last_status = row.status
             await asyncio.sleep(0.5)
@@ -1165,38 +1198,13 @@ class SandboxManager:
                     # reaped. The resume path will manage egress / kill on
                     # its own outcomes.
                     continue
-                # We own the kill. Tell the provider to drop the sandbox and
-                # revoke any egress refs; mark_terminated already landed via
-                # the atomic claim, so no second status flip is needed.
-                raw: opensandbox.Sandbox | None = None
-                try:
-                    raw = await opensandbox.Sandbox.connect(
-                        record.sandbox_id,
-                        connection_config=conn_config,
-                        skip_health_check=True,
-                    )
-                    await raw.kill()
-                    logger.info("Reaped paused sandbox {}", record.sandbox_id)
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to kill reaped paused sandbox {} (may already be gone): {}",
-                        record.sandbox_id,
-                        exc,
-                    )
-                finally:
-                    # G8: pair connect with close on every path so a kill that
-                    # raises mid-flight doesn't leak the httpx transport.
-                    if raw is not None:
-                        try:
-                            await raw.close()
-                        except Exception as exc:
-                            logger.debug(
-                                "Reap-path close failed for {}: {}",
-                                record.sandbox_id,
-                                exc,
-                            )
-                if self._exchange_host:
-                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+                # We own the kill. _kill_record handles the provider kill,
+                # egress revocation, and — on failure — marks kill_pending so
+                # the next cleanup loop retries instead of orphaning. The
+                # claim already set status='terminated'; _kill_record's
+                # mark_terminated is idempotent, and mark_kill_pending
+                # overwrites to 'kill_pending' for retry.
+                await self._kill_record(session, scoped, record, conn_config)
 
     async def reconcile_transients(self, *, claim_timeout: int = 60) -> None:
         """Repair rows stuck in ``pausing``/``resuming`` by reading provider state.
@@ -1235,17 +1243,13 @@ class SandboxManager:
                     info = await raw.get_info()
                     state = (info.status.state if info and info.status else "") or ""
                 except Exception as exc:
-                    # 404 / NOT_FOUND means the provider has GC'd the pod
-                    # out-of-band; the row will never recover, so kill it
-                    # immediately instead of leaving it transient forever
-                    # (which would trap subsequent ``get_or_create`` calls in
-                    # ``_await_stable_status`` until manual cleanup). The error
-                    # body shape was empirically captured during Task 0 — see
-                    # internals-note G4. For non-404 errors (network blips,
-                    # SDK glitches) just bump the check timestamp and try
-                    # again next tick.
-                    msg = str(exc).upper()
-                    if "NOT_FOUND" in msg or "404" in msg:
+                    # 404 means the provider has GC'd the pod out-of-band;
+                    # kill the row so it doesn't trap get_or_create in
+                    # _await_stable_status forever. For non-404 errors
+                    # (network blips, SDK glitches) just bump the check
+                    # timestamp and try again next tick.
+                    is_gone = isinstance(exc, ProviderApiError) and exc.status_code == 404
+                    if is_gone:
                         logger.warning(
                             "Reconciler: provider reports {} gone (404 / "
                             "NOT_FOUND): {}; killing the row",
@@ -1337,8 +1341,13 @@ class SandboxManager:
         conn_config: ConnectionConfig,
     ) -> None:
         """Kill + revoke egress + mark terminated. Shared by cleanup_expired,
-        pause_idle fallback, and reconciler paths."""
+        pause_idle fallback, and reconciler paths.
+
+        On kill failure, marks the row ``kill_pending`` so the next cleanup loop
+        retries instead of orphaning the provider sandbox.
+        """
         raw: opensandbox.Sandbox | None = None
+        killed = False
         try:
             raw = await opensandbox.Sandbox.connect(
                 record.sandbox_id,
@@ -1347,15 +1356,18 @@ class SandboxManager:
             )
             await raw.kill()
             logger.info("Killed sandbox {}", record.sandbox_id)
+            killed = True
         except Exception as exc:
-            logger.warning(
-                "Failed to kill sandbox {} (may already be gone): {}",
-                record.sandbox_id,
-                exc,
-            )
+            if isinstance(exc, ProviderApiError) and exc.status_code == 404:
+                logger.info("Sandbox {} already gone (404)", record.sandbox_id)
+                killed = True
+            else:
+                logger.warning(
+                    "Failed to kill sandbox {} (will retry on next loop): {}",
+                    record.sandbox_id,
+                    exc,
+                )
         finally:
-            # G8: pair connect with close on every path so a kill that
-            # raises mid-flight doesn't leak the httpx transport.
             if raw is not None:
                 try:
                     await raw.close()
@@ -1365,9 +1377,12 @@ class SandboxManager:
                         record.sandbox_id,
                         exc,
                     )
-        await scoped_repo.mark_terminated(record.id)
-        if self._exchange_host:
-            await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+        if killed:
+            await scoped_repo.mark_terminated(record.id)
+            if self._exchange_host:
+                await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
+        else:
+            await scoped_repo.mark_kill_pending(record.id)
 
 
 # ---------------------------------------------------------------------------

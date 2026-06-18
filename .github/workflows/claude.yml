@@ -20,18 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
+      pull-requests: read
+      issues: read
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
-    env:
-      ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
-      ANTHROPIC_AUTH_TOKEN: ${{ secrets.MINIMAX_API_TOKEN }}
-      ANTHROPIC_MODEL: MiniMax-M2.7
-      ANTHROPIC_SMALL_FAST_MODEL: MiniMax-M2.7
-      ANTHROPIC_DEFAULT_SONNET_MODEL: MiniMax-M2.7
-      ANTHROPIC_DEFAULT_OPUS_MODEL: MiniMax-M2.7
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: MiniMax-M2.7
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,7 +34,7 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.MINIMAX_API_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
@@ -54,5 +46,5 @@ jobs:
           # Optional: Add claude_args to customize behavior and configuration
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
+          # claude_args: '--allowed-tools Bash(gh pr *)'
 

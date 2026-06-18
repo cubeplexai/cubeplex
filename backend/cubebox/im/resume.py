@@ -163,4 +163,28 @@ async def resume_paused_run(
         return False
 
 
-__all__ = ["resume_paused_run"]
+async def resolve_full_question_id(run_id: str, short_qid: str) -> str:
+    """Map truncated question_id back to the full value from DB pending.
+
+    The IM action_id / custom_id only carries the first 8 chars of the
+    question_id to stay within platform limits.  ``resume_paused_run``
+    does an exact match, so we need the full hash.
+    """
+    try:
+        resolved = await _resolve_run_context(run_id)
+        if resolved is None:
+            return short_qid
+        conversation_id = resolved[0]
+
+        from cubebox.agents.checkpointer import init_checkpointer
+
+        async with init_checkpointer() as cp:
+            pending = await cp.load_pending_request(conversation_id)
+        if pending is not None and pending.question_id.startswith(short_qid):
+            return pending.question_id
+    except Exception:
+        logger.warning("[IM] resolve_full_question_id failed", exc_info=True)
+    return short_qid
+
+
+__all__ = ["resume_paused_run", "resolve_full_question_id"]

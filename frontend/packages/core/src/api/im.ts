@@ -48,7 +48,17 @@ export interface ConnectDiscordAccountIn {
   acting_user_id?: string
 }
 
-export type ConnectImAccountIn = ConnectFeishuAccountIn | ConnectDiscordAccountIn
+export interface ConnectSlackAccountIn {
+  platform: 'slack'
+  bot_token: string
+  app_token: string
+  acting_user_id?: string
+}
+
+export type ConnectImAccountIn =
+  | ConnectFeishuAccountIn
+  | ConnectDiscordAccountIn
+  | ConnectSlackAccountIn
 
 // ── Workspace scope ──────────────────────────────────────────────────────────
 

@@ -15,7 +15,6 @@ interface Props {
 }
 
 function comingLabel(t: DynamicT, id: PlatformDescriptor['id']): string {
-  if (id === 'slack') return t('im.platform.slack.coming')
   if (id === 'teams') return t('im.platform.teams.coming')
   return ''
 }
