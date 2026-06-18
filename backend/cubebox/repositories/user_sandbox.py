@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, and_, or_, select, text, update
+from sqlalchemy import CursorResult, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.user_sandbox import UserSandbox
@@ -139,36 +139,50 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     ) -> None:
         """Re-scope the active sandbox row for an upgrade-to-topic in one shot.
 
-        Matches EITHER the personal user-scope row (``('user', creator)``)
-        OR the standalone-group-chat conversation-scope row
-        (``('conversation', conv_id)``). The two-branch UPDATE closes the
-        race where ``upgrade_conversation_to_topic`` reads
-        ``is_group_chat=False`` then a concurrent ``invite-to-group``
-        flips the sandbox to conversation-scope before the upgrade's
-        rekey runs — separate UPDATEs would miss the moved row.
+        Prefers the conversation-scope row when present (more recent state
+        from a prior group-chat upgrade), and falls back to the personal
+        user-scope row (1:1 case). The two-step UPDATE closes the race where
+        ``upgrade_conversation_to_topic`` reads ``is_group_chat=False`` then
+        a concurrent ``invite-to-group`` flips the sandbox to conversation-
+        scope before the upgrade's rekey runs.
+
+        At most one row gets rekeyed. A single OR-matched UPDATE could touch
+        BOTH rows (e.g. paused user-scope + running conversation-scope),
+        producing two ``(topic, topic_id)`` rows — the partial unique index
+        only covers active states, so the collision surfaces later when both
+        try to resume.
         """
-        stmt = (
+        conv_stmt = (
             update(UserSandbox)
             .where(
                 UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
-                or_(
-                    and_(
-                        UserSandbox.scope_type == "user",  # type: ignore[arg-type]
-                        UserSandbox.scope_id == creator_user_id,  # type: ignore[arg-type]
-                    ),
-                    and_(
-                        UserSandbox.scope_type == "conversation",  # type: ignore[arg-type]
-                        UserSandbox.scope_id == conversation_id,  # type: ignore[arg-type]
-                    ),
-                ),
+                UserSandbox.scope_type == "conversation",  # type: ignore[arg-type]
+                UserSandbox.scope_id == conversation_id,  # type: ignore[arg-type]
                 UserSandbox.status.in_(  # type: ignore[attr-defined]
                     ("provisioning", "running", "paused", "resuming")
                 ),
             )
             .values(scope_type="topic", scope_id=topic_id)
         )
-        await self.session.execute(stmt)
+        res = cast(CursorResult[Any], await self.session.execute(conv_stmt))
+        if res.rowcount > 0:
+            return
+
+        user_stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.scope_type == "user",  # type: ignore[arg-type]
+                UserSandbox.scope_id == creator_user_id,  # type: ignore[arg-type]
+                UserSandbox.status.in_(  # type: ignore[attr-defined]
+                    ("provisioning", "running", "paused", "resuming")
+                ),
+            )
+            .values(scope_type="topic", scope_id=topic_id)
+        )
+        await self.session.execute(user_stmt)
 
     async def rekey(
         self,

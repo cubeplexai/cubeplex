@@ -416,8 +416,8 @@ class TestIMResumeRefusesTopicConversation:
     async def test_resume_paused_run_refuses_topic(self) -> None:
         from cubebox.im import resume as resume_mod
 
-        async def _fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None]:
-            return ("conv-topic", "user-1", "org-1", "ws-1", "top-1")
+        async def _fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None, bool]:
+            return ("conv-topic", "user-1", "org-1", "ws-1", "top-1", False)
 
         run_manager = AsyncMock()
         run_manager.resume_run_with_answer = AsyncMock()
@@ -439,8 +439,8 @@ class TestIMResumeRefusesTopicConversation:
         """Counterpart: a non-topic conversation must NOT trigger the guard."""
         from cubebox.im import resume as resume_mod
 
-        async def _fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None]:
-            return ("conv-personal", "user-1", "org-1", "ws-1", None)
+        async def _fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None, bool]:
+            return ("conv-personal", "user-1", "org-1", "ws-1", None, False)
 
         run_manager = AsyncMock()
         run_manager.resume_run_with_answer = AsyncMock(return_value=None)

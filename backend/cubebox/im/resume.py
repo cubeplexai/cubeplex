@@ -17,8 +17,8 @@ from loguru import logger
 
 async def _resolve_run_context(
     run_id: str,
-) -> tuple[str, str, str, str, str | None] | None:
-    """Look up ``(conversation_id, user_id, org_id, workspace_id, topic_id)`` for a run.
+) -> tuple[str, str, str, str, str | None, bool] | None:
+    """Look up ``(conversation_id, user_id, org_id, workspace_id, topic_id, is_group_chat)`` for a run.
 
     Two-step lookup:
 
@@ -69,6 +69,7 @@ async def _resolve_run_context(
             str(row.org_id),
             str(row.workspace_id),
             str(row.topic_id) if row.topic_id is not None else None,
+            bool(row.is_group_chat),
         )
     except Exception:
         logger.warning("[resume] _resolve_run_context failed for {}", run_id, exc_info=True)
@@ -97,10 +98,10 @@ async def resume_paused_run(
     if resolved is None:
         logger.warning("[resume] cannot resolve run_id={}", run_id)
         return False
-    conversation_id, user_id, org_id, workspace_id, topic_id = resolved
-    if topic_id is not None:
+    conversation_id, user_id, org_id, workspace_id, topic_id, is_group_chat = resolved
+    if topic_id is not None or is_group_chat:
         logger.warning(
-            "[resume] refusing IM resume for topic conversation {} "
+            "[resume] refusing IM resume for topic / group-chat conversation {} "
             "(run_id={}) — topic-aware IM resume not implemented (v1 scope)",
             conversation_id,
             run_id,

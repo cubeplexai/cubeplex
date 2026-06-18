@@ -94,6 +94,32 @@ async def _is_topic_owner_of_conversation(
     return role == "owner"
 
 
+async def _is_conv_participant_of_share(
+    session: AsyncSession, conversation_id: str, user_id: str
+) -> bool:
+    """True when the conv has no topic and the user is a conversation_participant.
+
+    Mirrors the standalone-group-chat branch in ``list_conversation_shares`` so
+    LIST and REVOKE stay symmetric: any member of the group chat may revoke any
+    share minted on that conversation.
+    """
+    from typing import cast as _cast
+
+    from cubebox.models.conversation_participant import ConversationParticipant
+
+    conv_stmt = select(_cast(Any, Conversation.topic_id)).where(
+        _cast(Any, Conversation.id) == conversation_id,
+    )
+    topic_id = (await session.execute(conv_stmt)).scalar_one_or_none()
+    if topic_id is not None:
+        return False
+    part_stmt = select(_cast(Any, ConversationParticipant.user_id)).where(
+        _cast(Any, ConversationParticipant.conversation_id) == conversation_id,
+        _cast(Any, ConversationParticipant.user_id) == user_id,
+    )
+    return (await session.execute(part_stmt)).scalar_one_or_none() is not None
+
+
 class CreateShareRequest(BaseModel):
     conversation_id: str
     scope: ShareScope = ShareScope.public
@@ -265,13 +291,19 @@ async def revoke_share(
     if share is not None:
         return _serialize(share)
 
-    # Topic owners may revoke shares created by any participant of their
-    # topic (e.g. after a transfer or to clean up a departed member's
-    # share). Look up the share unfiltered, then check topic ownership.
+    # Look up the share unfiltered, then check the two widened revoke paths:
+    # - topic owners may revoke any share on a conv inside their topic
+    #   (cleanup after transfers / departures).
+    # - standalone-group-chat participants may revoke any share on that conv,
+    #   so REVOKE stays symmetric with LIST (round-1 widened LIST to include
+    #   P(conv); without this widening, the UI shows the row but DELETE 404s).
     existing = await repo.get_active(share_id)
     if existing is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Share not found")
-    if not await _is_topic_owner_of_conversation(session, existing.conversation_id, user.id):
+    allowed = await _is_topic_owner_of_conversation(
+        session, existing.conversation_id, user.id
+    ) or await _is_conv_participant_of_share(session, existing.conversation_id, user.id)
+    if not allowed:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Share not found")
 
     existing.is_active = False

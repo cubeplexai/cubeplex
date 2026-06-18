@@ -105,7 +105,12 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
           <SandboxFilesView workspaceId={workspaceId} conversationId={conversationId} />
         )}
         {activeTab === 'browser' && (
-          <BrowserView workspaceId={workspaceId} hideHeader refreshRef={browserRefreshRef} />
+          <BrowserView
+            workspaceId={workspaceId}
+            conversationId={conversationId}
+            hideHeader
+            refreshRef={browserRefreshRef}
+          />
         )}
         {activeTab === 'terminal' && (
           <SandboxTerminalView
