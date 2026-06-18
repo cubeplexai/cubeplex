@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Conversation } from '../types'
+import type { Conversation, ConversationParticipant } from '../types'
 import type { ApiClient } from '../api'
 import {
   createConversation,
@@ -8,6 +8,8 @@ import {
   renameConversation,
   setPinConversation,
   generateConversationTitle,
+  inviteToGroup,
+  listConversationParticipants,
 } from '../api'
 
 /** Pinned first, then recency desc — same invariant the backend uses. */
@@ -26,6 +28,7 @@ export interface ConversationStore {
   error: string | null
   /** ids currently mid-pin-request — UI uses this to disable the button. */
   pinPending: Record<string, true>
+  conversationParticipants: Record<string, ConversationParticipant[]>
   fetchList(client: ApiClient): Promise<void>
   create(client: ApiClient, title?: string, opts?: { draft?: boolean }): Promise<Conversation>
   remove(client: ApiClient, id: string): Promise<void>
@@ -33,6 +36,8 @@ export interface ConversationStore {
   setPin(client: ApiClient, id: string, isPinned: boolean): Promise<void>
   generateTitle(client: ApiClient, id: string, content: string): Promise<void>
   setActive(id: string | null): void
+  inviteToGroup(client: ApiClient, conversationId: string, userIds: string[]): Promise<void>
+  fetchConversationParticipants(client: ApiClient, conversationId: string): Promise<void>
 }
 
 export const useConversationStore = create<ConversationStore>((set, get) => ({
@@ -42,6 +47,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
   isFetchingList: false,
   error: null,
   pinPending: {},
+  conversationParticipants: {},
 
   async fetchList(client: ApiClient) {
     if (get().isFetchingList) return
@@ -130,5 +136,38 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   setActive(id: string | null) {
     set({ activeId: id })
+  },
+
+  async inviteToGroup(client: ApiClient, conversationId: string, userIds: string[]) {
+    try {
+      const { participants, conversation } = await inviteToGroup(client, conversationId, userIds)
+      set((s) => ({
+        conversationParticipants: {
+          ...s.conversationParticipants,
+          [conversationId]: participants,
+        },
+        conversations: sortPinnedFirst(
+          s.conversations.map((c) => (c.id === conversationId ? conversation : c)),
+        ),
+      }))
+    } catch (err) {
+      set({ error: (err as Error).message })
+      throw err
+    }
+  },
+
+  async fetchConversationParticipants(client: ApiClient, conversationId: string) {
+    try {
+      const { items } = await listConversationParticipants(client, conversationId)
+      set((s) => ({
+        conversationParticipants: {
+          ...s.conversationParticipants,
+          [conversationId]: items,
+        },
+      }))
+    } catch (err) {
+      set({ error: (err as Error).message })
+      throw err
+    }
   },
 }))
