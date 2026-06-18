@@ -10,14 +10,16 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { ExternalLink, Power, Trash2 } from 'lucide-react'
+import { CheckCircle2, ExternalLink, FlaskConical, Power, Trash2, XCircle } from 'lucide-react'
 import {
   ApiError,
   activateSsoConnection,
   createApiClient,
   deactivateSsoConnection,
   deleteSsoConnection,
+  validateSsoConnection,
   type SsoConnectionResponse,
+  type SsoValidateCheck,
 } from '@cubebox/core'
 
 import { Badge } from '@/components/ui/badge'
@@ -47,6 +49,9 @@ export function SSOStatusPanel({ connection, orgSlug, onUpdated, onDeleted }: SS
   const client = useMemo(() => createApiClient(''), [])
   const [dialog, setDialog] = useState<DialogKind>(null)
   const [busy, setBusy] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [validateResult, setValidateResult] = useState<SsoValidateCheck[] | null>(null)
+  const [showIdpAttrs, setShowIdpAttrs] = useState(false)
 
   const status = connection.status as 'testing' | 'active' | 'inactive'
 
@@ -75,6 +80,25 @@ export function SSOStatusPanel({ connection, orgSlug, onUpdated, onDeleted }: SS
     if (!orgSlug) return
     window.open(`/login/${encodeURIComponent(orgSlug)}`, '_blank', 'noopener,noreferrer')
   }, [orgSlug])
+
+  const onValidate = useCallback(async () => {
+    setValidating(true)
+    setValidateResult(null)
+    try {
+      const res = await validateSsoConnection(client, connection.id)
+      setValidateResult(res.checks)
+      if (res.all_passed) {
+        toast.success(t('panel.validateAllPassed'))
+      } else {
+        toast.error(t('panel.validateFailed'))
+      }
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : String(err)
+      toast.error(msg)
+    } finally {
+      setValidating(false)
+    }
+  }, [client, connection.id, t])
 
   const runAction = useCallback(
     async (kind: 'activate' | 'deactivate' | 'delete') => {
@@ -133,6 +157,18 @@ export function SSOStatusPanel({ connection, orgSlug, onUpdated, onDeleted }: SS
           {t('panel.testSso')}
         </Button>
 
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void onValidate()}
+          disabled={validating}
+          data-testid="sso-validate"
+          className="gap-1.5"
+        >
+          <FlaskConical className="size-3.5" />
+          {validating ? t('panel.validating') : t('panel.validate')}
+        </Button>
+
         {status === 'testing' && (
           <Button
             type="button"
@@ -170,6 +206,44 @@ export function SSOStatusPanel({ connection, orgSlug, onUpdated, onDeleted }: SS
         )}
         <p className="ml-auto max-w-md text-xs text-muted-foreground">{t('panel.testSsoHelp')}</p>
       </div>
+
+      {validateResult !== null && (
+        <div className="border-t border-border px-5 py-4 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+            {t('panel.validateResults')}
+          </p>
+          {validateResult.map((check) => (
+            <div key={check.name} className="flex items-start gap-2 text-sm">
+              {check.passed ? (
+                <CheckCircle2 className="size-4 text-success-fg mt-0.5 shrink-0" />
+              ) : (
+                <XCircle className="size-4 text-destructive mt-0.5 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <span className="font-medium">{check.name}</span>
+                <span className="ml-2 text-muted-foreground">{check.detail}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {connection.last_idp_attributes && (
+        <div className="border-t border-border px-5 py-4">
+          <button
+            type="button"
+            onClick={() => setShowIdpAttrs((v) => !v)}
+            className="text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+          >
+            {t('panel.lastIdpAttributes')} {showIdpAttrs ? '▲' : '▼'}
+          </button>
+          {showIdpAttrs && (
+            <pre className="mt-2 overflow-x-auto rounded-md bg-muted/50 p-3 text-[11px] leading-relaxed text-muted-foreground font-mono">
+              {JSON.stringify(connection.last_idp_attributes, null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
 
       <ConfirmDialog
         open={dialog === 'activate'}

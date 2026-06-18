@@ -254,9 +254,14 @@ async def sso_oidc_callback(
     except OIDCValidationError:
         return _sso_error_redirect("sso_idp_error")
 
+    raw_claims = dict(userinfo.claims or {})
+    if conn.status == "testing":
+        conn.last_idp_attributes = raw_claims
+        await session.flush()
+
     mapping = conn.config.get("attribute_mapping", {})
     try:
-        mapped = apply_mapping(userinfo.claims or {}, mapping, protocol="oidc")
+        mapped = apply_mapping(raw_claims, mapping, protocol="oidc")
     except AttributeMappingError:
         return _sso_error_redirect("sso_attribute_mapping_error")
 
@@ -358,6 +363,10 @@ async def sso_saml_acs(
 
     raw_attrs = dict(userinfo.attributes or {})
     raw_attrs.setdefault("NameID", userinfo.name_id)
+    if conn.status == "testing":
+        conn.last_idp_attributes = raw_attrs
+        await session.flush()
+
     mapping = conn.config.get("attribute_mapping", {})
     try:
         mapped = apply_mapping(raw_attrs, mapping, protocol="saml")
