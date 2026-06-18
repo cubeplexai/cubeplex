@@ -9,6 +9,7 @@ from cubebox.repositories.conversation_participant import ConversationParticipan
 from cubebox.repositories.conversation_share import ConversationShareRepository
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
 from cubebox.repositories.external_identity import ExternalIdentityRepository
+from cubebox.repositories.im_channel_binding import IMChannelBindingRepository
 from cubebox.repositories.invite_token import InviteTokenRepository
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
@@ -43,6 +44,7 @@ __all__ = [
     "ConversationShareRepository",
     "EmbeddingJobRepository",
     "ExternalIdentityRepository",
+    "IMChannelBindingRepository",
     "InviteTokenRepository",
     "MembershipRepository",
     "MCPConnectorInstallRepository",
