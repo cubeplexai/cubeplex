@@ -183,16 +183,18 @@ async def test_oidc_callback_rejects_non_oidc_state(
         oidc_nonce="n",
     )
     request = _make_request(fake_redis)
-    with pytest.raises(HTTPException) as exc_info:
-        await sso_oidc_callback(
-            code="any",
-            state=bad_state,
-            request=request,
-            session=sso_session,
-            user_manager=None,
-        )
-    assert exc_info.value.status_code == 400
-    assert "OIDC" in exc_info.value.detail or "invalid state" in exc_info.value.detail
+    resp = await sso_oidc_callback(
+        code="any",
+        state=bad_state,
+        request=request,
+        session=sso_session,
+        user_manager=None,
+    )
+    # The callback now redirects to the frontend error page instead of
+    # raising — friendlier UX, same security outcome (the user never
+    # gets a session cookie).
+    assert resp.status_code == 302
+    assert "error=sso_invalid_request" in resp.headers["location"]
 
 
 async def test_oidc_callback_rejects_state_without_nonce(
@@ -210,15 +212,15 @@ async def test_oidc_callback_rejects_state_without_nonce(
         oidc_nonce=None,  # missing nonce
     )
     request = _make_request(fake_redis)
-    with pytest.raises(HTTPException) as exc_info:
-        await sso_oidc_callback(
-            code="any",
-            state=bad_state,
-            request=request,
-            session=sso_session,
-            user_manager=None,
-        )
-    assert exc_info.value.status_code == 400
+    resp = await sso_oidc_callback(
+        code="any",
+        state=bad_state,
+        request=request,
+        session=sso_session,
+        user_manager=None,
+    )
+    assert resp.status_code == 302
+    assert "error=sso_invalid_request" in resp.headers["location"]
 
 
 # --- SAML ACS: unsolicited rejection ---------------------------------------
@@ -262,10 +264,11 @@ async def test_saml_acs_rejects_without_sidecar_request_id(
     request._form = payload_form  # type: ignore[attr-defined]
     request.form = _form  # type: ignore[method-assign,assignment]
 
-    with pytest.raises(HTTPException) as exc_info:
-        await sso_saml_acs(request=request, session=sso_session, user_manager=None)
-    assert exc_info.value.status_code == 400
-    assert "unsolicited" in exc_info.value.detail
+    resp = await sso_saml_acs(request=request, session=sso_session, user_manager=None)
+    assert resp.status_code == 302
+    # Same error code as expired-state — the unsolicited path can't be
+    # distinguished from a state that survived past its TTL.
+    assert "error=sso_state_expired" in resp.headers["location"]
 
 
 async def test_saml_acs_rejects_non_saml_state(
@@ -287,9 +290,9 @@ async def test_saml_acs_rejects_non_saml_state(
 
     request.form = _form  # type: ignore[method-assign,assignment]
 
-    with pytest.raises(HTTPException) as exc_info:
-        await sso_saml_acs(request=request, session=sso_session, user_manager=None)
-    assert exc_info.value.status_code == 400
+    resp = await sso_saml_acs(request=request, session=sso_session, user_manager=None)
+    assert resp.status_code == 302
+    assert "error=sso_invalid_request" in resp.headers["location"]
 
 
 # --- forced SSO enforcement ------------------------------------------------
