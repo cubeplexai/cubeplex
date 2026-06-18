@@ -56,6 +56,18 @@
       "unavailable": "搜索暂不可用"
     }
   },
+  "conversation": {
+    "invite": {
+      "title": "邀请加入此对话",
+      "description": "添加工作区成员，让他们能查看并参与此对话。",
+      "button": "邀请",
+      "cancel": "取消",
+      "invite": "邀请",
+      "inviting": "邀请中…",
+      "inviteError": "邀请成员失败。",
+      "emptyMembers": "没有其他工作区成员可邀请。"
+    }
+  },
   "topics": {
     "newGroupChat": "新建群聊",
     "newConversation": "在此话题下新建对话",
