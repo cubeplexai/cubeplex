@@ -93,7 +93,11 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
         <div className="size-7 rounded overflow-hidden bg-gradient-to-br from-primary to-primary/70 text-primary-foreground flex items-center justify-center text-2xs font-semibold shrink-0">
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatarUrl} alt={displayName ?? user?.email ?? ''} className="size-full object-cover" />
+            <img
+              src={avatarUrl}
+              alt={displayName ?? user?.email ?? ''}
+              className="size-full object-cover"
+            />
           ) : (
             initials
           )}

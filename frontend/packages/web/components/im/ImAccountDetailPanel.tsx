@@ -45,6 +45,7 @@ export function ImAccountDetailPanel({
   }, [client, account.workspace_id, account.id])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load-on-mount
     void loadLinks()
   }, [loadLinks])
 

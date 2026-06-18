@@ -60,6 +60,7 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
   }, [client, wsId])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load-on-mount + poll
     void load()
     const id = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load()

@@ -142,6 +142,7 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
     >
       <div className="flex items-center gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary/10">
+          {/* eslint-disable-next-line react-hooks/static-components -- Icon is a component reference returned by getArtifactIcon, not a new component */}
           <Icon className="size-4 text-primary" />
         </div>
         <div className="min-w-0 flex-1">

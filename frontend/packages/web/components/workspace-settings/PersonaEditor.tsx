@@ -33,6 +33,7 @@ export function PersonaEditor({ wsId }: PersonaEditorProps) {
   const [nameSaving, setNameSaving] = useState(false)
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync draft when prop changes
     setNameDraft(workspaceName)
   }, [workspaceName])
 

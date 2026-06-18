@@ -76,6 +76,7 @@ export function SSOIdentitiesList({ ssoId }: SSOIdentitiesListProps) {
   )
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load-on-mount
     void load(0, true)
   }, [load])
 

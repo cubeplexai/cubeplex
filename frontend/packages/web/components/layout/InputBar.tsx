@@ -87,6 +87,7 @@ export function InputBar({
     if (pendingDraft === null) return
     const consumed = useComposerDraft.getState().consume()
     if (consumed === null) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- consume external draft on signal
     setContent(consumed)
     justConsumedRef.current = true
   }, [pendingDraft])

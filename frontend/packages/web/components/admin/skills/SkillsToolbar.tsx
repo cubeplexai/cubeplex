@@ -65,6 +65,7 @@ export function SkillsToolbar({
   const [draft, setDraft] = useState(filters.q ?? '')
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync draft to filters.q clears
     if (!filters.q) setDraft('')
   }, [filters.q])
 
