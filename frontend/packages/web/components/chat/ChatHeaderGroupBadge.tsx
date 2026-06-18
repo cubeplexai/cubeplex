@@ -55,18 +55,22 @@ export function ChatHeaderGroupBadge({
         title={t('openLabel')}
       >
         <div className="flex -space-x-1.5">
-          {shown.map((p) => (
-            <div
-              key={p.id}
-              className={cn(
-                'size-5 rounded-full bg-muted ring-1 ring-background',
-                'flex items-center justify-center text-[9px] font-medium',
-                'text-muted-foreground',
-              )}
-            >
-              {p.user_id.slice(0, 1).toUpperCase()}
-            </div>
-          ))}
+          {shown.map((p) => {
+            const label = p.display_name || p.email || p.user_id
+            return (
+              <div
+                key={p.id}
+                title={label}
+                className={cn(
+                  'size-5 rounded-full bg-muted ring-1 ring-background',
+                  'flex items-center justify-center text-[9px] font-medium',
+                  'text-muted-foreground',
+                )}
+              >
+                {label.slice(0, 1).toUpperCase()}
+              </div>
+            )
+          })}
           {overflow > 0 && (
             <div
               className={cn(

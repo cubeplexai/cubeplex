@@ -67,14 +67,32 @@ def _serialize_topic(topic: Any) -> dict[str, Any]:
     }
 
 
-def _serialize_participant(p: Any) -> dict[str, Any]:
+def _serialize_participant(p: Any, users_by_id: dict[str, Any] | None = None) -> dict[str, Any]:
+    user = (users_by_id or {}).get(p.user_id)
     return {
         "id": p.id,
         "topic_id": p.topic_id,
         "user_id": p.user_id,
         "role": p.role,
         "joined_at": utc_isoformat(p.joined_at),
+        "display_name": (user.display_name if user else None) or None,
+        "email": user.email if user else None,
     }
+
+
+async def _hydrate_participants(
+    session: AsyncSession, participants: list[Any]
+) -> list[dict[str, Any]]:
+    """Single-query enrichment of participants with the user's display_name + email."""
+    if not participants:
+        return []
+    from cubebox.models.user import User
+
+    user_ids = list({p.user_id for p in participants})
+    stmt = select(User).where(cast(Any, User.id).in_(user_ids))
+    users = (await session.execute(stmt)).scalars().all()
+    users_by_id = {u.id: u for u in users}
+    return [_serialize_participant(p, users_by_id) for p in participants]
 
 
 def _serialize_conversation(conv: Any) -> dict[str, Any]:
@@ -121,7 +139,7 @@ async def create_topic(
     return {
         "topic": _serialize_topic(topic),
         "conversation": _serialize_conversation(conv),
-        "participants": [_serialize_participant(p) for p in participants],
+        "participants": await _hydrate_participants(session, list(participants)),
     }
 
 
@@ -132,7 +150,13 @@ async def list_topics(
 ) -> dict[str, Any]:
     repo = _topic_repo(session, ctx)
     topics = await repo.list_for_sidebar()
-    return {"items": [_serialize_topic(t) for t in topics]}
+    counts = await repo.participant_counts([t.id for t in topics])
+    items: list[dict[str, Any]] = []
+    for t in topics:
+        row = _serialize_topic(t)
+        row["participant_count"] = counts.get(t.id, 0)
+        items.append(row)
+    return {"items": items}
 
 
 @router.get("/{topic_id}")
@@ -151,7 +175,7 @@ async def get_topic(
 
     return {
         "topic": _serialize_topic(topic),
-        "participants": [_serialize_participant(p) for p in participants],
+        "participants": await _hydrate_participants(session, list(participants)),
         "conversations": [_serialize_conversation(c) for c in conversations],
     }
 
@@ -227,7 +251,7 @@ async def add_participants(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     await session.commit()
-    return {"participants": [_serialize_participant(p) for p in added]}
+    return {"participants": await _hydrate_participants(session, list(added))}
 
 
 @router.delete(
@@ -316,7 +340,8 @@ async def update_participant_role(
     session.add(target)
     await session.commit()
     await session.refresh(target)
-    return {"participant": _serialize_participant(target)}
+    hydrated = await _hydrate_participants(session, [target])
+    return {"participant": hydrated[0]}
 
 
 # --- Topic-scoped conversation creation ---
@@ -337,13 +362,16 @@ async def create_topic_conversation(
     if topic is None:
         raise HTTPException(status_code=404, detail="Topic not found")
 
+    # Match the regular conversation-create flow: empty title triggers
+    # auto-title from the first message; has_messages=True puts the row
+    # in the sidebar immediately so users see it appear.
     conv = Conversation(
-        title=body.title or topic.title,
+        title=body.title or "",
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
         creator_user_id=ctx.user.id,
         topic_id=topic_id,
-        has_messages=False,
+        has_messages=True,
     )
     session.add(conv)
     await session.commit()

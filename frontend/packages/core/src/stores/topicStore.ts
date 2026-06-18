@@ -10,6 +10,7 @@ import {
   removeTopicParticipant,
   updateParticipantRole as apiUpdateParticipantRole,
   upgradeToTopic,
+  createTopicConversation,
 } from '../api'
 
 export interface TopicWithParticipants {
@@ -42,6 +43,11 @@ export interface TopicStore {
     conversationId: string,
     body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
   ): Promise<{ topicId: string; conversationId: string }>
+  createConversation(
+    client: ApiClient,
+    topicId: string,
+    title?: string,
+  ): Promise<{ conversationId: string }>
 }
 
 export const useTopicStore = create<TopicStore>((set) => ({
@@ -77,7 +83,16 @@ export const useTopicStore = create<TopicStore>((set) => ({
 
   async create(client, body) {
     const data = await createTopic(client, body)
-    set((s) => ({ topics: [data.topic, ...s.topics] }))
+    set((s) => ({
+      topics: [data.topic, ...s.topics],
+      // Seed participants so the sidebar shows the creator's avatar
+      // immediately (response includes the owner row). Without this the
+      // topic row reads "0 members" until something triggers fetchDetail.
+      topicParticipants: {
+        ...s.topicParticipants,
+        [data.topic.id]: data.participants,
+      },
+    }))
     return {
       topicId: data.topic.id,
       conversationId: data.conversation.id,
@@ -161,5 +176,16 @@ export const useTopicStore = create<TopicStore>((set) => ({
     } catch {
       /* best-effort */
     }
+  },
+
+  async createConversation(client, topicId, title) {
+    const { conversation } = await createTopicConversation(client, topicId, title)
+    // Bump the topic to the top of the sidebar (client-side) immediately.
+    set((s) => ({
+      topics: s.topics.map((t) =>
+        t.id === topicId ? { ...t, last_activity_at: new Date().toISOString() } : t,
+      ),
+    }))
+    return { conversationId: conversation.id }
   },
 }))
