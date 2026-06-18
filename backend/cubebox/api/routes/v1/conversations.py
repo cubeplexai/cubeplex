@@ -1129,6 +1129,7 @@ async def send_message(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
+        conversation_id=conversation_id,
         topic_id=_topic_id,
         is_group_chat=_is_group_chat,
         participant_ids=_participant_ids,
@@ -1496,6 +1497,7 @@ async def cancel_active_run(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
+        conversation_id=conversation_id,
     )
 
     # Cancel-on-paused dispatch — covers both the live paused_hitl case
@@ -1717,6 +1719,7 @@ async def submit_sandbox_confirm(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
+        conversation_id=conversation_id,
         topic_id=_topic_id,
         is_group_chat=_is_group_chat,
         participant_ids=_participant_ids,
@@ -1809,6 +1812,7 @@ async def submit_ask_user_answer(
         user_id=ctx.user.id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
+        conversation_id=conversation_id,
         topic_id=_topic_id,
         is_group_chat=_is_group_chat,
         participant_ids=_participant_ids,

@@ -6,9 +6,9 @@ Verifies:
 - Lease (``in_use_until``) and freshness re-checks happen inside the WHERE
   clause so a touch landing between selection and claim makes the claim a
   no-op.
-- ``get_active_by_user`` ignores transient/paused rows.
-- ``get_resumable_by_user`` returns ``running`` or ``paused`` but never
-  ``pausing``/``resuming``.
+- ``get_active_by_scope`` ignores transient/paused rows.
+- ``get_resumable_by_scope`` returns ``running`` or ``paused`` but never
+  ``pausing``/``resuming`` (unless the only candidate row IS transient).
 - ``mark_paused``/``mark_resuming``/``mark_running`` reject illegal prior
   states.
 """
@@ -105,6 +105,8 @@ async def _mk(
         in_use_until=in_use_until,
         paused_at=paused_at,
         paused_ttl_seconds=paused_ttl_seconds,
+        scope_type="user",
+        scope_id=scope["user_id"],
     )
     return await repo.add(row)
 
@@ -172,26 +174,26 @@ async def test_claim_pausing_skips_fresh_row(
     assert row.status == "running"
 
 
-async def test_get_active_by_user_ignores_pausing_and_paused(
+async def test_get_active_by_scope_ignores_pausing_and_paused(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
-    """(e) get_active_by_user only returns ``running`` rows."""
+    """(e) get_active_by_scope only returns ``running`` rows."""
     repo = _mk_repo(db_session, scope)
     await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
     await _mk(repo, scope, status="paused", idle_secs=0, ttl_seconds=3600)
 
-    assert await repo.get_active_by_user(scope["user_id"]) is None
+    assert await repo.get_active_by_scope(scope_type="user", scope_id=scope["user_id"]) is None
 
     running = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
-    found = await repo.get_active_by_user(scope["user_id"])
+    found = await repo.get_active_by_scope(scope_type="user", scope_id=scope["user_id"])
     assert found is not None
     assert found.id == running.id
 
 
-async def test_get_resumable_by_user_returns_most_recent_non_terminal(
+async def test_get_resumable_by_scope_returns_most_recent_non_terminal(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
-    """(f) get_resumable_by_user returns any non-terminal row (running, paused,
+    """(f) get_resumable_by_scope returns any non-terminal row (running, paused,
     pausing, resuming) — so a late-arriving caller sees the in-flight lifecycle
     row instead of treating it as absent and creating a duplicate sandbox.
     """
@@ -203,7 +205,7 @@ async def test_get_resumable_by_user_returns_most_recent_non_terminal(
     )
 
     # Most recent row wins regardless of which non-terminal status it carries.
-    found = await repo.get_resumable_by_user(scope["user_id"])
+    found = await repo.get_resumable_by_scope(scope_type="user", scope_id=scope["user_id"])
     assert found is not None
     assert found.id == paused.id
     assert found.status == "paused"
@@ -287,7 +289,7 @@ async def test_mark_failed_from_transient_atomic(
     assert paused.status == "paused"
 
 
-async def test_get_resumable_by_user_returns_transient_when_only_row(
+async def test_get_resumable_by_scope_returns_transient_when_only_row(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
     """A lone ``pausing`` row IS returned; the manager waits on it instead of
@@ -295,7 +297,7 @@ async def test_get_resumable_by_user_returns_transient_when_only_row(
     repo = _mk_repo(db_session, scope)
     pausing = await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
 
-    found = await repo.get_resumable_by_user(scope["user_id"])
+    found = await repo.get_resumable_by_scope(scope_type="user", scope_id=scope["user_id"])
     assert found is not None
     assert found.id == pausing.id
     assert found.status == "pausing"

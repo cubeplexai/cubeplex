@@ -120,7 +120,7 @@ async def _build(
     extra_ref_holder: dict[str, Any] = {"extra": None}
 
     agent, all_tools, channel = await rm._build_agent_for_conversation(
-        ctx=RunContext(user_id="u1", org_id="o1", workspace_id="w1"),
+        ctx=RunContext(user_id="u1", org_id="o1", workspace_id="w1", conversation_id=_CONV_ID),
         conversation_id=_CONV_ID,
         run_id=_RUN_ID,
         cp=cp,

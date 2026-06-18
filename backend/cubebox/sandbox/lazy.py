@@ -55,7 +55,10 @@ class LazySandbox(Sandbox):
 
     Args:
         manager: SandboxManager instance for get_or_create / release.
-        user_id: The user to create the sandbox for.
+        scope_type: Polymorphic scope discriminator (``'user'`` /
+            ``'conversation'`` / ``'topic'``).
+        scope_id: The corresponding scope id.
+        user_id: Audit + egress owner for the underlying sandbox row.
         org_id: Active org scope for sandbox persistence.
         workspace_id: Active workspace scope for sandbox persistence.
         workdir: Working directory (used for prompt injection before sandbox exists).
@@ -65,24 +68,23 @@ class LazySandbox(Sandbox):
         self,
         *,
         manager: SandboxManager,
+        scope_type: str,
+        scope_id: str,
         user_id: str,
         org_id: str,
         workspace_id: str,
         workdir: str = "/workspace",
         catalog: SkillCatalogService | None = None,
         op_timeout_seconds: int | None = None,
-        topic_id: str | None = None,
     ) -> None:
         self._manager = manager
+        self._scope_type = scope_type
+        self._scope_id = scope_id
         self._user_id = user_id
         self._org_id = org_id
         self._workspace_id = workspace_id
         self._workdir = workdir
         self._catalog = catalog
-        # When set, the underlying sandbox is keyed by topic (shared by all
-        # participants of the dedicated-mode topic) instead of by user. None
-        # falls back to personal scope (existing behaviour).
-        self._topic_id = topic_id
         # Sizes the in-use lease window passed to ``manager.renew_lease``. None
         # falls back to the manager's default (``sandbox.lease_seconds``).
         self._op_timeout_seconds = op_timeout_seconds
@@ -123,15 +125,16 @@ class LazySandbox(Sandbox):
                 return self._sandbox
 
             logger.info(
-                "Lazy sandbox: creating sandbox for user {} (topic_id={})",
-                self._user_id,
-                self._topic_id,
+                "Lazy sandbox: creating sandbox for scope {}/{}",
+                self._scope_type,
+                self._scope_id,
             )
             sandbox = await self._manager.get_or_create(
-                self._user_id,
+                scope_type=self._scope_type,
+                scope_id=self._scope_id,
+                user_id=self._user_id,
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
-                topic_id=self._topic_id,
             )
             if self._catalog is not None:
                 try:
@@ -159,8 +162,9 @@ class LazySandbox(Sandbox):
             async with self._lock:
                 self._sandbox = None
             logger.warning(
-                "Lazy sandbox: first attempt failed for user {}, retrying",
-                self._user_id,
+                "Lazy sandbox: first attempt failed for scope {}/{}, retrying",
+                self._scope_type,
+                self._scope_id,
             )
             sandbox = await self._ensure()
 

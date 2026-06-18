@@ -145,6 +145,7 @@ async def process_one_queue_item(
                 user_id=captured["acting_user_id"],
                 org_id=captured["org_id"],
                 workspace_id=captured["workspace_id"],
+                conversation_id=captured["conversation_id"],
                 trigger="im",
             ),
             cancel_pending_hitl=True,

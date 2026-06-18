@@ -54,9 +54,26 @@ class _FakeManager:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self._sandbox = _FakeSandbox("sbx-test-1")
 
-    async def get_or_create(self, user_id: str, *, org_id: str, workspace_id: str) -> _FakeSandbox:
+    async def get_or_create(
+        self,
+        *,
+        scope_type: str,
+        scope_id: str,
+        user_id: str,
+        org_id: str,
+        workspace_id: str,
+    ) -> _FakeSandbox:
         self.calls.append(
-            ("get_or_create", {"user_id": user_id, "org_id": org_id, "workspace_id": workspace_id})
+            (
+                "get_or_create",
+                {
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                    "user_id": user_id,
+                    "org_id": org_id,
+                    "workspace_id": workspace_id,
+                },
+            )
         )
         return self._sandbox
 

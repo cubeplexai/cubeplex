@@ -50,24 +50,26 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         *,
         user_id: str,
         image: str,
+        scope_type: str,
+        scope_id: str,
         volumes_config: dict[str, Any] | None = None,
         ttl_seconds: int = 3600,
-        topic_id: str | None = None,
     ) -> UserSandbox:
         """Insert a provisioning placeholder row BEFORE provider create.
 
         The partial unique index over ('provisioning','running') makes a
-        concurrent second reserve for the same identity raise an IntegrityError,
-        so the loser never provisions a provider sandbox. ``sandbox_id`` gets a
-        unique ``pending-<row id>`` placeholder until promote overwrites it.
+        concurrent second reserve for the same scope key raise an
+        IntegrityError, so the loser never provisions a provider sandbox.
+        ``sandbox_id`` gets a unique ``pending-<row id>`` placeholder until
+        promote overwrites it.
 
-        ``topic_id`` selects scope: ``None`` -> ``('user', user_id)``;
-        a topic id -> ``('topic', topic_id)``. The polymorphic scope key
-        feeds into the single ``uq_user_sandbox_active_scope`` partial
-        unique, ensuring at most one active row per scope tuple.
+        ``scope_type`` / ``scope_id`` is the polymorphic key: ``'user' +
+        user_id`` for personal sandboxes, ``'conversation' + conv_id`` for
+        standalone group chats, ``'topic' + topic_id`` for dedicated topic
+        sandboxes. The key feeds into the single
+        ``uq_user_sandbox_active_scope`` partial unique, ensuring at most
+        one active row per scope tuple.
         """
-        scope_type = "topic" if topic_id is not None else "user"
-        scope_id = topic_id if topic_id is not None else user_id
         record = UserSandbox(
             user_id=user_id,
             sandbox_id="",  # set below once the row id is minted
@@ -92,26 +94,25 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def delete_record(self, record_id: str) -> None:
         await self.delete(record_id)
 
-    async def get_active_by_user(self, user_id: str) -> UserSandbox | None:
-        """Return the active (provisioning OR running) PERSONAL sandbox for
-        this user — i.e. the row with ``scope_type='user'`` and
-        ``scope_id=user_id``.
+    async def get_active_by_scope(self, *, scope_type: str, scope_id: str) -> UserSandbox | None:
+        """Return the active (provisioning OR running) sandbox for this scope.
 
         ``uq_user_sandbox_active_scope`` guarantees at most one matching
-        row, so no ``order_by/limit`` "newest wins" is needed.
+        row per (org, ws, scope_type, scope_id), so no ``order_by/limit``
+        "newest wins" is needed.
         """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.scope_type == "user")
-            .where(UserSandbox.scope_id == user_id)
+            .where(UserSandbox.scope_type == scope_type)
+            .where(UserSandbox.scope_id == scope_id)
             .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_resumable_by_user(self, user_id: str) -> UserSandbox | None:
-        """Return any non-terminal PERSONAL row (``topic_id IS NULL``) for
-        reuse (running/paused/pausing/resuming).
+    async def get_resumable_by_scope(self, *, scope_type: str, scope_id: str) -> UserSandbox | None:
+        """Return any non-terminal row for this scope (running/paused/
+        pausing/resuming).
 
         Transient rows (``pausing`` / ``resuming``) ARE returned so a late
         ``get_or_create`` caller sees the in-flight lifecycle row instead of
@@ -121,8 +122,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.scope_type == "user")
-            .where(UserSandbox.scope_id == user_id)
+            .where(UserSandbox.scope_type == scope_type)
+            .where(UserSandbox.scope_id == scope_id)
             .where(UserSandbox.status.in_(("running", "paused", "pausing", "resuming")))  # type: ignore[attr-defined]
             .order_by(UserSandbox.created_at.desc())  # type: ignore[attr-defined]
             .limit(1)
@@ -130,56 +131,36 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_active_by_topic(self, topic_id: str) -> UserSandbox | None:
-        """Return the active (provisioning OR running) sandbox for this topic.
+    async def rekey(
+        self,
+        *,
+        from_scope_type: str,
+        from_scope_id: str,
+        to_scope_type: str,
+        to_scope_id: str,
+    ) -> None:
+        """Re-scope the active sandbox row in place.
 
-        ``uq_user_sandbox_active_scope`` guarantees at most one matching
-        row for ``('topic', topic_id)``. Used for the dedicated topic-
-        sandbox mode where all participants share a single sandbox keyed
-        by topic rather than per-user.
+        Used by the upgrade endpoints: when a 1:1 becomes a standalone
+        group chat (user -> conversation) or when a standalone group chat
+        becomes a topic (conversation -> topic), the same running sandbox
+        is inherited under the new scope key. One UPDATE, no file
+        movement.
         """
         stmt = (
-            self._scoped_select()
-            .where(UserSandbox.scope_type == "topic")
-            .where(UserSandbox.scope_id == topic_id)
-            .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
+            update(UserSandbox)
+            .where(
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.scope_type == from_scope_type,  # type: ignore[arg-type]
+                UserSandbox.scope_id == from_scope_id,  # type: ignore[arg-type]
+                UserSandbox.status.in_(  # type: ignore[attr-defined]
+                    ("provisioning", "running", "paused", "resuming")
+                ),
+            )
+            .values(scope_type=to_scope_type, scope_id=to_scope_id)
         )
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_resumable_by_topic(self, topic_id: str) -> UserSandbox | None:
-        """Topic-scope counterpart to :meth:`get_resumable_by_user`."""
-        stmt = (
-            self._scoped_select()
-            .where(UserSandbox.scope_type == "topic")
-            .where(UserSandbox.scope_id == topic_id)
-            .where(UserSandbox.status.in_(("running", "paused", "pausing", "resuming")))  # type: ignore[attr-defined]
-            .order_by(UserSandbox.created_at.desc())  # type: ignore[attr-defined]
-            .limit(1)
-        )
-        result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
-
-    async def get_active_for_scope(
-        self, *, user_id: str, topic_id: str | None
-    ) -> UserSandbox | None:
-        """Pick the right active-row lookup by scope.
-
-        ``topic_id`` present -> topic scope (lookup keyed by topic). ``None`` ->
-        personal scope (lookup keyed by user). Centralising the branch here
-        keeps SandboxManager callsites uniform.
-        """
-        if topic_id is not None:
-            return await self.get_active_by_topic(topic_id)
-        return await self.get_active_by_user(user_id)
-
-    async def get_resumable_for_scope(
-        self, *, user_id: str, topic_id: str | None
-    ) -> UserSandbox | None:
-        """Pick the right resumable-row lookup by scope (see get_active_for_scope)."""
-        if topic_id is not None:
-            return await self.get_resumable_by_topic(topic_id)
-        return await self.get_resumable_by_user(user_id)
+        await self.session.execute(stmt)
 
     async def get_by_sandbox_id(self, sandbox_id: str) -> UserSandbox | None:
         """Get record by OpenSandbox sandbox ID."""

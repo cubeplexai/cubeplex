@@ -43,7 +43,7 @@ def _make_rm() -> RunManager:
 
 
 def _ctx() -> RunContext:
-    return RunContext(user_id="u1", org_id="o1", workspace_id="w1")
+    return RunContext(user_id="u1", org_id="o1", workspace_id="w1", conversation_id="c1")
 
 
 def _patch_checkpointer(monkeypatch: pytest.MonkeyPatch, *, pending: Any) -> AsyncMock:

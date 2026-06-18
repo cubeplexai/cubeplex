@@ -104,9 +104,9 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
             "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
             return_value=_RESOLVED_ENVS,
         ),
-        # Stub get_active_by_user → None so we always take the create-new path
+        # Stub get_active_by_scope → None so we always take the create-new path
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
             return_value=None,
         ),
         # _RESOLVED_ENVS already has value= populated; skip DB decrypt in these
@@ -114,7 +114,9 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
         patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
     ):
         sandbox = await manager.get_or_create(
-            "u-1",
+            scope_type="user",
+            scope_id="u-1",
+            user_id="u-1",
             org_id="org-1",
             workspace_id="ws-1",
         )
@@ -212,7 +214,7 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
     with (
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
             return_value=old_record,
         ),
         patch(
@@ -226,7 +228,9 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
         # _RESOLVED_ENVS already has value= populated; skip DB decrypt.
         patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
     ):
-        backend = await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
+        backend = await manager.get_or_create(
+            scope_type="user", scope_id="u-1", user_id="u-1", org_id="org-1", workspace_id="ws-1"
+        )
 
     # run env must have been set on the returned backend
     from cubebox.sandbox.opensandbox import OpenSandbox
@@ -272,11 +276,13 @@ async def test_create_without_exchange_host_skips_injection(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
             return_value=None,
         ),
     ):
-        backend = await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
+        backend = await manager.get_or_create(
+            scope_type="user", scope_id="u-1", user_id="u-1", org_id="org-1", workspace_id="ws-1"
+        )
 
     assert "env" not in create_kwargs, "Without exchange_host, env must NOT be passed"
     # After Task 6: the create call always carries a NetworkPolicy so admin
@@ -355,7 +361,7 @@ async def test_unhealthy_sandbox_revokes_refs(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
             return_value=old_record,
         ),
         patch(
@@ -367,7 +373,9 @@ async def test_unhealthy_sandbox_revokes_refs(
             return_value=resolved_envs,
         ),
     ):
-        await manager.get_or_create("u-1", org_id="org-1", workspace_id="ws-1")
+        await manager.get_or_create(
+            scope_type="user", scope_id="u-1", user_id="u-1", org_id="org-1", workspace_id="ws-1"
+        )
 
     # The old ref must now be revoked
     async with session_factory() as check_session:
@@ -450,7 +458,7 @@ async def test_touch_active_extends_egress_ref_expiry(
 
     with (
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_user",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=record,
         ),
         patch(
@@ -458,7 +466,9 @@ async def test_touch_active_extends_egress_ref_expiry(
             return_value=None,
         ),
     ):
-        found = await manager.touch_active("u-1", org_id="org-1", workspace_id="ws-1")
+        found = await manager.touch_active(
+            scope_type="user", scope_id="u-1", org_id="org-1", workspace_id="ws-1"
+        )
 
     assert found is True
     ref = await _get_ref(session_factory, ref_hash)

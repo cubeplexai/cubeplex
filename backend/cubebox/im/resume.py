@@ -140,7 +140,12 @@ async def resume_paused_run(
         RunContext,
     )
 
-    ctx = RunContext(user_id=user_id, org_id=org_id, workspace_id=workspace_id)
+    ctx = RunContext(
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+    )
 
     try:
         await run_manager.resume_run_with_answer(
