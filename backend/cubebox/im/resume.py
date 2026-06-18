@@ -100,13 +100,30 @@ async def resume_paused_run(
         return False
     conversation_id, user_id, org_id, workspace_id, topic_id, is_group_chat = resolved
     if topic_id is not None or is_group_chat:
-        logger.warning(
-            "[resume] refusing IM resume for topic / group-chat conversation {} "
-            "(run_id={}) — topic-aware IM resume not implemented (v1 scope)",
-            conversation_id,
-            run_id,
-        )
-        return False
+        im_bound = False
+        if topic_id is not None:
+            from sqlalchemy import select as _select
+
+            from cubebox.db.engine import async_session_maker as _sm
+            from cubebox.models.im_channel_binding import IMChannelBinding
+
+            async with _sm() as _sess:
+                im_bound = (
+                    await _sess.execute(
+                        _select(IMChannelBinding).where(
+                            IMChannelBinding.topic_id == topic_id,  # type: ignore[arg-type]
+                        )
+                    )
+                ).scalar_one_or_none() is not None
+
+        if not im_bound:
+            logger.warning(
+                "[resume] refusing IM resume for topic / group-chat conversation {} "
+                "(run_id={}) — topic-aware IM resume not implemented (v1 scope)",
+                conversation_id,
+                run_id,
+            )
+            return False
 
     answer: Any
     if input_kind == "sandbox_confirm":
