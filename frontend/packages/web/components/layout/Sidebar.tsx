@@ -30,6 +30,7 @@ import { VscMcp } from 'react-icons/vsc'
 import {
   Box,
   CalendarClock,
+  Layers,
   type LucideIcon,
   MoreHorizontal,
   PanelLeftClose,
@@ -37,7 +38,7 @@ import {
   Pencil,
   Pin,
   PinOff,
-  Plus,
+  SquarePen,
   Settings,
   Sparkles,
   Trash2,
@@ -51,6 +52,44 @@ function buildClient(currentWsId: string | null): ApiClient {
   const client = createApiClient('')
   if (currentWsId) client.setWorkspaceId(currentWsId)
   return client
+}
+
+const SIDEBAR_AVATAR_MAX = 3
+
+function GroupChatAvatars({ convoId }: { convoId: string }): React.ReactElement | null {
+  const participants = useConversationStore((s) => s.conversationParticipants[convoId])
+  if (!participants || participants.length === 0) return null
+  const shown = participants.slice(0, SIDEBAR_AVATAR_MAX)
+  const overflow = participants.length - shown.length
+  return (
+    <div className="flex -space-x-1 shrink-0">
+      {shown.map((p) => {
+        const label = p.display_name || p.email || p.user_id
+        return (
+          <div
+            key={p.id}
+            title={label}
+            className={cn(
+              'size-4 rounded-full bg-muted ring-1 ring-card',
+              'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
+            )}
+          >
+            {label.slice(0, 1).toUpperCase()}
+          </div>
+        )
+      })}
+      {overflow > 0 && (
+        <div
+          className={cn(
+            'size-4 rounded-full bg-muted ring-1 ring-card',
+            'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
+          )}
+        >
+          +{overflow}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function ConversationRow({
@@ -68,6 +107,9 @@ function ConversationRow({
   const tShell = useTranslations('shellLayout')
   const { remove, rename, setPin, setActive, pinPending } = useConversationStore()
   const isPinPending = !!pinPending[convo.id]
+  const hasGroupParticipants = useConversationStore(
+    (s) => (s.conversationParticipants[convo.id]?.length ?? 0) > 0,
+  )
 
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(convo.title)
@@ -123,7 +165,9 @@ function ConversationRow({
       <li>
         <div className={baseRowClasses}>
           {convo.is_pinned && <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />}
-          {showGroupIcon && <Users className="size-3 shrink-0 text-muted-foreground" />}
+          {showGroupIcon && !hasGroupParticipants && (
+            <Users className="size-3 shrink-0 text-muted-foreground" />
+          )}
           <input
             ref={inputRef}
             value={draft}
@@ -152,10 +196,13 @@ function ConversationRow({
           <div className="absolute left-0 top-[22%] bottom-[22%] w-0.5 bg-primary rounded-r" />
         )}
         {convo.is_pinned && <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />}
-        {showGroupIcon && <Users className="size-3 shrink-0 text-muted-foreground" />}
+        {showGroupIcon && !hasGroupParticipants && (
+          <Users className="size-3 shrink-0 text-muted-foreground" />
+        )}
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
           {convo.title || tSidebar('untitledChat')}
         </div>
+        {showGroupIcon && <GroupChatAvatars convoId={convo.id} />}
         <DropdownMenu>
           <DropdownMenuTrigger
             onClick={(e) => {
@@ -163,7 +210,7 @@ function ConversationRow({
               e.stopPropagation()
             }}
             className={
-              'p-1 rounded hover:bg-accent text-muted-foreground ' +
+              'p-1 rounded cursor-pointer hover:bg-accent text-muted-foreground ' +
               'hover:text-foreground shrink-0 opacity-0 ' +
               'group-hover:opacity-100 data-[popup-open]:opacity-100 ' +
               'transition-opacity'
@@ -354,20 +401,23 @@ function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEn
     return Number.isNaN(t) ? 0 : t
   }
 
+  // Pinned conversations float out of their topic so the user can find
+  // them at the top regardless of which topic they live under. The topic
+  // still appears below with the rest of its (unpinned) conversations.
   const byTopic = new Map<string, Conversation[]>()
-  const standalone: Conversation[] = []
+  const flat: Conversation[] = []
   for (const c of conversations) {
-    if (c.topic_id) {
+    if (c.topic_id && !c.is_pinned) {
       const list = byTopic.get(c.topic_id) ?? []
       list.push(c)
       byTopic.set(c.topic_id, list)
     } else {
-      standalone.push(c)
+      flat.push(c)
     }
   }
 
   const entries: MixedEntry[] = []
-  for (const c of standalone) {
+  for (const c of flat) {
     const kind = c.is_group_chat ? 'group-chat' : 'conversation'
     entries.push({ kind, conversation: c, sortKey: ts(c.updated_at) })
   }
@@ -381,7 +431,14 @@ function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEn
     const sortKey = Math.max(ts(topic.last_activity_at), newest)
     entries.push({ kind: 'topic', topic, conversations: convs, sortKey })
   }
-  entries.sort((a, b) => b.sortKey - a.sortKey)
+  // Pinned entries float to the top, sorted among themselves by sortKey;
+  // unpinned follow with the same sort.
+  entries.sort((a, b) => {
+    const aPinned = a.kind === 'topic' ? a.topic.is_pinned : a.conversation.is_pinned
+    const bPinned = b.kind === 'topic' ? b.topic.is_pinned : b.conversation.is_pinned
+    if (aPinned !== bPinned) return aPinned ? -1 : 1
+    return b.sortKey - a.sortKey
+  })
   return entries
 }
 
@@ -490,7 +547,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
                 collapsed ? 'justify-center' : 'gap-2',
               )}
             >
-              <Plus className="size-3.5 shrink-0" />
+              <SquarePen className="size-3.5 shrink-0" />
               {!collapsed && <span className="whitespace-nowrap">{tSidebar('newChat')}</span>}
             </Link>
           )
@@ -511,14 +568,14 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
                   'flex w-full items-center px-2 py-1.5 rounded transition-colors duration-fast text-xs text-muted-foreground hover:text-foreground hover:bg-accent',
                   collapsed ? 'justify-center' : 'gap-2',
                 )}
-                aria-label={t('newGroupChat')}
+                aria-label={t('newTopic')}
               >
-                <Users className="size-3.5 shrink-0" />
-                {!collapsed && <span className="whitespace-nowrap">{t('newGroupChat')}</span>}
+                <Layers className="size-3.5 shrink-0" />
+                {!collapsed && <span className="whitespace-nowrap">{t('newTopic')}</span>}
               </button>
             )
             return collapsed ? (
-              <RailTooltip label={t('newGroupChat')}>{newGroupBtn}</RailTooltip>
+              <RailTooltip label={t('newTopic')}>{newGroupBtn}</RailTooltip>
             ) : (
               newGroupBtn
             )

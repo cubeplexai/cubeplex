@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { AlertTriangle, X } from 'lucide-react'
+import { AlertTriangle, Info, X } from 'lucide-react'
 import {
   createApiClient,
   useAuthStore,
@@ -143,6 +143,16 @@ export function CreateGroupChatDialog({
           </div>
 
           <div className="mt-4 flex flex-col gap-4">
+            <div
+              className={cn(
+                'flex items-start gap-2 rounded-md border border-info-border',
+                'bg-info-surface px-2.5 py-2 text-xs text-info-fg leading-relaxed',
+              )}
+            >
+              <Info className="size-3.5 shrink-0 mt-0.5" />
+              <span>{tDialog('topicIntro')}</span>
+            </div>
+
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="group-chat-title">{tDialog('titleLabel')}</Label>
               <Input

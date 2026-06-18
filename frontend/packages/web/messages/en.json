@@ -30,7 +30,7 @@
     "requestNewLink": "Request a new link"
   },
   "sidebar": {
-    "newChat": "New chat",
+    "newChat": "New Chat",
     "recentChats": "Recent chats",
     "untitledChat": "New conversation",
     "renameConversation": "Rename",
@@ -49,8 +49,8 @@
     "expandSidebar": "Expand sidebar",
     "noRecentChats": "No conversations yet",
     "search": {
-      "open": "Search chats",
-      "placeholder": "Search chats…",
+      "open": "Search Chats",
+      "placeholder": "Search Chats…",
       "loading": "Searching…",
       "noMatches": "No matches",
       "unavailable": "Search unavailable"
@@ -77,6 +77,7 @@
   },
   "topics": {
     "newGroupChat": "New Group Chat",
+    "newTopic": "New Topic",
     "newConversation": "New conversation in this topic",
     "members": "{count} members",
     "owner": "Owner",
@@ -90,7 +91,8 @@
     "sandboxCreatorDescription": "Reuse the sandbox the current conversation has been using. Files and environment carry over.",
     "sandboxWarning": "Other members' operations will execute in your environment.",
     "createDialog": {
-      "title": "New Group Chat",
+      "title": "New Topic",
+      "topicIntro": "A topic groups related conversations. Members you invite become topic members, and can see and join every conversation under it — both the first one created here and any new ones added later.",
       "titleLabel": "Title",
       "titlePlaceholder": "Project sync, design review…",
       "membersLabel": "Invite members",
@@ -122,7 +124,7 @@
       "openLabel": "Invite members",
       "promoteLabel": "Promote to topic",
       "title": "Promote conversation to topic",
-      "irreversibleWarning": "Promoting to a topic can't be undone. Current participants become topic members, and anyone you invite to the topic later will see this conversation's full message history.",
+      "irreversibleWarning": "Promoting to a topic can't be undone. Current participants become topic members, and will be able to see and join every conversation under it — this one and any new ones created later.",
       "titleLabel": "Title",
       "titlePlaceholder": "Project sync, design review…",
       "membersLabel": "Invite members",

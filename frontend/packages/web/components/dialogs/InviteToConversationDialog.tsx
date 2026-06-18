@@ -154,10 +154,10 @@ export function InviteToConversationDialog({
                 )}
               >
                 <Info className="size-3.5 shrink-0 mt-0.5" />
-                <ul className="flex flex-col gap-1 list-disc list-inside marker:text-info-fg/70">
-                  <li>{t('noteMemory')}</li>
-                  <li>{t('noteSandbox')}</li>
-                </ul>
+                <div className="flex flex-col gap-0.5">
+                  <p>{t('noteMemory')}</p>
+                  <p>{t('noteSandbox')}</p>
+                </div>
               </div>
             )}
 

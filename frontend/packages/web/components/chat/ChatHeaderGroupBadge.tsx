@@ -12,7 +12,7 @@ interface ChatHeaderGroupBadgeProps {
   topicId: string
 }
 
-const AVATAR_MAX = 3
+const AVATAR_MAX = 5
 
 export function ChatHeaderGroupBadge({
   wsId,
