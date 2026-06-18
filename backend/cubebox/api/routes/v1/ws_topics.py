@@ -131,6 +131,16 @@ async def create_topic(
         has_messages=False,
     )
     session.add(conv)
+    await session.flush()
+
+    # Seed the creator as P(conv) so their first message doesn't have to
+    # auto-join itself; mirrors create_topic_conversation.
+    cp_repo = ConversationParticipantRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    await cp_repo.ensure_participant(conv.id, ctx.user.id)
 
     if body.member_user_ids:
         await repo.add_participants(topic.id, body.member_user_ids)

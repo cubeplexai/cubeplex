@@ -44,7 +44,6 @@ class RunContext:
     trigger: str = "interactive"
     topic_id: str | None = None
     is_group_chat: bool = False
-    participant_ids: list[str] | None = None
     sender_display_name: str | None = None
     sandbox_mode: str | None = None
     topic_creator_user_id: str | None = None
