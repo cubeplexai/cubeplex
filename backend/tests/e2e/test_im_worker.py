@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -22,6 +22,12 @@ from cubebox.models.im_connector import (
 )
 from cubebox.streams.run_manager import RunContext
 from tests.e2e.conftest import _build_database_url
+from tests.e2e.im_fixtures import (
+    im_cleanup,
+    im_seed_account,
+    im_seed_org_ws_user,
+    im_seed_stub_credential,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -39,55 +45,25 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     try:
         async with maker() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO organizations (id, name, slug, created_at)"
-                    " VALUES (:id, :id, :id, NOW()) ON CONFLICT (id) DO NOTHING"
-                ),
-                {"id": _ORG_ID},
+            await im_seed_org_ws_user(
+                session, org_id=_ORG_ID, ws_id=_WS_ID, user_id=_USER_ID
             )
-            await session.execute(
-                text(
-                    "INSERT INTO workspaces (id, org_id, name, created_at)"
-                    " VALUES (:id, :org, :id, NOW()) ON CONFLICT (id) DO NOTHING"
-                ),
-                {"id": _WS_ID, "org": _ORG_ID},
+            await im_seed_stub_credential(
+                session,
+                credential_id=_CRED_ID,
+                org_id=_ORG_ID,
+                user_id=_USER_ID,
+                name="feishu:T-wkrA",
             )
-            await session.execute(
-                text(
-                    "INSERT INTO users (id, email, hashed_password, is_active,"
-                    " is_superuser, is_verified, created_at, language)"
-                    " VALUES (:id, :email, 'x', true, false, false, NOW(), 'en')"
-                    " ON CONFLICT (id) DO NOTHING"
-                ),
-                {"id": _USER_ID, "email": f"{_USER_ID}@example.com"},
-            )
-            await session.execute(
-                text(
-                    "INSERT INTO credentials (id, org_id, kind, name, value_encrypted,"
-                    " cred_metadata, created_by_user_id, created_at, updated_at)"
-                    " VALUES (:id, :org, 'im_bot', 'feishu:T-wkrA', '\\x00'::bytea,"
-                    " '{}'::jsonb, :uid, NOW(), NOW())"
-                    " ON CONFLICT (id) DO NOTHING"
-                ),
-                {"id": _CRED_ID, "org": _ORG_ID, "uid": _USER_ID},
-            )
-            await session.execute(
-                text(
-                    "INSERT INTO im_connector_accounts (id, org_id, workspace_id,"
-                    " platform, external_account_id, acting_user_id, credential_id,"
-                    " delivery_mode, enabled, config, created_at, updated_at)"
-                    " VALUES (:id, :org, :ws, 'feishu', 'cli_wkrA', :uid, :cred,"
-                    " 'long_connection', true, '{}'::jsonb, NOW(), NOW())"
-                    " ON CONFLICT (id) DO NOTHING"
-                ),
-                {
-                    "id": _ACCOUNT_ID,
-                    "org": _ORG_ID,
-                    "ws": _WS_ID,
-                    "uid": _USER_ID,
-                    "cred": _CRED_ID,
-                },
+            await im_seed_account(
+                session,
+                account_id=_ACCOUNT_ID,
+                org_id=_ORG_ID,
+                ws_id=_WS_ID,
+                user_id=_USER_ID,
+                credential_id=_CRED_ID,
+                external_account_id="cli_wkrA",
+                delivery_mode="long_connection",
             )
             await session.commit()
             account = (
@@ -99,21 +75,11 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
             yield maker, account
         finally:
             async with maker() as session:
-                await session.execute(
-                    text("DELETE FROM im_run_queue WHERE account_id = :id"),
-                    {"id": _ACCOUNT_ID},
-                )
-                await session.execute(
-                    text("DELETE FROM im_webhook_receipts WHERE account_id = :id"),
-                    {"id": _ACCOUNT_ID},
-                )
-                await session.execute(
-                    text("DELETE FROM im_thread_links WHERE account_id = :id"),
-                    {"id": _ACCOUNT_ID},
-                )
-                await session.execute(
-                    text("DELETE FROM conversations WHERE workspace_id = :id"),
-                    {"id": _WS_ID},
+                await im_cleanup(
+                    session,
+                    account_ids=[_ACCOUNT_ID],
+                    ws_ids=[_WS_ID],
+                    cleanup_conversations_in_ws=True,
                 )
                 await session.commit()
     finally:
@@ -131,6 +97,7 @@ class _FakeRunManager:
         content: str,
         attachments: list[str] | None,
         ctx: RunContext,
+        cancel_pending_hitl: bool = False,
     ) -> str:
         self.calls.append(
             {
@@ -140,6 +107,7 @@ class _FakeRunManager:
                 "org_id": ctx.org_id,
                 "workspace_id": ctx.workspace_id,
                 "trigger": ctx.trigger,
+                "cancel_pending_hitl": cancel_pending_hitl,
             }
         )
         return f"run-fake-{len(self.calls)}"
@@ -253,6 +221,7 @@ async def test_worker_leaves_row_for_reclaim_on_start_run_failure(
             content: str,
             attachments: list[str] | None,
             ctx: RunContext,
+            cancel_pending_hitl: bool = False,
         ) -> str:
             raise RuntimeError("LLM exploded")
 

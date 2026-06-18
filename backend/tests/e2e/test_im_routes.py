@@ -17,7 +17,7 @@ def _unique_app_id(tag: str) -> str:
 pytestmark = pytest.mark.asyncio
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_open_id")
+@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_workspace_connect_list_delete_feishu_account(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -28,8 +28,10 @@ async def test_workspace_connect_list_delete_feishu_account(
     we still exercise the credential store + the IMConnectorService end to end.
     """
 
-    async def _fake_hydrate(app_id: str, app_secret: str, domain: str) -> str:
-        return "ou_hydrated_bot"
+    async def _fake_hydrate(
+        app_id: str, app_secret: str, domain: str
+    ) -> tuple[str, str, str]:
+        return "ou_hydrated_bot", "", ""
 
     mock_hydrate.side_effect = _fake_hydrate
 
@@ -71,7 +73,7 @@ async def test_workspace_connect_list_delete_feishu_account(
     assert not any(a["id"] == account["id"] for a in listed_after.json()["accounts"])
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_open_id")
+@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_admin_can_list_and_toggle_enabled(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -80,8 +82,10 @@ async def test_admin_can_list_and_toggle_enabled(
     drive both the workspace POST/DELETE and the admin list/enable/disable
     routes from the same client."""
 
-    async def _fake_hydrate(app_id: str, app_secret: str, domain: str) -> str:
-        return "ou_hydrated_admin"
+    async def _fake_hydrate(
+        app_id: str, app_secret: str, domain: str
+    ) -> tuple[str, str, str]:
+        return "ou_hydrated_admin", "", ""
 
     mock_hydrate.side_effect = _fake_hydrate
 
@@ -120,7 +124,7 @@ async def test_admin_can_list_and_toggle_enabled(
     await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_open_id")
+@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_workspace_delete_refuses_account_from_sibling_workspace(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -132,8 +136,10 @@ async def test_workspace_delete_refuses_account_from_sibling_workspace(
     sibling workspace's connector inside their org.
     """
 
-    async def _fake_hydrate(app_id: str, app_secret: str, domain: str) -> str:
-        return "ou_isolation"
+    async def _fake_hydrate(
+        app_id: str, app_secret: str, domain: str
+    ) -> tuple[str, str, str]:
+        return "ou_isolation", "", ""
 
     mock_hydrate.side_effect = _fake_hydrate
 

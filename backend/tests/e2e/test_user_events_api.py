@@ -34,7 +34,7 @@ from tests.e2e.conftest import (
     _lifespan_context,
     _login_and_attach,
 )
-from tests.e2e.helpers import csrf_cookie_name
+from tests.e2e.helpers import await_until, csrf_cookie_name
 
 # ---------------------------------------------------------------------------
 # Fixture: async client (ASGI transport) for non-SSE tests
@@ -186,7 +186,15 @@ async def test_sse_receives_live_event(
     received: dict | None = None
 
     async def fire_event() -> None:
-        await asyncio.sleep(0.3)  # let stream open and subscribe
+        # Wait until the SSE subscriber has registered with the bus instead of
+        # sleeping past a guessed-at delay. The publish path drops events with
+        # no subscribers, so a too-early publish (or a too-short sleep in CI)
+        # would silently break this test.
+        await await_until(
+            lambda: len(bus._subscribers.get(user_id, set())) > 0,
+            timeout=5.0,
+            message=f"SSE subscriber for user {user_id} never registered with bus",
+        )
         async with pub_session_maker() as session:
             repo = UserEventRepository(session)
             svc = UserEventService(repo=repo, bus=bus)

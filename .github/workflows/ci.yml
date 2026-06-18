@@ -218,7 +218,12 @@ jobs:
       - name: Alembic migrate
         run: make backend-migrate
 
-      - name: Pytest e2e (in-process TestClient)
+      - name: Pytest e2e (fast lane — excludes real_llm)
+        # The 10 `@pytest.mark.real_llm` tests (prompt-cache discipline,
+        # journey middleware, send_message billing) run in nightly-real-llm.yml
+        # against the live LLM gateway. Keeping them off the PR path saves
+        # ~5-10× wall-clock per push and prevents vendor-rate-limit flakes
+        # from blocking unrelated merges.
         run: make backend-test-e2e
 
       - name: Cleanup leftover test sandboxes
