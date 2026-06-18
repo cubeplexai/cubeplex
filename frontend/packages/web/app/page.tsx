@@ -13,7 +13,10 @@ export default async function RootRedirectPage() {
     headers: { cookie: cookieHeader },
     cache: 'no-store',
   })
-  if (!res.ok) redirect('/login')
+  // 401 = stale cookie (user deleted, DB reset, etc.). Bounce to /login with
+  // a ?next= so proxy.ts knows not to redirect back to / (see proxy.ts for
+  // the cookie-vs-?next disambiguation).
+  if (!res.ok) redirect('/login?next=/')
   const workspaces = (await res.json()) as { id: string }[]
   if (workspaces.length === 0) redirect('/workspaces')
   redirect(`/w/${workspaces[0].id}`)

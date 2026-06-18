@@ -19,6 +19,14 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
   if (hasAuth && PUBLIC_PATHS.includes(pathname)) {
+    // A ?next= param means an upstream server-side guard (page.tsx) or the
+    // client-side onUnauthorized listener has already determined the cookie
+    // is stale and explicitly routed the user here. Without this escape
+    // hatch, a stale cookie + /login redirect creates an infinite
+    // /login → / → 401 → /login loop because the proxy can't validate the
+    // cookie against the backend.
+    const hasNext = request.nextUrl.searchParams.has('next')
+    if (hasNext) return NextResponse.next()
     const url = request.nextUrl.clone()
     url.pathname = '/'
     url.search = ''
