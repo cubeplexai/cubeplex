@@ -21,6 +21,7 @@ from cubebox.agents.schemas import AgentEvent
 from cubebox.api.exceptions import InvalidInputError
 from cubebox.api.schemas.conversations import InviteToGroupRequest
 from cubebox.api.schemas.ws_topics import UpgradeToTopicRequest
+from cubebox.api.serializers import serialize_conversation as _serialize_conversation
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.cache import RedisHandle, redis_dep
@@ -67,18 +68,6 @@ REPLAY_CHUNK_SIZE = 1000
 router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
 
 logger = logging.getLogger(__name__)
-
-
-def _serialize_conversation(c: Conversation) -> dict[str, object]:
-    return {
-        "id": c.id,
-        "title": c.title,
-        "is_pinned": c.is_pinned,
-        "topic_id": c.topic_id,
-        "is_group_chat": c.is_group_chat,
-        "created_at": utc_isoformat(c.created_at),
-        "updated_at": utc_isoformat(c.updated_at),
-    }
 
 
 async def _resolve_topic_run_context(
@@ -131,7 +120,11 @@ async def _require_topic_owner_if_topic(
     ctx: RequestContext,
     conversation: Conversation,
 ) -> None:
-    """For topic conversations, raise 403 unless the caller is a topic owner."""
+    """For topic conversations, raise 403 unless the caller is a topic owner.
+
+    Stricter than :func:`_require_topic_owner_or_creator_if_topic`: this is
+    used by surfaces (pin/share) that are owner-only by spec.
+    """
     if conversation.topic_id is None:
         return
     from cubebox.repositories.topic import TopicRepository
@@ -147,6 +140,40 @@ async def _require_topic_owner_if_topic(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only topic owner can modify this conversation",
+        )
+
+
+async def _require_topic_owner_or_creator_if_topic(
+    session: AsyncSession,
+    ctx: RequestContext,
+    conversation: Conversation,
+) -> None:
+    """Rename / delete on a topic conv: ``C(conv) ∨ O(topic)``.
+
+    Per the access matrix, the conversation creator can rename / delete
+    their own conv even inside a topic; topic owners can do the same to
+    any conv under their topic. Personal / standalone-group conversations
+    are always C(conv)-gated by the route itself (the repo scope ensures
+    only the creator can read the row), so this helper short-circuits on
+    ``topic_id is None``.
+    """
+    if conversation.topic_id is None:
+        return
+    if conversation.creator_user_id == ctx.user.id:
+        return
+    from cubebox.repositories.topic import TopicRepository
+
+    topic_repo = TopicRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    participant = await topic_repo.get_participant(conversation.topic_id, ctx.user.id)
+    if participant is None or participant.role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only conversation creator or topic owner can modify this conversation",
         )
 
 
@@ -368,7 +395,8 @@ async def update_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
-    await _require_topic_owner_if_topic(session, ctx, existing)
+    # Rename: C(conv) ∨ O(topic) per spec § Access matrix.
+    await _require_topic_owner_or_creator_if_topic(session, ctx, existing)
     conversation = await repo.update_title(conversation_id, title)
     if not conversation:
         raise HTTPException(
@@ -439,7 +467,8 @@ async def delete_conversation(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation {conversation_id} not found",
         )
-    await _require_topic_owner_if_topic(session, ctx, existing)
+    # Delete: C(conv) ∨ O(topic) per spec § Access matrix.
+    await _require_topic_owner_or_creator_if_topic(session, ctx, existing)
     deleted = await repo.delete_conversation(conversation_id)
     if not deleted:
         raise HTTPException(
@@ -525,7 +554,6 @@ async def upgrade_conversation_to_topic(
     # Re-read into our working object after the lock so subsequent
     # mutations apply to the freshly-locked row.
     conversation = locked
-    was_group_chat = bool(conversation.is_group_chat)
     creator_user_id = conversation.creator_user_id
 
     if await _conversation_has_external_binding(session, conversation_id):
@@ -566,25 +594,21 @@ async def upgrade_conversation_to_topic(
     # Sandbox rekey: standalone group chat (or personal) -> topic. The
     # running sandbox row (if any) is re-scoped in place under the topic
     # so subsequent operations from any participant hit the same row.
+    # A single UPDATE that matches either the personal user-scope row OR
+    # the standalone-group-chat conversation-scope row avoids a race with
+    # a concurrent invite-to-group: even if the sandbox flips to
+    # conversation-scope between our ``was_group_chat`` read and this
+    # UPDATE, the OR-branch still catches the moved row.
     sbx_repo = UserSandboxRepository(
         session,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
     )
-    if was_group_chat:
-        await sbx_repo.rekey(
-            from_scope_type="conversation",
-            from_scope_id=conversation_id,
-            to_scope_type="topic",
-            to_scope_id=topic.id,
-        )
-    else:
-        await sbx_repo.rekey(
-            from_scope_type="user",
-            from_scope_id=creator_user_id,
-            to_scope_type="topic",
-            to_scope_id=topic.id,
-        )
+    await sbx_repo.rekey_to_topic(
+        creator_user_id=creator_user_id,
+        conversation_id=conversation_id,
+        topic_id=topic.id,
+    )
 
     await session.commit()
     await session.refresh(conversation)
@@ -598,23 +622,37 @@ async def upgrade_conversation_to_topic(
 
 
 def _serialize_conv_participant(
-    p: ConversationParticipant, users_by_id: dict[str, Any] | None = None
+    p: ConversationParticipant,
+    users_by_id: dict[str, Any] | None = None,
+    *,
+    include_email: bool = False,
 ) -> dict[str, Any]:
     user = (users_by_id or {}).get(p.user_id)
-    return {
+    row: dict[str, Any] = {
         "id": p.id,
         "conversation_id": p.conversation_id,
         "user_id": p.user_id,
         "joined_at": utc_isoformat(p.joined_at),
         "display_name": (user.display_name if user else None) or None,
-        "email": user.email if user else None,
     }
+    if include_email:
+        row["email"] = user.email if user else None
+    return row
 
 
 async def _hydrate_conv_participants(
-    session: AsyncSession, participants: list[ConversationParticipant]
+    session: AsyncSession,
+    participants: list[ConversationParticipant],
+    *,
+    include_email: bool = False,
 ) -> list[dict[str, Any]]:
-    """Single-query enrichment of conv participants with display_name + email."""
+    """Single-query enrichment of conv participants with display_name (+ optional email).
+
+    ``include_email`` defaults to ``False`` — the GET /participants
+    endpoint does not need to expose email to non-self callers. The
+    invite-response path opts in because the caller just selected those
+    user ids and already saw their emails.
+    """
     if not participants:
         return []
     from sqlalchemy import select as _select
@@ -625,13 +663,18 @@ async def _hydrate_conv_participants(
     stmt = _select(User).where(User.id.in_(user_ids))  # type: ignore[attr-defined]
     users = (await session.execute(stmt)).scalars().all()
     users_by_id = {u.id: u for u in users}
-    return [_serialize_conv_participant(p, users_by_id) for p in participants]
+    return [
+        _serialize_conv_participant(p, users_by_id, include_email=include_email)
+        for p in participants
+    ]
 
 
 async def _hydrate_conv_participants_by_uids(
     session: AsyncSession,
     conversation_id: str,
     user_ids: list[str],
+    *,
+    include_email: bool = False,
 ) -> list[dict[str, Any]]:
     """Load + hydrate ConversationParticipant rows for the given users."""
     if not user_ids:
@@ -647,7 +690,7 @@ async def _hydrate_conv_participants_by_uids(
         .order_by(ConversationParticipant.joined_at)  # type: ignore[arg-type]
     )
     rows = list((await session.execute(stmt)).scalars().all())
-    return await _hydrate_conv_participants(session, rows)
+    return await _hydrate_conv_participants(session, rows, include_email=include_email)
 
 
 @router.post(
@@ -698,7 +741,7 @@ async def invite_to_conversation(
                 detail=f"User {uid} is not a member of this workspace",
             )
 
-    added = await cp_repo.add_many(conversation_id, body.user_ids)
+    await cp_repo.add_many(conversation_id, body.user_ids)
 
     # Sandbox rekey on the 1 -> 2 transition. Only applies to personal
     # (non-topic) conversations: topic conversations have their sandbox
@@ -720,8 +763,15 @@ async def invite_to_conversation(
 
     await session.commit()
     await session.refresh(conversation)
+    # Return the FULL participant list (not just newly inserted rows).
+    # The frontend store replaces ``conversationParticipants[id]`` with
+    # this response, so returning only the delta would drop the auto-
+    # seeded creator on the 1 -> 2 transition.
+    all_user_ids = await cp_repo.list_user_ids(conversation_id)
     return {
-        "participants": await _hydrate_conv_participants(session, added),
+        "participants": await _hydrate_conv_participants_by_uids(
+            session, conversation_id, all_user_ids
+        ),
         "conversation": _serialize_conversation(conversation),
     }
 
@@ -1062,6 +1112,12 @@ async def send_message(
     # Use a short-lived session for the pre-check only.
     # Do NOT use Depends(get_session) here — it would hold a pooled connection
     # for the entire SSE stream duration, causing connection leaks on cancellation.
+    #
+    # The auto-join MUST run after all request-level validation (content,
+    # preset, attachments), otherwise a malicious caller with topic-only
+    # access could repeatedly hit /messages with a bogus preset and have
+    # the partial commit elevate them to P(conv) — which the spec gates
+    # HITL on. The validations below all raise without touching DB state.
     async with async_session_maker() as session:
         conv_repo = ConversationRepository(
             session,
@@ -1075,22 +1131,6 @@ async def send_message(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Conversation {conversation_id} not found",
             )
-        # Auto-join: anyone with view access (P(topic) ∨ P(conv)) who sends
-        # a message becomes a conv participant atomically with the send.
-        cp_repo = ConversationParticipantRepository(
-            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
-        )
-        await cp_repo.ensure_participant(conversation.id, ctx.user.id)
-        await session.commit()
-        await session.refresh(conversation)
-
-    (
-        _topic_id,
-        _is_group_chat,
-        _sender_display_name,
-        _sandbox_mode,
-        _topic_creator_user_id,
-    ) = await _resolve_topic_run_context(conversation, ctx)
 
     if not (request_obj.content and request_obj.content.strip()) and not request_obj.attachments:
         raise InvalidInputError(
@@ -1281,6 +1321,38 @@ async def send_message(
     # right status_code; the registered handler maps them to HTTP responses.
     resolve_preset(_snap, request_obj.preset_label)
 
+    # Auto-join is committed AFTER request-level validation passes.
+    # Anyone with view access (P(topic) ∨ P(conv)) who sends a valid
+    # message becomes a conv participant atomically with the send. A
+    # request that fails validation rolls back the participant insert
+    # (this block never runs), so a bogus-preset hammer can't elevate
+    # a topic-only caller to P(conv).
+    async with async_session_maker() as autojoin_session:
+        cp_repo = ConversationParticipantRepository(
+            autojoin_session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+        )
+        await cp_repo.ensure_participant(conversation.id, ctx.user.id)
+        await autojoin_session.commit()
+        # Re-fetch the conversation row in this session so
+        # ``is_group_chat`` reflects the just-committed update.
+        refreshed_conv_repo = ConversationRepository(
+            autojoin_session,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user.id,
+        )
+        refreshed = await refreshed_conv_repo.get_by_id(conversation.id)
+        if refreshed is not None:
+            conversation = refreshed
+
+    (
+        _topic_id,
+        _is_group_chat,
+        _sender_display_name,
+        _sandbox_mode,
+        _topic_creator_user_id,
+    ) = await _resolve_topic_run_context(conversation, ctx)
+
     if request_obj.attachments:
         from cubebox.repositories import AttachmentRepository
 
@@ -1322,6 +1394,7 @@ async def send_message(
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,
+        conversation_creator_user_id=conversation.creator_user_id,
     )
 
     try:
@@ -1684,6 +1757,7 @@ async def cancel_active_run(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
         conversation_id=conversation_id,
+        conversation_creator_user_id=conversation.creator_user_id,
     )
 
     # Cancel-on-paused dispatch — covers both the live paused_hitl case
@@ -1929,6 +2003,7 @@ async def submit_sandbox_confirm(
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,
+        conversation_creator_user_id=conversation.creator_user_id,
     )
     try:
         new_run_id = await run_manager.resume_run_with_answer(
@@ -2033,6 +2108,7 @@ async def submit_ask_user_answer(
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,
+        conversation_creator_user_id=conversation.creator_user_id,
     )
     try:
         new_run_id = await run_manager.resume_run_with_answer(

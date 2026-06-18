@@ -19,6 +19,7 @@ from cubebox.api.schemas.ws_topics import (
     TopicParticipantPatchRequest,
     TopicPatchRequest,
 )
+from cubebox.api.serializers import serialize_conversation
 from cubebox.auth.context import RequestContext
 from cubebox.auth.dependencies import require_member
 from cubebox.db.session import get_session
@@ -99,15 +100,7 @@ async def _hydrate_participants(
 
 
 def _serialize_conversation(conv: Any) -> dict[str, Any]:
-    return {
-        "id": conv.id,
-        "title": conv.title,
-        "topic_id": conv.topic_id,
-        "is_pinned": conv.is_pinned,
-        "is_group_chat": conv.is_group_chat,
-        "created_at": utc_isoformat(conv.created_at),
-        "updated_at": utc_isoformat(conv.updated_at),
-    }
+    return serialize_conversation(conv)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

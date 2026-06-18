@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, select, text, update
+from sqlalchemy import CursorResult, and_, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.user_sandbox import UserSandbox
@@ -129,6 +129,46 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def rekey_to_topic(
+        self,
+        *,
+        creator_user_id: str,
+        conversation_id: str,
+        topic_id: str,
+    ) -> None:
+        """Re-scope the active sandbox row for an upgrade-to-topic in one shot.
+
+        Matches EITHER the personal user-scope row (``('user', creator)``)
+        OR the standalone-group-chat conversation-scope row
+        (``('conversation', conv_id)``). The two-branch UPDATE closes the
+        race where ``upgrade_conversation_to_topic`` reads
+        ``is_group_chat=False`` then a concurrent ``invite-to-group``
+        flips the sandbox to conversation-scope before the upgrade's
+        rekey runs — separate UPDATEs would miss the moved row.
+        """
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                or_(
+                    and_(
+                        UserSandbox.scope_type == "user",  # type: ignore[arg-type]
+                        UserSandbox.scope_id == creator_user_id,  # type: ignore[arg-type]
+                    ),
+                    and_(
+                        UserSandbox.scope_type == "conversation",  # type: ignore[arg-type]
+                        UserSandbox.scope_id == conversation_id,  # type: ignore[arg-type]
+                    ),
+                ),
+                UserSandbox.status.in_(  # type: ignore[attr-defined]
+                    ("provisioning", "running", "paused", "resuming")
+                ),
+            )
+            .values(scope_type="topic", scope_id=topic_id)
+        )
+        await self.session.execute(stmt)
 
     async def rekey(
         self,

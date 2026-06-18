@@ -58,14 +58,20 @@ class ConversationParticipantRepository(ScopedRepository[ConversationParticipant
             await self.session.rollback()
             return None
 
-        count_stmt = select(func.count()).where(
-            cast(Any, ConversationParticipant.conversation_id) == conversation_id,
+        # Compute the new count inside the same UPDATE statement so two
+        # concurrent inserts cannot interleave with a stale snapshot
+        # count from a separate SELECT. The scalar subquery sees every
+        # row visible to the UPDATE's MVCC snapshot, including the row
+        # we just flushed.
+        count_subq = (
+            select(func.count() > 1)
+            .where(cast(Any, ConversationParticipant.conversation_id) == conversation_id)
+            .scalar_subquery()
         )
-        count = (await self.session.execute(count_stmt)).scalar_one()
         await self.session.execute(
             update(Conversation)
             .where(cast(Any, Conversation.id) == conversation_id)
-            .values(is_group_chat=count > 1)
+            .values(is_group_chat=count_subq)
         )
         return row
 

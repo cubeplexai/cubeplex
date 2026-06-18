@@ -165,7 +165,12 @@ async def test_invite_idempotent(
         json={"user_ids": [member_uid]},
     )
     assert second.status_code == 201, second.text
-    assert second.json()["participants"] == []
+    # Returns the FULL participant list so the frontend store can replace
+    # its cached entry without losing the auto-seeded creator. Re-inviting
+    # the same user is idempotent at the DB level (no duplicate rows) but
+    # the response still echoes the unchanged membership.
+    second_user_ids = {p["user_id"] for p in second.json()["participants"]}
+    assert member_uid in second_user_ids
 
     parts = await admin_c.get(f"/api/v1/ws/{ws_id}/conversations/{conv_id}/participants")
     assert parts.status_code == 200, parts.text
