@@ -28,8 +28,8 @@ from cubebox.models.organization_membership import OrganizationMembership
 from cubebox.models.sso_connection import SSOConnection
 from cubebox.models.user import User
 from cubebox.models.workspace import Workspace
-from cubebox.sso.attribute_mapping import apply_mapping
-from cubebox.sso.identity import SSOLoginRejected, resolve_identity
+from cubebox.sso.attribute_mapping import AttributeMappingError, apply_mapping
+from cubebox.sso.identity import SSOLoginRejected, SSOProvisioningDenied, resolve_identity
 from cubebox.sso.oidc import (
     OIDCValidationError,
     build_authorize_url,
@@ -219,11 +219,11 @@ async def sso_oidc_callback(
     store = _get_state_store(request)
     try:
         payload = await store.consume(state)
-    except (SSOStateInvalid, SSOStateExpired) as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    except (SSOStateInvalid, SSOStateExpired):
+        return _sso_error_redirect("sso_state_expired")
 
     if payload.sso_connection_id is None or payload.nonce is None or payload.protocol != "oidc":
-        raise HTTPException(400, detail="invalid state payload for OIDC callback")
+        return _sso_error_redirect("sso_invalid_request")
 
     conn = (
         await session.execute(
@@ -233,11 +233,11 @@ async def sso_oidc_callback(
         )
     ).scalar_one_or_none()
     if conn is None or conn.status not in {"active", "testing"}:
-        raise HTTPException(400, detail="sso_connection_inactive")
+        return _sso_error_redirect("sso_connection_inactive")
 
     verifier = await store.consume_pkce(state)
     if verifier is None:
-        raise HTTPException(400, detail="pkce_verifier_missing")
+        return _sso_error_redirect("sso_invalid_request")
 
     client_secret = await _get_client_secret(request, session, conn)
     base = _base_url()
@@ -251,11 +251,14 @@ async def sso_oidc_callback(
             client_secret=client_secret,
             expected_nonce=payload.nonce,
         )
-    except OIDCValidationError as exc:
-        raise HTTPException(400, detail=f"id_token_validation_failed: {exc}") from exc
+    except OIDCValidationError:
+        return _sso_error_redirect("sso_idp_error")
 
     mapping = conn.config.get("attribute_mapping", {})
-    mapped = apply_mapping(userinfo.claims or {}, mapping, protocol="oidc")
+    try:
+        mapped = apply_mapping(userinfo.claims or {}, mapping, protocol="oidc")
+    except AttributeMappingError:
+        return _sso_error_redirect("sso_attribute_mapping_error")
 
     # Enterprise OIDC SSO: the ID token is JWS-signed by the enterprise IdP.
     # The email in a signed ID token is as trustworthy as a signed SAML assertion
@@ -272,12 +275,15 @@ async def sso_oidc_callback(
             external_id=mapped.id,
             external_email=mapped.email,
             email_verified=True,
+            avatar_url=mapped.avatar,
             claims=mapped.raw,
             sso_connection=conn,
             request=request,
         )
     except SSOLoginRejected as exc:
-        raise HTTPException(403, detail=exc.code) from exc
+        return _sso_error_redirect(exc.code)
+    except SSOProvisioningDenied:
+        return _sso_error_redirect("sso_provisioning_denied")
 
     await _enforce_forced_sso_for_user(session, result.user, allowed_org_id=conn.org_id)
     return await _login_and_redirect(request, session, result.user)
@@ -294,21 +300,21 @@ async def sso_saml_acs(
     relay_state = str(form.get("RelayState", ""))
 
     if not saml_response or not relay_state:
-        raise HTTPException(400, detail="missing SAMLResponse or RelayState")
+        return _sso_error_redirect("sso_invalid_request")
 
     store = _get_state_store(request)
     try:
         payload = await store.consume(relay_state)
-    except (SSOStateInvalid, SSOStateExpired) as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    except (SSOStateInvalid, SSOStateExpired):
+        return _sso_error_redirect("sso_state_expired")
 
     if payload.sso_connection_id is None or payload.protocol != "saml":
-        raise HTTPException(400, detail="invalid state payload for SAML callback")
+        return _sso_error_redirect("sso_invalid_request")
 
     expected_request_id = await store.consume_saml_request_id(relay_state)
     if expected_request_id is None:
         # Either expired, or this is an unsolicited / IdP-initiated assertion.
-        raise HTTPException(400, detail="unsolicited_saml_response_rejected")
+        return _sso_error_redirect("sso_state_expired")
 
     conn = (
         await session.execute(
@@ -318,7 +324,7 @@ async def sso_saml_acs(
         )
     ).scalar_one_or_none()
     if conn is None or conn.status not in {"active", "testing"}:
-        raise HTTPException(400, detail="sso_connection_inactive")
+        return _sso_error_redirect("sso_connection_inactive")
 
     base = _base_url()
     org = (
@@ -347,13 +353,16 @@ async def sso_saml_acs(
             request_data=request_data,
             expected_in_response_to=expected_request_id,
         )
-    except ValueError as exc:
-        raise HTTPException(400, detail=str(exc)) from exc
+    except ValueError:
+        return _sso_error_redirect("sso_idp_error")
 
     raw_attrs = dict(userinfo.attributes or {})
     raw_attrs.setdefault("NameID", userinfo.name_id)
     mapping = conn.config.get("attribute_mapping", {})
-    mapped = apply_mapping(raw_attrs, mapping, protocol="saml")
+    try:
+        mapped = apply_mapping(raw_attrs, mapping, protocol="saml")
+    except AttributeMappingError:
+        return _sso_error_redirect("sso_attribute_mapping_error")
 
     # SAML email only counts as verified when the mapped email VALUE came from
     # a signed assertion attribute (not the NameID fallback) AND the resolved
@@ -384,12 +393,15 @@ async def sso_saml_acs(
             external_id=mapped.id,
             external_email=mapped.email,
             email_verified=saml_email_verified,
+            avatar_url=mapped.avatar,
             claims=mapped.raw,
             sso_connection=conn,
             request=request,
         )
     except SSOLoginRejected as exc:
-        raise HTTPException(403, detail=exc.code) from exc
+        return _sso_error_redirect(exc.code)
+    except SSOProvisioningDenied:
+        return _sso_error_redirect("sso_provisioning_denied")
 
     await _enforce_forced_sso_for_user(session, result.user, allowed_org_id=conn.org_id)
     return await _login_and_redirect(request, session, result.user)
@@ -526,3 +538,15 @@ async def _login_and_redirect(request: Request, session: AsyncSession, user: Use
         for v in values:
             redirect_resp.headers.append(header_name, v)
     return redirect_resp
+
+
+def _sso_error_redirect(error_code: str) -> RedirectResponse:
+    """Redirect to the frontend SSO error page instead of returning raw JSON.
+
+    The frontend /sso/callback page reads ?error= and renders a human-friendly
+    message with a "Back to login" link.
+    """
+    from urllib.parse import quote
+
+    base = _base_url()
+    return RedirectResponse(url=f"{base}/sso/callback?error={quote(error_code)}", status_code=302)

@@ -19,6 +19,7 @@ OIDC_DEFAULTS: dict[str, str] = {
     "id": "sub",
     "email": "email",
     "name": "name",
+    "avatar": "picture",
 }
 
 
@@ -27,6 +28,7 @@ class MappedAttributes:
     id: str
     email: str
     name: str | None
+    avatar: str | None
     raw: dict[str, Any]
 
 
@@ -64,7 +66,8 @@ def apply_mapping(
     ext_id = _resolve("id", required=True)
     email = _resolve("email", required=True)
     name = _resolve("name", required=False)
+    avatar = _resolve("avatar", required=False)
     assert ext_id is not None
     assert email is not None
 
-    return MappedAttributes(id=ext_id, email=email, name=name, raw=raw_attributes)
+    return MappedAttributes(id=ext_id, email=email, name=name, avatar=avatar, raw=raw_attributes)
