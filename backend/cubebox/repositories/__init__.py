@@ -5,6 +5,7 @@ from cubebox.repositories.attachment import AttachmentRepository
 from cubebox.repositories.billing import BillingRepository
 from cubebox.repositories.conversation import ConversationRepository
 from cubebox.repositories.conversation_chunk import ConversationChunkRepository
+from cubebox.repositories.conversation_participant import ConversationParticipantRepository
 from cubebox.repositories.conversation_share import ConversationShareRepository
 from cubebox.repositories.embedding_job import EmbeddingJobRepository
 from cubebox.repositories.invite_token import InviteTokenRepository
@@ -35,6 +36,7 @@ __all__ = [
     "ArtifactVersionRepository",
     "BillingRepository",
     "ConversationChunkRepository",
+    "ConversationParticipantRepository",
     "ConversationRepository",
     "ConversationShareRepository",
     "EmbeddingJobRepository",
