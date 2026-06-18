@@ -47,6 +47,10 @@ class RunContext:
     sender_display_name: str | None = None
     sandbox_mode: str | None = None
     topic_creator_user_id: str | None = None
+    # The conversation creator — owns the underlying PVC for standalone
+    # group chats, so non-creator participants don't accidentally drive a
+    # row keyed under the wrong user_id.
+    conversation_creator_user_id: str | None = None
 
 
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
@@ -3023,28 +3027,40 @@ class RunManager:
                 pass
 
     @staticmethod
-    def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str]:
-        """Resolve the polymorphic ``(scope_type, scope_id)`` for sandbox lookup.
+    def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str, str]:
+        """Resolve ``(scope_type, scope_id, owner_user_id)`` for sandbox lookup.
 
         Gated on ``sandbox_mode``, NOT participant count: a solo topic
         with ``sandbox_mode='dedicated'`` must still resolve to the
         topic-keyed sandbox, otherwise the sandbox flips identity the
         instant a second participant joins and earlier files are
         stranded in the creator's personal sandbox.
+
+        The third element is the user id that owns the underlying PVC
+        + acts as the audit subject on ``user_sandboxes.user_id`` — for
+        shared sandboxes (conversation/topic/creator-mode) this is the
+        creator, NOT the requesting actor, so a non-creator participant's
+        ops do not land in their own personal PVC.
         """
         if ctx.topic_id is None:
             if ctx.is_group_chat:
-                return "conversation", ctx.conversation_id
-            return "user", ctx.user_id
+                # Standalone group chat: shared sandbox owned by the
+                # conversation creator (not the message sender). Fall back
+                # to ctx.user_id if the creator id wasn't plumbed through
+                # so legacy callers keep working.
+                owner = ctx.conversation_creator_user_id or ctx.user_id
+                return "conversation", ctx.conversation_id, owner
+            return "user", ctx.user_id, ctx.user_id
         # Default an unspecified mode to "creator" so upgraded-from-1:1
         # topics (sandbox_mode left null at upgrade time) still share one
         # sandbox across participants. The matching default lives in
         # ws_sandbox._resolve_sandbox_scope so panel and run agree.
         effective_mode = ctx.sandbox_mode or "creator"
+        topic_owner = ctx.topic_creator_user_id or ctx.user_id
         if effective_mode == "dedicated":
-            return "topic", ctx.topic_id
+            return "topic", ctx.topic_id, topic_owner
         # creator-mode (and the implicit default): topic creator's user scope.
-        return "user", ctx.topic_creator_user_id or ctx.user_id
+        return "user", topic_owner, topic_owner
 
     async def _execute_run(
         self,
@@ -3219,12 +3235,16 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
-                        sandbox_scope_type, sandbox_scope_id = self._resolve_sandbox_target(ctx)
+                        (
+                            sandbox_scope_type,
+                            sandbox_scope_id,
+                            sandbox_owner_user_id,
+                        ) = self._resolve_sandbox_target(ctx)
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
                             scope_type=sandbox_scope_type,
                             scope_id=sandbox_scope_id,
-                            user_id=ctx.user_id,
+                            user_id=sandbox_owner_user_id,
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
@@ -3763,12 +3783,16 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
-                        sandbox_scope_type, sandbox_scope_id = self._resolve_sandbox_target(ctx)
+                        (
+                            sandbox_scope_type,
+                            sandbox_scope_id,
+                            sandbox_owner_user_id,
+                        ) = self._resolve_sandbox_target(ctx)
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
                             scope_type=sandbox_scope_type,
                             scope_id=sandbox_scope_id,
-                            user_id=ctx.user_id,
+                            user_id=sandbox_owner_user_id,
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),

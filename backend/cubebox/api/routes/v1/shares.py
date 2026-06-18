@@ -200,12 +200,32 @@ async def list_conversation_shares(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[dict[str, object]]:
     repo = ConversationShareRepository(session)
-    # Topic owners see every share for the conversation (any participant
-    # may have minted one). Non-topic conversations keep the per-creator
-    # filter — 1:1 behavior unchanged.
+    # Visibility rules:
+    # - Topic owner of the conv's topic → all shares on the conv.
+    # - Standalone group chat participant (no topic, but user is a
+    #   conversation_participant) → all shares on the conv. This matches
+    #   the conv-participant view: each member should see shares minted
+    #   by other members in the same group chat.
+    # - Otherwise → only the caller's own shares (1:1 behavior unchanged).
     visible_to: str | None = user.id
     if await _is_topic_owner_of_conversation(session, conversation_id, user.id):
         visible_to = None
+    else:
+        from typing import cast as _cast
+
+        from cubebox.models.conversation_participant import ConversationParticipant
+
+        conv_stmt = select(_cast(Any, Conversation.topic_id)).where(
+            _cast(Any, Conversation.id) == conversation_id,
+        )
+        topic_id = (await session.execute(conv_stmt)).scalar_one_or_none()
+        if topic_id is None:
+            part_stmt = select(_cast(Any, ConversationParticipant.user_id)).where(
+                _cast(Any, ConversationParticipant.conversation_id) == conversation_id,
+                _cast(Any, ConversationParticipant.user_id) == user.id,
+            )
+            if (await session.execute(part_stmt)).scalar_one_or_none() is not None:
+                visible_to = None
     shares = await repo.list_by_conversation(conversation_id, visible_to)
     return [_serialize(s) for s in shares]
 

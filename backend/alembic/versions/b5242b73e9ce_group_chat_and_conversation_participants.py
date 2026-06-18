@@ -84,6 +84,19 @@ def upgrade() -> None:
     op.create_foreign_key('fk_conversations_topic_id_topics', 'conversations', 'topics', ['topic_id'], ['id'])
     op.add_column('user_sandboxes', sa.Column('scope_type', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=False, server_default='user'))
     op.add_column('user_sandboxes', sa.Column('scope_id', sqlmodel.sql.sqltypes.AutoString(length=20), nullable=False, server_default=''))
+    # Backfill: every pre-existing user_sandboxes row was keyed by
+    # ``user_id`` only. The new polymorphic scope is ``('user', user_id)``
+    # — without this UPDATE the existing rows get ``scope_id=''`` from
+    # the column default and become unreachable via
+    # ``get_active_by_scope('user', real_user_id)``.
+    op.execute(
+        "UPDATE user_sandboxes SET scope_id = user_id "
+        "WHERE scope_id = '' OR scope_id IS NULL"
+    )
+    op.execute(
+        "UPDATE user_sandboxes SET scope_type = 'user' "
+        "WHERE scope_type = '' OR scope_type IS NULL"
+    )
     op.alter_column('user_sandboxes', 'scope_type', server_default=None)
     op.alter_column('user_sandboxes', 'scope_id', server_default=None)
     op.drop_index('uq_user_sandbox_active', table_name='user_sandboxes', postgresql_where=sa.text("status IN ('provisioning','running')"), sqlite_where=sa.text("status IN ('provisioning','running')"))
