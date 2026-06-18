@@ -12,9 +12,9 @@ import {
   type WsMember,
 } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { WorkspaceMemberPicker } from '@/components/dialogs/WorkspaceMemberPicker'
 import { cn } from '@/lib/utils'
 
 interface MemberPanelProps {
@@ -137,7 +137,10 @@ export function MemberPanel({ wsId, topicId, onClose }: MemberPanelProps): React
   }
 
   return (
-    <div className="flex flex-col gap-3 w-72" data-testid="member-panel">
+    <div
+      className="flex flex-col gap-3 w-full min-w-72 max-w-md mx-auto"
+      data-testid="member-panel"
+    >
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium">{tPanel('title', { count: participants.length })}</div>
         {isOwner && !invitePickerOpen && (
@@ -173,33 +176,12 @@ export function MemberPanel({ wsId, topicId, onClose }: MemberPanelProps): React
               <X className="size-3" />
             </button>
           </div>
-          {invitable.length === 0 ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">{tPanel('inviteEmpty')}</p>
-          ) : (
-            <ScrollArea className="max-h-40">
-              <ul className="py-0.5">
-                {invitable.map((m) => {
-                  const checked = selected.has(m.user_id)
-                  return (
-                    <li key={m.user_id}>
-                      <label
-                        className={cn(
-                          'flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs',
-                          'hover:bg-accent/50',
-                        )}
-                      >
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={() => toggleInvite(m.user_id)}
-                        />
-                        <span className="flex-1 truncate">{m.display_name || m.email}</span>
-                      </label>
-                    </li>
-                  )
-                })}
-              </ul>
-            </ScrollArea>
-          )}
+          <WorkspaceMemberPicker
+            invitable={invitable}
+            selected={selected}
+            onToggle={toggleInvite}
+            emptyText={tPanel('inviteEmpty')}
+          />
           <div className="flex items-center justify-end gap-2">
             <Button
               type="button"
