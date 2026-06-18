@@ -59,7 +59,9 @@ async def test_volume_claim_name_carries_workspace(
     factory, fake_create = session_factory
     mgr = SandboxManager(factory, mock_encryption_backend)
     monkeypatch.setattr(mgr, "_volume_enabled", True)
-    await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
+    await mgr.get_or_create(
+        scope_type="user", scope_id="user-1", user_id="user-1", org_id="org-1", workspace_id="ws-A"
+    )
     vols = fake_create.last_volumes
     assert vols is not None
     claim = vols[0].pvc.claim_name
@@ -72,9 +74,13 @@ async def test_same_user_two_workspaces_get_distinct_claims(
     factory, fake_create = session_factory
     mgr = SandboxManager(factory, mock_encryption_backend)
     monkeypatch.setattr(mgr, "_volume_enabled", True)
-    await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
+    await mgr.get_or_create(
+        scope_type="user", scope_id="user-1", user_id="user-1", org_id="org-1", workspace_id="ws-A"
+    )
     claim_a = fake_create.last_volumes[0].pvc.claim_name
-    await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-B")
+    await mgr.get_or_create(
+        scope_type="user", scope_id="user-1", user_id="user-1", org_id="org-1", workspace_id="ws-B"
+    )
     claim_b = fake_create.last_volumes[0].pvc.claim_name
     assert claim_a != claim_b
 
@@ -82,7 +88,9 @@ async def test_same_user_two_workspaces_get_distinct_claims(
 async def test_create_reserves_before_provider_create(session_factory, mock_encryption_backend):
     factory, fake_create = session_factory
     mgr = SandboxManager(factory, mock_encryption_backend)
-    await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
+    await mgr.get_or_create(
+        scope_type="user", scope_id="user-1", user_id="user-1", org_id="org-1", workspace_id="ws-A"
+    )
     assert fake_create.calls == 1
 
 
@@ -108,7 +116,13 @@ async def test_pre_create_setup_failure_releases_reservation(
     monkeypatch.setattr(SandboxEnvInjector, "build", boom)
 
     with pytest.raises(RuntimeError, match="malformed vault row"):
-        await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
+        await mgr.get_or_create(
+            scope_type="user",
+            scope_id="user-1",
+            user_id="user-1",
+            org_id="org-1",
+            workspace_id="ws-A",
+        )
 
     # The provisioning row must be gone, or the next reserve() would raise
     # IntegrityError on the partial unique index.
@@ -153,7 +167,13 @@ async def test_reconnect_failure_after_create_keeps_running_row(
     from cubebox.sandbox.base import SandboxError
 
     with pytest.raises(SandboxError, match="reconnect failed"):
-        await mgr.get_or_create("user-1", org_id="org-1", workspace_id="ws-A")
+        await mgr.get_or_create(
+            scope_type="user",
+            scope_id="user-1",
+            user_id="user-1",
+            org_id="org-1",
+            workspace_id="ws-A",
+        )
 
     # Row must remain `running` — not deleted — so the reaper / next reuse
     # owns its lifecycle.

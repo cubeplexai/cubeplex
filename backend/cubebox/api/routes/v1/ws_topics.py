@@ -396,7 +396,7 @@ async def get_topic_sandbox_status(
         raise HTTPException(status_code=404, detail="Topic not found")
 
     sandbox_repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    row = await sandbox_repo.get_active_by_topic(topic_id)
+    row = await sandbox_repo.get_active_by_scope(scope_type="topic", scope_id=topic_id)
     if row is None:
         return SandboxStatusOut(
             status="absent",

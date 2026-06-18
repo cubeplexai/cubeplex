@@ -40,6 +40,7 @@ class RunContext:
     user_id: str
     org_id: str
     workspace_id: str
+    conversation_id: str
     trigger: str = "interactive"
     topic_id: str | None = None
     is_group_chat: bool = False
@@ -3023,8 +3024,8 @@ class RunManager:
                 pass
 
     @staticmethod
-    def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str | None]:
-        """Resolve ``(user_id, topic_id)`` for sandbox lookup.
+    def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str]:
+        """Resolve the polymorphic ``(scope_type, scope_id)`` for sandbox lookup.
 
         Gated on ``sandbox_mode``, NOT participant count: a solo topic
         with ``sandbox_mode='dedicated'`` must still resolve to the
@@ -3033,17 +3034,18 @@ class RunManager:
         stranded in the creator's personal sandbox.
         """
         if ctx.topic_id is None:
-            return ctx.user_id, None
+            if ctx.is_group_chat:
+                return "conversation", ctx.conversation_id
+            return "user", ctx.user_id
         # Default an unspecified mode to "creator" so upgraded-from-1:1
         # topics (sandbox_mode left null at upgrade time) still share one
         # sandbox across participants. The matching default lives in
         # ws_sandbox._resolve_sandbox_scope so panel and run agree.
         effective_mode = ctx.sandbox_mode or "creator"
         if effective_mode == "dedicated":
-            # Audit owner is the topic creator; the topic_id keys the row.
-            return (ctx.topic_creator_user_id or ctx.user_id, ctx.topic_id)
-        # creator-mode (and the implicit default):
-        return ctx.topic_creator_user_id or ctx.user_id, None
+            return "topic", ctx.topic_id
+        # creator-mode (and the implicit default): topic creator's user scope.
+        return "user", ctx.topic_creator_user_id or ctx.user_id
 
     async def _execute_run(
         self,
@@ -3218,11 +3220,12 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
-                        sandbox_user_id, sandbox_topic_id = self._resolve_sandbox_target(ctx)
+                        sandbox_scope_type, sandbox_scope_id = self._resolve_sandbox_target(ctx)
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
-                            user_id=sandbox_user_id,
-                            topic_id=sandbox_topic_id,
+                            scope_type=sandbox_scope_type,
+                            scope_id=sandbox_scope_id,
+                            user_id=ctx.user_id,
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
@@ -3761,11 +3764,12 @@ class RunManager:
                         from cubebox.sandbox.manager import get_sandbox_manager
 
                         sandbox_manager = get_sandbox_manager()
-                        sandbox_user_id, sandbox_topic_id = self._resolve_sandbox_target(ctx)
+                        sandbox_scope_type, sandbox_scope_id = self._resolve_sandbox_target(ctx)
                         sandbox = LazySandbox(
                             manager=sandbox_manager,
-                            user_id=sandbox_user_id,
-                            topic_id=sandbox_topic_id,
+                            scope_type=sandbox_scope_type,
+                            scope_id=sandbox_scope_id,
+                            user_id=ctx.user_id,
                             org_id=ctx.org_id,
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),

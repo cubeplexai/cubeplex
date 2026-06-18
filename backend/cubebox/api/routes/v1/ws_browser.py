@@ -55,7 +55,9 @@ async def get_live_view(
     manager = get_sandbox_manager()
     try:
         sandbox = await manager.get_or_create(
-            ctx.user.id,
+            scope_type="user",
+            scope_id=ctx.user.id,
+            user_id=ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
@@ -110,4 +112,9 @@ async def keepalive(
     Touches only the *existing* sandbox — never provisions one — so a dead/reaped
     sandbox isn't silently re-created (and kept alive) behind a stale iframe."""
     manager = get_sandbox_manager()
-    await manager.touch_active(ctx.user.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    await manager.touch_active(
+        scope_type="user",
+        scope_id=ctx.user.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )

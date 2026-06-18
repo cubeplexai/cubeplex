@@ -43,33 +43,84 @@ from cubebox.utils.time import utc_isoformat
 router = APIRouter(prefix="/ws/{workspace_id}/sandbox", tags=["ws-sandbox"])
 
 
+async def _assert_personal_or_conv_access(
+    session: AsyncSession,
+    ctx: RequestContext,
+    conversation_id: str,
+    creator_user_id: str,
+) -> None:
+    """Caller must be the creator OR a conversation_participant. 404 on miss."""
+    if creator_user_id == ctx.user.id:
+        return
+    from cubebox.models.conversation_participant import ConversationParticipant
+
+    cp_stmt = select(cast(Any, ConversationParticipant.user_id)).where(
+        cast(Any, ConversationParticipant.conversation_id) == conversation_id,
+        cast(Any, ConversationParticipant.user_id) == ctx.user.id,
+    )
+    if (await session.execute(cp_stmt)).scalar_one_or_none() is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
+
+
+async def _assert_topic_access(
+    session: AsyncSession,
+    ctx: RequestContext,
+    topic_id: str,
+    conversation_id: str,
+) -> None:
+    """Caller must be a topic_participant OR a conversation_participant.
+
+    Covers two routes into a topic conv: full topic membership AND the
+    single-conv invite case where only the specific conversation has the
+    user as an actor.
+    """
+    from cubebox.models.conversation_participant import ConversationParticipant
+    from cubebox.models.topic import TopicParticipant
+
+    tp_stmt = select(cast(Any, TopicParticipant.user_id)).where(
+        cast(Any, TopicParticipant.topic_id) == topic_id,
+        cast(Any, TopicParticipant.user_id) == ctx.user.id,
+    )
+    if (await session.execute(tp_stmt)).scalar_one_or_none() is not None:
+        return
+    cp_stmt = select(cast(Any, ConversationParticipant.user_id)).where(
+        cast(Any, ConversationParticipant.conversation_id) == conversation_id,
+        cast(Any, ConversationParticipant.user_id) == ctx.user.id,
+    )
+    if (await session.execute(cp_stmt)).scalar_one_or_none() is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
+
+
 async def _resolve_sandbox_scope(
     session: AsyncSession, ctx: RequestContext, conversation_id: str | None
-) -> tuple[str, str | None]:
-    """Resolve the ``(user_id, topic_id)`` keys for a sandbox lookup.
+) -> tuple[str, str]:
+    """Resolve the polymorphic ``(scope_type, scope_id)`` for a sandbox lookup.
 
     Frontend hooks pass the current conversation id so we can route file /
     terminal / download / preview / status requests to whichever sandbox
     the agent is actually using:
 
-    - personal conversation (no topic): caller's personal sandbox
-    - dedicated-mode topic: keyed by ``(workspace_id, topic_id)``, audited
-      to the topic creator
-    - creator-mode topic: the topic creator's personal sandbox (every
-      participant sees the same files the agent is writing)
+    - no conversation: caller's personal sandbox (``'user'``)
+    - personal conv where caller is creator and not group_chat: caller's
+      personal sandbox (``'user'``)
+    - standalone group chat (no topic, is_group_chat=True): conversation-
+      keyed sandbox (``'conversation'``)
+    - dedicated-mode topic: topic-keyed sandbox (``'topic'``)
+    - creator-mode topic (or default): topic creator's personal sandbox
+      (``'user'``)
 
     Raises 404 when the caller passes a conversation_id they have no
-    access to. Without this check, a workspace member could enumerate or
-    guess another topic's conversation id and read its files.
+    access to.
     """
     if conversation_id is None:
-        return ctx.user.id, None
+        return "user", ctx.user.id
     from cubebox.models.conversation import Conversation
-    from cubebox.models.topic import Topic, TopicParticipant
+    from cubebox.models.topic import Topic
 
     conv_stmt = select(
         cast(Any, Conversation.topic_id),
         cast(Any, Conversation.creator_user_id),
+        cast(Any, Conversation.is_group_chat),
     ).where(
         cast(Any, Conversation.id) == conversation_id,
         cast(Any, Conversation.workspace_id) == ctx.workspace_id,
@@ -77,21 +128,14 @@ async def _resolve_sandbox_scope(
     row = (await session.execute(conv_stmt)).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
-    topic_id, creator_user_id = row
+    topic_id, creator_user_id, is_group_chat = row
     if topic_id is None:
-        # Personal conversation — only the creator may read its sandbox.
-        if creator_user_id != ctx.user.id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
-        return ctx.user.id, None
+        await _assert_personal_or_conv_access(session, ctx, conversation_id, str(creator_user_id))
+        if is_group_chat:
+            return "conversation", conversation_id
+        return "user", ctx.user.id
 
-    # Topic conversation: verify the caller participates.
-    part_stmt = select(cast(Any, TopicParticipant.user_id)).where(
-        cast(Any, TopicParticipant.topic_id) == topic_id,
-        cast(Any, TopicParticipant.user_id) == ctx.user.id,
-    )
-    if (await session.execute(part_stmt)).scalar_one_or_none() is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
-
+    await _assert_topic_access(session, ctx, str(topic_id), conversation_id)
     topic_stmt = select(
         cast(Any, Topic.sandbox_mode),
         cast(Any, Topic.creator_user_id),
@@ -101,20 +145,13 @@ async def _resolve_sandbox_scope(
     )
     topic_row = (await session.execute(topic_stmt)).first()
     if topic_row is None:
-        # Topic missing or archived — match ConversationRepository's
-        # archived-topic hiding so sandbox files don't outlive a delete.
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Conversation not found")
     mode, topic_creator_user_id = topic_row
 
-    # Default an unspecified mode to "creator" so every participant of an
-    # upgraded-from-1:1 topic sees the topic creator's personal sandbox —
-    # the same one the agent run mounts. A null fallback would silently
-    # route each participant to their own /workspace, defeating the topic.
     effective_mode = mode or "creator"
     if effective_mode == "dedicated":
-        return str(topic_creator_user_id or ctx.user.id), str(topic_id)
-    # creator-mode (and the implicit default): topic creator's personal sandbox.
-    return str(topic_creator_user_id or ctx.user.id), None
+        return "topic", str(topic_id)
+    return "user", str(topic_creator_user_id or ctx.user.id)
 
 
 @router.get("/status", response_model=SandboxStatusOut)
@@ -131,8 +168,8 @@ async def get_sandbox_status(
     one so the panel reflects what the agent is actually using.
     """
     repo = UserSandboxRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    sandbox_user_id, sandbox_topic_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
-    row = await repo.get_active_for_scope(user_id=sandbox_user_id, topic_id=sandbox_topic_id)
+    scope_type, scope_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
+    row = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
     if row is None:
         return SandboxStatusOut(
             status="absent",
@@ -175,13 +212,14 @@ async def list_sandbox_files(
             detail="path outside workspace",
         )
     manager = get_sandbox_manager()
-    sandbox_user_id, sandbox_topic_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
+    scope_type, scope_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
-            sandbox_user_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
-            topic_id=sandbox_topic_id,
         )
         await manager.touch(
             sandbox.id,
@@ -277,13 +315,14 @@ async def get_sandbox_file_content(
             detail="path outside workspace",
         )
     manager = get_sandbox_manager()
-    sandbox_user_id, sandbox_topic_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
+    scope_type, scope_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
-            sandbox_user_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
-            topic_id=sandbox_topic_id,
         )
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("filesystem operations require OpenSandbox backend")
@@ -328,13 +367,14 @@ async def download_sandbox_file(
             detail="path outside workspace",
         )
     manager = get_sandbox_manager()
-    sandbox_user_id, sandbox_topic_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
+    scope_type, scope_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
-            sandbox_user_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
-            topic_id=sandbox_topic_id,
         )
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("filesystem operations require OpenSandbox backend")
@@ -395,13 +435,14 @@ async def create_sandbox_preview_token(
         )
 
     manager = get_sandbox_manager()
-    sandbox_user_id, sandbox_topic_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
+    scope_type, scope_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
-            sandbox_user_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
-            topic_id=sandbox_topic_id,
         )
     except SandboxError as exc:
         raise HTTPException(
@@ -446,13 +487,14 @@ async def get_terminal(
 ) -> SandboxTerminalResponse:
     """Start ttyd in the sandbox and return a signed URL."""
     manager = get_sandbox_manager()
-    sandbox_user_id, sandbox_topic_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
+    scope_type, scope_id = await _resolve_sandbox_scope(session, ctx, conversation_id)
     try:
         sandbox = await manager.get_or_create(
-            sandbox_user_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=ctx.user.id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
-            topic_id=sandbox_topic_id,
         )
         await sandbox.start_terminal()
         await manager.touch(

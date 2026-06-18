@@ -309,29 +309,35 @@ class TestDedicatedSandboxIsolation:
             await s.commit()
             topic_id = topic_row.id
 
-        # Personal sandbox (no topic_id) — analog of "creator's personal".
-        await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
-
-        # Dedicated topic sandbox (topic_id present) — should NOT collide.
+        # Personal sandbox (scope_type='user') — analog of "creator's personal".
         await mgr.get_or_create(
-            user_id,
+            scope_type="user",
+            scope_id=user_id,
+            user_id=user_id,
             org_id=org_id,
             workspace_id=ws_a,
-            topic_id=topic_id,
+        )
+
+        # Dedicated topic sandbox (scope_type='topic') — should NOT collide.
+        await mgr.get_or_create(
+            scope_type="topic",
+            scope_id=topic_id,
+            user_id=user_id,
+            org_id=org_id,
+            workspace_id=ws_a,
         )
 
         async with session_factory() as s:
             repo = UserSandboxRepository(s, org_id=org_id, workspace_id=ws_a)
-            personal = await repo.get_active_by_user(user_id)
-            dedicated = await repo.get_active_by_topic(topic_id)
+            personal = await repo.get_active_by_scope(scope_type="user", scope_id=user_id)
+            dedicated = await repo.get_active_by_scope(scope_type="topic", scope_id=topic_id)
 
         assert personal is not None
         assert dedicated is not None
         assert personal.id != dedicated.id
         assert personal.sandbox_id != dedicated.sandbox_id
-        # Personal has no topic; dedicated is keyed by topic.
-        assert personal.topic_id is None
-        assert dedicated.topic_id == topic_id
+        assert (personal.scope_type, personal.scope_id) == ("user", user_id)
+        assert (dedicated.scope_type, dedicated.scope_id) == ("topic", topic_id)
 
         # Cross-check via raw SQL: exactly TWO active rows (one personal,
         # one topic) live for this user-workspace pair.
@@ -339,14 +345,14 @@ class TestDedicatedSandboxIsolation:
             rows = (
                 await s.execute(
                     sa.text(
-                        "SELECT topic_id FROM user_sandboxes "
+                        "SELECT scope_type, scope_id FROM user_sandboxes "
                         "WHERE user_id=:u AND workspace_id=:w AND status='running'"
                     ),
                     {"u": user_id, "w": ws_a},
                 )
             ).all()
-        topic_ids = {r[0] for r in rows}
-        assert topic_ids == {None, topic_id}
+        scope_keys = {(r[0], r[1]) for r in rows}
+        assert scope_keys == {("user", user_id), ("topic", topic_id)}
 
     @pytest.mark.anyio
     async def test_creator_sandbox_mode_reuses_personal(
@@ -368,9 +374,21 @@ class TestDedicatedSandboxIsolation:
         org_id, ws_a, _ws_b, user_id = seeded_org_ws_user
         mgr = SandboxManager(session_factory, _ENCRYPTION_BACKEND)
 
-        await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
+        await mgr.get_or_create(
+            scope_type="user",
+            scope_id=user_id,
+            user_id=user_id,
+            org_id=org_id,
+            workspace_id=ws_a,
+        )
         # Second call with the same identity reuses the existing row.
-        await mgr.get_or_create(user_id, org_id=org_id, workspace_id=ws_a)
+        await mgr.get_or_create(
+            scope_type="user",
+            scope_id=user_id,
+            user_id=user_id,
+            org_id=org_id,
+            workspace_id=ws_a,
+        )
 
         async with session_factory() as s:
             count = (
@@ -378,9 +396,10 @@ class TestDedicatedSandboxIsolation:
                     sa.text(
                         "SELECT COUNT(*) FROM user_sandboxes "
                         "WHERE user_id=:u AND workspace_id=:w "
-                        "AND topic_id IS NULL AND status='running'"
+                        "AND scope_type='user' AND scope_id=:s "
+                        "AND status='running'"
                     ),
-                    {"u": user_id, "w": ws_a},
+                    {"u": user_id, "w": ws_a, "s": user_id},
                 )
             ).scalar_one()
         assert count == 1

@@ -300,23 +300,28 @@ class SandboxManager:
 
     async def get_or_create(
         self,
-        user_id: str,
         *,
+        scope_type: str,
+        scope_id: str,
+        user_id: str,
         org_id: str,
         workspace_id: str,
-        topic_id: str | None = None,
     ) -> Sandbox:
         """Get the active sandbox for this scope, or create a new one.
 
-        Scope selection:
-        - ``topic_id=None`` (default): personal scope; the sandbox is keyed by
-          ``user_id`` (the historical behaviour). At most one active row per
-          ``(org_id, workspace_id, user_id)``.
-        - ``topic_id="top-..."``: topic scope; the sandbox is keyed by
-          ``topic_id`` and shared by all topic participants. At most one
-          active row per ``(org_id, workspace_id, topic_id)``.
+        Scope selection uses the polymorphic ``(scope_type, scope_id)``
+        tuple:
+        - ``scope_type='user'``: personal scope, keyed by ``user_id``.
+        - ``scope_type='conversation'``: standalone group chat scope,
+          keyed by ``conversation_id`` and shared by all conversation
+          participants.
+        - ``scope_type='topic'``: dedicated-mode topic scope, keyed by
+          ``topic_id`` and shared by all topic participants.
 
-        Flow (both scopes):
+        ``uq_user_sandbox_active_scope`` guarantees at most one active
+        row per ``(org_id, workspace_id, scope_type, scope_id)``.
+
+        Flow (all scopes):
         1. Query DB for an existing RUNNING sandbox in the chosen scope.
         2. If found, try to connect and health-check it.
         3. If healthy, return it (after refreshing egress env + refs);
@@ -333,7 +338,7 @@ class SandboxManager:
                 SandboxPolicyRepository(session, org_id=org_id),
                 default_image=self._image,
             ).resolve()
-            record = await repo.get_resumable_for_scope(user_id=user_id, topic_id=topic_id)
+            record = await repo.get_resumable_by_scope(scope_type=scope_type, scope_id=scope_id)
 
             # Late arrival on a transient row (another caller is pausing or
             # resuming this sandbox). Trigger an inline reconciler sweep
@@ -359,7 +364,7 @@ class SandboxManager:
                         "Inline reconcile during get_or_create failed: {}",
                         exc,
                     )
-                record = await repo.get_resumable_for_scope(user_id=user_id, topic_id=topic_id)
+                record = await repo.get_resumable_by_scope(scope_type=scope_type, scope_id=scope_id)
 
             if record and record.status in ("pausing", "resuming"):
                 stable = await self._await_stable_status(
@@ -393,13 +398,13 @@ class SandboxManager:
                     recheck_repo = UserSandboxRepository(
                         recheck_session, org_id=org_id, workspace_id=workspace_id
                     )
-                    record = await recheck_repo.get_resumable_for_scope(
-                        user_id=user_id, topic_id=topic_id
+                    record = await recheck_repo.get_resumable_by_scope(
+                        scope_type=scope_type, scope_id=scope_id
                     )
                 if record is None or record.status != "running":
                     record = None
 
-            # `get_resumable_for_scope` doesn't include `provisioning` rows; if a
+            # `get_resumable_by_scope` doesn't include `provisioning` rows; if a
             # sibling task is mid-reserve, the next branch (`record.status ==
             # 'running'`) won't fire and we'll fall through to the create
             # branch below, where `repo.reserve()` will collide on the partial
@@ -468,7 +473,8 @@ class SandboxManager:
                     user_id=user_id,
                     image=policy.default_image,
                     ttl_seconds=self._ttl,
-                    topic_id=topic_id,
+                    scope_type=scope_type,
+                    scope_id=scope_id,
                 )
             except Exception:
                 await session.rollback()
@@ -476,13 +482,14 @@ class SandboxManager:
                 # promote_to_running yet), so poll until it reaches `running` or a
                 # bounded timeout elapses — do NOT raise on a provisioning winner.
                 # Re-query in a fresh transaction each loop so we see the winner's
-                # committed promotion. In topic scope the winner row may have a
-                # different ``user_id`` (another participant), so the lookup
-                # MUST go through ``get_active_for_scope`` — keyed by topic_id
-                # when present — or the loser would never find the winner row
-                # and would time out with a spurious SandboxError.
+                # committed promotion. In shared scopes (conversation, topic) the
+                # winner row may have a different ``user_id`` (another
+                # participant), so the lookup MUST go through ``get_active_by_scope``
+                # using the same ``(scope_type, scope_id)`` we tried to reserve —
+                # otherwise the loser would never find the winner row and would
+                # time out with a spurious SandboxError.
                 deadline = time.monotonic() + self._reserve_wait_timeout
-                winner = await repo.get_active_for_scope(user_id=user_id, topic_id=topic_id)
+                winner = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
                 while (
                     winner is not None
                     and winner.status == "provisioning"
@@ -490,7 +497,9 @@ class SandboxManager:
                 ):
                     await asyncio.sleep(self._reserve_poll_interval)
                     await session.rollback()  # drop the snapshot before re-reading
-                    winner = await repo.get_active_for_scope(user_id=user_id, topic_id=topic_id)
+                    winner = await repo.get_active_by_scope(
+                        scope_type=scope_type, scope_id=scope_id
+                    )
                 if winner is not None and winner.status == "running":
                     raw_sandbox = await opensandbox.Sandbox.connect(
                         winner.sandbox_id, connection_config=conn_config
@@ -722,11 +731,11 @@ class SandboxManager:
 
     async def touch_active(
         self,
-        user_id: str,
         *,
+        scope_type: str,
+        scope_id: str,
         org_id: str,
         workspace_id: str,
-        topic_id: str | None = None,
     ) -> bool:
         """Refresh activity for the scope's *existing* active sandbox, if any.
 
@@ -735,12 +744,12 @@ class SandboxManager:
         re-provisioned on every ping while the panel stays open. Returns whether
         an active sandbox was found. Bypasses the touch throttle.
 
-        ``topic_id`` follows the same scope convention as ``get_or_create``:
-        ``None`` -> personal scope, otherwise topic scope.
+        ``scope_type`` / ``scope_id`` follow the same polymorphic convention
+        as :meth:`get_or_create`.
         """
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
-            record = await repo.get_active_for_scope(user_id=user_id, topic_id=topic_id)
+            record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
             if record is None:
                 return False
             await repo.update_activity(record.id)

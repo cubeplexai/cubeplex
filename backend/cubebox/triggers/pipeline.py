@@ -105,6 +105,7 @@ class TriggerPipeline:
                 user_id=trigger.run_as_user_id,
                 org_id=trigger.org_id,
                 workspace_id=trigger.workspace_id,
+                conversation_id=conv.id,
                 trigger="automated",
             )
 
