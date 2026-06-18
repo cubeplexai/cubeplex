@@ -18,6 +18,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from opensandbox.exceptions import SandboxApiException
 
 from cubebox.sandbox.manager import SandboxManager
 
@@ -399,23 +400,12 @@ async def test_reconcile_get_info_failure_just_bumps_touch(mock_encryption_backe
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "err_msg",
-    [
-        "404 KUBERNETES::SANDBOX_NOT_FOUND",
-        "kubernetes::sandbox_not_found",
-        "Sandbox 'sbx-x' not found (404)",
-    ],
-)
 @pytest.mark.asyncio
 async def test_reconcile_provider_404_kills_record(
-    err_msg: str, mock_encryption_backend: Any
+    mock_encryption_backend: Any,
 ) -> None:
-    """When the provider returns 404 / NOT_FOUND (pod GC'd out-of-band),
-    the reconciler must kill the row instead of leaving it transient
-    forever — otherwise subsequent ``get_or_create`` calls would time out
-    in ``_await_stable_status`` until manual cleanup.
-    """
+    """When the provider returns 404 (pod GC'd out-of-band), the reconciler
+    must kill the row instead of leaving it transient forever."""
     factory, _session = _make_session_factory()
     mgr = SandboxManager(factory, mock_encryption_backend)
     mgr._exchange_host = ""
@@ -424,7 +414,9 @@ async def test_reconcile_provider_404_kills_record(
     scoped = _scoped_repo()
 
     raw = MagicMock()
-    raw.get_info = AsyncMock(side_effect=RuntimeError(err_msg))
+    raw.get_info = AsyncMock(
+        side_effect=SandboxApiException("Not Found", status_code=404),
+    )
 
     with (
         patch("cubebox.sandbox.manager.UserSandboxRepository") as repo_cls,

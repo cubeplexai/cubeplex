@@ -1,6 +1,6 @@
 export { feishuDescriptor } from './feishu'
 export { discordDescriptor } from './discord'
-export { slackDescriptor } from './slack.stub'
+export { slackDescriptor } from './slack'
 export { teamsDescriptor } from './teams.stub'
 export type {
   PlatformDescriptor,
@@ -12,7 +12,7 @@ export type {
 
 import { discordDescriptor } from './discord'
 import { feishuDescriptor } from './feishu'
-import { slackDescriptor } from './slack.stub'
+import { slackDescriptor } from './slack'
 import { teamsDescriptor } from './teams.stub'
 import type { PlatformDescriptor } from './types'
 

@@ -16,6 +16,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     model = UserSandbox
 
     _ACTIVE_STATUSES = ("provisioning", "running")
+    _REAPABLE_STATUSES = ("provisioning", "running", "kill_pending")
 
     async def create(
         self,
@@ -242,6 +243,13 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             record.status = "terminated"
             await self.session.commit()
 
+    async def mark_kill_pending(self, record_id: str) -> None:
+        """Mark a sandbox as kill_pending (provider kill failed, retry later)."""
+        record = await self.get(record_id)
+        if record:
+            record.status = "kill_pending"
+            await self.session.commit()
+
     async def mark_failed_from_transient(self, record_id: str) -> bool:
         """Atomically flip ``pausing``/``resuming`` -> ``failed``.
 
@@ -418,12 +426,12 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
     async def list_expired(self) -> list[UserSandbox]:
         """List sandboxes that have exceeded their TTL since last activity.
 
-        Sweeps both ``running`` and ``provisioning`` rows so a crash mid-create
-        cannot orphan a reserved slot past its TTL.
+        Sweeps ``running``, ``provisioning``, and ``kill_pending`` rows so
+        neither a crash mid-create nor a failed kill can orphan a sandbox.
         """
         stmt = (
             self._scoped_select()
-            .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
+            .where(UserSandbox.status.in_(self._REAPABLE_STATUSES))  # type: ignore[attr-defined]
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await self.session.execute(stmt)
@@ -434,12 +442,12 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """System-scope query: find expired sandboxes across all workspaces.
 
         Only for background reapers — never expose to user-facing code. Sweeps
-        ``provisioning`` rows too so a crashed reserve can't pin the partial
-        unique slot forever.
+        ``provisioning`` rows (crashed reserve) and ``kill_pending`` rows
+        (failed provider kill) in addition to ``running``.
         """
         stmt = (
             select(UserSandbox)
-            .where(UserSandbox.status.in_(cls._ACTIVE_STATUSES))  # type: ignore[attr-defined]
+            .where(UserSandbox.status.in_(cls._REAPABLE_STATUSES))  # type: ignore[attr-defined]
             .where(text("last_activity_at + ttl_seconds * INTERVAL '1 second' < NOW()"))
         )
         result = await session.execute(stmt)

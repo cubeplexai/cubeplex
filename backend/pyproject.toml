@@ -50,6 +50,8 @@ dependencies = [
     "tiktoken>=0.13.0",
     "lark-oapi>=1.6.8",
     "discord-py>=2.7.1",
+    "slack-bolt>=1.28.0",
+    "slack-sdk>=3.42.0",
 ]
 
 [project.optional-dependencies]
