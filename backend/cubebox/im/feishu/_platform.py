@@ -80,6 +80,25 @@ class FeishuPlatform:
         )
         cardkit = _build_cardkit_client(client, secrets)
         op_dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
+
+        shared_mode = False
+        _sm = kwargs.get("session_maker")
+        if _sm is not None:
+            from sqlalchemy import select as _sel
+
+            from cubebox.models.im_channel_binding import IMChannelBinding
+
+            async with _sm() as _sess:
+                shared_mode = (
+                    await _sess.execute(
+                        _sel(IMChannelBinding).where(
+                            IMChannelBinding.account_id == queue_item.account_id,
+                            IMChannelBinding.channel_id == queue_item.channel_id,
+                            IMChannelBinding.mode == "shared",  # type: ignore[arg-type]
+                        )
+                    )
+                ).scalar_one_or_none() is not None
+
         tailer = OutboundRunTailer(
             redis=app.state.redis,
             key_prefix=app.state.redis_key_prefix,
@@ -89,6 +108,7 @@ class FeishuPlatform:
             dispatcher=op_dispatcher,
             artifact_dispatcher=artifact_disp,
             responder_open_id=queue_item.sender_open_id,
+            shared_mode=shared_mode,
         )
         asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 

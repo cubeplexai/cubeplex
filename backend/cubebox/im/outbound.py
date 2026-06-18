@@ -462,6 +462,7 @@ class OutboundRunTailer:
         artifact_dispatcher: Any | None = None,
         responder_open_id: str | None = None,
         block_ms: int = 2000,
+        shared_mode: bool = False,
     ) -> None:
         self._redis = redis
         self._prefix = key_prefix
@@ -472,6 +473,7 @@ class OutboundRunTailer:
         self._artifact_dispatcher = artifact_dispatcher
         self._responder_open_id = responder_open_id
         self._block_ms = block_ms
+        self._shared_mode = shared_mode
 
     async def maybe_register_awaiting_responder(self, *, ev_payload: dict[str, Any]) -> None:
         """Register the awaiting_responder binding if the event is a pending input.
@@ -485,6 +487,8 @@ class OutboundRunTailer:
         doesn't outlive its responder binding and surface "这不是发给你的"
         on a still-valid answer.
         """
+        if self._shared_mode:
+            return
         etype = ev_payload.get("type")
         if etype not in ("ask_user_request", "sandbox_confirm_request"):
             return
