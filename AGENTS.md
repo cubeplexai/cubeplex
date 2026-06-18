@@ -312,6 +312,31 @@ per-slot test DB.
 
 ---
 
+## Capturing Test / Build Output (agent workflow)
+
+Anything noisy and likely to need a second look — pytest, `pnpm lint`,
+`pnpm build`, `mypy`, alembic — pipe through `tee` into `tmp/<task>.log`
+in the worktree, then tail the summary. Lets you eyeball the result
+immediately AND go back into the full log later without re-running the
+command. `tmp/` is gitignored at the repo root.
+
+```bash
+mkdir -p tmp
+uv run pytest tests/unit/test_foo.py --no-cov 2>&1 | tee tmp/foo.log | tail -3
+pnpm lint 2>&1 | tee tmp/lint.log | tail -5
+```
+
+If `tail` shows green, you're done — don't grep the log "just to be
+sure." If `tail` shows a failure, the log already has the full
+traceback; `grep -nE "FAILED|Error|line [0-9]+" tmp/foo.log` finds the
+exact site without re-running.
+
+This is a process gotcha specifically for AI agents: re-running a
+3-minute test suite because the first `tail -3` cut off the relevant
+error costs more than every `tee` you'll ever write.
+
+---
+
 ## Authoring Conventions for Agents
 
 - Temporary / one-shot scripts → `backend/scripts/dev/`. They are not
