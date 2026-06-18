@@ -116,8 +116,9 @@
     },
     "upgradeDialog": {
       "openLabel": "邀请成员",
-      "title": "升级为群聊",
-      "irreversibleWarning": "升级不可撤销。所有当前参与者将对受邀成员可见。",
+      "promoteLabel": "提升为话题",
+      "title": "将对话提升为话题",
+      "irreversibleWarning": "提升操作不可撤销。话题会创建一个持久容器，沿用当前参与者（包含当前群聊成员），并对后续受邀成员可见。",
       "titleLabel": "标题",
       "titlePlaceholder": "项目同步、设计评审…",
       "membersLabel": "邀请成员",

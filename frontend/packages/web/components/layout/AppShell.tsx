@@ -1,7 +1,7 @@
 'use client'
 
 import { ReactNode, useEffect, useRef, useState } from 'react'
-import { Menu, Monitor, UserPlus, X } from 'lucide-react'
+import { Layers, Menu, Monitor, UserPlus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
@@ -145,10 +145,10 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
             type="button"
             onClick={() => setUpgradeOpen(true)}
             className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
-            aria-label={tUpgrade('openLabel')}
-            title={tUpgrade('openLabel')}
+            aria-label={tUpgrade('promoteLabel')}
+            title={tUpgrade('promoteLabel')}
           >
-            <UserPlus className="h-4 w-4" />
+            <Layers className="h-4 w-4" />
           </button>
         )}
         {workspaceId && conversation && (
