@@ -81,39 +81,20 @@ def _serialize_conversation(c: Conversation) -> dict[str, object]:
     }
 
 
-def _require_participant_if_topic(
-    conversation: Conversation,
-    ctx: RequestContext,
-    participant_ids: list[str] | None,
-) -> None:
-    """For topic conversations, raise 404 unless the caller is a participant.
-
-    Returns 404 (not 403) to match GET behavior — ``_scoped_select`` already
-    hides this row from a non-participant on read. A 403 with a topic-specific
-    message would leak conversation existence and prior-membership history.
-    """
-    if conversation.topic_id is None:
-        return
-    if ctx.user.id not in (participant_ids or []):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Conversation {conversation.id} not found",
-        )
-
-
 async def _resolve_topic_run_context(
     conversation: Conversation,
     ctx: RequestContext,
-) -> tuple[str | None, bool, list[str] | None, str | None, str | None, str | None]:
+) -> tuple[str | None, bool, str | None, str | None, str | None]:
     """Resolve topic fields needed to build a RunContext.
 
-    Returns ``(topic_id, is_group_chat, participant_ids, sender_display_name,
-    sandbox_mode, topic_creator_user_id)``. For personal (non-topic)
-    conversations, all topic fields are ``None`` / ``False``.
+    Returns ``(topic_id, is_group_chat, sender_display_name, sandbox_mode,
+    topic_creator_user_id)``. ``is_group_chat`` is read straight off the
+    conversation row — ``Conversation.is_group_chat`` is the source of
+    truth. For personal (non-topic) conversations, topic-only fields are
+    ``None``.
     """
     topic_id: str | None = conversation.topic_id
-    is_group_chat = False
-    participant_ids: list[str] | None = None
+    is_group_chat = bool(conversation.is_group_chat)
     sender_display_name: str | None = None
     sandbox_mode: str | None = None
     topic_creator_user_id: str | None = None
@@ -129,20 +110,16 @@ async def _resolve_topic_run_context(
                 user_id=ctx.user.id,
             )
             topic_obj = await topic_repo.get(topic_id)
-            participants = await topic_repo.list_participants(topic_id)
-            participant_ids = [p.user_id for p in participants]
-            is_group_chat = len(participants) > 1
             if topic_obj:
                 sandbox_mode = topic_obj.sandbox_mode
                 topic_creator_user_id = topic_obj.creator_user_id
 
-        if is_group_chat:
-            sender_display_name = ctx.user.display_name or ctx.user.email
+    if is_group_chat:
+        sender_display_name = ctx.user.display_name or ctx.user.email
 
     return (
         topic_id,
         is_group_chat,
-        participant_ids,
         sender_display_name,
         sandbox_mode,
         topic_creator_user_id,
@@ -1093,21 +1070,27 @@ async def send_message(
             user_id=ctx.user.id,
         )
         conversation = await conv_repo.get_by_id(conversation_id)
-    if not conversation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Conversation {conversation_id} not found",
+        if not conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Conversation {conversation_id} not found",
+            )
+        # Auto-join: anyone with view access (P(topic) ∨ P(conv)) who sends
+        # a message becomes a conv participant atomically with the send.
+        cp_repo = ConversationParticipantRepository(
+            session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
         )
+        await cp_repo.ensure_participant(conversation.id, ctx.user.id)
+        await session.commit()
+        await session.refresh(conversation)
 
     (
         _topic_id,
         _is_group_chat,
-        _participant_ids,
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx)
-    _require_participant_if_topic(conversation, ctx, _participant_ids)
 
     if not (request_obj.content and request_obj.content.strip()) and not request_obj.attachments:
         raise InvalidInputError(
@@ -1336,7 +1319,6 @@ async def send_message(
         conversation_id=conversation_id,
         topic_id=_topic_id,
         is_group_chat=_is_group_chat,
-        participant_ids=_participant_ids,
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,
@@ -1773,15 +1755,21 @@ async def steer_active_run(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    # Auto-join: steering a paused run also counts as participating.
+    cp_repo = ConversationParticipantRepository(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    )
+    await cp_repo.ensure_participant(conversation.id, ctx.user.id)
+    await session.commit()
+    await session.refresh(conversation)
+
     (
         _topic_id,
         _is_group_chat,
-        _participant_ids,
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx)
-    _require_participant_if_topic(conversation, ctx, _participant_ids)
 
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
@@ -1881,15 +1869,27 @@ async def submit_sandbox_confirm(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    # HITL is stricter than send: only conv participants (P(conv)) can
+    # answer. A topic-only member who has never sent a message in this
+    # conversation cannot answer HITL — they would have to send (which
+    # auto-joins them) before they can resolve a pending question. 404
+    # (not 403) to match the info-disclosure rule.
+    cp_repo = ConversationParticipantRepository(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    )
+    if not await cp_repo.is_participant(conversation.id, ctx.user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
     (
         _topic_id,
         _is_group_chat,
-        _participant_ids,
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx)
-    _require_participant_if_topic(conversation, ctx, _participant_ids)
 
     from cubepi.hitl.types import ApproveAnswer
 
@@ -1926,7 +1926,6 @@ async def submit_sandbox_confirm(
         conversation_id=conversation_id,
         topic_id=_topic_id,
         is_group_chat=_is_group_chat,
-        participant_ids=_participant_ids,
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,
@@ -1977,15 +1976,27 @@ async def submit_ask_user_answer(
             detail=f"Conversation {conversation_id} not found",
         )
 
+    # HITL is stricter than send: only conv participants (P(conv)) can
+    # answer. A topic-only member who has never sent a message in this
+    # conversation cannot answer HITL — they would have to send (which
+    # auto-joins them) before they can resolve a pending question. 404
+    # (not 403) to match the info-disclosure rule.
+    cp_repo = ConversationParticipantRepository(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id
+    )
+    if not await cp_repo.is_participant(conversation.id, ctx.user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+
     (
         _topic_id,
         _is_group_chat,
-        _participant_ids,
         _sender_display_name,
         _sandbox_mode,
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx)
-    _require_participant_if_topic(conversation, ctx, _participant_ids)
 
     from cubebox.agents.checkpointer import init_checkpointer
 
@@ -2019,7 +2030,6 @@ async def submit_ask_user_answer(
         conversation_id=conversation_id,
         topic_id=_topic_id,
         is_group_chat=_is_group_chat,
-        participant_ids=_participant_ids,
         sender_display_name=_sender_display_name,
         sandbox_mode=_sandbox_mode,
         topic_creator_user_id=_topic_creator_user_id,

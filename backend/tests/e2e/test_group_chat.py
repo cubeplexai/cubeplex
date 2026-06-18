@@ -148,8 +148,8 @@ class TestGroupChatRunContextResolution:
     async def test_group_chat_flag_and_sender_set_for_topic_conversation(
         self, four_layer_admin_and_member: FourLayerFixture
     ) -> None:
-        """For a topic conversation with >1 participant, the resolver returns
-        ``is_group_chat=True`` and a ``sender_display_name``. The run_manager
+        """For a topic conversation flagged ``is_group_chat=True``, the resolver
+        returns that flag and a ``sender_display_name``. The run_manager
         guards memory-snapshot injection behind ``not ctx.is_group_chat`` —
         so this resolution is the structural seam for the "personal memory
         skipped in group chat" behaviour.
@@ -180,8 +180,12 @@ class TestGroupChatRunContextResolution:
 
                 conv_row = await session.get(Conversation, conv_id)
                 assert conv_row is not None
-                # Reach into the owner row for org_id and to load the user
-                # we'll pretend is the sender (admin in this case).
+                # Flip the stored flag — Conversation.is_group_chat is now the
+                # source of truth; participant counts no longer drive it.
+                conv_row.is_group_chat = True
+                session.add(conv_row)
+                await session.commit()
+                await session.refresh(conv_row)
                 org_id = conv_row.org_id
                 creator_user_id = conv_row.creator_user_id
                 user_row = await session.get(User, creator_user_id)
@@ -200,7 +204,6 @@ class TestGroupChatRunContextResolution:
         (
             topic_id_out,
             is_group_chat,
-            participant_ids,
             sender_display_name,
             sandbox_mode,
             topic_creator_user_id,
@@ -208,8 +211,6 @@ class TestGroupChatRunContextResolution:
 
         assert topic_id_out == topic_id
         assert is_group_chat is True
-        assert participant_ids is not None
-        assert set(participant_ids) == {creator_user_id, member_uid}
         # The sender display falls back to email when display_name is unset
         # — for the test admin, that's an "@example.com" string.
         assert sender_display_name is not None and "@" in sender_display_name
@@ -258,7 +259,6 @@ class TestGroupChatRunContextResolution:
         (
             topic_id,
             is_group_chat,
-            participant_ids,
             sender_display_name,
             sandbox_mode,
             topic_creator_user_id,
@@ -266,7 +266,6 @@ class TestGroupChatRunContextResolution:
 
         assert topic_id is None
         assert is_group_chat is False
-        assert participant_ids is None
         assert sender_display_name is None
         assert sandbox_mode is None
         assert topic_creator_user_id is None

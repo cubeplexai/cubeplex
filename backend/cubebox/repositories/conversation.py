@@ -44,6 +44,22 @@ class ConversationRepository(ScopedRepository[Conversation]):
         conv_member_subq = select(cast(Any, ConversationParticipant.conversation_id)).where(
             cast(Any, ConversationParticipant.user_id) == self.user_id
         )
+        # B4 helper: topic convs where caller is a conv participant AND the
+        # topic is not archived — archiving a topic must hide every
+        # conversation inside it, including from creators who got seeded as
+        # P(conv) on conv-create.
+        b4_conv_subq = (
+            select(cast(Any, ConversationParticipant.conversation_id))
+            .join(
+                Conversation,
+                cast(Any, Conversation.id) == ConversationParticipant.conversation_id,
+            )
+            .join(Topic, cast(Any, Topic.id) == Conversation.topic_id)
+            .where(
+                cast(Any, ConversationParticipant.user_id) == self.user_id,
+                cast(Any, Topic.is_archived).is_(False),
+            )
+        )
         return (
             super()
             ._scoped_select()
@@ -62,9 +78,10 @@ class ConversationRepository(ScopedRepository[Conversation]):
                     ),
                     # B3: topic conv, caller is topic participant (topic not archived)
                     cast(Any, Conversation.topic_id).in_(topic_member_subq),
-                    # B4: topic conv where caller is conv participant
-                    # (covers people invited only to a single conv inside a topic)
-                    cast(Any, Conversation.id).in_(conv_member_subq),
+                    # B4: topic conv where caller is conv participant on a
+                    # non-archived topic (covers people invited only to a
+                    # single conv inside a topic)
+                    cast(Any, Conversation.id).in_(b4_conv_subq),
                 ),
             )
         )
