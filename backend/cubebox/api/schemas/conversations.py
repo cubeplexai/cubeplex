@@ -8,7 +8,28 @@ dict that conforms to :data:`PendingHitl`.
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class InviteToGroupRequest(BaseModel):
+    """Request body for inviting workspace members into a conversation."""
+
+    user_ids: list[str] = Field(min_length=1, max_length=20)
+
+
+class ConversationParticipantOut(BaseModel):
+    """Hydrated conversation participant row."""
+
+    id: str
+    conversation_id: str
+    user_id: str
+    joined_at: str
+    display_name: str | None = None
+    email: str | None = None
+
+
+class ListConversationParticipantsResponse(BaseModel):
+    items: list[ConversationParticipantOut]
 
 
 class AskUserOption(BaseModel):

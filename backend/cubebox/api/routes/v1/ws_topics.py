@@ -25,6 +25,9 @@ from cubebox.db.session import get_session
 from cubebox.models.conversation import Conversation
 from cubebox.models.topic import TopicParticipant
 from cubebox.repositories.conversation import ConversationRepository
+from cubebox.repositories.conversation_participant import (
+    ConversationParticipantRepository,
+)
 from cubebox.repositories.topic import TopicRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.utils.time import utc_isoformat
@@ -101,6 +104,7 @@ def _serialize_conversation(conv: Any) -> dict[str, Any]:
         "title": conv.title,
         "topic_id": conv.topic_id,
         "is_pinned": conv.is_pinned,
+        "is_group_chat": conv.is_group_chat,
         "created_at": utc_isoformat(conv.created_at),
         "updated_at": utc_isoformat(conv.updated_at),
     }
@@ -374,6 +378,32 @@ async def create_topic_conversation(
         has_messages=True,
     )
     session.add(conv)
+    await session.flush()
+
+    # Seed the creator as P(conv) so their first message doesn't have to
+    # auto-join itself, and any conv-only invitees can be added in the
+    # same transaction.
+    cp_repo = ConversationParticipantRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    await cp_repo.ensure_participant(conv.id, ctx.user.id)
+
+    # Optional member_user_ids: each invitee must already be a topic
+    # participant. The conv-participant insert tags them as actors of
+    # this specific conversation inside the topic.
+    if body.member_user_ids:
+        topic_participants = await repo.list_participants(topic_id)
+        topic_member_ids = {p.user_id for p in topic_participants}
+        for uid in body.member_user_ids:
+            if uid not in topic_member_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"User {uid} is not a participant of topic {topic_id}",
+                )
+        await cp_repo.add_many(conv.id, body.member_user_ids)
+
     await session.commit()
     await session.refresh(conv)
     return {"conversation": _serialize_conversation(conv)}
