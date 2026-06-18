@@ -117,16 +117,29 @@ async def process_one_queue_item(
             )
         ).scalar_one_or_none()
         if conv_row is not None and (conv_row.topic_id is not None or conv_row.is_group_chat):
-            logger.warning(
-                "[IM worker] refusing to dispatch run for queue item {} — "
-                "conversation {} is a topic / group chat (v1 scope)",
-                item.id,
-                item.conversation_id,
-            )
-            await mark_queue_item_completed(session, item_id=item.id)
-            await mark_receipt_failed(session, receipt_id=item.receipt_id)
-            await session.commit()
-            return True
+            from cubebox.models.im_channel_binding import IMChannelBinding
+
+            im_bound = False
+            if conv_row.topic_id is not None:
+                im_bound = (
+                    await session.execute(
+                        select(IMChannelBinding).where(
+                            IMChannelBinding.topic_id == conv_row.topic_id,
+                        )
+                    )
+                ).scalar_one_or_none() is not None
+
+            if not im_bound:
+                logger.warning(
+                    "[IM worker] refusing to dispatch run for queue item {} — "
+                    "conversation {} is a topic / group chat (v1 scope)",
+                    item.id,
+                    item.conversation_id,
+                )
+                await mark_queue_item_completed(session, item_id=item.id)
+                await mark_receipt_failed(session, receipt_id=item.receipt_id)
+                await session.commit()
+                return True
         await session.commit()
         captured = {
             "conversation_id": item.conversation_id,
