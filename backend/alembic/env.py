@@ -70,6 +70,15 @@ _CHECKPOINT_TABLES = {
     "cubepi_schema_version",
 }
 
+# Hand-crafted PostgreSQL indexes that SQLModel can't declare (HNSW from
+# pgvector, pgroonga full-text). Without this guard autogen proposes to
+# drop them on every run — applying that migration would silently break
+# search. Owned by alembic/versions/fabe1279b9f6_conversation_search_tables.
+_HAND_BUILT_INDEXES = {
+    "ix_chunks_embedding_hnsw",
+    "ix_chunks_text_lexical",
+}
+
 
 def include_object(
     object: object,  # noqa: A002
@@ -78,7 +87,7 @@ def include_object(
     reflected: bool,
     compare_to: object,
 ) -> bool:
-    """Exclude cubepi-checkpointer-owned tables from autogenerate."""
+    """Exclude cubepi-checkpointer tables and hand-built indexes from autogenerate."""
     if type_ == "table" and name is not None:
         if name in _CHECKPOINT_TABLES:
             return False
@@ -86,6 +95,8 @@ def include_object(
             return False
         if name.startswith("cubepi_runs_p"):
             return False
+    if type_ == "index" and name in _HAND_BUILT_INDEXES:
+        return False
     return True
 
 
