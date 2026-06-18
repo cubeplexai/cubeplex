@@ -8,7 +8,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_admin
+from cubebox.auth.dependencies import require_admin, require_member
 from cubebox.db import get_session
 from cubebox.models import Membership, Role, User
 from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
@@ -56,9 +56,16 @@ class ChangeWsRoleResponse(BaseModel):
 
 @router.get("", response_model=list[WsMemberOut])
 async def list_workspace_members(
-    ctx: Annotated[RequestContext, Depends(require_admin)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> list[WsMemberOut]:
+    """Workspace member list.
+
+    Open to any workspace member — they need to see each other to invite
+    people to conversations, topics, and group chats. Workspace members
+    already share message history, sandboxes, and artifacts, so exposing
+    the member roster (email, display name, role) doesn't widen access.
+    """
     mem_repo = MembershipRepository(session)
     members = await mem_repo.list_workspace_members(ctx.workspace_id)
 
