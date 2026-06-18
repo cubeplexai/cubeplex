@@ -57,10 +57,12 @@ function ConversationRow({
   convo,
   isActive,
   currentWsId,
+  showGroupIcon = false,
 }: {
   convo: Conversation
   isActive: boolean
   currentWsId: string | null
+  showGroupIcon?: boolean
 }): React.ReactElement {
   const tSidebar = useTranslations('sidebar')
   const tShell = useTranslations('shellLayout')
@@ -121,6 +123,7 @@ function ConversationRow({
       <li>
         <div className={baseRowClasses}>
           {convo.is_pinned && <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />}
+          {showGroupIcon && <Users className="size-3 shrink-0 text-muted-foreground" />}
           <input
             ref={inputRef}
             value={draft}
@@ -149,6 +152,7 @@ function ConversationRow({
           <div className="absolute left-0 top-[22%] bottom-[22%] w-0.5 bg-primary rounded-r" />
         )}
         {convo.is_pinned && <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />}
+        {showGroupIcon && <Users className="size-3 shrink-0 text-muted-foreground" />}
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
           {convo.title || tSidebar('untitledChat')}
         </div>
@@ -341,6 +345,7 @@ function WorkspaceNav({
 
 type MixedEntry =
   | { kind: 'conversation'; conversation: Conversation; sortKey: number }
+  | { kind: 'group-chat'; conversation: Conversation; sortKey: number }
   | { kind: 'topic'; topic: Topic; conversations: Conversation[]; sortKey: number }
 
 function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEntry[] {
@@ -363,7 +368,8 @@ function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEn
 
   const entries: MixedEntry[] = []
   for (const c of standalone) {
-    entries.push({ kind: 'conversation', conversation: c, sortKey: ts(c.updated_at) })
+    const kind = c.is_group_chat ? 'group-chat' : 'conversation'
+    entries.push({ kind, conversation: c, sortKey: ts(c.updated_at) })
   }
   for (const topic of topics) {
     const convs = (byTopic.get(topic.id) ?? [])
@@ -551,15 +557,29 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
             <p className="px-2 py-1.5 text-xs text-faint">{tSidebar('noRecentChats')}</p>
           ) : (
             <ul className="space-y-0.5">
-              {mixedList.map((entry) =>
-                entry.kind === 'conversation' ? (
-                  <ConversationRow
-                    key={`c-${entry.conversation.id}`}
-                    convo={entry.conversation}
-                    isActive={activeId === entry.conversation.id}
-                    currentWsId={currentWsId}
-                  />
-                ) : (
+              {mixedList.map((entry) => {
+                if (entry.kind === 'conversation') {
+                  return (
+                    <ConversationRow
+                      key={`c-${entry.conversation.id}`}
+                      convo={entry.conversation}
+                      isActive={activeId === entry.conversation.id}
+                      currentWsId={currentWsId}
+                    />
+                  )
+                }
+                if (entry.kind === 'group-chat') {
+                  return (
+                    <ConversationRow
+                      key={`g-${entry.conversation.id}`}
+                      convo={entry.conversation}
+                      isActive={activeId === entry.conversation.id}
+                      currentWsId={currentWsId}
+                      showGroupIcon
+                    />
+                  )
+                }
+                return (
                   <TopicNode
                     key={`t-${entry.topic.id}`}
                     topic={entry.topic}
@@ -575,8 +595,8 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
                       />
                     )}
                   />
-                ),
-              )}
+                )
+              })}
             </ul>
           )}
         </ScrollArea>
