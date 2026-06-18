@@ -19,6 +19,7 @@ import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 import { SharePanel } from '@/components/chat/SharePanel'
 import { ChatHeaderGroupBadge } from '@/components/chat/ChatHeaderGroupBadge'
 import { UpgradeToTopicDialog } from '@/components/dialogs/UpgradeToTopicDialog'
+import { InviteToConversationDialog } from '@/components/dialogs/InviteToConversationDialog'
 
 interface AppShellProps {
   children: ReactNode
@@ -28,6 +29,7 @@ interface AppShellProps {
 
 export function AppShell({ children, headerTitle, conversationId }: AppShellProps) {
   const tUpgrade = useTranslations('topics.upgradeDialog')
+  const tInvite = useTranslations('conversation.invite')
   const view = usePanelStore((s) => s.view)
   const openSandbox = usePanelStore((s) => s.openSandbox)
   const { workspaceId } = useWorkspaceContext()
@@ -37,6 +39,7 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
   const topicId = conversation?.topic_id ?? null
   const canUpgrade = Boolean(workspaceId && conversation && !conversation.topic_id)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
   // Only offer the browser panel where the backend actually mounts /browser/*
   // (sandbox support enabled); otherwise the button opens a panel that 404s.
   const { sandboxEnabled } = useDeploymentMode()
@@ -111,6 +114,15 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
     />
   )
 
+  const inviteDialog = workspaceId && conversation && (
+    <InviteToConversationDialog
+      wsId={workspaceId}
+      conversationId={conversation.id}
+      open={inviteOpen}
+      onOpenChange={setInviteOpen}
+    />
+  )
+
   const main = (
     <div className="flex flex-col h-full overflow-hidden">
       <header className="h-11 border-b border-border flex items-center px-3 md:px-4 shrink-0 gap-1">
@@ -131,6 +143,18 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
             className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
             aria-label={tUpgrade('openLabel')}
             title={tUpgrade('openLabel')}
+          >
+            <UserPlus className="h-4 w-4" />
+          </button>
+        )}
+        {workspaceId && conversation && (
+          <button
+            type="button"
+            onClick={() => setInviteOpen(true)}
+            className="mr-1 rounded p-1.5 text-muted-foreground hover:bg-accent transition-colors duration-fast"
+            aria-label={tInvite('button')}
+            title={tInvite('button')}
+            data-testid="conversation-invite-button"
           >
             <UserPlus className="h-4 w-4" />
           </button>
@@ -175,6 +199,7 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
           </div>
         )}
         {upgradeDialog}
+        {inviteDialog}
       </div>
     )
   }
@@ -203,6 +228,7 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
         )}
       </ResizablePanelGroup>
       {upgradeDialog}
+      {inviteDialog}
     </>
   )
 }

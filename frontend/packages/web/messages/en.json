@@ -56,6 +56,18 @@
       "unavailable": "Search unavailable"
     }
   },
+  "conversation": {
+    "invite": {
+      "title": "Invite to this chat",
+      "description": "Add workspace members so they can see and reply in this conversation.",
+      "button": "Invite",
+      "cancel": "Cancel",
+      "invite": "Invite",
+      "inviting": "Inviting…",
+      "inviteError": "Failed to invite members.",
+      "emptyMembers": "No other workspace members to invite."
+    }
+  },
   "topics": {
     "newGroupChat": "New Group Chat",
     "newConversation": "New conversation in this topic",
