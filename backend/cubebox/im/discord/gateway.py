@@ -84,7 +84,12 @@ class DiscordGateway:
         async def on_message(message: discord.Message) -> None:
             if bot.user is None or self._connector is None:
                 return
-            event = self._connector.parse_inbound(message)
+
+            from cubebox.im.types import lookup_binding_mode
+
+            channel_id = str(message.channel.id)
+            binding_mode = await lookup_binding_mode(session_maker, account.id, channel_id)
+            event = self._connector.parse_inbound(message, binding_mode=binding_mode)
             if event is None:
                 return
             event.account_external_id = account.external_account_id

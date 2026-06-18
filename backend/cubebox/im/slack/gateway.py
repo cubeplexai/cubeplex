@@ -118,8 +118,12 @@ class SlackGateway:
         session_maker: Any,
         ingest: Any,
     ) -> None:
+        from cubebox.im.types import lookup_binding_mode
+
+        channel_id = event.get("channel", "")
+        binding_mode = await lookup_binding_mode(session_maker, account.id, channel_id)
         connector = SlackConnector(bot_user_id=bot_user_id)
-        parsed = connector.parse_inbound(event)
+        parsed = connector.parse_inbound(event, binding_mode=binding_mode)
         if parsed is None:
             return
         parsed.account_external_id = account.external_account_id

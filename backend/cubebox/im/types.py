@@ -11,13 +11,37 @@ See docs/dev/plans/2026-06-11-im-connectors-feishu.md
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from cubebox.im.card_model import CardState
 
 BindingMode = Literal["isolated", "shared"]
 
 DM_SCOPE_KEY = "dm"
+
+
+async def lookup_binding_mode(
+    session_maker: Any,
+    account_id: str,
+    channel_id: str,
+) -> BindingMode:
+    """Look up the binding mode for a (account, channel) pair.
+
+    Returns ``'isolated'`` if no binding row exists.
+    """
+    from sqlmodel import col, select
+
+    from cubebox.models.im_channel_binding import IMChannelBinding
+
+    stmt = select(IMChannelBinding).where(
+        col(IMChannelBinding.account_id) == account_id,
+        col(IMChannelBinding.channel_id) == channel_id,
+    )
+    async with session_maker() as session:
+        binding = (await session.execute(stmt)).scalar_one_or_none()
+    if binding is not None and binding.mode == "shared":
+        return "shared"
+    return "isolated"
 
 
 def make_participant_scope(sender_ref: str) -> str:
