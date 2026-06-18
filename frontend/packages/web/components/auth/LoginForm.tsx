@@ -73,7 +73,10 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
       </button>
       <div className="text-center text-sm text-foreground/60">
         {t('newHere')}{' '}
-        <Link href="/register" className="underline">
+        <Link
+          href={nextPath === '/' ? '/register' : `/register?next=${encodeURIComponent(nextPath)}`}
+          className="underline"
+        >
           {t('createAccount')}
         </Link>
       </div>

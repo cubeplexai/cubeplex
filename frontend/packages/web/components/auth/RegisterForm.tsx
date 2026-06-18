@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubebox/core'
 
-export function RegisterForm() {
+export function RegisterForm({ nextPath = '/' }: { nextPath?: string }) {
   const t = useTranslations('auth')
   const router = useRouter()
   const [displayName, setDisplayName] = useState('')
@@ -89,7 +89,10 @@ export function RegisterForm() {
       </button>
       <div className="text-center text-sm text-foreground/60">
         {t('alreadyHaveAccount')}{' '}
-        <Link href="/login" className="underline">
+        <Link
+          href={nextPath === '/' ? '/login' : `/login?next=${encodeURIComponent(nextPath)}`}
+          className="underline"
+        >
           {t('signIn')}
         </Link>
       </div>
