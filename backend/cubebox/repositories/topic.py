@@ -207,6 +207,28 @@ class TopicRepository(ScopedRepository[Topic]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def participant_counts(self, topic_ids: list[str]) -> dict[str, int]:
+        """Return ``{topic_id: count}`` for the given topic_ids in one query.
+
+        Used by the sidebar list endpoint so the badge can render the
+        right member count without an N+1 round-trip per topic.
+        """
+        if not topic_ids:
+            return {}
+        stmt = (
+            select(
+                cast(Any, TopicParticipant.topic_id),
+                func.count(),
+            )
+            .where(cast(Any, TopicParticipant.topic_id).in_(topic_ids))
+            .group_by(cast(Any, TopicParticipant.topic_id))
+        )
+        rows = (await self.session.execute(stmt)).all()
+        out: dict[str, int] = dict.fromkeys(topic_ids, 0)
+        for topic_id, count in rows:
+            out[str(topic_id)] = int(count)
+        return out
+
     async def bump_activity(self, topic_id: str) -> None:
         """Update ``last_activity_at`` to now. Called from the message
         insertion path; safe to call on a topic the caller may not be

@@ -8,6 +8,8 @@ export interface Topic {
   created_at: string
   updated_at: string
   last_activity_at: string
+  /** Present on list responses; absent on single-topic responses. */
+  participant_count?: number
 }
 
 export interface TopicParticipant {
@@ -16,6 +18,9 @@ export interface TopicParticipant {
   user_id: string
   role: 'owner' | 'member'
   joined_at: string
+  /** Hydrated by the backend from the User row. */
+  display_name?: string | null
+  email?: string | null
 }
 
 export interface TopicCreateResponse {

@@ -228,7 +228,10 @@ export function MemberPanel({ wsId, topicId, onClose }: MemberPanelProps): React
       <ScrollArea className="max-h-72">
         <ul className="flex flex-col gap-0.5">
           {participants.map((p) => {
-            const name = displayNameOf(p.user_id)
+            // Prefer the participant's hydrated name (always present on
+            // /topics responses) and fall back to the workspace-member
+            // lookup for legacy state.
+            const name = p.display_name || p.email || displayNameOf(p.user_id)
             const isSelf = p.user_id === currentUserId
             const canRemove = isOwner && !isSelf
             const canPromote = isOwner && !isSelf && p.role !== 'owner'

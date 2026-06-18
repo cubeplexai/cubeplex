@@ -505,7 +505,7 @@ async def upgrade_conversation_to_topic(
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, Any]:
     from cubebox.api.routes.v1.ws_topics import (
-        _serialize_participant,
+        _hydrate_participants,
         _serialize_topic,
     )
     from cubebox.repositories.topic import TopicRepository
@@ -571,7 +571,7 @@ async def upgrade_conversation_to_topic(
     return {
         "topic": _serialize_topic(topic),
         "conversation": _serialize_conversation(conversation),
-        "participants": [_serialize_participant(p) for p in participants],
+        "participants": await _hydrate_participants(session, list(participants)),
     }
 
 

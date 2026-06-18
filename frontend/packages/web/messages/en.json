@@ -58,6 +58,7 @@
   },
   "topics": {
     "newGroupChat": "New Group Chat",
+    "newConversation": "New conversation in this topic",
     "members": "{count} members",
     "owner": "Owner",
     "member": "Member",

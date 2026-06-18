@@ -58,6 +58,7 @@
   },
   "topics": {
     "newGroupChat": "新建群聊",
+    "newConversation": "在此话题下新建对话",
     "members": "{count} 位成员",
     "owner": "群主",
     "member": "成员",
