@@ -23,11 +23,13 @@ import {
 import {
   ChevronDown,
   ChevronRight,
+  Layers,
   MoreHorizontal,
-  Plus,
+  Pin,
+  PinOff,
+  SquarePen,
   Trash2,
   UserPlus,
-  Users,
 } from 'lucide-react'
 import { MemberPanel } from '@/components/chat/MemberPanel'
 
@@ -41,7 +43,7 @@ function buildClient(currentWsId: string | null): ApiClient {
 
 function ParticipantAvatars({
   participants,
-  max = 3,
+  max = 5,
 }: {
   participants: TopicParticipant[]
   max?: number
@@ -95,7 +97,7 @@ export function TopicNode({
     conversations.some((c) => c.id === activeConvId),
   )
   const router = useRouter()
-  const { topicParticipants, fetchDetail, remove, createConversation } = useTopicStore()
+  const { topicParticipants, fetchDetail, remove, createConversation, setPin } = useTopicStore()
   const fetchConversations = useConversationStore((s) => s.fetchList)
   const participants = topicParticipants[topic.id] ?? []
   const [creating, setCreating] = useState<boolean>(false)
@@ -159,7 +161,11 @@ export function TopicNode({
         ) : (
           <ChevronRight className="size-3 shrink-0" />
         )}
-        <Users className="size-3 shrink-0 text-primary/70" />
+        {topic.is_pinned ? (
+          <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />
+        ) : (
+          <Layers className="size-3 shrink-0 text-primary/70" />
+        )}
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
           {topic.title || tTopics('newGroupChat')}
         </div>
@@ -175,14 +181,14 @@ export function TopicNode({
           onClick={(e) => void handleCreateConversation(e)}
           disabled={creating}
           className={cn(
-            'p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground',
+            'p-1 rounded cursor-pointer hover:bg-accent text-muted-foreground hover:text-foreground',
             'shrink-0 opacity-0 group-hover:opacity-100 transition-opacity',
-            'disabled:opacity-50',
+            'disabled:opacity-50 disabled:cursor-not-allowed',
           )}
           aria-label={tTopics('newConversation')}
           title={tTopics('newConversation')}
         >
-          <Plus className="size-3.5" />
+          <SquarePen className="size-3.5" />
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -191,7 +197,7 @@ export function TopicNode({
               e.stopPropagation()
             }}
             className={cn(
-              'p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground',
+              'p-1 rounded cursor-pointer hover:bg-accent text-muted-foreground hover:text-foreground',
               'shrink-0 opacity-0 group-hover:opacity-100 data-[popup-open]:opacity-100',
               'transition-opacity',
             )}
@@ -220,6 +226,16 @@ export function TopicNode({
             >
               <UserPlus className="size-3.5" />
               {tTopics('inviteMembers')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                void setPin(buildClient(currentWsId), topic.id, !topic.is_pinned).catch((err) =>
+                  console.error('Failed to toggle topic pin:', err),
+                )
+              }}
+            >
+              {topic.is_pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
+              {topic.is_pinned ? tSidebar('unpinConversation') : tSidebar('pinConversation')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

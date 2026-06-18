@@ -77,6 +77,7 @@
   },
   "topics": {
     "newGroupChat": "新建群聊",
+    "newTopic": "新建话题",
     "newConversation": "在此话题下新建对话",
     "members": "{count} 位成员",
     "owner": "群主",
@@ -90,7 +91,8 @@
     "sandboxCreatorDescription": "继续使用当前对话所使用的沙盒。文件和环境都会带过来。",
     "sandboxWarning": "其他成员的操作将在你的沙盒中执行。",
     "createDialog": {
-      "title": "新建群聊",
+      "title": "新建话题",
+      "topicIntro": "话题用来把相关的会话归到一起。你邀请的成员会成为话题成员，能看到并参与话题下的所有会话（这里创建的第一个，以及之后新建的会话）。",
       "titleLabel": "标题",
       "titlePlaceholder": "项目同步、设计评审…",
       "membersLabel": "邀请成员",
@@ -122,7 +124,7 @@
       "openLabel": "邀请成员",
       "promoteLabel": "提升为话题",
       "title": "将对话提升为话题",
-      "irreversibleWarning": "提升为话题不可撤销。当前所有参与者会成为话题成员；之后邀请进话题的人都能看到这个对话的全部历史消息。",
+      "irreversibleWarning": "提升为话题不可撤销。当前所有参与者会成为话题成员，能看到并参与话题下的所有会话（当前这一个，以及之后新建的会话）。",
       "titleLabel": "标题",
       "titlePlaceholder": "项目同步、设计评审…",
       "membersLabel": "邀请成员",

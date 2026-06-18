@@ -12,7 +12,7 @@ interface ConversationMemberStripProps {
   conversationId: string
 }
 
-const AVATAR_MAX = 3
+const AVATAR_MAX = 5
 
 export function ConversationMemberStrip({
   wsId,
