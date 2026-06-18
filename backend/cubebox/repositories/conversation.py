@@ -13,6 +13,7 @@ from sqlalchemy import and_, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import Conversation
+from cubebox.models.conversation_participant import ConversationParticipant
 from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.repositories.base import ScopedRepository
 
@@ -40,21 +41,31 @@ class ConversationRepository(ScopedRepository[Conversation]):
                 cast(Any, Topic.is_archived).is_(False),
             )
         )
+        conv_member_subq = select(cast(Any, ConversationParticipant.conversation_id)).where(
+            cast(Any, ConversationParticipant.user_id) == self.user_id
+        )
         return (
             super()
             ._scoped_select()
             .where(
+                cast(Any, Conversation.deleted_at).is_(None),
                 or_(
+                    # B1: personal conv, caller is the creator
                     and_(
                         cast(Any, Conversation.topic_id).is_(None),
                         cast(Any, Conversation.creator_user_id) == self.user_id,
                     ),
+                    # B2: standalone group chat (no topic), caller is conv participant
                     and_(
-                        cast(Any, Conversation.topic_id).is_not(None),
-                        cast(Any, Conversation.topic_id).in_(topic_member_subq),
+                        cast(Any, Conversation.topic_id).is_(None),
+                        cast(Any, Conversation.id).in_(conv_member_subq),
                     ),
+                    # B3: topic conv, caller is topic participant (topic not archived)
+                    cast(Any, Conversation.topic_id).in_(topic_member_subq),
+                    # B4: topic conv where caller is conv participant
+                    # (covers people invited only to a single conv inside a topic)
+                    cast(Any, Conversation.id).in_(conv_member_subq),
                 ),
-                cast(Any, Conversation.deleted_at).is_(None),
             )
         )
 
@@ -135,22 +146,20 @@ class ConversationRepository(ScopedRepository[Conversation]):
                 cast(Any, Topic.is_archived).is_(False),
             )
         )
+        conv_member_subq = select(cast(Any, ConversationParticipant.conversation_id)).where(
+            cast(Any, ConversationParticipant.user_id) == self.user_id
+        )
         stmt = (
             update(Conversation)
             .where(
                 Conversation.id == conversation_id,  # type: ignore[arg-type]
                 Conversation.title == expected_title,  # type: ignore[arg-type]
-                or_(
-                    and_(
-                        cast(Any, Conversation.topic_id).is_(None),
-                        cast(Any, Conversation.creator_user_id) == self.user_id,
-                    ),
-                    and_(
-                        cast(Any, Conversation.topic_id).is_not(None),
-                        cast(Any, Conversation.topic_id).in_(topic_member_subq),
-                    ),
-                ),
                 cast(Any, Conversation.deleted_at).is_(None),
+                or_(
+                    cast(Any, Conversation.creator_user_id) == self.user_id,
+                    cast(Any, Conversation.id).in_(conv_member_subq),
+                    cast(Any, Conversation.topic_id).in_(topic_member_subq),
+                ),
             )
             .values(title=new_title, updated_at=now)
         )
