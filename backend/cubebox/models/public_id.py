@@ -50,6 +50,7 @@ PREFIX_IM_WEBHOOK_RECEIPT: str = "imwr"
 PREFIX_IM_RUN_QUEUE_ITEM: str = "imrq"
 PREFIX_TOP: str = "top"
 PREFIX_TPM: str = "tpm"
+PREFIX_CPM: str = "cpm"
 
 
 @dataclass
