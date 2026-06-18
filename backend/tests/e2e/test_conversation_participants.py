@@ -240,6 +240,54 @@ async def test_non_invitee_404s_on_send(
 
 
 @pytest.mark.anyio
+async def test_non_creator_cannot_rename_or_delete_standalone_group(
+    four_layer_admin_and_member: FourLayerFixture,
+) -> None:
+    """Spec § Permissions: rename/delete a standalone group chat = C(conv).
+
+    An invited participant (P(conv) but not C(conv)) sees the row but must
+    not be able to mutate it shared-state-wise.
+    """
+    (admin_c, ws_id, _), (member_c, _, member_uid) = four_layer_admin_and_member
+
+    conv_id = (await admin_c.post(f"/api/v1/ws/{ws_id}/conversations")).json()["id"]
+    invite = await admin_c.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/invite-to-group",
+        json={"user_ids": [member_uid]},
+    )
+    assert invite.status_code == 201, invite.text
+
+    # Member sees the conv (P(conv) via B2).
+    listed = await member_c.get(f"/api/v1/ws/{ws_id}/conversations")
+    assert any(c["id"] == conv_id for c in listed.json()["conversations"])
+
+    # Member must not be able to rename.
+    rename_resp = await member_c.patch(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}",
+        params={"title": "Renamed by Bob"},
+    )
+    assert rename_resp.status_code == 403, rename_resp.text
+
+    # Member must not be able to pin (shared row).
+    pin_resp = await member_c.patch(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/pin",
+        json={"is_pinned": True},
+    )
+    assert pin_resp.status_code == 403, pin_resp.text
+
+    # Member must not be able to delete.
+    del_resp = await member_c.delete(f"/api/v1/ws/{ws_id}/conversations/{conv_id}")
+    assert del_resp.status_code == 403, del_resp.text
+
+    # Creator still can.
+    rename_ok = await admin_c.patch(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}",
+        params={"title": "Renamed by Alice"},
+    )
+    assert rename_ok.status_code == 200, rename_ok.text
+
+
+@pytest.mark.anyio
 async def test_send_auto_joins_topic_participant(
     four_layer_admin_and_member: FourLayerFixture,
 ) -> None:

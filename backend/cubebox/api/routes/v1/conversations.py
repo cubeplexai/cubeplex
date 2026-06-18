@@ -120,12 +120,20 @@ async def _require_topic_owner_if_topic(
     ctx: RequestContext,
     conversation: Conversation,
 ) -> None:
-    """For topic conversations, raise 403 unless the caller is a topic owner.
+    """Owner-only mutations on shared rows (pin / share).
 
-    Stricter than :func:`_require_topic_owner_or_creator_if_topic`: this is
-    used by surfaces (pin/share) that are owner-only by spec.
+    Personal 1:1 (no topic, not group_chat) — only creator can read the row
+    via ``_scoped_select`` B1, so no extra check.
+    Standalone group chat (no topic, is_group_chat=True) — any P(conv) can
+    read via B2; restrict mutation to the creator.
+    Topic conv — restrict to topic owner.
     """
     if conversation.topic_id is None:
+        if conversation.is_group_chat and conversation.creator_user_id != ctx.user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the conversation creator can modify this conversation",
+            )
         return
     from cubebox.repositories.topic import TopicRepository
 
@@ -148,16 +156,20 @@ async def _require_topic_owner_or_creator_if_topic(
     ctx: RequestContext,
     conversation: Conversation,
 ) -> None:
-    """Rename / delete on a topic conv: ``C(conv) ∨ O(topic)``.
+    """Rename / delete: ``C(conv) ∨ O(topic)`` per the access matrix.
 
-    Per the access matrix, the conversation creator can rename / delete
-    their own conv even inside a topic; topic owners can do the same to
-    any conv under their topic. Personal / standalone-group conversations
-    are always C(conv)-gated by the route itself (the repo scope ensures
-    only the creator can read the row), so this helper short-circuits on
-    ``topic_id is None``.
+    Personal 1:1 — creator-only via ``_scoped_select`` B1; short-circuit.
+    Standalone group chat — any P(conv) can read; restrict mutation to
+    creator (matches the spec: "Rename/delete standalone group chat:
+    C(conv)").
+    Topic conv — creator OR topic owner.
     """
     if conversation.topic_id is None:
+        if conversation.is_group_chat and conversation.creator_user_id != ctx.user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the conversation creator can modify this conversation",
+            )
         return
     if conversation.creator_user_id == ctx.user.id:
         return
