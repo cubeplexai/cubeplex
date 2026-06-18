@@ -116,20 +116,20 @@ async def process_one_queue_item(
                 )
             )
         ).scalar_one_or_none()
+        binding_row: Any = None
         if conv_row is not None and (conv_row.topic_id is not None or conv_row.is_group_chat):
             from cubebox.models.im_channel_binding import IMChannelBinding
 
-            im_bound = False
             if conv_row.topic_id is not None:
-                im_bound = (
+                binding_row = (
                     await session.execute(
                         select(IMChannelBinding).where(
                             IMChannelBinding.topic_id == conv_row.topic_id,
                         )
                     )
-                ).scalar_one_or_none() is not None
+                ).scalar_one_or_none()
 
-            if not im_bound:
+            if binding_row is None:
                 logger.warning(
                     "[IM worker] refusing to dispatch run for queue item {} — "
                     "conversation {} is a topic / group chat (v1 scope)",
@@ -140,6 +140,19 @@ async def process_one_queue_item(
                 await mark_receipt_failed(session, receipt_id=item.receipt_id)
                 await session.commit()
                 return True
+        topic_creator_user_id: str | None = None
+        if conv_row is not None and conv_row.topic_id is not None:
+            from cubebox.models.topic import Topic
+
+            topic_row = (
+                await session.execute(
+                    select(Topic).where(
+                        Topic.id == conv_row.topic_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if topic_row is not None:
+                topic_creator_user_id = topic_row.creator_user_id
         await session.commit()
         captured = {
             "conversation_id": item.conversation_id,
@@ -148,6 +161,10 @@ async def process_one_queue_item(
             "org_id": account.org_id,
             "workspace_id": account.workspace_id,
             "acting_user_id": effective_user_id,
+            "topic_id": (conv_row.topic_id if conv_row is not None else None),
+            "is_group_chat": (conv_row.is_group_chat if conv_row is not None else False),
+            "sandbox_mode": (binding_row.sandbox_mode if binding_row is not None else None),
+            "topic_creator_user_id": topic_creator_user_id,
         }
         captured_item = item
 
@@ -162,6 +179,10 @@ async def process_one_queue_item(
                 workspace_id=captured["workspace_id"],
                 conversation_id=captured["conversation_id"],
                 trigger="im",
+                topic_id=captured["topic_id"],
+                is_group_chat=captured["is_group_chat"],
+                sandbox_mode=captured["sandbox_mode"],
+                topic_creator_user_id=(captured["topic_creator_user_id"]),
             ),
             cancel_pending_hitl=True,
         )
