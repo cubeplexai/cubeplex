@@ -173,6 +173,27 @@ class TopicRepository(ScopedRepository[Topic]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_participants_bulk(
+        self, topic_ids: list[str]
+    ) -> dict[str, list[TopicParticipant]]:
+        """Fetch participants for many topics in a single query.
+
+        Used by the sidebar list endpoint so it can render avatars for every
+        topic without an N+1 round-trip per topic.
+        """
+        if not topic_ids:
+            return {}
+        stmt = (
+            select(TopicParticipant)
+            .where(cast(Any, TopicParticipant.topic_id).in_(topic_ids))
+            .order_by(cast(Any, TopicParticipant.joined_at))
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        out: dict[str, list[TopicParticipant]] = {tid: [] for tid in topic_ids}
+        for row in rows:
+            out.setdefault(str(row.topic_id), []).append(row)
+        return out
+
     async def get_participant(self, topic_id: str, user_id: str) -> TopicParticipant | None:
         stmt = select(TopicParticipant).where(
             TopicParticipant.topic_id == topic_id,  # type: ignore[arg-type]

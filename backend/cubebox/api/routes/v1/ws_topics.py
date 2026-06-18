@@ -18,6 +18,7 @@ from cubebox.api.schemas.ws_topics import (
     TopicParticipantAddRequest,
     TopicParticipantPatchRequest,
     TopicPatchRequest,
+    TopicSetPinRequest,
 )
 from cubebox.api.serializers import serialize_conversation
 from cubebox.auth.context import RequestContext
@@ -65,6 +66,7 @@ def _serialize_topic(topic: Any) -> dict[str, Any]:
         "max_participants": topic.max_participants,
         "creator_user_id": topic.creator_user_id,
         "is_archived": topic.is_archived,
+        "is_pinned": topic.is_pinned,
         "created_at": utc_isoformat(topic.created_at),
         "updated_at": utc_isoformat(topic.updated_at),
         "last_activity_at": utc_isoformat(topic.last_activity_at),
@@ -155,13 +157,35 @@ async def list_topics(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> dict[str, Any]:
+    """Return all topics the caller participates in, with participants
+    embedded so the sidebar can render avatars on first paint without an
+    N+1 per-topic detail fetch.
+    """
+    from cubebox.models.user import User
+
     repo = _topic_repo(session, ctx)
     topics = await repo.list_for_sidebar()
-    counts = await repo.participant_counts([t.id for t in topics])
+    if not topics:
+        return {"items": []}
+    topic_ids = [t.id for t in topics]
+    counts = await repo.participant_counts(topic_ids)
+    parts_by_topic = await repo.list_participants_bulk(topic_ids)
+
+    # Hydrate all participant users in one query.
+    all_uids = list({p.user_id for ps in parts_by_topic.values() for p in ps})
+    users_by_id: dict[str, Any] = {}
+    if all_uids:
+        stmt = select(User).where(cast(Any, User.id).in_(all_uids))
+        for u in (await session.execute(stmt)).scalars().all():
+            users_by_id[u.id] = u
+
     items: list[dict[str, Any]] = []
     for t in topics:
         row = _serialize_topic(t)
         row["participant_count"] = counts.get(t.id, 0)
+        row["participants"] = [
+            _serialize_participant(p, users_by_id) for p in parts_by_topic.get(t.id, [])
+        ]
         items.append(row)
     return {"items": items}
 
@@ -205,6 +229,28 @@ async def update_topic(
 
     if body.title is not None:
         topic.title = body.title
+    session.add(topic)
+    await session.commit()
+    await session.refresh(topic)
+    return {"topic": _serialize_topic(topic)}
+
+
+@router.patch("/{topic_id}/pin")
+async def set_topic_pin(
+    topic_id: str,
+    body: TopicSetPinRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, Any]:
+    """Toggle the topic's sidebar pin. Any participant can pin / unpin —
+    the pin is a workspace-shared sidebar position; participants typically
+    want to surface the same hot topics."""
+    repo = _topic_repo(session, ctx)
+    topic = await repo.get(topic_id)
+    if topic is None:
+        raise HTTPException(status_code=404, detail="Topic not found")
+
+    topic.is_pinned = body.is_pinned
     session.add(topic)
     await session.commit()
     await session.refresh(topic)

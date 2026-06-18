@@ -11,6 +11,7 @@ import {
   updateParticipantRole as apiUpdateParticipantRole,
   upgradeToTopic,
   createTopicConversation,
+  setTopicPin,
 } from '../api'
 
 export interface TopicWithParticipants {
@@ -30,6 +31,7 @@ export interface TopicStore {
     body: { title: string; sandbox_mode?: string; member_user_ids?: string[] },
   ): Promise<{ topicId: string; conversationId: string }>
   remove(client: ApiClient, topicId: string): Promise<void>
+  setPin(client: ApiClient, topicId: string, isPinned: boolean): Promise<void>
   addMembers(client: ApiClient, topicId: string, userIds: string[]): Promise<void>
   removeMember(client: ApiClient, topicId: string, userId: string): Promise<void>
   updateParticipantRole(
@@ -60,7 +62,18 @@ export const useTopicStore = create<TopicStore>((set) => ({
     set({ isLoading: true, error: null })
     try {
       const { items } = await listTopics(client)
-      set({ topics: items, isLoading: false })
+      // The list endpoint embeds participants per topic so the sidebar can
+      // render avatars on first paint without an N+1 detail fetch.
+      const nextParticipants: Record<string, TopicParticipant[]> = {}
+      for (const t of items) {
+        const ps = (t as Topic & { participants?: TopicParticipant[] }).participants
+        if (Array.isArray(ps)) nextParticipants[t.id] = ps
+      }
+      set((s) => ({
+        topics: items,
+        isLoading: false,
+        topicParticipants: { ...s.topicParticipants, ...nextParticipants },
+      }))
     } catch (e) {
       set({ error: String(e), isLoading: false })
     }
@@ -128,6 +141,25 @@ export const useTopicStore = create<TopicStore>((set) => ({
         topicParticipants: nextParticipants,
       }
     })
+  },
+
+  async setPin(client, topicId, isPinned) {
+    // Optimistic flip; revert on failure.
+    set((s) => ({
+      topics: s.topics.map((t) => (t.id === topicId ? { ...t, is_pinned: isPinned } : t)),
+    }))
+    try {
+      const { topic } = await setTopicPin(client, topicId, isPinned)
+      set((s) => ({
+        topics: s.topics.map((t) => (t.id === topicId ? topic : t)),
+      }))
+    } catch (e) {
+      // Roll back.
+      set((s) => ({
+        topics: s.topics.map((t) => (t.id === topicId ? { ...t, is_pinned: !isPinned } : t)),
+      }))
+      throw e
+    }
   },
 
   async addMembers(client, topicId, userIds) {

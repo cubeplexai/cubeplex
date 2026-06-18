@@ -13,6 +13,10 @@ class TopicPatchRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
 
 
+class TopicSetPinRequest(BaseModel):
+    is_pinned: bool
+
+
 class TopicParticipantAddRequest(BaseModel):
     user_ids: list[str] = Field(min_length=1)
 
