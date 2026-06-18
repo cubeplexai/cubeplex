@@ -15,9 +15,12 @@ from loguru import logger
 from cubebox.im.outbound import _FloodSignal
 from cubebox.im.types import (
     DM_SCOPE_KEY,
+    BindingMode,
     InboundEvent,
+    make_channel_scope,
     make_participant_scope,
     make_thread_participant_scope,
+    make_thread_scope,
 )
 
 _USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
@@ -78,7 +81,9 @@ class DiscordConnector:
         text = _ROLE_MENTION_RE.sub(_replace_role, text)
         return text.strip()
 
-    def parse_inbound(self, message: Any) -> InboundEvent | None:
+    def parse_inbound(
+        self, message: Any, *, binding_mode: BindingMode = "isolated"
+    ) -> InboundEvent | None:
         """Normalize one discord.py Message into InboundEvent.
 
         Returns None for messages we ignore: bot authors, own messages,
@@ -125,12 +130,16 @@ class DiscordConnector:
 
         if is_thread:
             thread_id = str(channel.id)
+            if binding_mode == "shared":
+                scope_key = make_thread_scope(thread_id)
+            else:
+                scope_key = make_thread_participant_scope(sender_ref, thread_id)
             return InboundEvent(
                 platform="discord",
                 account_external_id="",
                 platform_event_id=message_id,
                 channel_id=thread_id,
-                scope_key=make_thread_participant_scope(sender_ref, thread_id),
+                scope_key=scope_key,
                 scope_kind="thread",
                 reply_to_id=message_id,
                 inbound_message_id=message_id,
@@ -139,12 +148,16 @@ class DiscordConnector:
                 text=text,
             )
 
+        if binding_mode == "shared":
+            scope_key = make_channel_scope()
+        else:
+            scope_key = make_participant_scope(sender_ref)
         return InboundEvent(
             platform="discord",
             account_external_id="",
             platform_event_id=message_id,
             channel_id=str(channel.id),
-            scope_key=make_participant_scope(sender_ref),
+            scope_key=scope_key,
             scope_kind="channel",
             reply_to_id=message_id,
             inbound_message_id=message_id,

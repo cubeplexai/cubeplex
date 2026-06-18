@@ -11,8 +11,11 @@ See docs/dev/plans/2026-06-11-im-connectors-feishu.md
 """
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from cubebox.im.card_model import CardState
+
+BindingMode = Literal["isolated", "shared"]
 
 DM_SCOPE_KEY = "dm"
 

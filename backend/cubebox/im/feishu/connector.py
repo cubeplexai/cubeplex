@@ -33,7 +33,14 @@ from typing import Any
 from loguru import logger
 
 from cubebox.im.outbound import _FloodSignal
-from cubebox.im.types import DM_SCOPE_KEY, InboundEvent, RenderState, make_participant_scope
+from cubebox.im.types import (
+    DM_SCOPE_KEY,
+    BindingMode,
+    InboundEvent,
+    RenderState,
+    make_channel_scope,
+    make_participant_scope,
+)
 
 # Matches Feishu inline mention markup: <at user_id="ou_xxx">name</at>
 _AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>", re.DOTALL)
@@ -88,7 +95,9 @@ class FeishuConnector:
     # Inbound
     # ------------------------------------------------------------------
 
-    def parse_inbound(self, raw: dict[str, Any]) -> InboundEvent | None:
+    def parse_inbound(
+        self, raw: dict[str, Any], *, binding_mode: BindingMode = "isolated"
+    ) -> InboundEvent | None:
         """Normalize one Feishu im.message.receive_v1 payload into InboundEvent.
 
         Returns ``None`` for events we ignore: bot's own messages, non-text
@@ -153,8 +162,12 @@ class FeishuConnector:
                 return None
             if not sender_ref:
                 return None
-            scope_key = make_participant_scope(sender_ref)
-            scope_kind = "participant"
+            if binding_mode == "shared":
+                scope_key = make_channel_scope()
+                scope_kind = "channel"
+            else:
+                scope_key = make_participant_scope(sender_ref)
+                scope_kind = "participant"
             reply_target = message_id
 
         return InboundEvent(
