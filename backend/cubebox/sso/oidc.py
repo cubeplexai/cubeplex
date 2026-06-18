@@ -188,10 +188,28 @@ async def exchange_code(
     return OIDCUserInfo(
         sub=str(userinfo.get("sub", "")),
         email=str(userinfo.get("email", "")),
-        email_verified=bool(userinfo.get("email_verified", False)),
+        email_verified=_coerce_email_verified(userinfo.get("email_verified")),
         name=userinfo.get("name"),
         claims=userinfo,
     )
+
+
+def _coerce_email_verified(value: Any) -> bool:
+    """Normalize the OIDC ``email_verified`` claim to a real bool.
+
+    OIDC Core says ``email_verified`` MUST be a JSON Boolean, but some
+    non-compliant IdPs and SAML→OIDC bridges emit the string ``"false"``.
+    ``bool("false")`` is ``True`` (any non-empty Python string is truthy),
+    which would silently bypass the ``not email_verified`` reject in
+    Identity Resolution. Accept only a real ``True`` or the
+    case-insensitive string ``"true"``; everything else (including
+    ``"false"``, numbers, missing) is treated as not-verified.
+    """
+    if value is True:
+        return True
+    if isinstance(value, str) and value.strip().lower() == "true":
+        return True
+    return False
 
 
 class OIDCDiscoveryRefused(Exception):
