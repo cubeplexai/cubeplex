@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import { AlertTriangle, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import {
   ApiError,
   createApiClient,
@@ -54,7 +54,7 @@ export function UpgradeToTopicDialog({
 
   const [title, setTitle] = useState(initialTitle)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [sandboxMode, setSandboxMode] = useState<SandboxMode>('dedicated')
+  const [sandboxMode, setSandboxMode] = useState<SandboxMode>('creator')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -63,7 +63,7 @@ export function UpgradeToTopicDialog({
       /* eslint-disable react-hooks/set-state-in-effect */
       setTitle(initialTitle)
       setSelected(new Set())
-      setSandboxMode('dedicated')
+      setSandboxMode('creator')
       setError(null)
       setSubmitting(false)
       /* eslint-enable react-hooks/set-state-in-effect */
@@ -164,15 +164,9 @@ export function UpgradeToTopicDialog({
           </div>
 
           <div className="mt-4 flex flex-col gap-4">
-            <div
-              className={cn(
-                'flex items-start gap-2 rounded-md border border-warning-border',
-                'bg-warning-surface px-2.5 py-2 text-xs text-warning-fg',
-              )}
-            >
-              <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-              <span>{tDialog('irreversibleWarning')}</span>
-            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {tDialog('irreversibleWarning')}
+            </p>
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="upgrade-topic-title">{tDialog('titleLabel')}</Label>
@@ -200,28 +194,27 @@ export function UpgradeToTopicDialog({
               <Label>{tDialog('sandboxLabel')}</Label>
               <RadioGroup
                 value={sandboxMode}
-                onValueChange={(v) => setSandboxMode((v as SandboxMode) ?? 'dedicated')}
+                onValueChange={(v) => setSandboxMode((v as SandboxMode) ?? 'creator')}
               >
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <RadioGroupItem value="dedicated" />
-                  <span>{t('sandboxDedicated')}</span>
+                <label className="flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 hover:bg-accent/40">
+                  <div className="flex items-center gap-2 text-sm">
+                    <RadioGroupItem value="creator" />
+                    <span>{t('sandboxCreator')}</span>
+                  </div>
+                  <p className="pl-6 text-xs text-muted-foreground leading-relaxed">
+                    {t('sandboxCreatorDescription')}
+                  </p>
                 </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <RadioGroupItem value="creator" />
-                  <span>{t('sandboxCreator')}</span>
+                <label className="flex cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 hover:bg-accent/40">
+                  <div className="flex items-center gap-2 text-sm">
+                    <RadioGroupItem value="dedicated" />
+                    <span>{t('sandboxDedicated')}</span>
+                  </div>
+                  <p className="pl-6 text-xs text-muted-foreground leading-relaxed">
+                    {t('sandboxDedicatedDescription')}
+                  </p>
                 </label>
               </RadioGroup>
-              {sandboxMode === 'creator' && (
-                <div
-                  className={cn(
-                    'flex items-start gap-2 rounded-md border border-warning-border',
-                    'bg-warning-surface px-2.5 py-2 text-xs text-warning-fg',
-                  )}
-                >
-                  <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-                  <span>{t('sandboxWarning')}</span>
-                </div>
-              )}
             </div>
 
             {error && (
