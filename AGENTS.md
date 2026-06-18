@@ -234,6 +234,33 @@ Full details, role tables, operator CLI, system endpoints:
 
 ---
 
+## Test Layout
+
+Pick the directory by what the test actually hits. The marker is
+auto-applied by `backend/tests/conftest.py`, and the Makefile filters
+know which suite each command targets.
+
+- **`backend/tests/unit/`** — pure functions, in-process collaborators
+  only. No Postgres / Redis / OpenSandbox / S3 / network. Mock at the
+  function or class boundary. Runs in seconds; runs on every commit
+  via pre-commit / CI.
+- **`backend/tests/integration/`** — in-process integration of multiple
+  cubebox modules through their real public APIs, but still no external
+  systems. Compose services together with fakes between them.
+- **`backend/tests/e2e/`** — anything that touches a real backing store
+  (Postgres, Redis, rustfs S3, OpenSandbox, or the FastAPI app via
+  httpx `AsyncClient`). Slow; run on demand or pre-PR.
+
+**If your test opens an `AsyncSession`, runs alembic, or hits the
+FastAPI app, it is an e2e test, full stop.** The directory choice
+drives both which conftest fixtures the file inherits AND whether
+`make check-ci` ignores it — putting a DB-touching test in
+`tests/integration/` will run it during every pre-push and fail the
+moment a new migration lands without manually re-`upgrade head`ing the
+per-slot test DB.
+
+---
+
 ## Authoring Conventions for Agents
 
 - Temporary / one-shot scripts → `backend/scripts/dev/`. They are not
