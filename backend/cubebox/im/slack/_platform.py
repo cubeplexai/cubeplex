@@ -58,20 +58,12 @@ class SlackPlatform:
         shared_mode = False
         _sm = kwargs.get("session_maker")
         if _sm is not None:
-            from sqlalchemy import select as _sel
+            from cubebox.im.types import lookup_binding_mode
 
-            from cubebox.models.im_channel_binding import IMChannelBinding
-
-            async with _sm() as _sess:
-                shared_mode = (
-                    await _sess.execute(
-                        _sel(IMChannelBinding).where(
-                            IMChannelBinding.account_id == queue_item.account_id,
-                            IMChannelBinding.channel_id == queue_item.channel_id,
-                            IMChannelBinding.mode == "shared",  # type: ignore[arg-type]
-                        )
-                    )
-                ).scalar_one_or_none() is not None
+            shared_mode = (
+                await lookup_binding_mode(_sm, queue_item.account_id, queue_item.channel_id)
+                == "shared"
+            )
 
         tailer = OutboundRunTailer(
             redis=app.state.redis,

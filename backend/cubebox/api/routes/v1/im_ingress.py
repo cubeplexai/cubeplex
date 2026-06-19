@@ -40,6 +40,7 @@ from cubebox.im.feishu.signature import (
 )
 from cubebox.im.inbound import ingest_inbound_event
 from cubebox.im.resume import resume_paused_run
+from cubebox.im.types import BindingMode, lookup_binding_mode
 from cubebox.models.im_connector import IMConnectorAccount
 from cubebox.repositories.im_connector import get_account_by_external_id_unscoped
 
@@ -269,7 +270,11 @@ async def feishu_events(
     # Parse + ingest the message event. ``bot_open_id`` was already
     # checked at the top of this handler (early-out path).
     connector = FeishuConnector(bot_open_id=bot_open_id)
-    event = connector.parse_inbound(payload)
+    channel_id = (payload.get("event") or {}).get("message", {}).get("chat_id", "")
+    binding_mode: BindingMode = "isolated"
+    if channel_id:
+        binding_mode = await lookup_binding_mode(async_session_maker, account.id, channel_id)
+    event = connector.parse_inbound(payload, binding_mode=binding_mode)
     if event is None:
         # Not a message we act on (bot echo, non-text, non-mention in group, ...).
         return Response(status_code=status.HTTP_200_OK)

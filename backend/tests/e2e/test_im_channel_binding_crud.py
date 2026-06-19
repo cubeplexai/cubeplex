@@ -165,6 +165,31 @@ async def test_delete_binding(seeded: async_sessionmaker[AsyncSession]) -> None:
         assert ok2 is False
 
 
+async def test_update_preserves_sandbox_mode_when_omitted(
+    seeded: async_sessionmaker[AsyncSession],
+) -> None:
+    """Update with sandbox_mode=... (sentinel) must not clear the stored value."""
+    async with seeded() as session:
+        repo = IMChannelBindingRepository(session, org_id=_ORG_ID, workspace_id=_WS_ID)
+        binding = await repo.create(
+            account_id=_ACCOUNT_ID,
+            channel_id="oc_sentinel_1",
+            mode="shared",
+            sandbox_mode="dedicated",
+        )
+        await session.commit()
+
+        updated = await repo.update(
+            binding_id=binding.id,
+            channel_name="Renamed",
+        )
+        await session.commit()
+
+        assert updated is not None
+        assert updated.sandbox_mode == "dedicated"
+        assert updated.channel_name == "Renamed"
+
+
 async def test_unique_constraint(seeded: async_sessionmaker[AsyncSession]) -> None:
     """Duplicate (account_id, channel_id) raises ValueError."""
     async with seeded() as session:

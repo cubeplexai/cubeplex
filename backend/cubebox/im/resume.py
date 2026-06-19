@@ -99,6 +99,8 @@ async def resume_paused_run(
         logger.warning("[resume] cannot resolve run_id={}", run_id)
         return False
     conversation_id, user_id, org_id, workspace_id, topic_id, is_group_chat = resolved
+    sandbox_mode: str | None = None
+    topic_creator_user_id: str | None = None
     if topic_id is not None or is_group_chat:
         im_bound = False
         if topic_id is not None:
@@ -106,15 +108,28 @@ async def resume_paused_run(
 
             from cubebox.db.engine import async_session_maker as _sm
             from cubebox.models.im_channel_binding import IMChannelBinding
+            from cubebox.models.topic import Topic
 
             async with _sm() as _sess:
-                im_bound = (
+                binding_row = (
                     await _sess.execute(
                         _select(IMChannelBinding).where(
                             IMChannelBinding.topic_id == topic_id,  # type: ignore[arg-type]
                         )
                     )
-                ).scalar_one_or_none() is not None
+                ).scalar_one_or_none()
+                im_bound = binding_row is not None
+                if binding_row is not None:
+                    sandbox_mode = binding_row.sandbox_mode
+                topic_row = (
+                    await _sess.execute(
+                        _select(Topic).where(
+                            Topic.id == topic_id,  # type: ignore[arg-type]
+                        )
+                    )
+                ).scalar_one_or_none()
+                if topic_row is not None:
+                    topic_creator_user_id = topic_row.creator_user_id
 
         if not im_bound:
             logger.warning(
@@ -163,6 +178,11 @@ async def resume_paused_run(
         org_id=org_id,
         workspace_id=workspace_id,
         conversation_id=conversation_id,
+        trigger="im",
+        topic_id=topic_id,
+        is_group_chat=is_group_chat,
+        sandbox_mode=sandbox_mode,
+        topic_creator_user_id=topic_creator_user_id,
     )
 
     try:
