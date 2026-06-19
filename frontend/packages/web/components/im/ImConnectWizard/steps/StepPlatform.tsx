@@ -14,8 +14,7 @@ interface Props {
   onPick: (descriptor: PlatformDescriptor) => void
 }
 
-function comingLabel(t: DynamicT, id: PlatformDescriptor['id']): string {
-  if (id === 'teams') return t('im.platform.teams.coming')
+function comingLabel(_t: DynamicT, _id: string): string {
   return ''
 }
 

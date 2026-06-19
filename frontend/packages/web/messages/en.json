@@ -1925,7 +1925,7 @@
         "headline": "Connect your team's IM to cubebox",
         "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right cubebox user by email.",
         "cta": "Connect a {platform} bot",
-        "comingNote": "Teams — coming later",
+        "comingNote": "",
         "guideLink": "Setup guide"
       },
       "admin": {
@@ -1945,11 +1945,7 @@
         "label": "Discord"
       },
       "teams": {
-        "label": "Teams",
-        "coming": "Coming soon"
-      },
-      "dingtalk": {
-        "label": "DingTalk"
+        "label": "Teams"
       }
     },
     "status": {
@@ -2029,16 +2025,17 @@
           "appToken": "App Token (xapp-...)"
         }
       },
-      "dingtalk": {
+      "teams": {
         "prereq": {
-          "app": "Create an enterprise internal bot at open.dingtalk.com",
-          "stream": "Enable Stream Mode in the bot settings",
-          "permissions": "Grant these permissions to the bot",
-          "credentials": "Copy the AppKey and AppSecret from the bot settings"
+          "app": "Create a Bot Registration in Azure Portal (or via Teams Toolkit)",
+          "graphPermission": "Add User.Read.All application permission and grant admin consent",
+          "clientSecret": "Create a Client Secret in Certificates & Secrets",
+          "endpoint": "Set Messaging Endpoint to https://<your-domain>/api/v1/im/teams/messages"
         },
         "field": {
-          "appKey": "AppKey (ding...)",
-          "appSecret": "AppSecret"
+          "appId": "Application (Client) ID",
+          "appSecret": "Client Secret",
+          "tenantId": "Tenant ID"
         }
       }
     },

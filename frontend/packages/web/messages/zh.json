@@ -1925,7 +1925,7 @@
         "headline": "把团队 IM 接到 cubebox",
         "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 cubebox 用户。",
         "cta": "连接一个 {platform} bot",
-        "comingNote": "Teams — 即将推出",
+        "comingNote": "",
         "guideLink": "查看部署指南"
       },
       "admin": {
@@ -1945,11 +1945,7 @@
         "label": "Discord"
       },
       "teams": {
-        "label": "Teams",
-        "coming": "即将支持"
-      },
-      "dingtalk": {
-        "label": "钉钉"
+        "label": "Teams"
       }
     },
     "status": {
@@ -2029,16 +2025,17 @@
           "appToken": "App Token (xapp-...)"
         }
       },
-      "dingtalk": {
+      "teams": {
         "prereq": {
-          "app": "在 open.dingtalk.com 创建企业内部机器人",
-          "stream": "在机器人设置中启用 Stream 模式",
-          "permissions": "为机器人授予以下权限",
-          "credentials": "从机器人设置中复制 AppKey 和 AppSecret"
+          "app": "在 Azure Portal 创建 Bot 注册（或使用 Teams Toolkit）",
+          "graphPermission": "添加 User.Read.All 应用权限并授予管理员同意",
+          "clientSecret": "在「证书和密码」中创建客户端密码",
+          "endpoint": "将消息终结点设为 https://<your-domain>/api/v1/im/teams/messages"
         },
         "field": {
-          "appKey": "AppKey (ding...)",
-          "appSecret": "AppSecret"
+          "appId": "应用程序(客户端) ID",
+          "appSecret": "客户端密码",
+          "tenantId": "租户 ID"
         }
       }
     },
