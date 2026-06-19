@@ -12,7 +12,9 @@ from loguru import logger
 from cubebox.im.outbound import _FloodSignal
 from cubebox.im.types import (
     DM_SCOPE_KEY,
+    BindingMode,
     InboundEvent,
+    make_channel_scope,
     make_participant_scope,
 )
 
@@ -59,7 +61,9 @@ class DingtalkConnector:
     # Inbound
     # ------------------------------------------------------------------
 
-    def parse_inbound(self, raw: dict[str, Any]) -> InboundEvent | None:
+    def parse_inbound(
+        self, raw: dict[str, Any], *, binding_mode: BindingMode = "isolated"
+    ) -> InboundEvent | None:
         """Normalize a DingTalk Stream callback dict into an InboundEvent.
 
         Returns None for non-text messages.
@@ -82,8 +86,12 @@ class DingtalkConnector:
             scope_key = DM_SCOPE_KEY
             scope_kind = "dm"
         else:
-            scope_key = make_participant_scope(sender_staff_id)
-            scope_kind = "group"
+            if binding_mode == "shared":
+                scope_key = make_channel_scope()
+                scope_kind = "channel"
+            else:
+                scope_key = make_participant_scope(sender_staff_id)
+                scope_kind = "group"
             text = re.sub(r"^\s+", "", text)
 
         return InboundEvent(

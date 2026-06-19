@@ -126,7 +126,12 @@ class DingtalkGateway:
         if connector.is_link_command(raw):
             await self._handle_link_command(raw)
             return
-        parsed = connector.parse_inbound(raw)
+
+        from cubebox.im.types import lookup_binding_mode
+
+        channel_id = raw.get("conversationId", "")
+        binding_mode = await lookup_binding_mode(session_maker, account.id, channel_id)
+        parsed = connector.parse_inbound(raw, binding_mode=binding_mode)
         if parsed is None:
             return
         parsed.account_external_id = account.external_account_id

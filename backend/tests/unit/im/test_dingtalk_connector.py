@@ -79,3 +79,37 @@ class TestParseInbound:
         event = connector.parse_inbound(raw)
         assert event is not None
         assert event.text == "hello there"
+
+    def test_shared_mode_group_uses_channel_scope(self) -> None:
+        raw = {
+            "msgtype": "text",
+            "text": {"content": " hello"},
+            "msgId": "msg_005",
+            "conversationId": "cid_group_shared",
+            "conversationType": "2",
+            "senderId": "staff_xyz",
+            "senderStaffId": "staff_xyz",
+            "chatbotUserId": "bot_999",
+        }
+        connector = DingtalkConnector(bot_user_id="bot_999")
+        event = connector.parse_inbound(raw, binding_mode="shared")
+        assert event is not None
+        assert event.scope_key == "ch"
+        assert event.scope_kind == "channel"
+
+    def test_shared_mode_dm_stays_isolated(self) -> None:
+        raw = {
+            "msgtype": "text",
+            "text": {"content": "hello"},
+            "msgId": "msg_006",
+            "conversationId": "cid_dm_shared",
+            "conversationType": "1",
+            "senderId": "staff_xyz",
+            "senderStaffId": "staff_xyz",
+            "chatbotUserId": "bot_999",
+        }
+        connector = DingtalkConnector(bot_user_id="bot_999")
+        event = connector.parse_inbound(raw, binding_mode="shared")
+        assert event is not None
+        assert event.scope_key == DM_SCOPE_KEY
+        assert event.scope_kind == "dm"
