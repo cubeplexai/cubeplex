@@ -512,13 +512,18 @@ async def update_channel_binding(
     updated = await repo.update(
         binding_id=binding_id,
         mode=body.mode,
-        sandbox_mode=body.sandbox_mode,
+        sandbox_mode=body.sandbox_mode if "sandbox_mode" in body.model_fields_set else ...,
         channel_name=body.channel_name,
     )
     if updated is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="binding not found",
+        )
+    if updated.mode == "shared" and updated.sandbox_mode is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="sandbox_mode is required when mode is shared",
         )
     await session.commit()
     return _binding_to_out(updated)
