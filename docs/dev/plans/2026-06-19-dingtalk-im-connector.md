@@ -100,9 +100,10 @@ class TestParseInbound:
         assert event.reply_to_id == "msg_001"
 
     def test_group_at_mention(self) -> None:
+        # DingTalk strips the @BotName tag and delivers a leading space
         raw = {
             "msgtype": "text",
-            "text": {"content": "@cubebox what time is it"},
+            "text": {"content": " what time is it"},
             "msgId": "msg_002",
             "conversationId": "cid_group_456",
             "conversationType": "2",
@@ -200,12 +201,26 @@ class DingtalkConnector:
         bot_user_id: str = "",
         access_token: str = "",
         conversation_id: str = "",
+        sender_staff_id: str = "",
+        is_dm: bool = False,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._bot_user_id = bot_user_id
         self._access_token = access_token
         self._conversation_id = conversation_id
-        self._http = http_client or httpx.AsyncClient(timeout=10)
+        self._sender_staff_id = sender_staff_id
+        self._is_dm = is_dm
+        self._http_ext = http_client
+        self._http_own: httpx.AsyncClient | None = None
+
+    @property
+    def _http(self) -> httpx.AsyncClient:
+        """Lazy-init httpx client; avoids allocation for parse-only connectors."""
+        if self._http_ext is not None:
+            return self._http_ext
+        if self._http_own is None:
+            self._http_own = httpx.AsyncClient(timeout=10)
+        return self._http_own
 
     # ------------------------------------------------------------------
     # Inbound
@@ -295,20 +310,42 @@ class DingtalkConnector:
         text: str,
         *,
         open_conversation_id: str = "",
+        user_id: str = "",
     ) -> str | None:
-        """Reply to a conversation with markdown. Returns processQueryKey."""
+        """Reply to a conversation with markdown.
+
+        For group conversations, uses groupMessages/send with openConversationId.
+        For DM conversations, uses oToMessages/batchSend with userIds (since
+        DingTalk's group endpoint rejects single-chat conversationIds).
+        Pass ``user_id`` (staffId) for DM replies.
+        """
         cid = open_conversation_id or self._conversation_id
-        url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
             "Content-Type": "application/json",
         }
-        payload = {
-            "msgParam": json.dumps({"title": title, "text": text}),
-            "msgKey": "sampleMarkdown",
-            "robotCode": self._bot_user_id,
-            "openConversationId": cid,
-        }
+        msg_param = json.dumps({"title": title, "text": text})
+        # Default to stored DM user for reply routing
+        effective_user_id = user_id or (self._sender_staff_id if self._is_dm else "")
+
+        if effective_user_id:
+            # DM: single-chat reply via proactive message endpoint
+            url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+            payload = {
+                "msgParam": msg_param,
+                "msgKey": "sampleMarkdown",
+                "robotCode": self._bot_user_id,
+                "userIds": [effective_user_id],
+            }
+        else:
+            # Group: reply via group messages endpoint
+            url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+            payload = {
+                "msgParam": msg_param,
+                "msgKey": "sampleMarkdown",
+                "robotCode": self._bot_user_id,
+                "openConversationId": cid,
+            }
         try:
             resp = await self._http.post(url, headers=headers, json=payload)
             if resp.status_code == 200:
@@ -454,6 +491,7 @@ class DingtalkConnector:
             title="Notice",
             text=text,
             open_conversation_id=chat_id,
+            user_id=self._sender_staff_id if self._is_dm else "",
         )
 ```
 
@@ -661,10 +699,10 @@ class DingtalkOpDispatcher:
 
     async def dispatch_stream(self, state: Any, text: str) -> bool:
         s = self._state
-        if s.card_id is None:
-            return await self.dispatch_create(state)
         if s.card_unavailable:
             return True
+        if s.card_id is None:
+            return await self.dispatch_create(state)
         full_content = s.card_state.streaming_content
         self._stream_seq += 1
         guid = f"{s.card_id}-{self._stream_seq}"
@@ -693,7 +731,11 @@ class DingtalkOpDispatcher:
             and pending.choices
             and pending_id != self._pending_input_sent_id
         ):
-            await self._send_pending_input_buttons(pending)
+            if s.card_unavailable or s.card_id is None:
+                # Card path is down — surface HITL via plain text fallback
+                await self._emergency_pending_input(pending)
+            else:
+                await self._send_pending_input_buttons(pending)
             self._pending_input_sent_id = pending_id
 
         if pending is not None and pending.resolved_choice is not None:
@@ -702,6 +744,14 @@ class DingtalkOpDispatcher:
             s.card_unavailable = False
             self._stream_seq = 0
         return True
+
+    async def _emergency_pending_input(self, pending: Any) -> None:
+        """Fallback: send HITL question as plain markdown when card is unavailable."""
+        text = pending.question or "Please continue in the cubebox web UI."
+        if pending.choices:
+            labels = ", ".join(label for label, _, _ in pending.choices)
+            text = f"{text}\n\nOptions: {labels}\n\n_(Please answer in the web UI.)_"
+        await self.emergency_text(text)
 
     async def _send_pending_input_buttons(self, pending: Any) -> None:
         """Update the card with action buttons for AskUser/SandboxConfirm."""
@@ -971,6 +1021,7 @@ import asyncio
 import json
 from typing import Any
 
+import httpx
 import dingtalk_stream
 from loguru import logger
 
@@ -1003,6 +1054,7 @@ class DingtalkGateway:
         self._refresh_task: asyncio.Task[None] | None = None
         self._access_token: str = ""
         self.card_template_id: str = ""
+        self._shared_http = httpx.AsyncClient(timeout=10)
 
     async def start(self) -> None:
         # Register the interactive card template (idempotent — DingTalk
@@ -1095,10 +1147,14 @@ class DingtalkGateway:
             return
         parsed.account_external_id = account.external_account_id
 
+        is_dm = parsed.scope_kind == "dm"
         gate_connector = DingtalkConnector(
             bot_user_id=self._app_key,
             access_token=self._access_token,
             conversation_id=parsed.channel_id,
+            sender_staff_id=parsed.sender_ref,
+            is_dm=is_dm,
+            http_client=self._shared_http,
         )
         try:
             result = await ingest(
@@ -1136,6 +1192,7 @@ class DingtalkGateway:
                 await self._task
             except (asyncio.CancelledError, Exception):
                 pass
+        await self._shared_http.aclose()
         logger.info(
             "[DingTalk] Gateway stopped for account {}", self._account.id
         )
@@ -1287,10 +1344,13 @@ class DingtalkPlatform:
                         "[DingTalk] token refresh failed for {}", account.id
                     )
 
+        is_dm = queue_item.scope_kind == "dm"
         connector = DingtalkConnector(
             bot_user_id=account.external_account_id,
             access_token=access_token,
             conversation_id=queue_item.channel_id,
+            sender_staff_id=queue_item.sender_open_id,
+            is_dm=is_dm,
         )
 
         cfg = account.config or {}
