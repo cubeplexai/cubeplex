@@ -167,9 +167,11 @@ Expected: FAIL — `DingtalkConnector` not found.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
+import httpx
 from loguru import logger
 
 from cubebox.im.outbound import _FloodSignal
@@ -198,10 +200,12 @@ class DingtalkConnector:
         bot_user_id: str = "",
         access_token: str = "",
         conversation_id: str = "",
+        http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._bot_user_id = bot_user_id
         self._access_token = access_token
         self._conversation_id = conversation_id
+        self._http = http_client or httpx.AsyncClient(timeout=10)
 
     # ------------------------------------------------------------------
     # Inbound
@@ -256,9 +260,13 @@ class DingtalkConnector:
     # Outbound — card + message API calls
     # ------------------------------------------------------------------
 
-    async def send_markdown(self, title: str, text: str) -> str | None:
-        """Send a plain markdown message. Returns msgId or None."""
-        import httpx
+    async def send_markdown(
+        self, title: str, text: str, *, user_ids: list[str] | None = None
+    ) -> str | None:
+        """Send a proactive markdown message to specific users. Returns processQueryKey or None."""
+        if not user_ids:
+            logger.warning("[DingTalk] send_markdown called with no user_ids")
+            return None
 
         url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
         headers = {
@@ -266,18 +274,17 @@ class DingtalkConnector:
             "Content-Type": "application/json",
         }
         payload = {
-            "msgParam": f'{{"title":"{title}","text":"{text}"}}',
+            "msgParam": json.dumps({"title": title, "text": text}),
             "msgKey": "sampleMarkdown",
             "robotCode": self._bot_user_id,
-            "userIds": [],
+            "userIds": user_ids,
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    return resp.json().get("processQueryKey")
-                logger.warning("[DingTalk] send_markdown failed: {}", resp.text)
-                return None
+            resp = await self._http.post(url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                return resp.json().get("processQueryKey")
+            logger.warning("[DingTalk] send_markdown failed: {}", resp.text)
+            return None
         except Exception:
             logger.warning("[DingTalk] send_markdown error", exc_info=True)
             return None
@@ -289,30 +296,25 @@ class DingtalkConnector:
         *,
         open_conversation_id: str = "",
     ) -> str | None:
-        """Reply to a conversation with markdown. Returns msgId."""
-        import httpx
-
+        """Reply to a conversation with markdown. Returns processQueryKey."""
         cid = open_conversation_id or self._conversation_id
-        url = (
-            "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
-        )
+        url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
             "Content-Type": "application/json",
         }
         payload = {
-            "msgParam": f'{{"title":"{title}","text":"{text}"}}',
+            "msgParam": json.dumps({"title": title, "text": text}),
             "msgKey": "sampleMarkdown",
             "robotCode": self._bot_user_id,
             "openConversationId": cid,
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    return resp.json().get("processQueryKey")
-                logger.warning("[DingTalk] reply_markdown failed: {}", resp.text)
-                return None
+            resp = await self._http.post(url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                return resp.json().get("processQueryKey")
+            logger.warning("[DingTalk] reply_markdown failed: {}", resp.text)
+            return None
         except Exception:
             logger.warning("[DingTalk] reply_markdown error", exc_info=True)
             return None
@@ -330,8 +332,6 @@ class DingtalkConnector:
         out_track_id: str,
     ) -> bool:
         """Create + deliver an interactive card instance."""
-        import httpx
-
         url = "https://api.dingtalk.com/v1.0/card/instances/createAndDeliver"
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
@@ -344,14 +344,13 @@ class DingtalkConnector:
             "cardData": {"cardParamMap": card_data},
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    return True
-                logger.warning(
-                    "[DingTalk] create_and_deliver_card failed: {}", resp.text
-                )
-                return False
+            resp = await self._http.post(url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                return True
+            logger.warning(
+                "[DingTalk] create_and_deliver_card failed: {}", resp.text
+            )
+            return False
         except Exception:
             logger.warning("[DingTalk] create_and_deliver_card error", exc_info=True)
             return False
@@ -360,14 +359,13 @@ class DingtalkConnector:
         self,
         *,
         out_track_id: str,
+        guid: str,
         key: str,
         content: str,
         is_final: bool = False,
         is_error: bool = False,
     ) -> bool:
-        """Stream-update a card variable."""
-        import httpx
-
+        """Stream-update a card variable. DingTalk requires PUT, not POST."""
         url = "https://api.dingtalk.com/v1.0/card/streaming"
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
@@ -375,6 +373,7 @@ class DingtalkConnector:
         }
         payload: dict[str, Any] = {
             "outTrackId": out_track_id,
+            "guid": guid,
             "key": key,
             "content": content,
             "isFull": True,
@@ -382,14 +381,13 @@ class DingtalkConnector:
             "isError": is_error,
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    return True
-                if resp.status_code == 429:
-                    raise DingtalkRateLimitError("rate limited")
-                logger.warning("[DingTalk] streaming_update failed: {}", resp.text)
-                return False
+            resp = await self._http.put(url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code == 429:
+                raise DingtalkRateLimitError("rate limited")
+            logger.warning("[DingTalk] streaming_update failed: {}", resp.text)
+            return False
         except DingtalkRateLimitError:
             raise
         except Exception:
@@ -403,8 +401,6 @@ class DingtalkConnector:
         card_data: dict[str, Any],
     ) -> bool:
         """Update card data (buttons, status) via PUT."""
-        import httpx
-
         url = "https://api.dingtalk.com/v1.0/card/instances"
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
@@ -415,12 +411,11 @@ class DingtalkConnector:
             "cardData": {"cardParamMap": card_data},
         }
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.put(url, headers=headers, json=payload)
-                if resp.status_code == 200:
-                    return True
-                logger.warning("[DingTalk] update_card_actions failed: {}", resp.text)
-                return False
+            resp = await self._http.put(url, headers=headers, json=payload)
+            if resp.status_code == 200:
+                return True
+            logger.warning("[DingTalk] update_card_actions failed: {}", resp.text)
+            return False
         except Exception:
             logger.warning("[DingTalk] update_card_actions error", exc_info=True)
             return False
@@ -431,21 +426,18 @@ class DingtalkConnector:
 
     async def resolve_email(self, open_id: str) -> str | None:
         """Look up a DingTalk user's email by staffId."""
-        import httpx
-
         url = "https://oapi.dingtalk.com/topapi/v2/user/get"
         params = {"access_token": self._access_token}
         payload = {"userid": open_id}
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(url, params=params, json=payload)
-                data = resp.json()
-                if data.get("errcode") != 0:
-                    logger.warning("[DingTalk] user/get failed: {}", data)
-                    return None
-                result = data.get("result", {})
-                email = result.get("email") or result.get("org_email") or ""
-                return email.strip().lower() if email else None
+            resp = await self._http.post(url, params=params, json=payload)
+            data = resp.json()
+            if data.get("errcode") != 0:
+                logger.warning("[DingTalk] user/get failed: {}", data)
+                return None
+            result = data.get("result", {})
+            email = result.get("email") or result.get("org_email") or ""
+            return email.strip().lower() if email else None
         except Exception:
             logger.warning("[DingTalk] resolve_email error", exc_info=True)
             return None
@@ -643,6 +635,7 @@ class DingtalkOpDispatcher:
         self._card_template_id = card_template_id
         self._open_conversation_id = open_conversation_id
         self._pending_input_sent_id: str | None = None
+        self._stream_seq: int = 0
 
     async def dispatch_create(self, state: Any) -> bool:
         s = self._state
@@ -673,9 +666,12 @@ class DingtalkOpDispatcher:
         if s.card_unavailable:
             return True
         full_content = s.card_state.streaming_content
+        self._stream_seq += 1
+        guid = f"{s.card_id}-{self._stream_seq}"
         try:
             ok = await self._connector.streaming_update_card(
                 out_track_id=s.card_id,
+                guid=guid,
                 key="content",
                 content=full_content,
             )
@@ -701,8 +697,10 @@ class DingtalkOpDispatcher:
             self._pending_input_sent_id = pending_id
 
         if pending is not None and pending.resolved_choice is not None:
+            # HITL resolved — next card starts fresh, reset stream state
             s.card_id = None
             s.card_unavailable = False
+            self._stream_seq = 0
         return True
 
     async def _send_pending_input_buttons(self, pending: Any) -> None:
@@ -753,8 +751,10 @@ class DingtalkOpDispatcher:
 
         if s.card_id and not s.card_unavailable:
             status = "error" if s.card_state.error else "done"
+            self._stream_seq += 1
             await self._connector.streaming_update_card(
                 out_track_id=s.card_id,
+                guid=f"{s.card_id}-{self._stream_seq}",
                 key="content",
                 content=full_content,
                 is_final=True,
@@ -971,6 +971,7 @@ import asyncio
 import json
 from typing import Any
 
+import dingtalk_stream
 from loguru import logger
 
 from cubebox.im.dingtalk.connector import DingtalkConnector
@@ -999,13 +1000,19 @@ class DingtalkGateway:
         self._redis_key_prefix = redis_key_prefix
         self._client: Any = None
         self._task: asyncio.Task[None] | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
         self._access_token: str = ""
+        self.card_template_id: str = ""
 
     async def start(self) -> None:
-        import dingtalk_stream
+        # Register the interactive card template (idempotent — DingTalk
+        # deduplicates by template name). Store the ID for build_tailer.
+        tpl_id = await self._register_card_template()
+        if tpl_id:
+            self.card_template_id = tpl_id
 
         credential = dingtalk_stream.Credential(self._app_key, self._app_secret)
-        client = dingtalk_stream.AIMClient(credential=credential)
+        client = dingtalk_stream.DingTalkStreamClient(credential=credential)
         self._client = client
 
         account = self._account
@@ -1036,7 +1043,7 @@ class DingtalkGateway:
 
         async def _run() -> None:
             try:
-                client.start()
+                await client.start()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1057,6 +1064,22 @@ class DingtalkGateway:
                 )
 
         self._task.add_done_callback(_on_task_done)
+
+        # Periodic token refresh — DingTalk access tokens expire every 2h
+        async def _token_loop() -> None:
+            while True:
+                await asyncio.sleep(6000)  # refresh every ~100 minutes
+                try:
+                    await self.refresh_access_token()
+                    logger.debug("[DingTalk] token refreshed for {}", account.id)
+                except Exception:
+                    logger.warning(
+                        "[DingTalk] token refresh failed for {}", account.id, exc_info=True
+                    )
+
+        self._refresh_task = asyncio.create_task(
+            _token_loop(), name=f"dingtalk-token-refresh:{account.id}"
+        )
         logger.info("[DingTalk] Gateway started for account {}", account.id)
 
     async def _handle_inbound(
@@ -1096,6 +1119,12 @@ class DingtalkGateway:
             )
 
     async def stop(self) -> None:
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except (asyncio.CancelledError, Exception):
+                pass
         if self._client is not None:
             try:
                 self._client.stop()
@@ -1120,8 +1149,8 @@ class DingtalkGateway:
 
         url = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
         payload = {"appKey": self._app_key, "appSecret": self._app_secret}
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=10) as http:
+            resp = await http.post(url, json=payload)
             data = resp.json()
             token = data.get("accessToken", "")
             self._access_token = token
@@ -1131,16 +1160,49 @@ class DingtalkGateway:
     def access_token(self) -> str:
         return self._access_token
 
+    async def _register_card_template(self) -> str:
+        """Register the cubebox streaming card template. Returns template ID."""
+        import httpx
 
-class _CallbackHandler:
-    """Adapts an async handler to the dingtalk-stream callback interface."""
+        url = "https://api.dingtalk.com/v1.0/card/templates"
+        headers = {
+            "x-acs-dingtalk-access-token": self._access_token,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "cardTemplateJson": json.dumps({
+                "config": {"autoLayout": True},
+                "header": {},
+                "cardContentList": [
+                    {"id": "content", "type": "markdown", "props": {"content": "${content}"}},
+                    {"id": "status", "type": "text", "props": {"content": "${status}"}},
+                ],
+                "cardActionList": [],
+            }),
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as http:
+                resp = await http.post(url, headers=headers, json=payload)
+                data = resp.json()
+                tpl_id = data.get("cardTemplateId", "")
+                if tpl_id:
+                    logger.info("[DingTalk] card template registered: {}", tpl_id)
+                else:
+                    logger.warning("[DingTalk] card template registration returned no ID: {}", data)
+                return tpl_id
+        except Exception:
+            logger.warning("[DingTalk] card template registration failed", exc_info=True)
+            return ""
+
+
+class _CallbackHandler(dingtalk_stream.CallbackHandler):
+    """Subclasses the SDK's CallbackHandler to route events to our async handler."""
 
     def __init__(self, handler: Any) -> None:
+        super().__init__()
         self._handler = handler
 
-    async def process(self, callback: Any) -> Any:
-        import dingtalk_stream
-
+    async def process(self, callback: dingtalk_stream.CallbackMessage) -> tuple[str, str]:
         try:
             data = json.loads(callback.data) if isinstance(callback.data, str) else callback.data
             await self._handler(data)
@@ -1149,7 +1211,7 @@ class _CallbackHandler:
         return dingtalk_stream.AckMessage.STATUS_OK, "OK"
 ```
 
-Note: The `dingtalk-stream` SDK's exact API surface needs to be verified at implementation time. The `_CallbackHandler` wrapper class adapts our async handlers to the SDK's callback protocol. The gateway's `start()` may need adjustment based on whether `client.start()` is blocking or async.
+Note: The `dingtalk-stream` SDK's exact API surface needs to be verified at implementation time. `_CallbackHandler` subclasses the SDK's `dingtalk_stream.CallbackHandler` base class — the SDK dispatches callbacks via its `process()` method. `DingTalkStreamClient.start()` is awaitable.
 
 - [ ] **Step 2: Verify mypy passes**
 
@@ -1240,7 +1302,7 @@ class DingtalkPlatform:
             stream_interval=1.0,
         )
 
-        card_template_id = cfg.get("card_template_id", "")
+        card_template_id = (gw.card_template_id if gw else "") or cfg.get("card_template_id", "")
         op_dispatcher = DingtalkOpDispatcher(
             connector=connector,
             state=state,
@@ -1765,10 +1827,19 @@ Add a method to `DingtalkConnector`:
 
 ```python
     def is_link_command(self, raw: dict[str, Any]) -> bool:
-        """Check if the message is a 'link' keyword command."""
+        """Check if the message is a 'link <email>' keyword command."""
         text_obj = raw.get("text") or {}
         text: str = text_obj.get("content", "").strip().lower()
-        return text in ("link", "/link")
+        return text.startswith("link ") or text in ("link", "/link")
+
+    def parse_link_email(self, raw: dict[str, Any]) -> str:
+        """Extract email from a 'link alice@example.com' command. Returns '' if no email."""
+        text_obj = raw.get("text") or {}
+        text: str = text_obj.get("content", "").strip()
+        parts = text.split(maxsplit=1)
+        if len(parts) == 2 and "@" in parts[1]:
+            return parts[1].strip().lower()
+        return ""
 ```
 
 - [ ] **Step 2: Add link handling to gateway**
@@ -1787,10 +1858,25 @@ Add `_handle_link_command` method to `DingtalkGateway`:
 
 ```python
     async def _handle_link_command(self, raw: dict[str, Any]) -> None:
-        """Handle the 'link' keyword by sending an identity-link URL."""
+        """Handle 'link alice@example.com' by sending an identity-link URL."""
         sender_staff_id = raw.get("senderStaffId", "")
         conversation_id = raw.get("conversationId", "")
         if not sender_staff_id or not conversation_id:
+            return
+
+        connector = DingtalkConnector(bot_user_id=self._app_key)
+        email = connector.parse_link_email(raw)
+        if not email:
+            gate_connector = DingtalkConnector(
+                bot_user_id=self._app_key,
+                access_token=self._access_token,
+                conversation_id=conversation_id,
+            )
+            await gate_connector.reply_markdown(
+                title="Link",
+                text="Usage: `link alice@example.com`",
+                open_conversation_id=conversation_id,
+            )
             return
 
         try:
@@ -1798,7 +1884,7 @@ Add `_handle_link_command` method to `DingtalkGateway`:
 
             token = sign_link_token(
                 im_user_id=sender_staff_id,
-                email="",
+                email=email,
                 account_id=self._account.id,
                 workspace_id=self._account.workspace_id,
                 platform="dingtalk",

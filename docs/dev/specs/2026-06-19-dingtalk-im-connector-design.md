@@ -162,7 +162,7 @@ Action ID format: `im:dingtalk:{run_id}:{short_qid}:{akey}:{value}`
 account:
 
 - `start(account)`: decrypt AppKey + AppSecret from credential vault,
-  create `dingtalk_stream.AIMClient`, register callback handlers
+  create `dingtalk_stream.DingTalkStreamClient`, register callback handlers
   (chat message + card action), connect. Spawned as background task.
 - `stop()`: disconnect the stream client, cancel the background task.
 - `is_open()`: check if the stream connection is alive.
@@ -275,7 +275,6 @@ generation (already configured for other IM connectors).
 | `im/dingtalk/connector.py` | parse_inbound, outbound card/message API, identity resolution |
 | `im/dingtalk/gateway.py` | DingTalk Stream lifecycle |
 | `im/dingtalk/renderer.py` | DingtalkOpDispatcher: interactive card rendering |
-| `im/dingtalk/card_builder.py` | Card template + instance JSON construction |
 | `im/dingtalk/interactions.py` | Card action callback handling |
 | `frontend/.../platforms/dingtalk.ts` | Platform descriptor |
 | `@cubebox/core` schema | ConnectDingtalkAccountIn |
