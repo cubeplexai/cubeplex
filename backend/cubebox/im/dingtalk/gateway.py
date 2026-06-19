@@ -123,6 +123,9 @@ class DingtalkGateway:
         ingest: Any,
     ) -> None:
         connector = DingtalkConnector(bot_user_id=self._app_key)
+        if connector.is_link_command(raw):
+            await self._handle_link_command(raw)
+            return
         parsed = connector.parse_inbound(raw)
         if parsed is None:
             return
@@ -155,6 +158,59 @@ class DingtalkGateway:
                 "[DingTalk] ingest failed for {}",
                 parsed.platform_event_id,
             )
+
+    async def _handle_link_command(self, raw: dict[str, Any]) -> None:
+        """Handle 'link alice@example.com' by sending an identity-link URL."""
+        sender_staff_id = raw.get("senderStaffId", "")
+        conversation_id = raw.get("conversationId", "")
+        if not sender_staff_id or not conversation_id:
+            return
+
+        connector = DingtalkConnector(bot_user_id=self._app_key)
+        email = connector.parse_link_email(raw)
+        if not email:
+            gate_connector = DingtalkConnector(
+                bot_user_id=self._app_key,
+                access_token=self._access_token,
+                conversation_id=conversation_id,
+                http_client=self._shared_http,
+            )
+            await gate_connector.reply_markdown(
+                title="Link",
+                text="Usage: `link alice@example.com`",
+                open_conversation_id=conversation_id,
+            )
+            return
+
+        try:
+            from cubebox.im.link import get_frontend_base_url, get_jwt_secret, sign_link_token
+
+            token = sign_link_token(
+                im_user_id=sender_staff_id,
+                email=email,
+                account_id=self._account.id,
+                workspace_id=self._account.workspace_id,
+                platform="dingtalk",
+                secret=get_jwt_secret(),
+            )
+        except Exception:
+            logger.warning("[DingTalk] sign_link_token failed", exc_info=True)
+            return
+
+        base = get_frontend_base_url()
+        url = f"{base}/im-link?token={token}"
+
+        gate_connector = DingtalkConnector(
+            bot_user_id=self._app_key,
+            access_token=self._access_token,
+            conversation_id=conversation_id,
+            http_client=self._shared_http,
+        )
+        await gate_connector.reply_markdown(
+            title="Link your account",
+            text=f"Click to bind your cubebox account:\n\n[Link your account]({url})",
+            open_conversation_id=conversation_id,
+        )
 
     async def stop(self) -> None:
         if self._refresh_task is not None:
