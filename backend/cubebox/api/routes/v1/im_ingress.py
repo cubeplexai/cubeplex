@@ -40,6 +40,9 @@ from cubebox.im.feishu.signature import (
 )
 from cubebox.im.inbound import ingest_inbound_event
 from cubebox.im.resume import resume_paused_run
+from cubebox.im.teams.app_manager import get_entry_by_bot_id
+from cubebox.im.teams.commands import parse_link_command as parse_teams_link
+from cubebox.im.teams.connector import TeamsConnector
 from cubebox.im.types import BindingMode, lookup_binding_mode
 from cubebox.models.im_connector import IMConnectorAccount
 from cubebox.repositories.im_connector import get_account_by_external_id_unscoped
@@ -463,3 +466,141 @@ async def _handle_card_action(
     if not ok:
         return True, "会话已结束"
     return True, None
+
+
+@router.post("/teams/messages")
+async def teams_messages(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> Response:
+    """Receive one Teams Bot Framework activity via webhook.
+
+    Azure Bot Service POSTs activities here. The SDK App instance
+    validates the JWT Bearer token. We parse the activity and ingest.
+    """
+    raw_body = await request.body()
+    try:
+        activity: dict[str, Any] = json.loads(raw_body or b"{}")
+    except json.JSONDecodeError:
+        return Response(status_code=status.HTTP_400_BAD_REQUEST)
+    if not isinstance(activity, dict):
+        return Response(status_code=status.HTTP_400_BAD_REQUEST)
+
+    recipient = activity.get("recipient") or {}
+    bot_id = str(recipient.get("id") or "")
+    if not bot_id:
+        return Response(status_code=status.HTTP_200_OK)
+
+    entry = get_entry_by_bot_id(bot_id)
+    if entry is None:
+        logger.debug("[Teams ingress] no app for bot_id={}", bot_id)
+        return Response(status_code=status.HTTP_200_OK)
+
+    account = await get_account_by_external_id_unscoped(
+        session, platform="teams", external_account_id=bot_id
+    )
+    if account is None or not account.enabled:
+        return Response(status_code=status.HTTP_200_OK)
+
+    activity_type = str(activity.get("type") or "")
+
+    if activity_type == "invoke":
+        value = activity.get("value") or {}
+        action_data = value.get("action")
+        if isinstance(action_data, str) and action_data.startswith("im:"):
+            from cubebox.im.teams.interactions import handle_card_action
+
+            ok = await handle_card_action(
+                data={"action": action_data},
+                run_manager=request.app.state.run_manager,
+                redis_key_prefix=request.app.state.redis_key_prefix,
+            )
+            status_body = {"status": 200} if ok else {"status": 500}
+            return Response(
+                content=json.dumps(status_body),
+                media_type="application/json",
+            )
+
+    if activity_type != "message":
+        return Response(status_code=status.HTTP_200_OK)
+
+    connector = TeamsConnector(bot_id=bot_id)
+    event = connector.parse_inbound(activity)
+    if event is None:
+        return Response(status_code=status.HTTP_200_OK)
+
+    event.account_external_id = account.external_account_id
+
+    gate_connector = TeamsConnector(
+        bot_id=bot_id,
+        app=entry.app,
+        channel_id=event.channel_id,
+        graph_client=entry.graph_client,
+    )
+
+    link_email = parse_teams_link(event.text)
+    if link_email is not None:
+        await _handle_teams_link_command(
+            email=link_email,
+            event=event,
+            account=account,
+            connector=gate_connector,
+        )
+        return Response(status_code=status.HTTP_200_OK)
+
+    maker: async_sessionmaker[AsyncSession] = async_session_maker
+    result = await ingest_inbound_event(
+        event,
+        account=account,
+        session_maker=maker,
+        identity_resolver=gate_connector,
+        rejection_notifier=gate_connector,
+    )
+    logger.info(
+        "[Teams ingress] {} {}: {}",
+        account.id,
+        event.platform_event_id,
+        result.outcome,
+    )
+    return Response(status_code=status.HTTP_200_OK)
+
+
+async def _handle_teams_link_command(
+    *,
+    email: str,
+    event: Any,
+    account: IMConnectorAccount,
+    connector: Any,
+) -> None:
+    """Generate an identity-link token and reply to the Teams chat."""
+    from cubebox.config import config
+    from cubebox.im.link import sign_link_token
+
+    secret = str(config.get("auth.jwt_secret", "CHANGE_ME"))
+    sender_ref = event.sender_ref or event.sender_open_id or ""
+    if not sender_ref:
+        if connector is not None:
+            await connector.send_to_chat(event.channel_id, None, "Cannot identify sender.")
+        return
+
+    try:
+        token = sign_link_token(
+            im_user_id=sender_ref,
+            email=email,
+            account_id=account.id,
+            workspace_id=account.workspace_id,
+            platform="teams",
+            secret=secret,
+        )
+    except Exception:
+        logger.warning("[Teams] sign_link_token failed", exc_info=True)
+        if connector is not None:
+            await connector.send_to_chat(event.channel_id, None, "Failed to generate link.")
+        return
+
+    base = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
+    url = f"{base}/im-link?token={token}"
+    text = f"Click to confirm your identity:\n{url}"
+    if connector is not None:
+        await connector.send_to_chat(event.channel_id, None, text)
