@@ -493,6 +493,19 @@ class DingtalkConnector:
             open_conversation_id=chat_id,
             user_id=self._sender_staff_id if self._is_dm else "",
         )
+
+    # ------------------------------------------------------------------
+    # Lifecycle hooks (called by OutboundRunTailer on the connector)
+    # ------------------------------------------------------------------
+
+    async def on_processing_start(self, state: Any) -> None:
+        pass
+
+    async def on_processing_complete(self, state: Any) -> None:
+        pass
+
+    async def on_processing_failed(self, state: Any) -> None:
+        pass
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
