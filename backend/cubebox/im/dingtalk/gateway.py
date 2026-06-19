@@ -76,26 +76,25 @@ class DingtalkGateway:
         )
 
         async def _run() -> None:
-            try:
-                await client.start()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("[DingTalk] Stream client crashed for {}", account.id)
+            backoff = 1.0
+            while True:
+                try:
+                    await client.start()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning(
+                        "[DingTalk] Stream disconnected for {}, reconnecting in {:.0f}s",
+                        account.id,
+                        backoff,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 60.0)
+                else:
+                    backoff = 1.0
 
         self._task = asyncio.create_task(_run(), name=f"dingtalk-gateway:{account.id}")
-
-        def _on_task_done(task: asyncio.Task[None]) -> None:
-            exc = task.exception() if not task.cancelled() else None
-            if exc is not None:
-                logger.error(
-                    "[DingTalk] gateway task crashed for {}: {}",
-                    account.id,
-                    exc,
-                    exc_info=exc,
-                )
-
-        self._task.add_done_callback(_on_task_done)
 
         async def _token_loop() -> None:
             while True:

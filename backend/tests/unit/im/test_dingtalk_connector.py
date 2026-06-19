@@ -40,6 +40,7 @@ class TestParseInbound:
             "senderId": "staff_def",
             "senderStaffId": "staff_def",
             "chatbotUserId": "bot_999",
+            "isInAtList": True,
             "atUsers": [
                 {"dingtalkId": "bot_999"},
             ],
@@ -74,6 +75,7 @@ class TestParseInbound:
             "senderId": "staff_ghi",
             "senderStaffId": "staff_ghi",
             "chatbotUserId": "bot_999",
+            "isInAtList": True,
         }
         connector = DingtalkConnector(bot_user_id="bot_999")
         event = connector.parse_inbound(raw)
@@ -90,12 +92,28 @@ class TestParseInbound:
             "senderId": "staff_xyz",
             "senderStaffId": "staff_xyz",
             "chatbotUserId": "bot_999",
+            "isInAtList": True,
         }
         connector = DingtalkConnector(bot_user_id="bot_999")
         event = connector.parse_inbound(raw, binding_mode="shared")
         assert event is not None
         assert event.scope_key == "ch"
         assert event.scope_kind == "channel"
+
+    def test_group_non_mention_ignored(self) -> None:
+        raw = {
+            "msgtype": "text",
+            "text": {"content": "random chatter"},
+            "msgId": "msg_007",
+            "conversationId": "cid_group_456",
+            "conversationType": "2",
+            "senderId": "staff_def",
+            "senderStaffId": "staff_def",
+            "chatbotUserId": "bot_999",
+            "isInAtList": False,
+        }
+        connector = DingtalkConnector(bot_user_id="bot_999")
+        assert connector.parse_inbound(raw) is None
 
     def test_shared_mode_dm_stays_isolated(self) -> None:
         raw = {

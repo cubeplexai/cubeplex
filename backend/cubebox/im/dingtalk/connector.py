@@ -86,6 +86,9 @@ class DingtalkConnector:
             scope_key = DM_SCOPE_KEY
             scope_kind = "dm"
         else:
+            is_at_bot = raw.get("isInAtList", False)
+            if not is_at_bot:
+                return None
             if binding_mode == "shared":
                 scope_key = make_channel_scope()
                 scope_kind = "channel"
