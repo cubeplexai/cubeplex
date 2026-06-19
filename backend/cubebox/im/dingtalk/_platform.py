@@ -27,6 +27,7 @@ class DingtalkPlatform:
 
         app = kwargs["app"]
         gateways: dict[str, Any] = kwargs.get("gateways", {})
+        load_secrets = kwargs.get("load_secrets")
 
         access_token = ""
         gw = gateways.get(account.id)
@@ -38,6 +39,28 @@ class DingtalkPlatform:
                 except Exception:
                     logger.warning(
                         "[DingTalk] token refresh failed for {}",
+                        account.id,
+                    )
+
+        if not access_token and load_secrets is not None:
+            import httpx
+
+            secrets = await load_secrets(account)
+            app_key = str(secrets.get("app_key") or "")
+            app_secret = str(secrets.get("app_secret") or "")
+            if app_key and app_secret:
+                try:
+                    url = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
+                    async with httpx.AsyncClient(timeout=10) as http:
+                        resp = await http.post(
+                            url, json={"appKey": app_key, "appSecret": app_secret}
+                        )
+                        token: str = resp.json().get("accessToken", "")
+                        if token:
+                            access_token = token
+                except Exception:
+                    logger.warning(
+                        "[DingTalk] standalone token refresh failed for {}",
                         account.id,
                     )
 
@@ -67,6 +90,18 @@ class DingtalkPlatform:
             open_conversation_id=queue_item.channel_id,
         )
 
+        shared_mode = False
+        _sm = kwargs.get("session_maker")
+        if _sm is not None:
+            from cubebox.im.types import is_shared_mode_for_tailer
+
+            shared_mode = await is_shared_mode_for_tailer(
+                _sm,
+                queue_item.account_id,
+                queue_item.channel_id,
+                queue_item.conversation_id,
+            )
+
         tailer = OutboundRunTailer(
             redis=app.state.redis,
             key_prefix=app.state.redis_key_prefix,
@@ -75,6 +110,7 @@ class DingtalkPlatform:
             state=state,
             dispatcher=op_dispatcher,
             responder_open_id=queue_item.sender_open_id,
+            shared_mode=shared_mode,
         )
         asyncio.create_task(tailer.run(), name=f"im-tailer:{run_id}")
 

@@ -26,6 +26,10 @@ async def handle_card_action(
         return
 
     action_id: str = content.get("cardActionId", "")
+    if not action_id:
+        private_data = content.get("cardPrivateData", {})
+        params = private_data.get("params", {}) if isinstance(private_data, dict) else {}
+        action_id = params.get("cardActionId", "")
     if not action_id.startswith("im:"):
         return
 

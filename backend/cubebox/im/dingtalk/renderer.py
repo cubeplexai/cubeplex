@@ -131,10 +131,12 @@ class DingtalkOpDispatcher:
             "question": pending.question or "Please choose:",
             "buttons": buttons,
         }
-        await self._connector.update_card_actions(
+        ok = await self._connector.update_card_actions(
             out_track_id=s.card_id,
             card_data=card_data,
         )
+        if not ok:
+            await self._emergency_pending_input(pending)
 
     async def dispatch_finalize(self, state: Any) -> bool:
         s = self._state
@@ -184,4 +186,6 @@ class DingtalkOpDispatcher:
             logger.warning("[DingTalk] emergency text send failed", exc_info=True)
 
     async def aclose(self) -> None:
-        pass
+        if self._connector._http_own is not None:
+            await self._connector._http_own.aclose()
+            self._connector._http_own = None

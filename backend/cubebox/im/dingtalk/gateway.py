@@ -168,19 +168,24 @@ class DingtalkGateway:
         """Handle 'link alice@example.com' by sending an identity-link URL."""
         sender_staff_id = raw.get("senderStaffId", "")
         conversation_id = raw.get("conversationId", "")
+        is_dm = raw.get("conversationType") == "1"
         if not sender_staff_id or not conversation_id:
             return
+
+        def _make_reply_connector() -> DingtalkConnector:
+            return DingtalkConnector(
+                bot_user_id=self._app_key,
+                access_token=self._access_token,
+                conversation_id=conversation_id,
+                sender_staff_id=sender_staff_id,
+                is_dm=is_dm,
+                http_client=self._shared_http,
+            )
 
         connector = DingtalkConnector(bot_user_id=self._app_key)
         email = connector.parse_link_email(raw)
         if not email:
-            gate_connector = DingtalkConnector(
-                bot_user_id=self._app_key,
-                access_token=self._access_token,
-                conversation_id=conversation_id,
-                http_client=self._shared_http,
-            )
-            await gate_connector.reply_markdown(
+            await _make_reply_connector().reply_markdown(
                 title="Link",
                 text="Usage: `link alice@example.com`",
                 open_conversation_id=conversation_id,
@@ -205,13 +210,7 @@ class DingtalkGateway:
         base = get_frontend_base_url()
         url = f"{base}/im-link?token={token}"
 
-        gate_connector = DingtalkConnector(
-            bot_user_id=self._app_key,
-            access_token=self._access_token,
-            conversation_id=conversation_id,
-            http_client=self._shared_http,
-        )
-        await gate_connector.reply_markdown(
+        await _make_reply_connector().reply_markdown(
             title="Link your account",
             text=f"Click to bind your cubebox account:\n\n[Link your account]({url})",
             open_conversation_id=conversation_id,
@@ -249,8 +248,11 @@ class DingtalkGateway:
             resp = await http.post(url, json=payload)
             data = resp.json()
             token: str = data.get("accessToken", "")
-            self._access_token = token
-            return token
+            if token:
+                self._access_token = token
+            else:
+                logger.warning("[DingTalk] refresh returned empty token, keeping previous")
+            return self._access_token
 
     @property
     def access_token(self) -> str:
