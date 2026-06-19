@@ -122,6 +122,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
     import cubebox.im.discord  # noqa: F401
     import cubebox.im.feishu  # noqa: F401
     import cubebox.im.slack  # noqa: F401
+    import cubebox.im.teams  # noqa: F401
 
     instance_id = str(uuid.uuid4())
 
@@ -271,6 +272,35 @@ async def start(app: FastAPI, run_manager: Any) -> None:
         )
     if accounts:
         await asyncio.gather(*(_connect_one(a) for a in accounts), return_exceptions=True)
+
+    # Initialize Teams webhook App instances (no persistent connection,
+    # but the App instance must exist for the ingress route to dispatch).
+    async with async_session_maker() as s:
+        webhook_accounts = (
+            (
+                await s.execute(
+                    select(IMConnectorAccount).where(
+                        IMConnectorAccount.enabled == True,  # type: ignore[arg-type]  # noqa: E712
+                        IMConnectorAccount.platform == "teams",  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for wa in webhook_accounts:
+        try:
+            secrets = await _load_secrets(wa)
+            from cubebox.im.registry import get_platform as _get_platform
+
+            platform = _get_platform(wa.platform)
+            await platform.on_account_enabled(wa, secrets=secrets, gateways=gateways)
+        except Exception:
+            logger.warning(
+                "[IM] teams app init failed for account {} on startup",
+                wa.id,
+                exc_info=True,
+            )
 
     # Expose the connector so the workspace POST /im/accounts route can
     # spin up the connection inline instead of waiting for the next restart.
