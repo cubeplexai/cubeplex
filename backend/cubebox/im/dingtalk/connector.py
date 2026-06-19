@@ -238,6 +238,7 @@ class DingtalkConnector:
             "cardTemplateId": card_template_id,
             "outTrackId": out_track_id,
             "openConversationId": open_conversation_id,
+            "callbackType": "STREAM",
             "cardData": {"cardParamMap": card_data},
         }
         try:

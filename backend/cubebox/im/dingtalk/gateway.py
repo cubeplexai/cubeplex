@@ -121,6 +121,10 @@ class DingtalkGateway:
         session_maker: Any,
         ingest: Any,
     ) -> None:
+        is_group = raw.get("conversationType") != "1"
+        if is_group and not raw.get("isInAtList", False):
+            return
+
         connector = DingtalkConnector(bot_user_id=self._app_key)
         if connector.is_link_command(raw):
             await self._handle_link_command(raw)
@@ -230,8 +234,8 @@ class DingtalkGateway:
         if self._task is not None:
             self._task.cancel()
             try:
-                await self._task
-            except (asyncio.CancelledError, Exception):
+                await asyncio.wait_for(self._task, timeout=5.0)
+            except (asyncio.CancelledError, TimeoutError, Exception):
                 pass
         await self._shared_http.aclose()
         logger.info("[DingTalk] Gateway stopped for account {}", self._account.id)

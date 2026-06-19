@@ -157,7 +157,7 @@ class DingtalkOpDispatcher:
         if s.card_id and not s.card_unavailable:
             status = "error" if s.card_state.error else "done"
             self._stream_seq += 1
-            await self._connector.streaming_update_card(
+            ok = await self._connector.streaming_update_card(
                 out_track_id=s.card_id,
                 guid=f"{s.card_id}-{self._stream_seq}",
                 key="content",
@@ -165,10 +165,17 @@ class DingtalkOpDispatcher:
                 is_final=True,
                 is_error=bool(s.card_state.error),
             )
-            await self._connector.update_card_actions(
-                out_track_id=s.card_id,
-                card_data={"status": status},
-            )
+            if ok:
+                await self._connector.update_card_actions(
+                    out_track_id=s.card_id,
+                    card_data={"status": status},
+                )
+            else:
+                await self._connector.reply_markdown(
+                    title="cubebox",
+                    text=full_content[:4000],
+                    open_conversation_id=self._open_conversation_id,
+                )
         elif full_content:
             await self._connector.reply_markdown(
                 title="cubebox",
