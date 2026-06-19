@@ -116,15 +116,18 @@ class DingtalkConnector:
         """Check if the message is a 'link <email>' keyword command."""
         text_obj = raw.get("text") or {}
         text: str = text_obj.get("content", "").strip().lower()
-        return text.startswith("link ") or text in ("link", "/link")
+        return text.startswith("link ") or text.startswith("/link ") or text in ("link", "/link")
 
     def parse_link_email(self, raw: dict[str, Any]) -> str:
         """Extract email from a 'link alice@example.com' command. Returns '' if no email."""
         text_obj = raw.get("text") or {}
         text: str = text_obj.get("content", "").strip()
-        parts = text.split(maxsplit=1)
-        if len(parts) == 2 and "@" in parts[1]:
-            return parts[1].strip().lower()
+        if text.lower().startswith("/link"):
+            text = text[5:].strip()
+        elif text.lower().startswith("link"):
+            text = text[4:].strip()
+        if "@" in text:
+            return text.strip().lower()
         return ""
 
     # ------------------------------------------------------------------

@@ -289,7 +289,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
                                 select(IMConnectorAccount).where(
                                     IMConnectorAccount.enabled == True,  # type: ignore[arg-type]  # noqa: E712
                                     IMConnectorAccount.delivery_mode.in_(  # type: ignore[attr-defined]
-                                        ["long_connection", "gateway"]
+                                        ["long_connection", "gateway", "stream"]
                                     ),
                                 )
                             )
