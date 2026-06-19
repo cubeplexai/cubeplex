@@ -87,8 +87,12 @@ class DiscordGateway:
 
             from cubebox.im.types import lookup_binding_mode
 
-            channel_id = str(message.channel.id)
-            binding_mode = await lookup_binding_mode(session_maker, account.id, channel_id)
+            channel = message.channel
+            channel_type_value = getattr(getattr(channel, "type", None), "value", -1)
+            is_thread = channel_type_value in (11, 12)
+            parent_id = getattr(channel, "parent_id", None) if is_thread else None
+            lookup_channel_id = str(parent_id) if parent_id else str(channel.id)
+            binding_mode = await lookup_binding_mode(session_maker, account.id, lookup_channel_id)
             event = self._connector.parse_inbound(message, binding_mode=binding_mode)
             if event is None:
                 return
