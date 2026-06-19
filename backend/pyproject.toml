@@ -54,6 +54,7 @@ dependencies = [
     "slack-sdk>=3.42.0",
     "authlib>=1.7.2",
     "python3-saml>=1.16.0",
+    "dingtalk-stream>=0.24.3",
 ]
 
 [project.optional-dependencies]
