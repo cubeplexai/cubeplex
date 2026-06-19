@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Plus, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { createApiClient, useMemberStore, type OrgMember } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -23,7 +23,13 @@ import {
 } from '@/components/ui/select'
 import { AddOrgMemberDialog } from './AddOrgMemberDialog'
 
-export function OrgMembersTable() {
+interface OrgMembersTableProps {
+  /** controlled "add member" dialog state, owned by the page header action */
+  addOpen: boolean
+  onAddOpenChange: (open: boolean) => void
+}
+
+export function OrgMembersTable({ addOpen, onAddOpenChange }: OrgMembersTableProps) {
   const t = useTranslations('adminMembers')
   const client = useMemo(() => createApiClient(''), [])
   const {
@@ -35,7 +41,6 @@ export function OrgMembersTable() {
     removeOrgMember,
   } = useMemberStore()
 
-  const [addOpen, setAddOpen] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
 
   useEffect(() => {
@@ -74,17 +79,6 @@ export function OrgMembersTable() {
 
   return (
     <>
-      <header className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">{t('title')}</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">{t('subtitle')}</p>
-        </div>
-        <Button size="sm" className="gap-1.5" onClick={() => setAddOpen(true)}>
-          <Plus className="size-3.5" />
-          {t('addMember')}
-        </Button>
-      </header>
-
       {orgLoading ? (
         <div className="py-8 text-center text-xs text-muted-foreground">Loading...</div>
       ) : orgMembers.length === 0 ? (
@@ -127,7 +121,7 @@ export function OrgMembersTable() {
         </div>
       )}
 
-      <AddOrgMemberDialog open={addOpen} onOpenChange={setAddOpen} onAdd={handleAdd} />
+      <AddOrgMemberDialog open={addOpen} onOpenChange={onAddOpenChange} onAdd={handleAdd} />
     </>
   )
 }
