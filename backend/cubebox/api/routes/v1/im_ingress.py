@@ -497,6 +497,23 @@ async def teams_messages(
         logger.debug("[Teams ingress] no app for bot_id={}", bot_id)
         return Response(status_code=status.HTTP_200_OK)
 
+    # Validate Azure Bot Framework JWT before any state-changing work.
+    token_validator = getattr(entry.app.server, "_token_validator", None)
+    if token_validator is None:
+        logger.warning("[Teams ingress] no token validator for bot_id={}", bot_id)
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+    try:
+        await token_validator.validate_token(
+            auth_header.removeprefix("Bearer "),
+            activity.get("serviceUrl"),
+        )
+    except Exception:
+        logger.warning("[Teams ingress] JWT validation failed for bot_id={}", bot_id)
+        return Response(status_code=status.HTTP_401_UNAUTHORIZED)
+
     account = await get_account_by_external_id_unscoped(
         session, platform="teams", external_account_id=bot_id
     )
@@ -511,8 +528,10 @@ async def teams_messages(
         if isinstance(action_data, str) and action_data.startswith("im:"):
             from cubebox.im.teams.interactions import handle_card_action
 
+            operator_aad_id = str((activity.get("from") or {}).get("aadObjectId") or "")
             ok = await handle_card_action(
                 data={"action": action_data},
+                operator_aad_id=operator_aad_id,
                 run_manager=request.app.state.run_manager,
                 redis_key_prefix=request.app.state.redis_key_prefix,
             )
