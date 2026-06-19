@@ -98,7 +98,7 @@ git commit -m "feat(im): add microsoft-teams-apps SDK dependency + teams package
 Create `backend/tests/unit/im/test_teams_format.py`:
 
 ```python
-from cubebox.im.teams.format import normalize_for_teams
+from cubebox.im.teams.format import normalize_for_teams, strip_mention_tags
 
 
 def test_strikethrough_stripped() -> None:
@@ -127,15 +127,15 @@ def test_inline_code_preserved() -> None:
 
 
 def test_mention_tag_stripped() -> None:
-    assert normalize_for_teams("<at>CubeBot</at> hello") == "hello"
+    assert strip_mention_tags("<at>CubeBot</at> hello") == "hello"
 
 
 def test_mention_tag_with_id_stripped() -> None:
-    assert normalize_for_teams('<at id="abc">CubeBot</at> hi') == "hi"
+    assert strip_mention_tags('<at id="abc">CubeBot</at> hi') == "hi"
 
 
 def test_empty_after_strip() -> None:
-    assert normalize_for_teams("<at>Bot</at>") == ""
+    assert strip_mention_tags("<at>Bot</at>") == ""
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -472,7 +472,7 @@ from cubebox.im.types import (
     make_thread_participant_scope,
 )
 
-_TEAMS_MSG_LIMIT = 25000
+TEAMS_MSG_LIMIT = 25000
 
 
 class TeamsRateLimitError(_FloodSignal):
@@ -519,7 +519,7 @@ class TeamsConnector:
         sender_id: str = str(from_obj.get("id") or "")
         aad_object_id: str = str(from_obj.get("aadObjectId") or "")
 
-        if sender_id == self._bot_id or (not aad_object_id and sender_id == self._bot_id):
+        if sender_id == self._bot_id:
             return None
 
         conversation: dict[str, Any] = activity.get("conversation", {})
@@ -607,7 +607,7 @@ class TeamsConnector:
         if self._app is None or not self._channel_id:
             return None
         try:
-            text = normalize_for_teams(text[:_TEAMS_MSG_LIMIT])
+            text = normalize_for_teams(text[:TEAMS_MSG_LIMIT])
             result = await self._app.send(self._channel_id, text)
             return str(result.id) if result and hasattr(result, "id") else None
         except Exception:
@@ -619,10 +619,13 @@ class TeamsConnector:
         if self._app is None or not self._channel_id:
             return False
         try:
-            text = normalize_for_teams(text[:_TEAMS_MSG_LIMIT])
-            await self._app.update_activity(
-                self._channel_id, activity_id, text
-            )
+            from microsoft_teams.api import MessageActivityInput
+
+            text = normalize_for_teams(text[:TEAMS_MSG_LIMIT])
+            msg = MessageActivityInput()
+            msg.id = activity_id
+            msg.text = text
+            await self._app.send(self._channel_id, msg)
             return True
         except Exception as exc:
             if _is_rate_limit(exc):
@@ -702,7 +705,7 @@ class TeamsConnector:
 
 def _is_rate_limit(exc: Exception) -> bool:
     msg = str(exc).lower()
-    return "429" in msg or "rate" in msg and "limit" in msg
+    return "429" in msg or ("rate" in msg and "limit" in msg)
 ```
 
 - [ ] **Step 5: Run tests**
@@ -755,10 +758,9 @@ from typing import Any
 from loguru import logger
 
 from cubebox.im.outbound import find_split_point, note_edit_success, note_flood_strike
-from cubebox.im.teams.connector import TeamsRateLimitError
+from cubebox.im.teams.connector import TEAMS_MSG_LIMIT, TeamsRateLimitError
 from cubebox.im.types import RenderState
 
-_TEAMS_MSG_LIMIT = 25000
 _SPLIT_THRESHOLD = 24000
 
 
@@ -914,16 +916,16 @@ class TeamsOpDispatcher:
         if not full_content:
             return True
         remaining = full_content[self.sent_char_offset:]
-        if s.bot_message_id is not None and len(remaining) <= _TEAMS_MSG_LIMIT:
+        if s.bot_message_id is not None and len(remaining) <= TEAMS_MSG_LIMIT:
             try:
                 await self._connector.edit_message(s.bot_message_id, remaining)
             except Exception:
                 logger.warning("[Teams] finalize edit failed", exc_info=True)
-                await self.emergency_text(remaining[:_TEAMS_MSG_LIMIT])
+                await self.emergency_text(remaining[:TEAMS_MSG_LIMIT])
         else:
             while remaining:
-                chunk = remaining[:_TEAMS_MSG_LIMIT]
-                remaining = remaining[_TEAMS_MSG_LIMIT:]
+                chunk = remaining[:TEAMS_MSG_LIMIT]
+                remaining = remaining[TEAMS_MSG_LIMIT:]
                 if s.bot_message_id and not self.sent_char_offset:
                     try:
                         await self._connector.edit_message(
@@ -940,7 +942,7 @@ class TeamsOpDispatcher:
 
     async def emergency_text(self, text: str) -> None:
         try:
-            await self._connector.send_message(text[:_TEAMS_MSG_LIMIT])
+            await self._connector.send_message(text[:TEAMS_MSG_LIMIT])
         except Exception:
             logger.warning("[Teams] emergency text send failed", exc_info=True)
 
@@ -1111,11 +1113,13 @@ class TeamsAppEntry:
         account_id: str,
         bot_id: str,
         secrets: dict[str, Any],
+        graph_client: Any = None,
     ) -> None:
         self.app = app
         self.account_id = account_id
         self.bot_id = bot_id
         self.secrets = secrets
+        self.graph_client = graph_client
 
 
 async def init_app(
@@ -1135,17 +1139,24 @@ async def init_app(
     tenant_id = str(secrets["tenant_id"])
 
     app = App(
-        app_id=app_id,
-        app_password=app_secret,
+        client_id=app_id,
+        client_secret=app_secret,
         tenant_id=tenant_id,
     )
     await app.initialize()
+
+    from cubebox.im.teams.graph import TeamsGraphClient
+
+    graph_client = TeamsGraphClient(
+        app_id=app_id, app_secret=app_secret, tenant_id=tenant_id,
+    )
 
     entry = TeamsAppEntry(
         app=app,
         account_id=account_id,
         bot_id=bot_id,
         secrets=secrets,
+        graph_client=graph_client,
     )
     _app_cache[bot_id] = entry
     logger.info("[Teams] app initialized for account={} bot_id={}", account_id, bot_id)
@@ -1609,7 +1620,6 @@ after the Feishu route. Add necessary imports at the top:
 from cubebox.im.teams.app_manager import get_entry_by_bot_id
 from cubebox.im.teams.commands import parse_link_command as parse_teams_link
 from cubebox.im.teams.connector import TeamsConnector
-from cubebox.im.teams.graph import TeamsGraphClient
 ```
 
 Add the route function:
@@ -1666,7 +1676,7 @@ async def teams_messages(
                 run_manager=request.app.state.run_manager,
                 redis_key_prefix=request.app.state.redis_key_prefix,
             )
-            status_body = {"status": 200} if ok else {"status": 200}
+            status_body = {"status": 200} if ok else {"status": 500}
             return Response(
                 content=json.dumps(status_body),
                 media_type="application/json",
@@ -1684,16 +1694,12 @@ async def teams_messages(
     event.account_external_id = account.external_account_id
 
     # Build a connector with outbound capability for identity gating
-    graph_client = TeamsGraphClient(
-        app_id=str(entry.secrets.get("app_id", "")),
-        app_secret=str(entry.secrets.get("app_secret", "")),
-        tenant_id=str(entry.secrets.get("tenant_id", "")),
-    )
+    # Reuse the cached graph_client from the entry (token cache persists)
     gate_connector = TeamsConnector(
         bot_id=bot_id,
         app=entry.app,
         channel_id=event.channel_id,
-        graph_client=graph_client,
+        graph_client=entry.graph_client,
     )
 
     # Intercept /link commands
