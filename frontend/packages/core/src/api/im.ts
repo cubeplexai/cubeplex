@@ -62,11 +62,20 @@ export interface ConnectDingtalkAccountIn {
   acting_user_id?: string
 }
 
+export interface ConnectTeamsAccountIn {
+  platform: 'teams'
+  app_id: string
+  app_secret: string
+  tenant_id: string
+  acting_user_id?: string
+}
+
 export type ConnectImAccountIn =
   | ConnectFeishuAccountIn
   | ConnectDiscordAccountIn
   | ConnectSlackAccountIn
   | ConnectDingtalkAccountIn
+  | ConnectTeamsAccountIn
 
 // ── Workspace scope ──────────────────────────────────────────────────────────
 
