@@ -39,6 +39,8 @@ async def handle_card_action(
 
     _, kind, run_id, short_qid, answer_key, value = parts
 
+    operator_open_id: str = callback.get("userId", "")
+
     question_id = await resolve_full_question_id(run_id, short_qid)
 
     try:
@@ -46,7 +48,7 @@ async def handle_card_action(
             run_id=run_id,
             input_kind=kind,
             choice=value,
-            operator_open_id="",
+            operator_open_id=operator_open_id,
             question_id=question_id,
             answer_key=answer_key,
             run_manager=run_manager,

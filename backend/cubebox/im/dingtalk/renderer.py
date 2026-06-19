@@ -78,7 +78,9 @@ class DingtalkOpDispatcher:
     async def dispatch_patch(self, state: Any) -> bool:
         s = self._state
         pending = s.card_state.pending_input
-        pending_id = f"{pending.kind}:{pending.run_id}" if pending else None
+        pending_id = (
+            f"{pending.kind}:{pending.run_id}:{pending.question_id or ''}" if pending else None
+        )
 
         if (
             pending is not None
