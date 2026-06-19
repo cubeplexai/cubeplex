@@ -424,6 +424,98 @@ class IMConnectorService:
             logger.exception("[IM] Slack auth.test probe failed")
             raise ValueError("could not validate Slack bot token") from None
 
+    async def connect_dingtalk(
+        self,
+        *,
+        workspace_id: str,
+        app_key: str,
+        app_secret: str,
+        acting_user_id: str,
+    ) -> IMConnectorAccount:
+        """Bind one DingTalk enterprise bot: validate credentials, store, return account."""
+        existing = (
+            await self._session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
+                    IMConnectorAccount.platform == "dingtalk",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id == app_key,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(
+                f"dingtalk account already exists for app_key={app_key} (id={existing.id})"
+            )
+
+        await self._validate_dingtalk_credentials(app_key, app_secret)
+
+        secret_payload = json.dumps(
+            {
+                "app_key": app_key,
+                "app_secret": app_secret,
+                "bot_open_id": app_key,
+            }
+        )
+        try:
+            credential_id = await self._credentials.create(
+                kind="im_bot",
+                name=f"dingtalk:{app_key}",
+                plaintext=secret_payload,
+            )
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ValueError(
+                f"dingtalk account already exists for app_key={app_key} (credential race)"
+            ) from exc
+        try:
+            account = IMConnectorAccount(
+                org_id=self._org_id,
+                workspace_id=workspace_id,
+                platform="dingtalk",
+                external_account_id=app_key,
+                acting_user_id=acting_user_id,
+                credential_id=credential_id,
+                delivery_mode="stream",
+                config={
+                    "bot_app_name": None,
+                    "bot_avatar_url": None,
+                },
+            )
+            self._session.add(account)
+            await self._session.commit()
+            await self._session.refresh(account)
+            return account
+        except Exception:
+            await self._session.rollback()
+            try:
+                await self._credentials.delete(credential_id=credential_id)
+            except Exception:
+                logger.warning(
+                    "[IM] orphan credential {} could not be rolled back",
+                    credential_id,
+                    exc_info=True,
+                )
+            raise
+
+    async def _validate_dingtalk_credentials(
+        self,
+        app_key: str,
+        app_secret: str,
+    ) -> None:
+        """Validate credentials via access token exchange."""
+        import httpx
+
+        url = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
+        payload = {"appKey": app_key, "appSecret": app_secret}
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json=payload)
+            if resp.status_code != 200:
+                raise ValueError(f"DingTalk credential validation failed: {resp.text}")
+            data = resp.json()
+            token = data.get("accessToken")
+            if not token:
+                raise ValueError("DingTalk returned empty access token")
+
     async def _hydrate_discord_bot_info(
         self,
         bot_token: str,

@@ -42,6 +42,15 @@ class ConnectSlackAccountIn(BaseModel):
     acting_user_id: str = Field(default="self", min_length=1)
 
 
+class ConnectDingtalkAccountIn(BaseModel):
+    """Payload for ``POST /ws/{ws}/im/accounts`` when ``platform == 'dingtalk'``."""
+
+    platform: Literal["dingtalk"] = "dingtalk"
+    app_key: str = Field(min_length=1, max_length=128)
+    app_secret: str = Field(min_length=1)
+    acting_user_id: str = Field(default="self", min_length=1)
+
+
 class ImRuntimeStatus(BaseModel):
     """Runtime status snapshot embedded on every ``IMAccountOut``.
 
@@ -97,7 +106,8 @@ class IMAccountListOut(BaseModel):
 ConnectIMAccountIn = Annotated[
     Annotated[ConnectFeishuAccountIn, Tag("feishu")]
     | Annotated[ConnectDiscordAccountIn, Tag("discord")]
-    | Annotated[ConnectSlackAccountIn, Tag("slack")],
+    | Annotated[ConnectSlackAccountIn, Tag("slack")]
+    | Annotated[ConnectDingtalkAccountIn, Tag("dingtalk")],
     Discriminator("platform"),
 ]
 

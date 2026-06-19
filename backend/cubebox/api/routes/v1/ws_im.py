@@ -17,6 +17,7 @@ from cubebox.api.schemas.im_channel_binding import (
     ChannelBindingUpdateIn,
 )
 from cubebox.api.schemas.im_connector import (
+    ConnectDingtalkAccountIn,
     ConnectDiscordAccountIn,
     ConnectFeishuAccountIn,
     ConnectIMAccountIn,
@@ -195,6 +196,37 @@ async def _connect_slack(
     return _to_out(account)
 
 
+async def _connect_dingtalk(
+    body: ConnectDingtalkAccountIn,
+    request: Request,
+    ctx: RequestContext,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> IMAccountOut:
+    svc = _service(session, backend, ctx)
+    acting = await _resolve_acting_user(body.acting_user_id, ctx, session)
+    try:
+        account = await svc.connect_dingtalk(
+            workspace_id=ctx.workspace_id,
+            app_key=body.app_key,
+            app_secret=body.app_secret,
+            acting_user_id=acting,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    starter = getattr(request.app.state, "im_connect_account", None)
+    if starter is not None and account.enabled:
+        try:
+            await starter(account)
+        except Exception:
+            logger.warning(
+                "[IM ws] dingtalk gateway startup failed for {}",
+                account.id,
+                exc_info=True,
+            )
+    return _to_out(account)
+
+
 @router.post("/accounts", status_code=status.HTTP_201_CREATED, response_model=IMAccountOut)
 async def connect_account(
     workspace_id: str,
@@ -213,6 +245,8 @@ async def connect_account(
         return await _connect_discord(body, request, ctx, session, backend)
     elif isinstance(body, ConnectSlackAccountIn):
         return await _connect_slack(body, request, ctx, session, backend)
+    elif isinstance(body, ConnectDingtalkAccountIn):
+        return await _connect_dingtalk(body, request, ctx, session, backend)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
