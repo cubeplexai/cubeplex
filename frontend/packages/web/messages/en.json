@@ -197,8 +197,8 @@
   },
   "adminNav": {
     "settings": "General",
-    "models": "Models",
-    "modelPresets": "Model Presets",
+    "models": "Model Providers",
+    "modelPresets": "Model Settings",
     "webTools": "Web Tools",
     "skills": "Skills",
     "skillRegistries": "Skill Registries",
@@ -510,7 +510,7 @@
     "confirmPublishBtn": "Confirm add"
   },
   "adminModels": {
-    "title": "Models & Providers",
+    "title": "Model Providers",
     "subtitle": "Manage LLM providers and available models",
     "loading": "Loading…",
     "loadFailed": "Load failed: {message}",
@@ -1459,7 +1459,7 @@
     "backlogRefPrefix": "Owner: {ref}"
   },
   "adminPresets": {
-    "title": "Model Presets",
+    "title": "Model Settings",
     "subtitle": "Configure preset chains and task-specific routing.",
     "loading": "Loading…",
     "loadFailed": "Failed to load presets: {message}",

@@ -19,6 +19,7 @@ import {
 import { jsonHeaders } from '@/lib/csrf'
 import type { AdminModelPresetsBody, AdminPresetEntry, TaskPresetKey } from '@/lib/types/presets'
 import type { AdminModelPresetsResponse } from '@/lib/api/presets'
+import { AdminPageShell } from '@/components/management/AdminPageShell'
 import { cn } from '@/lib/utils'
 
 interface PresetEditorProps {
@@ -249,197 +250,195 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-start justify-between border-b border-border/70 px-6 py-4">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">{t('title')}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t('subtitle')}
-            {origin !== 'org' ? (
-              <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-                {origin === 'system' ? t('originSystem') : t('originNone')}
-              </span>
-            ) : null}
-          </p>
-        </div>
+    <AdminPageShell
+      title={t('title')}
+      description={
+        <>
+          {t('subtitle')}
+          {origin !== 'org' ? (
+            <span className="ml-2 rounded-full bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+              {origin === 'system' ? t('originSystem') : t('originNone')}
+            </span>
+          ) : null}
+        </>
+      }
+      action={
         <Button onClick={() => void handleSave()} disabled={saving} aria-label={t('save')}>
           {saving ? <Loader2 className="size-4 animate-spin" /> : null}
           <span>{t('save')}</span>
         </Button>
-      </header>
+      }
+    >
+      {banner && (
+        <Alert variant="destructive" role="alert">
+          <AlertTitle>{t('errorTitle')}</AlertTitle>
+          <AlertDescription>{banner}</AlertDescription>
+        </Alert>
+      )}
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-        {banner && (
-          <Alert variant="destructive" role="alert">
-            <AlertTitle>{t('errorTitle')}</AlertTitle>
-            <AlertDescription>{banner}</AlertDescription>
-          </Alert>
+      <section aria-label={t('presetsSectionAria')} className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-medium">{t('presetsHeading')}</h3>
+          <Button variant="outline" size="sm" onClick={addPreset}>
+            <Plus className="size-3.5" />
+            <span>{t('addPreset')}</span>
+          </Button>
+        </div>
+
+        {body.presets.length === 0 && (
+          <p className="rounded-md border border-dashed border-border/70 px-4 py-6 text-center text-sm text-muted-foreground">
+            {t('emptyPresets')}
+          </p>
         )}
 
-        <section aria-label={t('presetsSectionAria')} className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-medium">{t('presetsHeading')}</h3>
-            <Button variant="outline" size="sm" onClick={addPreset}>
-              <Plus className="size-3.5" />
-              <span>{t('addPreset')}</span>
-            </Button>
-          </div>
+        <RadioGroup
+          value={body.presets.findIndex((p) => p.is_default).toString()}
+          onValueChange={(v) => {
+            const n = Number(v)
+            if (Number.isFinite(n)) setDefault(n)
+          }}
+          className="space-y-3"
+        >
+          {body.presets.map((preset, idx) => {
+            const isDuplicate = duplicateLabels.has(preset.label.trim())
+            const isEmptyLabel = preset.label.trim().length === 0
+            return (
+              <div
+                key={idx}
+                draggable
+                onDragStart={() => setDraggingIdx(idx)}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  if (draggingIdx !== null && draggingIdx !== idx) {
+                    movePreset(draggingIdx, idx)
+                  }
+                  setDraggingIdx(null)
+                }}
+                onDragEnd={() => setDraggingIdx(null)}
+                className={cn(
+                  'rounded-lg border border-border/70 bg-card/40 p-4',
+                  draggingIdx === idx && 'opacity-50',
+                )}
+                data-testid={`preset-row-${idx}`}
+              >
+                <div className="flex items-start gap-3">
+                  <button
+                    type="button"
+                    aria-label={t('dragHandle')}
+                    className="mt-1 cursor-grab text-muted-foreground hover:text-foreground"
+                  >
+                    <GripVertical className="size-4" />
+                  </button>
 
-          {body.presets.length === 0 && (
-            <p className="rounded-md border border-dashed border-border/70 px-4 py-6 text-center text-sm text-muted-foreground">
-              {t('emptyPresets')}
-            </p>
-          )}
-
-          <RadioGroup
-            value={body.presets.findIndex((p) => p.is_default).toString()}
-            onValueChange={(v) => {
-              const n = Number(v)
-              if (Number.isFinite(n)) setDefault(n)
-            }}
-            className="space-y-3"
-          >
-            {body.presets.map((preset, idx) => {
-              const isDuplicate = duplicateLabels.has(preset.label.trim())
-              const isEmptyLabel = preset.label.trim().length === 0
-              return (
-                <div
-                  key={idx}
-                  draggable
-                  onDragStart={() => setDraggingIdx(idx)}
-                  onDragOver={(e) => {
-                    e.preventDefault()
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault()
-                    if (draggingIdx !== null && draggingIdx !== idx) {
-                      movePreset(draggingIdx, idx)
-                    }
-                    setDraggingIdx(null)
-                  }}
-                  onDragEnd={() => setDraggingIdx(null)}
-                  className={cn(
-                    'rounded-lg border border-border/70 bg-card/40 p-4',
-                    draggingIdx === idx && 'opacity-50',
-                  )}
-                  data-testid={`preset-row-${idx}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <button
-                      type="button"
-                      aria-label={t('dragHandle')}
-                      className="mt-1 cursor-grab text-muted-foreground hover:text-foreground"
-                    >
-                      <GripVertical className="size-4" />
-                    </button>
-
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1">
-                          <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                            {t('label')}
-                          </Label>
-                          <Input
-                            value={preset.label}
-                            onChange={(e) => updatePreset(idx, { label: e.target.value })}
-                            placeholder={t('labelPlaceholder')}
-                            aria-invalid={isEmptyLabel || isDuplicate || undefined}
-                            className={cn((isEmptyLabel || isDuplicate) && 'border-destructive')}
-                          />
-                          {isDuplicate && (
-                            <p className="mt-1 text-xs text-destructive">
-                              {t('errorDuplicateLabel')}
-                            </p>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2 self-end pb-1.5">
-                          <RadioGroupItem value={idx.toString()} id={`default-${idx}`} />
-                          <Label htmlFor={`default-${idx}`} className="text-xs">
-                            {t('isDefault')}
-                          </Label>
-                        </div>
-
-                        <div className="flex items-center gap-1 self-end pb-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t('moveUp')}
-                            onClick={() => movePreset(idx, idx - 1)}
-                            disabled={idx === 0}
-                          >
-                            <ArrowUp className="size-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t('moveDown')}
-                            onClick={() => movePreset(idx, idx + 1)}
-                            disabled={idx === body.presets.length - 1}
-                          >
-                            <ArrowDown className="size-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            aria-label={t('removePreset')}
-                            onClick={() => removePreset(idx)}
-                          >
-                            <Trash2 className="size-3.5" />
-                          </Button>
-                        </div>
+                  <div className="flex-1 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          {t('label')}
+                        </Label>
+                        <Input
+                          value={preset.label}
+                          onChange={(e) => updatePreset(idx, { label: e.target.value })}
+                          placeholder={t('labelPlaceholder')}
+                          aria-invalid={isEmptyLabel || isDuplicate || undefined}
+                          className={cn((isEmptyLabel || isDuplicate) && 'border-destructive')}
+                        />
+                        {isDuplicate && (
+                          <p className="mt-1 text-xs text-destructive">
+                            {t('errorDuplicateLabel')}
+                          </p>
+                        )}
                       </div>
 
-                      <ChainEditor
-                        chain={preset.chain}
-                        availableModels={availableModels}
-                        missingRefs={missingRefs}
-                        onMove={(from, to) => moveChainEntry(idx, from, to)}
-                        onRemove={(chainIdx) => removeChainEntry(idx, chainIdx)}
-                        onAdd={(ref) => addChainEntry(idx, ref)}
-                      />
+                      <div className="flex items-center gap-2 self-end pb-1.5">
+                        <RadioGroupItem value={idx.toString()} id={`default-${idx}`} />
+                        <Label htmlFor={`default-${idx}`} className="text-xs">
+                          {t('isDefault')}
+                        </Label>
+                      </div>
+
+                      <div className="flex items-center gap-1 self-end pb-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t('moveUp')}
+                          onClick={() => movePreset(idx, idx - 1)}
+                          disabled={idx === 0}
+                        >
+                          <ArrowUp className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t('moveDown')}
+                          onClick={() => movePreset(idx, idx + 1)}
+                          disabled={idx === body.presets.length - 1}
+                        >
+                          <ArrowDown className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          aria-label={t('removePreset')}
+                          onClick={() => removePreset(idx)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
                     </div>
+
+                    <ChainEditor
+                      chain={preset.chain}
+                      availableModels={availableModels}
+                      missingRefs={missingRefs}
+                      onMove={(from, to) => moveChainEntry(idx, from, to)}
+                      onRemove={(chainIdx) => removeChainEntry(idx, chainIdx)}
+                      onAdd={(ref) => addChainEntry(idx, ref)}
+                    />
                   </div>
                 </div>
-              )
-            })}
-          </RadioGroup>
-        </section>
-
-        <section aria-label={t('taskPresetsAria')} className="space-y-3">
-          <h3 className="text-sm font-medium">{t('taskPresetsHeading')}</h3>
-          <p className="text-xs text-muted-foreground">{t('taskPresetsHint')}</p>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-            {TASK_KEYS.map((key) => (
-              <div key={key} className="space-y-1">
-                <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                  {t(TASK_LABEL_KEY[key])}
-                </Label>
-                <Select
-                  value={body.task_presets[key] ?? NOT_SET}
-                  onValueChange={(v) => setTaskPreset(key, v ?? NOT_SET)}
-                >
-                  <SelectTrigger aria-label={t(TASK_LABEL_KEY[key])}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NOT_SET}>{t('notSet')}</SelectItem>
-                    {labelSet
-                      .map((label) => label.trim())
-                      .filter((label, i, arr) => label && arr.indexOf(label) === i)
-                      .map((label) => (
-                        <SelectItem key={label} value={label}>
-                          {label}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
               </div>
-            ))}
-          </div>
-        </section>
-      </div>
-    </div>
+            )
+          })}
+        </RadioGroup>
+      </section>
+
+      <section aria-label={t('taskPresetsAria')} className="space-y-3">
+        <h3 className="text-sm font-medium">{t('taskPresetsHeading')}</h3>
+        <p className="text-xs text-muted-foreground">{t('taskPresetsHint')}</p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          {TASK_KEYS.map((key) => (
+            <div key={key} className="space-y-1">
+              <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                {t(TASK_LABEL_KEY[key])}
+              </Label>
+              <Select
+                value={body.task_presets[key] ?? NOT_SET}
+                onValueChange={(v) => setTaskPreset(key, v ?? NOT_SET)}
+              >
+                <SelectTrigger aria-label={t(TASK_LABEL_KEY[key])}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NOT_SET}>{t('notSet')}</SelectItem>
+                  {labelSet
+                    .map((label) => label.trim())
+                    .filter((label, i, arr) => label && arr.indexOf(label) === i)
+                    .map((label) => (
+                      <SelectItem key={label} value={label}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ))}
+        </div>
+      </section>
+    </AdminPageShell>
   )
 }
 

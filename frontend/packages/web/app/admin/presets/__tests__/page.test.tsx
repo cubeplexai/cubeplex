@@ -81,7 +81,7 @@ describe('AdminPresetsPage (shell)', () => {
 
     renderWithIntl(<AdminPresetsPage />)
 
-    await waitFor(() => expect(screen.queryByRole('heading', { level: 2 })).not.toBeNull())
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 1 })).not.toBeNull())
     expect(screen.getByRole('heading', { name: en.adminPresets.title })).toBeTruthy()
 
     // Provider catalog endpoints were hit.
