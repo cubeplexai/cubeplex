@@ -358,7 +358,7 @@ async def enable_workspace_account(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
     updated = await svc.set_enabled(account_id=account_id, enabled=True)
     assert updated is not None
-    if updated.delivery_mode in ("long_connection", "gateway"):
+    if updated.delivery_mode in ("long_connection", "gateway", "stream"):
         starter = getattr(request.app.state, "im_connect_account", None)
         if starter is not None:
             try:

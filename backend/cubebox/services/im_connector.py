@@ -50,7 +50,7 @@ def compute_runtime(
             state = "connected"
         else:
             state = "disconnected"
-    elif account.delivery_mode == "gateway":
+    elif account.delivery_mode in ("gateway", "stream"):
         gws = gateways or {}
         gw = gws.get(account.id)
         if gw is not None and getattr(gw, "is_open", lambda: False)():
