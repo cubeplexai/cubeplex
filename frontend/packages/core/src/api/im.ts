@@ -19,7 +19,7 @@ export interface ImAccount {
   external_account_id: string
   workspace_id: string
   acting_user_id: string
-  delivery_mode: 'long_connection' | 'webhook' | 'gateway'
+  delivery_mode: 'long_connection' | 'webhook' | 'gateway' | 'stream'
   enabled: boolean
   runtime: ImRuntimeStatus
   bot_app_name: string | null
@@ -55,10 +55,18 @@ export interface ConnectSlackAccountIn {
   acting_user_id?: string
 }
 
+export interface ConnectDingtalkAccountIn {
+  platform: 'dingtalk'
+  app_key: string
+  app_secret: string
+  acting_user_id?: string
+}
+
 export type ConnectImAccountIn =
   | ConnectFeishuAccountIn
   | ConnectDiscordAccountIn
   | ConnectSlackAccountIn
+  | ConnectDingtalkAccountIn
 
 // ── Workspace scope ──────────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 export { feishuDescriptor } from './feishu'
 export { discordDescriptor } from './discord'
 export { slackDescriptor } from './slack'
+export { dingtalkDescriptor } from './dingtalk'
 export { teamsDescriptor } from './teams.stub'
 export type {
   PlatformDescriptor,
@@ -10,6 +11,7 @@ export type {
   FormState,
 } from './types'
 
+import { dingtalkDescriptor } from './dingtalk'
 import { discordDescriptor } from './discord'
 import { feishuDescriptor } from './feishu'
 import { slackDescriptor } from './slack'
@@ -20,5 +22,6 @@ export const ALL_PLATFORMS: PlatformDescriptor[] = [
   feishuDescriptor,
   discordDescriptor,
   slackDescriptor,
+  dingtalkDescriptor,
   teamsDescriptor,
 ]
