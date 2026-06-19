@@ -118,6 +118,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
     tracebacks; affected accounts simply won't receive connection traffic.
     """
     # Trigger platform registrations
+    import cubebox.im.dingtalk  # noqa: F401
     import cubebox.im.discord  # noqa: F401
     import cubebox.im.feishu  # noqa: F401
     import cubebox.im.slack  # noqa: F401
@@ -260,7 +261,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
                     select(IMConnectorAccount).where(
                         IMConnectorAccount.enabled == True,  # type: ignore[arg-type]  # noqa: E712
                         IMConnectorAccount.delivery_mode.in_(  # type: ignore[attr-defined]
-                            ["long_connection", "gateway"]
+                            ["long_connection", "gateway", "stream"]
                         ),
                     )
                 )
