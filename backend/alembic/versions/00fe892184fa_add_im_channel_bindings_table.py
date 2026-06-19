@@ -1,7 +1,7 @@
 """add im_channel_bindings table
 
 Revision ID: 00fe892184fa
-Revises: 59fd2d03ce79
+Revises: e9dd15e7ab06
 Create Date: 2026-06-19 00:02:22.225347
 
 """
@@ -14,7 +14,10 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = '00fe892184fa'
-down_revision: Union[str, Sequence[str], None] = '59fd2d03ce79'
+# Chained off e9dd15e7ab06 (search-tables drift fix, PR #254) instead of
+# 59fd2d03ce79 — PR #255 merged after #254 without rebasing, leaving main
+# with two alembic heads. Linearizing here so `alembic upgrade head` works.
+down_revision: Union[str, Sequence[str], None] = 'e9dd15e7ab06'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
