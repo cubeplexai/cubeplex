@@ -1925,7 +1925,7 @@
         "headline": "把团队 IM 接到 cubebox",
         "description": "Bot 在 IM 里回复，@ 时跑 agent，按邮箱自动认领对应的 cubebox 用户。",
         "cta": "连接一个 {platform} bot",
-        "comingNote": "Teams · DingTalk — 后续支持",
+        "comingNote": "Teams — 即将推出",
         "guideLink": "查看部署指南"
       },
       "admin": {
@@ -1947,6 +1947,9 @@
       "teams": {
         "label": "Teams",
         "coming": "即将支持"
+      },
+      "dingtalk": {
+        "label": "钉钉"
       }
     },
     "status": {
@@ -2024,6 +2027,18 @@
         "field": {
           "botToken": "Bot Token (xoxb-...)",
           "appToken": "App Token (xapp-...)"
+        }
+      },
+      "dingtalk": {
+        "prereq": {
+          "app": "在 open.dingtalk.com 创建企业内部机器人",
+          "stream": "在机器人设置中启用 Stream 模式",
+          "permissions": "为机器人授予以下权限",
+          "credentials": "从机器人设置中复制 AppKey 和 AppSecret"
+        },
+        "field": {
+          "appKey": "AppKey (ding...)",
+          "appSecret": "AppSecret"
         }
       }
     },

@@ -62,6 +62,21 @@ function TeamsLogo(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+function DingtalkLogo(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" {...props}>
+      <path
+        d="M512 0C229.2 0 0 229.2 0 512s229.2 512 512 512 512-229.2 512-512S794.8 0 512 0z"
+        fill="#3A96FF"
+      />
+      <path
+        d="M770.8 576.4c-6.4-14.6-23.6-40.8-23.6-40.8s-103.6 10-153.4 1.8c0 0 94.4-61.6 130.4-109 36-47.4 58.2-128.6 38.8-175.6-6.6-16-20.4-25.8-38-26.4-28.8-1-73 18.6-146.6 93.8-57.4 58.6-106 130.2-106 130.2l-27.6-7.8s22.8-104 11.2-143.8c-15.2-52.4-53.4-67.6-78.8-52.8-22.6 13.2-33.4 44.8-31 89 2.4 44.2 21 112.8 21 112.8s-79.4 83-118.4 167.8c-17.4 37.8-23.6 74.8-11.4 95.6 7.6 13 20.6 18.8 35.8 18.2 36.2-1.4 95.2-49.4 146.4-110.8 0 0 78.4 23.8 119 30.6 40.6 6.8 97.6 10.4 97.6 10.4s-36.2 55.4-41.2 83.2c-7.4 41 10.4 62 34.8 64.6 24.4 2.6 56.2-14.8 74.8-51.8 18.6-37 26.4-81.2 26.4-81.2s51.8-14 72.2-25.4c30.8-17.2 28.4-50.4-2.4-73.4z"
+        fill="#fff"
+      />
+    </svg>
+  )
+}
+
 function DiscordLogo(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 256 199" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -75,6 +90,7 @@ function DiscordLogo(props: SVGProps<SVGSVGElement>) {
 
 const LOGOS: Record<string, (props: SVGProps<SVGSVGElement>) => React.ReactElement> = {
   feishu: FeishuLogo,
+  dingtalk: DingtalkLogo,
   discord: DiscordLogo,
   slack: SlackLogo,
   teams: TeamsLogo,

@@ -39,7 +39,7 @@ export type WizardStepDef = {
 }
 
 export type PlatformDescriptor = {
-  id: 'feishu' | 'discord' | 'slack' | 'teams'
+  id: 'feishu' | 'discord' | 'slack' | 'teams' | 'dingtalk'
   labelKey: string
   iconName: string
   live: boolean
