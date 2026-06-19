@@ -65,11 +65,13 @@ class DiscordPlatform:
         shared_mode = False
         _sm = kwargs.get("session_maker")
         if _sm is not None:
-            from cubebox.im.types import lookup_binding_mode
+            from cubebox.im.types import is_shared_mode_for_tailer
 
-            shared_mode = (
-                await lookup_binding_mode(_sm, queue_item.account_id, queue_item.channel_id)
-                == "shared"
+            shared_mode = await is_shared_mode_for_tailer(
+                _sm,
+                queue_item.account_id,
+                queue_item.channel_id,
+                queue_item.conversation_id,
             )
 
         tailer = OutboundRunTailer(

@@ -44,6 +44,46 @@ async def lookup_binding_mode(
     return "isolated"
 
 
+async def is_shared_mode_for_tailer(
+    session_maker: Any,
+    account_id: str,
+    channel_id: str,
+    conversation_id: str,
+) -> bool:
+    """Determine shared mode for an outbound tailer.
+
+    Primary: (account_id, channel_id) binding lookup.
+    Fallback: if the conversation has a topic_id, check binding by topic_id.
+    Handles Discord threads where channel_id is the thread ID, not the
+    parent channel that carries the binding.
+    """
+    bm = await lookup_binding_mode(session_maker, account_id, channel_id)
+    if bm == "shared":
+        return True
+
+    from sqlmodel import col, select
+
+    from cubebox.models.conversation import Conversation
+    from cubebox.models.im_channel_binding import IMChannelBinding
+
+    async with session_maker() as session:
+        conv = (
+            await session.execute(
+                select(Conversation).where(col(Conversation.id) == conversation_id)
+            )
+        ).scalar_one_or_none()
+        if conv is not None and conv.topic_id is not None:
+            binding = (
+                await session.execute(
+                    select(IMChannelBinding).where(
+                        col(IMChannelBinding.topic_id) == conv.topic_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            return binding is not None and binding.mode == "shared"
+    return False
+
+
 def make_participant_scope(sender_ref: str) -> str:
     """Group session keyed by sender (Feishu groups, WeCom, future per-user rooms).
 
