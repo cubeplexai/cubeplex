@@ -55,6 +55,7 @@ dependencies = [
     "authlib>=1.7.2",
     "python3-saml>=1.16.0",
     "dingtalk-stream>=0.24.3",
+    "microsoft-teams-apps>=2.0.13.4",
 ]
 
 [project.optional-dependencies]
