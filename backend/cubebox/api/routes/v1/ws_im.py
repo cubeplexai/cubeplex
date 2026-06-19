@@ -22,6 +22,7 @@ from cubebox.api.schemas.im_connector import (
     ConnectFeishuAccountIn,
     ConnectIMAccountIn,
     ConnectSlackAccountIn,
+    ConnectTeamsAccountIn,
     IdentityLinkListOut,
     IdentityLinkOut,
     IMAccountListOut,
@@ -227,6 +228,34 @@ async def _connect_dingtalk(
     return _to_out(account)
 
 
+async def _connect_teams(
+    body: ConnectTeamsAccountIn,
+    request: Request,
+    ctx: RequestContext,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+) -> IMAccountOut:
+    svc = _service(session, backend, ctx)
+    acting = await _resolve_acting_user(body.acting_user_id, ctx, session)
+    try:
+        account = await svc.connect_teams(
+            workspace_id=ctx.workspace_id,
+            app_id=body.app_id,
+            app_secret=body.app_secret,
+            tenant_id=body.tenant_id,
+            acting_user_id=acting,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    starter = getattr(request.app.state, "im_connect_account", None)
+    if starter is not None and account.enabled:
+        try:
+            await starter(account)
+        except Exception:
+            logger.warning("[IM ws] teams app init failed for {}", account.id, exc_info=True)
+    return _to_out(account)
+
+
 @router.post("/accounts", status_code=status.HTTP_201_CREATED, response_model=IMAccountOut)
 async def connect_account(
     workspace_id: str,
@@ -247,6 +276,8 @@ async def connect_account(
         return await _connect_slack(body, request, ctx, session, backend)
     elif isinstance(body, ConnectDingtalkAccountIn):
         return await _connect_dingtalk(body, request, ctx, session, backend)
+    elif isinstance(body, ConnectTeamsAccountIn):
+        return await _connect_teams(body, request, ctx, session, backend)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

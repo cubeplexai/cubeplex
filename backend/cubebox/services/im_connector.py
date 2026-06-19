@@ -375,6 +375,121 @@ class IMConnectorService:
                 )
             raise
 
+    async def connect_teams(
+        self,
+        *,
+        workspace_id: str,
+        app_id: str,
+        app_secret: str,
+        tenant_id: str,
+        acting_user_id: str,
+    ) -> IMConnectorAccount:
+        """Bind one Teams bot: validate credentials, store credential, return account."""
+        existing = (
+            await self._session.execute(
+                select(IMConnectorAccount).where(
+                    IMConnectorAccount.org_id == self._org_id,  # type: ignore[arg-type]
+                    IMConnectorAccount.platform == "teams",  # type: ignore[arg-type]
+                    IMConnectorAccount.external_account_id == app_id,  # type: ignore[arg-type]
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ValueError(f"teams account already exists for app_id={app_id} (id={existing.id})")
+
+        bot_name = await self._hydrate_teams_bot_info(app_id, app_secret, tenant_id)
+
+        secret_payload = json.dumps(
+            {
+                "app_id": app_id,
+                "app_secret": app_secret,
+                "tenant_id": tenant_id,
+                "bot_open_id": app_id,
+            }
+        )
+        try:
+            credential_id = await self._credentials.create(
+                kind="im_bot",
+                name=f"teams:{app_id}",
+                plaintext=secret_payload,
+            )
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ValueError(
+                f"teams account already exists for app_id={app_id} (credential race)"
+            ) from exc
+        try:
+            account = IMConnectorAccount(
+                org_id=self._org_id,
+                workspace_id=workspace_id,
+                platform="teams",
+                external_account_id=app_id,
+                acting_user_id=acting_user_id,
+                credential_id=credential_id,
+                delivery_mode="webhook",
+                config={
+                    "bot_app_name": bot_name or None,
+                    "bot_avatar_url": None,
+                    "tenant_id": tenant_id,
+                },
+            )
+            self._session.add(account)
+            await self._session.commit()
+            await self._session.refresh(account)
+            return account
+        except Exception:
+            await self._session.rollback()
+            try:
+                await self._credentials.delete(credential_id=credential_id)
+            except Exception:
+                logger.warning(
+                    "[IM] orphan credential {} could not be rolled back",
+                    credential_id,
+                    exc_info=True,
+                )
+            raise
+
+    async def _hydrate_teams_bot_info(
+        self,
+        app_id: str,
+        app_secret: str,
+        tenant_id: str,
+    ) -> str:
+        """Validate Teams bot credentials via OAuth2 token request.
+
+        Returns the bot display name (app_id as fallback). Raises ValueError
+        on invalid credentials.
+        """
+        import httpx
+
+        token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    token_url,
+                    data={
+                        "grant_type": "client_credentials",
+                        "client_id": app_id,
+                        "client_secret": app_secret,
+                        "scope": "https://api.botframework.com/.default",
+                    },
+                    timeout=10.0,
+                )
+                if resp.status_code != 200:
+                    raise ValueError(
+                        f"Teams credential validation failed (HTTP {resp.status_code}): "
+                        f"{resp.text[:200]}"
+                    )
+                data = resp.json()
+                if "access_token" not in data:
+                    raise ValueError("Teams credential validation failed: no access_token")
+                return app_id
+        except ValueError:
+            raise
+        except Exception:
+            logger.exception("[IM] Teams credential validation failed")
+            raise ValueError("could not validate Teams bot credentials") from None
+
     async def _hydrate_slack_bot_info(
         self,
         bot_token: str,
