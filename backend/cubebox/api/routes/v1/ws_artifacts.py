@@ -64,7 +64,7 @@ async def delete_workspace_artifact(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
 
     conversation_id = artifact.conversation_id
-    await art_repo.delete_with_versions(artifact_id)
+    await art_repo.delete_with_versions(artifact)
 
     prefix = f"artifacts/{conversation_id}/{artifact_id}/"
     try:
