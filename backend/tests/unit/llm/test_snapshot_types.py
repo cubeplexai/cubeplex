@@ -18,9 +18,7 @@ def test_snapshot_is_frozen():
 
 
 def test_snapshot_holds_data_unchanged():
-    p = ModelPreset(
-        key="x", primary="a/b", fallbacks=("c/d",), kind="tier", is_default=True
-    )
+    p = ModelPreset(key="x", primary="a/b", fallbacks=("c/d",), kind="tier", is_default=True)
     s = LLMSnapshot(providers={}, model_presets=(p,), task_routing={"title": "x"})
     assert s.model_presets[0].chain == ("a/b", "c/d")
     assert s.task_routing == {"title": "x"}

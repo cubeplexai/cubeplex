@@ -25,8 +25,8 @@ def _snap_with_model() -> LLMSnapshot:
                 ],
             )
         },
-        presets=(),
-        task_presets={},
+        model_presets=(),
+        task_routing={},
     )
 
 
@@ -40,7 +40,7 @@ def test_build_bound_model_returns_cubepi_boundmodel():
 
 
 def test_build_bound_model_unknown_provider():
-    snap = LLMSnapshot(providers={}, presets=(), task_presets={})
+    snap = LLMSnapshot(providers={}, model_presets=(), task_routing={})
     with pytest.raises(ValueError, match="acme"):
         build_bound_model(snap, "acme/m1")
 

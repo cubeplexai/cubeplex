@@ -1,9 +1,31 @@
 """E2E tests for admin provider/model CRUD endpoints."""
 
+from typing import Any
+
 import pytest
 from httpx import AsyncClient
 
 pytestmark = pytest.mark.e2e  # ensure marker even though conftest auto-adds
+
+
+def _preset_body(label: str, ref: str) -> dict[str, Any]:
+    """A valid tiered model-presets PUT body: one custom preset (the default).
+
+    Tiers are all off; the named custom preset points at `ref` so the
+    delete-guard scan reports `label` when its model is referenced.
+    """
+    off = {"enabled": False, "primary": None, "fallbacks": []}
+    return {
+        "tiers": {
+            "lite": dict(off),
+            "flash": dict(off),
+            "pro": dict(off),
+            "max": dict(off),
+        },
+        "custom_presets": [{"label": label, "primary": ref, "fallbacks": [], "description": ""}],
+        "default_preset": label,
+        "task_routing": {},
+    }
 
 
 async def test_create_and_list_providers(
@@ -161,10 +183,7 @@ async def test_delete_model_blocked_by_preset_reference(
     # Org admin writes a preset that references this model.
     res = await client.put(
         "/api/v1/admin/model-presets",
-        json={
-            "presets": [{"label": "in-use", "chain": [ref], "is_default": True}],
-            "task_presets": {},
-        },
+        json=_preset_body("in-use", ref),
     )
     assert res.status_code == 200, res.text
 
@@ -193,10 +212,7 @@ async def test_delete_model_blocked_by_preset_reference(
     other_ref = f"{slug}/guard-m2"
     res = await client.put(
         "/api/v1/admin/model-presets",
-        json={
-            "presets": [{"label": "moved", "chain": [other_ref], "is_default": True}],
-            "task_presets": {},
-        },
+        json=_preset_body("moved", other_ref),
     )
     assert res.status_code == 200, res.text
     res = await client.delete(f"/api/v1/admin/providers/{pid}/models/{mid}")

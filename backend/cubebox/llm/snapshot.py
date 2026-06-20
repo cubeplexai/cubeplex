@@ -55,9 +55,7 @@ async def load_llm_snapshot(
     """Read DB providers + OrgSettings → frozen snapshot. No YAML."""
     providers = await _load_providers(session, org_id, encryption_backend)
     model_presets, task_routing = await _load_presets(session, org_id)
-    return LLMSnapshot(
-        providers=providers, model_presets=model_presets, task_routing=task_routing
-    )
+    return LLMSnapshot(providers=providers, model_presets=model_presets, task_routing=task_routing)
 
 
 async def _load_providers(

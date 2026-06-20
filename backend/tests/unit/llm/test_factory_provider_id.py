@@ -14,7 +14,7 @@ def test_built_provider_carries_provider_id() -> None:
         api_key="sk-test",
         models=[],
     )
-    snap = LLMSnapshot(providers={"anthropic": cfg}, presets=(), task_presets={})
+    snap = LLMSnapshot(providers={"anthropic": cfg}, model_presets=(), task_routing={})
     provider = build_provider(snap, "anthropic")
     assert provider.provider_id == "anthropic"
     bound = provider.model("claude-3-7-sonnet", max_tokens=1024, temperature=0.5)

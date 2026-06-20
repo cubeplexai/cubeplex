@@ -47,12 +47,18 @@ default:
   # Note: For reasoning models, set reasoning config to enable reasoning output
   # Example: reasoning: {effort: "medium", summary: "auto"}
   llm:
-    # Default model in "provider/model-id" format
-    default_model: "cubebox/doubao-seed-1.8-thinking"
-
-    # Fallback models tried in order when default_model fails (timeout/error)
-    fallback_models:
-      - "cubebox/qwen3.5-plus-thinking"
+    # Tiered model presets seeded into the system OrgSettings.model_presets row.
+    # Each tier carries a primary model ref ("provider/model-id") plus optional
+    # fallbacks tried in order when the primary fails (timeout/error).
+    model_presets:
+      tiers:
+        lite:  { enabled: true,  primary: "cubebox/doubao-seed-1.8-thinking", fallbacks: [] }
+        flash: { enabled: false, primary: null, fallbacks: [] }
+        pro:   { enabled: true,  primary: "cubebox/doubao-seed-1.8-thinking",
+                 fallbacks: ["cubebox/qwen3.5-plus-thinking"] }
+        max:   { enabled: false, primary: null, fallbacks: [] }
+      default_preset: pro
+      task_routing: {}
 
     # Model Providers Configuration
     providers:

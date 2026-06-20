@@ -1,25 +1,53 @@
-"""Seeder writes OrgSettings.model_presets on first run; idempotent after."""
+"""seed_model_presets_from_config writes the system row; idempotent after."""
 
 import pytest
 from sqlalchemy import select
 
 from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.seeders.provider_seeder import seed_default_presets_from_config
+from cubebox.seeders.provider_seeder import seed_model_presets_from_config
+
+
+def _tiered_llm_config() -> dict:
+    """A valid llm.model_presets block: lite + pro enabled, default=pro."""
+    return {
+        "model_presets": {
+            "tiers": {
+                "lite": {"enabled": True, "primary": "acme/m1", "fallbacks": []},
+                "flash": {"enabled": False, "primary": None, "fallbacks": []},
+                "pro": {
+                    "enabled": True,
+                    "primary": "acme/m2",
+                    "fallbacks": ["acme/m3"],
+                },
+                "max": {"enabled": False, "primary": None, "fallbacks": []},
+            },
+            "default_preset": "pro",
+            "task_routing": {},
+        }
+    }
 
 
 @pytest.mark.asyncio
-async def test_first_run_writes_default_preset(async_session, monkeypatch):
+async def test_first_run_writes_tiered_presets(async_session, monkeypatch):
     monkeypatch.setattr(
-        "cubebox.config.config.llm",
-        {
-            "default_model": "acme/m1",
-            "fallback_models": ["acme/m2"],
-            "title_model": "acme/mini",
-            "compaction": {"summary_model": "acme/mini"},
-        },
+        "cubebox.seeders.provider_seeder.settings",
+        {"llm": _tiered_llm_config()},
     )
-    await seed_default_presets_from_config(async_session)
-    await async_session.commit()
+    # Start from a clean system row.
+    existing = (
+        await async_session.execute(
+            select(OrgSettings).where(
+                OrgSettings.org_id.is_(None),
+                OrgSettings.key == MODEL_PRESETS_KEY,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        await async_session.delete(existing)
+        await async_session.commit()
+
+    await seed_model_presets_from_config(async_session)
+
     row = (
         await async_session.execute(
             select(OrgSettings).where(
@@ -29,38 +57,34 @@ async def test_first_run_writes_default_preset(async_session, monkeypatch):
         )
     ).scalar_one()
     val = row.value
-    labels = {p["label"] for p in val["presets"]}
-    assert "default" in labels
-    default = next(p for p in val["presets"] if p["label"] == "default")
-    assert default["chain"] == ["acme/m1", "acme/m2"]
-    assert default["is_default"] is True
-    # task_presets entries created for distinct task models.
-    assert val["task_presets"].get("title") in labels
-    assert val["task_presets"].get("compaction") in labels
+    assert val["default_preset"] == "pro"
+    assert val["tiers"]["pro"]["primary"] == "acme/m2"
+    assert val["tiers"]["pro"]["fallbacks"] == ["acme/m3"]
 
 
 @pytest.mark.asyncio
 async def test_second_run_does_not_overwrite_admin_edits(async_session, monkeypatch):
     monkeypatch.setattr(
-        "cubebox.config.config.llm",
-        {
-            "default_model": "acme/m1",
-            "fallback_models": [],
+        "cubebox.seeders.provider_seeder.settings",
+        {"llm": _tiered_llm_config()},
+    )
+    # Pre-existing admin-edited system row: default points at the lite tier.
+    admin_value = {
+        "tiers": {
+            "lite": {"enabled": True, "primary": "admin/m0", "fallbacks": []},
+            "flash": {"enabled": False, "primary": None, "fallbacks": []},
+            "pro": {"enabled": False, "primary": None, "fallbacks": []},
+            "max": {"enabled": False, "primary": None, "fallbacks": []},
         },
-    )
-    async_session.add(
-        OrgSettings(
-            org_id=None,
-            key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [{"label": "custom", "chain": ["acme/m1"], "is_default": True}],
-                "task_presets": {},
-            },
-        )
-    )
+        "custom_presets": [],
+        "default_preset": "lite",
+        "task_routing": {},
+    }
+    async_session.add(OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=admin_value))
     await async_session.commit()
-    await seed_default_presets_from_config(async_session)
-    await async_session.commit()
+
+    await seed_model_presets_from_config(async_session)
+
     row = (
         await async_session.execute(
             select(OrgSettings).where(
@@ -69,5 +93,6 @@ async def test_second_run_does_not_overwrite_admin_edits(async_session, monkeypa
             )
         )
     ).scalar_one()
-    labels = {p["label"] for p in row.value["presets"]}
-    assert labels == {"custom"}  # not overwritten
+    # Untouched: the admin row, not the config seed.
+    assert row.value["default_preset"] == "lite"
+    assert row.value["tiers"]["lite"]["primary"] == "admin/m0"

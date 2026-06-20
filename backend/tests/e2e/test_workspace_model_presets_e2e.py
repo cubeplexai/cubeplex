@@ -24,10 +24,9 @@ pytestmark = pytest.mark.e2e  # belt + suspenders alongside conftest auto-mark
 async def _purge_system_presets_row() -> None:
     """Drop the system-level (org_id IS NULL) model_presets row.
 
-    App lifespan re-seeds this row in the legacy ``{presets, chain}`` shape
-    (the seeder migration is a separate task), which the new
-    ``ModelPresetsConfig`` schema rejects at load time. Tests that read the
-    snapshot / system fallback must start from a clean system row.
+    App lifespan seeds a valid tiered system row from ``config.test.yaml``.
+    These tests assert ``origin='none'`` / ``origin='org'`` semantics, so they
+    must start with NO system fallback row present.
     """
     eng = create_async_engine(_build_database_url(), poolclass=NullPool)
     try:
