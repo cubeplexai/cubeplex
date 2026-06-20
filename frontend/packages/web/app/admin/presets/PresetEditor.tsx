@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { ArrowDown, ArrowUp, GripVertical, Loader2, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Loader2, Plus, Trash2 } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -16,8 +16,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { jsonHeaders } from '@/lib/csrf'
-import type { AdminModelPresetsBody, AdminPresetEntry, TaskPresetKey } from '@/lib/types/presets'
+import { MODEL_TIERS, TASK_KEYS } from '@/lib/types/presets'
+import type {
+  CustomPreset,
+  ModelPresetsConfig,
+  ModelTier,
+  TaskKey,
+  TierSetting,
+} from '@/lib/types/presets'
 import type { AdminModelPresetsResponse } from '@/lib/api/presets'
 import { AdminPageShell } from '@/components/management/AdminPageShell'
 import { cn } from '@/lib/utils'
@@ -27,15 +35,31 @@ interface PresetEditorProps {
   availableModels: string[]
 }
 
-const TASK_KEYS: TaskPresetKey[] = ['title', 'compaction', 'summarize']
 const NOT_SET = '__not_set__'
 
-// Static map so next-intl's typed-key check + the i18n-key parity script can
-// see exactly which message keys are referenced (no dynamic `t(TASK_LABEL_KEY[key])`).
-const TASK_LABEL_KEY = {
-  title: 'task_title',
-  compaction: 'task_compaction',
-  summarize: 'task_summarize',
+// Static maps so next-intl's typed-key check + the i18n-key parity script can
+// see exactly which message keys are referenced (no dynamic `t(MAP[key])`).
+const TIER_NAME_KEY = {
+  lite: 'modelTiers.lite.name',
+  flash: 'modelTiers.flash.name',
+  pro: 'modelTiers.pro.name',
+  max: 'modelTiers.max.name',
+} as const
+const TIER_DESC_KEY = {
+  lite: 'modelTiers.lite.description',
+  flash: 'modelTiers.flash.description',
+  pro: 'modelTiers.pro.description',
+  max: 'modelTiers.max.description',
+} as const
+const TASK_NAME_KEY = {
+  title: 'taskRouting.title.name',
+  summarize: 'taskRouting.summarize.name',
+  compaction: 'taskRouting.compaction.name',
+} as const
+const TASK_HINT_KEY = {
+  title: 'taskRouting.title.hint',
+  summarize: 'taskRouting.summarize.hint',
+  compaction: 'taskRouting.compaction.hint',
 } as const
 
 interface ApiError {
@@ -55,8 +79,6 @@ export function extractMissingRefs(data: unknown): string[] {
 
 // Fallback: backend BrokenPresetError pre-data-field serialized missing_refs
 // as `details="missing_refs=['a/b', 'c/d']"`. Parse it back into a string[].
-// Returns [] when the shape doesn't match. Kept for back-compat with older
-// servers whose responses do not include the structured `data` field.
 export function parseMissingRefs(details: string | undefined): string[] {
   if (!details) return []
   const match = details.match(/missing_refs=\[(.*)\]/)
@@ -69,33 +91,54 @@ export function parseMissingRefs(details: string | undefined): string[] {
     .filter(Boolean)
 }
 
-function emptyBody(): AdminModelPresetsBody {
-  return { presets: [], task_presets: {} }
+function emptyTier(): TierSetting {
+  return { enabled: false, primary: null, fallbacks: [] }
 }
 
-// Canonical serialization for dirty-checking: presets compared in order with a
-// fixed key shape; task_presets keyed in TASK_KEYS order so re-adding a key in
-// a different order doesn't read as an edit.
-function canonicalize(b: AdminModelPresetsBody): string {
-  const tasks: Partial<Record<TaskPresetKey, string>> = {}
+function emptyConfig(): ModelPresetsConfig {
+  return {
+    tiers: {
+      lite: emptyTier(),
+      flash: emptyTier(),
+      pro: emptyTier(),
+      max: emptyTier(),
+    },
+    custom_presets: [],
+    default_preset: 'pro',
+    task_routing: {},
+  }
+}
+
+// Canonical serialization for dirty-checking: tiers in lite/flash/pro/max
+// order, custom presets by index, then default_preset, then task_routing in
+// TASK_KEYS order so re-adding a key in a different order doesn't read as edit.
+function canonicalize(c: ModelPresetsConfig): string {
+  const tiers = MODEL_TIERS.map((t) => ({
+    tier: t,
+    enabled: c.tiers[t].enabled,
+    primary: c.tiers[t].primary,
+    fallbacks: c.tiers[t].fallbacks,
+  }))
+  const tasks: Partial<Record<TaskKey, string>> = {}
   for (const k of TASK_KEYS) {
-    if (b.task_presets[k]) tasks[k] = b.task_presets[k]
+    if (c.task_routing[k]) tasks[k] = c.task_routing[k]
   }
   return JSON.stringify({
-    presets: b.presets.map((p) => ({ label: p.label, chain: p.chain, is_default: p.is_default })),
-    task_presets: tasks,
+    tiers,
+    custom_presets: c.custom_presets.map((p) => ({
+      label: p.label,
+      primary: p.primary,
+      fallbacks: p.fallbacks,
+      description: p.description,
+    })),
+    default_preset: c.default_preset,
+    task_routing: tasks,
   })
 }
 
 /**
  * Move an array entry from index `from` to index `to`. `to` is the index the
- * moved item should occupy in the final array. Used by both arrow buttons
- * (`reorder(arr, idx, idx ± 1)`) and HTML5 drag-drop
- * (`reorder(arr, draggingIdx, dropTargetIdx)`) — the splice-after-removal
- * shape gives "moved item lands at target's original slot" for both
- * directions without any off-by-one adjustment.
- *
- * Exported for unit tests.
+ * moved item should occupy in the final array. Exported for unit tests.
  */
 export function reorder<T>(arr: readonly T[], from: number, to: number): T[] {
   if (from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) {
@@ -107,108 +150,127 @@ export function reorder<T>(arr: readonly T[], from: number, to: number): T[] {
   return next
 }
 
+// The model-id part of a `slug/model_id` ref (used for the optional task-row
+// secondary label). Returns the whole ref if it has no slash.
+function modelIdOf(ref: string): string {
+  const idx = ref.indexOf('/')
+  return idx === -1 ? ref : ref.slice(idx + 1)
+}
+
 export function PresetEditor({ initial, availableModels }: PresetEditorProps): React.ReactElement {
   const t = useTranslations('adminPresets')
-  const [body, setBody] = useState<AdminModelPresetsBody>(() => initial.value ?? emptyBody())
-  const [savedBody, setSavedBody] = useState<AdminModelPresetsBody>(
-    () => initial.value ?? emptyBody(),
+  const [body, setBody] = useState<ModelPresetsConfig>(() => initial.value ?? emptyConfig())
+  const [savedBody, setSavedBody] = useState<ModelPresetsConfig>(
+    () => initial.value ?? emptyConfig(),
   )
   const [origin, setOrigin] = useState(initial.origin)
   const [saving, setSaving] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
   const [missingRefs, setMissingRefs] = useState<Set<string>>(new Set())
-  const [draggingIdx, setDraggingIdx] = useState<number | null>(null)
 
-  const labelSet = useMemo(() => body.presets.map((p) => p.label), [body.presets])
+  // ----- tier mutations -----
+  const updateTier = (tier: ModelTier, patch: Partial<TierSetting>): void => {
+    setBody((b) => ({ ...b, tiers: { ...b.tiers, [tier]: { ...b.tiers[tier], ...patch } } }))
+  }
+
+  // ----- custom-preset mutations -----
+  const updateCustom = (idx: number, patch: Partial<CustomPreset>): void => {
+    setBody((b) => ({
+      ...b,
+      custom_presets: b.custom_presets.map((p, i) => (i === idx ? { ...p, ...patch } : p)),
+    }))
+  }
+
+  const addCustom = (): void => {
+    setBody((b) => ({
+      ...b,
+      custom_presets: [
+        ...b.custom_presets,
+        { label: '', primary: '', fallbacks: [], description: '' },
+      ],
+    }))
+  }
+
+  const removeCustom = (idx: number): void => {
+    setBody((b) => {
+      const removedLabel = b.custom_presets[idx]?.label.trim()
+      const next = b.custom_presets.filter((_, i) => i !== idx)
+      // Drop task_routing values that pointed at the removed label.
+      const routing = { ...b.task_routing }
+      if (removedLabel) {
+        for (const k of TASK_KEYS) {
+          if (routing[k] === removedLabel) delete routing[k]
+        }
+      }
+      // Clear default if it pointed at the removed preset.
+      const defaultPreset = b.default_preset === removedLabel ? 'pro' : b.default_preset
+      return { ...b, custom_presets: next, task_routing: routing, default_preset: defaultPreset }
+    })
+  }
+
+  const setTaskRouting = (key: TaskKey, value: string | undefined): void => {
+    setBody((b) => {
+      const next: Partial<Record<TaskKey, string>> = { ...b.task_routing }
+      if (!value) delete next[key]
+      else next[key] = value
+      return { ...b, task_routing: next }
+    })
+  }
+
+  // The keys selectable from task routing + default radio: enabled tiers with a
+  // primary, plus custom presets with a non-empty label.
+  const availableKeys = useMemo(
+    () => [
+      ...MODEL_TIERS.filter((tier) => body.tiers[tier].enabled && body.tiers[tier].primary),
+      ...body.custom_presets.map((c) => c.label.trim()).filter(Boolean),
+    ],
+    [body.tiers, body.custom_presets],
+  )
+
+  const primaryByKey = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const tier of MODEL_TIERS) {
+      const s = body.tiers[tier]
+      if (s.enabled && s.primary) map.set(tier, s.primary)
+    }
+    for (const c of body.custom_presets) {
+      const label = c.label.trim()
+      if (label && c.primary) map.set(label, c.primary)
+    }
+    return map
+  }, [body.tiers, body.custom_presets])
+
+  const tierNameSet = useMemo(() => new Set<string>(MODEL_TIERS), [])
+
   const duplicateLabels = useMemo(() => {
     const seen = new Set<string>()
     const dups = new Set<string>()
-    for (const label of labelSet) {
-      const norm = label.trim()
+    for (const c of body.custom_presets) {
+      const norm = c.label.trim()
       if (!norm) continue
       if (seen.has(norm)) dups.add(norm)
       else seen.add(norm)
     }
     return dups
-  }, [labelSet])
+  }, [body.custom_presets])
 
-  const updatePreset = (idx: number, patch: Partial<AdminPresetEntry>): void => {
-    setBody((b) => ({
-      ...b,
-      presets: b.presets.map((p, i) => (i === idx ? { ...p, ...patch } : p)),
-    }))
+  // ----- save-gating validation (cheap; computed every render) -----
+  const computeValidationError = (): string | null => {
+    for (const tier of MODEL_TIERS) {
+      const s = body.tiers[tier]
+      if (s.enabled && !s.primary) return t('errorTierMissingPrimary')
+    }
+    for (const c of body.custom_presets) {
+      const label = c.label.trim()
+      if (!label) return t('errorCustomMissingLabel')
+      if (tierNameSet.has(label)) return t('errorLabelCollidesTier')
+      if (!c.primary) return t('errorCustomMissingPrimary')
+    }
+    if (duplicateLabels.size > 0) return t('errorDuplicateLabel')
+    if (!availableKeys.includes(body.default_preset)) return t('errorDefaultUnavailable')
+    return null
   }
-
-  const setDefault = (idx: number): void => {
-    setBody((b) => ({
-      ...b,
-      presets: b.presets.map((p, i) => ({ ...p, is_default: i === idx })),
-    }))
-  }
-
-  const movePreset = (from: number, to: number): void => {
-    if (to < 0 || to >= body.presets.length) return
-    setBody((b) => ({ ...b, presets: reorder(b.presets, from, to) }))
-  }
-
-  const addPreset = (): void => {
-    setBody((b) => ({
-      ...b,
-      presets: [
-        ...b.presets,
-        {
-          label: '',
-          chain: [],
-          is_default: b.presets.length === 0,
-        },
-      ],
-    }))
-  }
-
-  const removePreset = (idx: number): void => {
-    setBody((b) => {
-      const next = b.presets.filter((_, i) => i !== idx)
-      // Drop task_presets values that pointed at the removed label.
-      const removedLabel = b.presets[idx]?.label
-      const taskPresets = { ...b.task_presets }
-      if (removedLabel) {
-        for (const k of TASK_KEYS) {
-          if (taskPresets[k] === removedLabel) delete taskPresets[k]
-        }
-      }
-      // Ensure exactly one default if any presets remain.
-      const hasDefault = next.some((p) => p.is_default)
-      if (!hasDefault && next.length > 0) next[0] = { ...next[0], is_default: true }
-      return { ...b, presets: next, task_presets: taskPresets }
-    })
-  }
-
-  const moveChainEntry = (presetIdx: number, from: number, to: number): void => {
-    const preset = body.presets[presetIdx]
-    if (!preset || to < 0 || to >= preset.chain.length) return
-    updatePreset(presetIdx, { chain: reorder(preset.chain, from, to) })
-  }
-
-  const removeChainEntry = (presetIdx: number, chainIdx: number): void => {
-    const preset = body.presets[presetIdx]
-    if (!preset) return
-    updatePreset(presetIdx, { chain: preset.chain.filter((_, i) => i !== chainIdx) })
-  }
-
-  const addChainEntry = (presetIdx: number, ref: string): void => {
-    const preset = body.presets[presetIdx]
-    if (!preset || !ref) return
-    updatePreset(presetIdx, { chain: [...preset.chain, ref] })
-  }
-
-  const setTaskPreset = (key: TaskPresetKey, value: string): void => {
-    setBody((b) => {
-      const next: Partial<Record<TaskPresetKey, string>> = { ...b.task_presets }
-      if (value === NOT_SET) delete next[key]
-      else next[key] = value
-      return { ...b, task_presets: next }
-    })
-  }
+  const validationError = computeValidationError()
 
   const discard = (): void => {
     setBody(savedBody)
@@ -216,41 +278,21 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
     setMissingRefs(new Set())
   }
 
-  const buildPutBody = (): AdminModelPresetsBody => {
-    // Omit any unset task_presets keys (Partial type — backend rejects empty strings).
-    const taskPresets: Partial<Record<TaskPresetKey, string>> = {}
-    for (const k of TASK_KEYS) {
-      const v = body.task_presets[k]
-      if (v) taskPresets[k] = v
-    }
-    return {
-      presets: body.presets.map((p) => ({
-        label: p.label.trim(),
-        chain: p.chain,
-        is_default: p.is_default,
-      })),
-      task_presets: taskPresets,
-    }
-  }
-
   const handleSave = async (): Promise<void> => {
     setSaving(true)
     setBanner(null)
     setMissingRefs(new Set())
 
-    const put = buildPutBody()
     try {
       const res = await fetch('/api/v1/admin/model-presets', {
         method: 'PUT',
         credentials: 'include',
         headers: jsonHeaders(),
-        body: JSON.stringify(put),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
         const data: ApiError = await res.json().catch(() => ({ status: 'error' }))
         if (data.error_code === 'broken_preset') {
-          // Prefer the structured `data.missing_refs` payload; fall back to
-          // parsing the Python-repr `details` string for older servers.
           let refs = extractMissingRefs(data.data)
           if (refs.length === 0) {
             refs = parseMissingRefs(data.details)
@@ -263,7 +305,7 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
         return
       }
       const data = (await res.json()) as AdminModelPresetsResponse
-      const saved = data.value ?? emptyBody()
+      const saved = data.value ?? emptyConfig()
       setBody(saved)
       setSavedBody(saved)
       setOrigin(data.origin)
@@ -297,168 +339,197 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
         </Alert>
       )}
 
-      <section aria-label={t('presetsSectionAria')} className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">{t('presetsHeading')}</h3>
-          <Button variant="outline" size="sm" onClick={addPreset}>
-            <Plus className="size-3.5" />
-            <span>{t('addPreset')}</span>
-          </Button>
-        </div>
+      <RadioGroup
+        value={body.default_preset}
+        onValueChange={(v) => setBody((b) => ({ ...b, default_preset: v }))}
+        className="contents"
+      >
+        {/* ---------- Section 1: Tiers ---------- */}
+        <section aria-label={t('tiersSectionHeading')} className="space-y-3">
+          <h3 className="text-sm font-medium">{t('tiersSectionHeading')}</h3>
+          {MODEL_TIERS.map((tier) => {
+            const setting = body.tiers[tier]
+            const selectable = setting.enabled && !!setting.primary
+            return (
+              <div
+                key={tier}
+                className="rounded-lg border border-border/70 bg-card/40 p-4"
+                data-testid={`tier-row-${tier}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">{t(TIER_NAME_KEY[tier])}</div>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{t(TIER_DESC_KEY[tier])}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-4">
+                    <DefaultRadio value={tier} disabled={!selectable} t={t} />
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id={`tier-enabled-${tier}`}
+                        checked={setting.enabled}
+                        onCheckedChange={(c: boolean) => updateTier(tier, { enabled: c })}
+                      />
+                      <Label
+                        htmlFor={`tier-enabled-${tier}`}
+                        className="cursor-pointer text-xs text-muted-foreground"
+                      >
+                        {t('tierEnabled')}
+                      </Label>
+                    </div>
+                  </div>
+                </div>
 
-        {body.presets.length === 0 && (
-          <p className="rounded-md border border-dashed border-border/70 px-4 py-6 text-center text-sm text-muted-foreground">
-            {t('emptyPresets')}
-          </p>
-        )}
+                {setting.enabled && (
+                  <div className="mt-4 border-t border-border/60 pt-4">
+                    <PrimaryFallbackEditor
+                      primary={setting.primary}
+                      fallbacks={setting.fallbacks}
+                      availableModels={availableModels}
+                      missingRefs={missingRefs}
+                      onPrimaryChange={(ref) => updateTier(tier, { primary: ref })}
+                      onFallbacksChange={(next) => updateTier(tier, { fallbacks: next })}
+                    />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </section>
 
-        <RadioGroup
-          value={body.presets.findIndex((p) => p.is_default).toString()}
-          onValueChange={(v) => {
-            const n = Number(v)
-            if (Number.isFinite(n)) setDefault(n)
-          }}
-          className="space-y-3"
-        >
-          {body.presets.map((preset, idx) => {
-            const isDuplicate = duplicateLabels.has(preset.label.trim())
-            const isEmptyLabel = preset.label.trim().length === 0
+        {/* ---------- Section 2: Custom presets ---------- */}
+        <section aria-label={t('customSectionHeading')} className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-medium">{t('customSectionHeading')}</h3>
+            <Button variant="outline" size="sm" onClick={addCustom}>
+              <Plus className="size-3.5" />
+              <span>{t('addCustom')}</span>
+            </Button>
+          </div>
+
+          {body.custom_presets.map((preset, idx) => {
+            const label = preset.label.trim()
+            const isEmptyLabel = label.length === 0
+            const isDuplicate = duplicateLabels.has(label)
+            const collidesTier = label.length > 0 && tierNameSet.has(label)
+            const labelInvalid = isEmptyLabel || isDuplicate || collidesTier
+            const selectable = !isEmptyLabel && !isDuplicate && !collidesTier && !!preset.primary
             return (
               <div
                 key={idx}
-                draggable
-                onDragStart={() => setDraggingIdx(idx)}
-                onDragOver={(e) => {
-                  e.preventDefault()
-                }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  if (draggingIdx !== null && draggingIdx !== idx) {
-                    movePreset(draggingIdx, idx)
-                  }
-                  setDraggingIdx(null)
-                }}
-                onDragEnd={() => setDraggingIdx(null)}
-                className={cn(
-                  'rounded-lg border border-border/70 bg-card/40 p-4',
-                  draggingIdx === idx && 'opacity-50',
-                )}
-                data-testid={`preset-row-${idx}`}
+                className="rounded-lg border border-border/70 bg-card/40 p-4"
+                data-testid={`custom-row-${idx}`}
               >
-                <div className="flex items-start gap-3">
-                  <button
-                    type="button"
-                    aria-label={t('dragHandle')}
-                    className="mt-1 cursor-grab text-muted-foreground hover:text-foreground"
-                  >
-                    <GripVertical className="size-4" />
-                  </button>
-
-                  <div className="flex-1 space-y-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                          {t('label')}
-                        </Label>
-                        <Input
-                          value={preset.label}
-                          onChange={(e) => updatePreset(idx, { label: e.target.value })}
-                          placeholder={t('labelPlaceholder')}
-                          aria-invalid={isEmptyLabel || isDuplicate || undefined}
-                          className={cn((isEmptyLabel || isDuplicate) && 'border-destructive')}
-                        />
-                        {isDuplicate && (
-                          <p className="mt-1 text-xs text-destructive">
-                            {t('errorDuplicateLabel')}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 self-end pb-1.5">
-                        <RadioGroupItem value={idx.toString()} id={`default-${idx}`} />
-                        <Label htmlFor={`default-${idx}`} className="text-xs">
-                          {t('isDefault')}
-                        </Label>
-                      </div>
-
-                      <div className="flex items-center gap-1 self-end pb-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t('moveUp')}
-                          onClick={() => movePreset(idx, idx - 1)}
-                          disabled={idx === 0}
-                        >
-                          <ArrowUp className="size-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t('moveDown')}
-                          onClick={() => movePreset(idx, idx + 1)}
-                          disabled={idx === body.presets.length - 1}
-                        >
-                          <ArrowDown className="size-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t('removePreset')}
-                          onClick={() => removePreset(idx)}
-                        >
-                          <Trash2 className="size-3.5" />
-                        </Button>
-                      </div>
+                <div className="flex items-start gap-4">
+                  <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {t('customLabel')}
+                      </Label>
+                      <Input
+                        value={preset.label}
+                        onChange={(e) => updateCustom(idx, { label: e.target.value })}
+                        placeholder={t('labelPlaceholder')}
+                        aria-invalid={labelInvalid || undefined}
+                        className={cn(labelInvalid && 'border-destructive')}
+                      />
+                      {isDuplicate && (
+                        <p className="mt-1 text-xs text-destructive">{t('errorDuplicateLabel')}</p>
+                      )}
+                      {collidesTier && (
+                        <p className="mt-1 text-xs text-destructive">
+                          {t('errorLabelCollidesTier')}
+                        </p>
+                      )}
                     </div>
-
-                    <ChainEditor
-                      chain={preset.chain}
-                      availableModels={availableModels}
-                      missingRefs={missingRefs}
-                      onMove={(from, to) => moveChainEntry(idx, from, to)}
-                      onRemove={(chainIdx) => removeChainEntry(idx, chainIdx)}
-                      onAdd={(ref) => addChainEntry(idx, ref)}
-                    />
+                    <div>
+                      <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        {t('customDescription')}
+                      </Label>
+                      <Input
+                        value={preset.description}
+                        onChange={(e) => updateCustom(idx, { description: e.target.value })}
+                      />
+                    </div>
                   </div>
+
+                  <div className="flex shrink-0 items-center gap-3 self-start pt-5">
+                    <DefaultRadio value={label} disabled={!selectable} t={t} />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={t('removePreset')}
+                      onClick={() => removeCustom(idx)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 border-t border-border/60 pt-4">
+                  <PrimaryFallbackEditor
+                    primary={preset.primary}
+                    fallbacks={preset.fallbacks}
+                    availableModels={availableModels}
+                    missingRefs={missingRefs}
+                    onPrimaryChange={(ref) => updateCustom(idx, { primary: ref ?? '' })}
+                    onFallbacksChange={(next) => updateCustom(idx, { fallbacks: next })}
+                  />
                 </div>
               </div>
             )
           })}
-        </RadioGroup>
-      </section>
+        </section>
+      </RadioGroup>
 
-      <section aria-label={t('taskPresetsAria')} className="space-y-3">
-        <h3 className="text-sm font-medium">{t('taskPresetsHeading')}</h3>
-        <p className="text-xs text-muted-foreground">{t('taskPresetsHint')}</p>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          {TASK_KEYS.map((key) => (
-            <div key={key} className="space-y-1">
-              <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                {t(TASK_LABEL_KEY[key])}
-              </Label>
+      {/* ---------- Section 3: Task routing ---------- */}
+      <section aria-label={t('taskRouting.heading')} className="space-y-1">
+        <h3 className="text-sm font-medium">{t('taskRouting.heading')}</h3>
+        <p className="pb-2 text-xs text-muted-foreground">{t('taskRouting.hint')}</p>
+        <div className="divide-y divide-border/60 rounded-lg border border-border/70 bg-card/40 px-4">
+          {TASK_KEYS.map((task) => (
+            <div key={task} className="flex items-center justify-between gap-4 py-2.5">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{t(TASK_NAME_KEY[task])}</div>
+                <div className="text-xs text-muted-foreground">{t(TASK_HINT_KEY[task])}</div>
+              </div>
               <Select
-                value={body.task_presets[key] ?? NOT_SET}
-                onValueChange={(v) => setTaskPreset(key, v ?? NOT_SET)}
+                value={body.task_routing[task] ?? NOT_SET}
+                onValueChange={(v) => setTaskRouting(task, !v || v === NOT_SET ? undefined : v)}
               >
-                <SelectTrigger aria-label={t(TASK_LABEL_KEY[key])}>
+                <SelectTrigger className="w-56" aria-label={t(TASK_NAME_KEY[task])}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={NOT_SET}>{t('notSet')}</SelectItem>
-                  {labelSet
-                    .map((label) => label.trim())
-                    .filter((label, i, arr) => label && arr.indexOf(label) === i)
-                    .map((label) => (
-                      <SelectItem key={label} value={label}>
-                        {label}
+                  <SelectItem value={NOT_SET}>
+                    <span className="text-muted-foreground">
+                      {t('taskRouting.useDefault', { preset: body.default_preset })}
+                    </span>
+                  </SelectItem>
+                  {availableKeys.map((key) => {
+                    const primary = primaryByKey.get(key)
+                    return (
+                      <SelectItem key={key} value={key}>
+                        {key}
+                        {primary ? (
+                          <span className="ml-1.5 text-xs text-muted-foreground">
+                            · {modelIdOf(primary)}
+                          </span>
+                        ) : null}
                       </SelectItem>
-                    ))}
+                    )
+                  })}
                 </SelectContent>
               </Select>
             </div>
           ))}
         </div>
       </section>
+
+      {validationError && !banner && (
+        <p className="text-xs text-destructive" role="alert">
+          {validationError}
+        </p>
+      )}
 
       <div className="sticky bottom-0 -mx-1 flex items-center justify-end gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <Button variant="ghost" size="sm" onClick={discard} disabled={!dirty || saving}>
@@ -467,7 +538,7 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
         <Button
           size="sm"
           onClick={() => void handleSave()}
-          disabled={!dirty || saving}
+          disabled={!dirty || saving || validationError !== null}
           aria-label={t('save')}
         >
           {saving ? <Loader2 className="size-4 animate-spin" /> : null}
@@ -478,33 +549,153 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
   )
 }
 
-interface ChainEditorProps {
-  chain: string[]
+interface DefaultRadioProps {
+  value: string
+  disabled: boolean
+  t: ReturnType<typeof useTranslations>
+}
+
+// The default-preset radio cell shared by tier rows and custom rows. An empty
+// value (custom preset with no label yet) is rendered disabled and never
+// selectable.
+function DefaultRadio({ value, disabled, t }: DefaultRadioProps): React.ReactElement {
+  const id = `default-${value || 'unset'}`
+  return (
+    <div className="flex items-center gap-1.5">
+      <RadioGroupItem value={value} id={id} disabled={disabled || !value} />
+      <Label
+        htmlFor={id}
+        className={cn(
+          'cursor-pointer text-xs text-muted-foreground',
+          (disabled || !value) && 'cursor-not-allowed opacity-50',
+        )}
+      >
+        {t('defaultBadge')}
+      </Label>
+    </div>
+  )
+}
+
+interface PrimaryFallbackEditorProps {
+  primary: string | null
+  fallbacks: string[]
   availableModels: string[]
   missingRefs: Set<string>
-  onMove: (from: number, to: number) => void
-  onRemove: (idx: number) => void
+  onPrimaryChange: (ref: string | null) => void
+  onFallbacksChange: (next: string[]) => void
+}
+
+// A single "Primary model" ref picker plus the ordered "Fallbacks" list. The
+// fallbacks list reuses ChainEditor (add + reorder + remove). DRY: both the
+// primary picker and the fallbacks add-input share the RefPicker autocomplete.
+function PrimaryFallbackEditor({
+  primary,
+  fallbacks,
+  availableModels,
+  missingRefs,
+  onPrimaryChange,
+  onFallbacksChange,
+}: PrimaryFallbackEditorProps): React.ReactElement {
+  const t = useTranslations('adminPresets')
+
+  const moveFallback = (from: number, to: number): void => {
+    if (to < 0 || to >= fallbacks.length) return
+    onFallbacksChange(reorder(fallbacks, from, to))
+  }
+  const removeFallback = (idx: number): void => {
+    onFallbacksChange(fallbacks.filter((_, i) => i !== idx))
+  }
+  const addFallback = (ref: string): void => {
+    if (!ref || fallbacks.includes(ref) || ref === primary) return
+    onFallbacksChange([...fallbacks, ref])
+  }
+
+  const primaryMissing = !!primary && missingRefs.has(primary)
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {t('primary')}
+        </Label>
+        {primary ? (
+          <div
+            className={cn(
+              'flex items-center gap-2 rounded-md border border-border/60 bg-background px-2.5 py-1.5 text-sm',
+              primaryMissing && 'border-destructive bg-destructive/5',
+            )}
+            title={primaryMissing ? t('missingRefTitle', { ref: primary }) : undefined}
+          >
+            <span className={cn('flex-1 font-mono text-xs', primaryMissing && 'text-destructive')}>
+              {primary}
+            </span>
+            {primaryMissing && (
+              <span className="text-[10px] uppercase tracking-wide text-destructive">
+                {t('missingRefBadge')}
+              </span>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={t('chainRemove')}
+              onClick={() => onPrimaryChange(null)}
+            >
+              <Trash2 className="size-3" />
+            </Button>
+          </div>
+        ) : (
+          <RefPicker
+            availableModels={availableModels}
+            exclude={fallbacks}
+            ariaLabel={t('primary')}
+            onAdd={(ref) => onPrimaryChange(ref)}
+          />
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {t('fallbacks')}
+        </Label>
+        <ChainEditor
+          chain={fallbacks}
+          availableModels={availableModels}
+          exclude={primary ? [primary] : []}
+          missingRefs={missingRefs}
+          onMove={moveFallback}
+          onRemove={removeFallback}
+          onAdd={addFallback}
+        />
+      </div>
+    </div>
+  )
+}
+
+interface RefPickerProps {
+  availableModels: string[]
+  exclude: string[]
+  ariaLabel: string
   onAdd: (ref: string) => void
 }
 
-function ChainEditor({
-  chain,
+// Autocomplete input that resolves a single `slug/model_id` ref. Shared by the
+// primary picker and the fallbacks add-input inside ChainEditor.
+function RefPicker({
   availableModels,
-  missingRefs,
-  onMove,
-  onRemove,
+  exclude,
+  ariaLabel,
   onAdd,
-}: ChainEditorProps): React.ReactElement {
+}: RefPickerProps): React.ReactElement {
   const t = useTranslations('adminPresets')
   const [draft, setDraft] = useState('')
   const [open, setOpen] = useState(false)
 
   const filtered = useMemo(() => {
     const q = draft.trim().toLowerCase()
-    const pool = availableModels.filter((m) => !chain.includes(m))
+    const pool = availableModels.filter((m) => !exclude.includes(m))
     if (!q) return pool.slice(0, 20)
     return pool.filter((m) => m.toLowerCase().includes(q)).slice(0, 20)
-  }, [draft, availableModels, chain])
+  }, [draft, availableModels, exclude])
 
   const handleAdd = (ref: string): void => {
     if (!ref.trim()) return
@@ -514,10 +705,85 @@ function ChainEditor({
   }
 
   return (
+    <div className="relative">
+      <div className="flex items-center gap-2">
+        <Input
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            setOpen(true)
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => {
+            window.setTimeout(() => setOpen(false), 120)
+          }}
+          placeholder={t('addModelPlaceholder')}
+          aria-label={ariaLabel}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleAdd(draft)
+            }
+          }}
+        />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => handleAdd(draft)}
+          disabled={!draft.trim()}
+        >
+          <Plus className="size-3.5" />
+          <span>{t('chainAdd')}</span>
+        </Button>
+      </div>
+      {open && filtered.length > 0 && (
+        <ul
+          role="listbox"
+          className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover py-1 text-sm shadow-md"
+        >
+          {filtered.map((ref) => (
+            <li
+              key={ref}
+              role="option"
+              aria-selected={false}
+              className="cursor-pointer px-2.5 py-1 font-mono text-xs hover:bg-accent hover:text-accent-foreground"
+              onMouseDown={(e) => {
+                e.preventDefault()
+                handleAdd(ref)
+              }}
+            >
+              {ref}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+interface ChainEditorProps {
+  chain: string[]
+  availableModels: string[]
+  exclude: string[]
+  missingRefs: Set<string>
+  onMove: (from: number, to: number) => void
+  onRemove: (idx: number) => void
+  onAdd: (ref: string) => void
+}
+
+function ChainEditor({
+  chain,
+  availableModels,
+  exclude,
+  missingRefs,
+  onMove,
+  onRemove,
+  onAdd,
+}: ChainEditorProps): React.ReactElement {
+  const t = useTranslations('adminPresets')
+
+  return (
     <div className="space-y-2">
-      <Label className="text-[11px] uppercase tracking-wide text-muted-foreground">
-        {t('chain')}
-      </Label>
       {chain.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t('chainEmpty')}</p>
       ) : (
@@ -575,60 +841,12 @@ function ChainEditor({
         </ol>
       )}
 
-      <div className="relative">
-        <div className="flex items-center gap-2">
-          <Input
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value)
-              setOpen(true)
-            }}
-            onFocus={() => setOpen(true)}
-            onBlur={() => {
-              // Defer closing so click on a list item fires first.
-              window.setTimeout(() => setOpen(false), 120)
-            }}
-            placeholder={t('addModelPlaceholder')}
-            aria-label={t('addModelAria')}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                handleAdd(draft)
-              }
-            }}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleAdd(draft)}
-            disabled={!draft.trim()}
-          >
-            <Plus className="size-3.5" />
-            <span>{t('chainAdd')}</span>
-          </Button>
-        </div>
-        {open && filtered.length > 0 && (
-          <ul
-            role="listbox"
-            className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover py-1 text-sm shadow-md"
-          >
-            {filtered.map((ref) => (
-              <li
-                key={ref}
-                role="option"
-                aria-selected={false}
-                className="cursor-pointer px-2.5 py-1 font-mono text-xs hover:bg-accent hover:text-accent-foreground"
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  handleAdd(ref)
-                }}
-              >
-                {ref}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <RefPicker
+        availableModels={availableModels}
+        exclude={[...chain, ...exclude]}
+        ariaLabel={t('addModelAria')}
+        onAdd={onAdd}
+      />
     </div>
   )
 }

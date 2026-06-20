@@ -1504,6 +1504,11 @@
     "errorBrokenPreset": "One or more chain entries reference models that don't exist. Fix the highlighted refs and try again.",
     "errorDuplicateLabel": "Label must be unique.",
     "errorGeneric": "Save failed (HTTP {status}).",
+    "errorTierMissingPrimary": "Every enabled tier needs a primary model.",
+    "errorCustomMissingLabel": "Custom presets need a label.",
+    "errorCustomMissingPrimary": "Custom presets need a primary model.",
+    "errorLabelCollidesTier": "Label can't match a tier name.",
+    "errorDefaultUnavailable": "Pick a default from an enabled tier or a complete custom preset.",
     "modelTiers": {
       "lite": {
         "name": "Lite",

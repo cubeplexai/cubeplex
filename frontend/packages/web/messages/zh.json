@@ -1504,6 +1504,11 @@
     "errorBrokenPreset": "链路中存在不存在的模型引用，请修正高亮项后重试。",
     "errorDuplicateLabel": "标签必须唯一。",
     "errorGeneric": "保存失败（HTTP {status}）。",
+    "errorTierMissingPrimary": "每个启用的层级都需要一个主模型。",
+    "errorCustomMissingLabel": "自定义预设需要填写名称。",
+    "errorCustomMissingPrimary": "自定义预设需要一个主模型。",
+    "errorLabelCollidesTier": "名称不能与层级名称相同。",
+    "errorDefaultUnavailable": "请从已启用的层级或填写完整的自定义预设中选择默认项。",
     "modelTiers": {
       "lite": { "name": "Lite", "description": "最快最省，适合简单、高频任务。" },
       "flash": { "name": "Flash", "description": "速度快、质量稳，日常均衡之选。" },
