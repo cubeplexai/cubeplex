@@ -55,12 +55,29 @@ export function ArtifactLibraryCard({
     openArtifact(artifact.conversation_id, artifact.id)
   }, [openArtifact, artifact.conversation_id, artifact.id])
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Only act when the card itself is focused, not a nested control.
+      if (e.target !== e.currentTarget) return
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        handlePreview()
+      }
+    },
+    [handlePreview],
+  )
+
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={t('preview') + ': ' + artifact.name}
       onClick={handlePreview}
+      onKeyDown={handleKeyDown}
       className={cn(
         'group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border',
         'bg-card transition-all hover:border-primary/30 hover:shadow-sm',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       )}
       data-testid="artifact-card"
     >

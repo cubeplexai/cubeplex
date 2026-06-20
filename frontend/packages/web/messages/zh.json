@@ -265,6 +265,7 @@
     "openSource": "打开来源会话",
     "download": "下载",
     "delete": "删除",
+    "preview": "预览",
     "moreActions": "更多操作",
     "deleteConfirmTitle": "删除成果？",
     "deleteConfirmBody": "将永久删除「{name}」及其文件，且无法恢复。",

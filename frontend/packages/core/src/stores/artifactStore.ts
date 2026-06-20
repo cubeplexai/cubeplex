@@ -29,6 +29,14 @@ export interface ArtifactStore {
   /** Remove a single artifact from a conversation's map */
   removeArtifact: (conversationId: string, artifactId: string) => void
 
+  /** Artifact ids deleted this session. Chat cards rendered from immutable
+   *  message history (not from this store) consult this to suppress a stale
+   *  card whose artifact was deleted from the library. */
+  deletedIds: Record<string, true>
+
+  /** Whether an artifact was deleted this session. */
+  isDeleted: (artifactId: string) => boolean
+
   /** Cached version lists per artifactId */
   versions: Record<string, ArtifactVersion[]>
 
@@ -48,6 +56,7 @@ export interface ArtifactStore {
 export const useArtifactStore = create<ArtifactStore>((set, get) => ({
   artifacts: {},
   loading: {},
+  deletedIds: {},
   versions: {},
   selectedVersion: {},
 
@@ -108,11 +117,16 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
 
   removeArtifact: (conversationId, artifactId) =>
     set((state) => {
+      let artifacts = state.artifacts
       const conv = state.artifacts[conversationId]
-      if (!conv || !(artifactId in conv)) return state
-      const { [artifactId]: _, ...restConv } = conv
-      return { artifacts: { ...state.artifacts, [conversationId]: restConv } }
+      if (conv && artifactId in conv) {
+        const { [artifactId]: _removed, ...restConv } = conv
+        artifacts = { ...state.artifacts, [conversationId]: restConv }
+      }
+      return { artifacts, deletedIds: { ...state.deletedIds, [artifactId]: true } }
     }),
+
+  isDeleted: (artifactId) => !!get().deletedIds[artifactId],
 
   async loadVersions(client, conversationId, artifactId) {
     if (get().versions[artifactId]) return
