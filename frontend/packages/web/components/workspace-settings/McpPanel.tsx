@@ -34,6 +34,7 @@ import { MCPPromoteDialog } from '@/components/mcp/MCPPromoteDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
@@ -439,76 +440,73 @@ export function McpPanel({ wsId }: McpPanelProps) {
         />
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside
-          aria-label="MCP connector list"
-          className="w-[340px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
-        >
-          {loading && connectors.length === 0 ? (
-            <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('loading')}</p>
-          ) : error ? (
-            <p className="px-4 py-6 text-center text-xs text-destructive">{error}</p>
-          ) : (
-            <div className="flex flex-col gap-4 p-3">
-              <section>
-                <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {tMcp('installed')}
-                </h3>
-                {filteredConnectors.length === 0 ? (
-                  <p className="px-1 text-xs text-muted-foreground">{t('noConnectors')}</p>
-                ) : (
-                  <div className="flex flex-col gap-1.5">
-                    {filteredConnectors.map((c) => (
-                      <ConnectorRow
-                        key={c.install.install_id}
-                        connector={c}
-                        active={c.install.install_id === selectedId}
-                        onClick={() => setSelectedId(c.install.install_id)}
-                      />
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              {meWsRole === 'admin' && (
+      <ListDetailLayout
+        selected={selected !== null}
+        onBack={() => setSelectedId(null)}
+        backLabel={t('back')}
+        placeholder={t('selectConnector')}
+        railClassName="w-[340px] bg-card/20 px-0 py-0"
+        list={
+          <div aria-label="MCP connector list">
+            {loading && connectors.length === 0 ? (
+              <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('loading')}</p>
+            ) : error ? (
+              <p className="px-4 py-6 text-center text-xs text-destructive">{error}</p>
+            ) : (
+              <div className="flex flex-col gap-4 p-3">
                 <section>
                   <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {tAvailable('title')}
+                    {tMcp('installed')}
                   </h3>
-                  {filteredAvailable.length === 0 ? (
-                    <p className="px-1 text-xs text-muted-foreground">{tAvailable('empty')}</p>
+                  {filteredConnectors.length === 0 ? (
+                    <p className="px-1 text-xs text-muted-foreground">{t('noConnectors')}</p>
                   ) : (
                     <div className="flex flex-col gap-1.5">
-                      {filteredAvailable.map((row) => (
-                        <AvailableConnectorRow
-                          key={row.install?.install_id ?? row.template?.template_id ?? 'unknown'}
-                          row={row}
-                          client={client}
-                          wsId={wsId}
-                          onConnected={async (installId: string) => {
-                            await load()
-                            setSelectedId(installId)
-                          }}
+                      {filteredConnectors.map((c) => (
+                        <ConnectorRow
+                          key={c.install.install_id}
+                          connector={c}
+                          active={c.install.install_id === selectedId}
+                          onClick={() => setSelectedId(c.install.install_id)}
                         />
                       ))}
                     </div>
                   )}
                 </section>
-              )}
-            </div>
-          )}
-        </aside>
 
-        <section className="flex flex-1 overflow-y-auto">
-          {selected ? (
-            <ConnectorDetail connector={selected} wsId={wsId} onChanged={load} />
-          ) : (
-            <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-              {t('selectConnector')}
-            </div>
-          )}
-        </section>
-      </div>
+                {meWsRole === 'admin' && (
+                  <section>
+                    <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {tAvailable('title')}
+                    </h3>
+                    {filteredAvailable.length === 0 ? (
+                      <p className="px-1 text-xs text-muted-foreground">{tAvailable('empty')}</p>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        {filteredAvailable.map((row) => (
+                          <AvailableConnectorRow
+                            key={row.install?.install_id ?? row.template?.template_id ?? 'unknown'}
+                            row={row}
+                            client={client}
+                            wsId={wsId}
+                            onConnected={async (installId: string) => {
+                              await load()
+                              setSelectedId(installId)
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                )}
+              </div>
+            )}
+          </div>
+        }
+        detail={
+          selected ? <ConnectorDetail connector={selected} wsId={wsId} onChanged={load} /> : null
+        }
+      />
     </div>
   )
 }

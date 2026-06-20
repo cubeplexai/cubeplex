@@ -12,6 +12,7 @@ import { UploadWorkspaceSkillModal } from '@/components/workspace-settings/skill
 import { CandidateCard } from '@/components/skills/CandidateCard'
 import { CandidateDetailPanel } from '@/components/skills/CandidateDetailPanel'
 import { PageHeader } from '@/components/management/PageHeader'
+import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
 
 type Selection = { kind: 'skill'; id: string } | { kind: 'candidate'; candidateId: string }
 
@@ -57,136 +58,138 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
         onSearch={(q) => void search(apiClient, wsId, q)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside
-          aria-label={t('listAria')}
-          data-testid="skills-list"
-          className="w-[360px] shrink-0 overflow-y-auto border-r border-border bg-card/20"
-        >
-          {filters.externalOnly ? (
-            searching ? (
-              <div className="flex flex-col gap-1.5 p-3">
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="h-[76px] animate-pulse rounded-lg border border-border bg-accent"
-                  />
-                ))}
-              </div>
-            ) : candidates.filter((c) => c.source_kind === 'remote').length === 0 ? (
-              <div className="flex flex-col items-center justify-center gap-1 px-6 py-8 text-center">
-                <p className="text-sm text-muted-foreground">{t('noMatch')}</p>
-                <p className="text-xs text-muted-foreground/70">{t('noMatchHint')}</p>
-              </div>
-            ) : (
-              <ul className="flex flex-col gap-1.5 p-3">
-                {candidates
-                  .filter((c) => c.source_kind === 'remote')
-                  .map((c) => (
-                    <li key={c.candidate_id}>
-                      <CandidateCard
-                        candidate={c}
-                        active={
-                          selection?.kind === 'candidate' &&
-                          selection.candidateId === c.candidate_id
-                        }
-                        onClick={() =>
-                          setSelection({ kind: 'candidate', candidateId: c.candidate_id })
-                        }
-                      />
-                    </li>
+      <ListDetailLayout
+        selected={selection !== null}
+        onBack={() => setSelection(null)}
+        backLabel={t('back')}
+        placeholder={t('selectSkill')}
+        railClassName="border-border bg-card/20 px-0 py-0"
+        list={
+          <div aria-label={t('listAria')} data-testid="skills-list">
+            {filters.externalOnly ? (
+              searching ? (
+                <div className="flex flex-col gap-1.5 p-3">
+                  {[1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      className="h-[76px] animate-pulse rounded-lg border border-border bg-accent"
+                    />
                   ))}
-              </ul>
-            )
-          ) : loading && skills.length === 0 ? (
-            <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('loading')}</p>
-          ) : error ? (
-            <div className="m-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
-              {error.message}
-            </div>
-          ) : (
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2 px-4 pb-1 pt-2">
-                <span className="text-xs font-semibold text-muted-foreground">
-                  {t('systemCatalog')}
-                </span>
-                <div className="flex-1 border-t border-border" />
-              </div>
-
-              {skills.length === 0 ? (
+                </div>
+              ) : candidates.filter((c) => c.source_kind === 'remote').length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-1 px-6 py-8 text-center">
                   <p className="text-sm text-muted-foreground">{t('noMatch')}</p>
                   <p className="text-xs text-muted-foreground/70">{t('noMatchHint')}</p>
                 </div>
               ) : (
                 <ul className="flex flex-col gap-1.5 p-3">
-                  {skills.map((s: WorkspaceSkillEntry) => (
-                    <li key={s.id}>
-                      <WorkspaceSkillCard
-                        skill={s}
-                        active={selection?.kind === 'skill' && selection.id === s.id}
-                        onClick={() => setSelection({ kind: 'skill', id: s.id })}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {(candidates.filter((c) => c.source_kind === 'remote').length > 0 || searching) && (
-                <>
-                  <div className="flex items-center gap-2 px-4 py-2">
-                    <span className="text-xs font-semibold text-muted-foreground">
-                      {t('externalSources')}
-                    </span>
-                    {searching && (
-                      <div className="ml-auto flex items-center gap-1.5">
-                        <div className="flex gap-1">
-                          <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
-                          <div className="animation-delay-200 h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
-                          <div className="animation-delay-400 h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
-                        </div>
-                      </div>
-                    )}
-                    <div className="flex-1 border-t border-border" />
-                  </div>
-                  {searching &&
-                  candidates.filter((c) => c.source_kind === 'remote').length === 0 ? (
-                    <div className="flex flex-col gap-1.5 px-3 pb-3">
-                      {[1, 2, 3].map((i) => (
-                        <div
-                          key={i}
-                          className="h-[76px] animate-pulse rounded-lg border border-border bg-accent"
+                  {candidates
+                    .filter((c) => c.source_kind === 'remote')
+                    .map((c) => (
+                      <li key={c.candidate_id}>
+                        <CandidateCard
+                          candidate={c}
+                          active={
+                            selection?.kind === 'candidate' &&
+                            selection.candidateId === c.candidate_id
+                          }
+                          onClick={() =>
+                            setSelection({ kind: 'candidate', candidateId: c.candidate_id })
+                          }
                         />
-                      ))}
-                    </div>
-                  ) : (
-                    <ul className="flex flex-col gap-1.5 px-3 pb-3">
-                      {candidates
-                        .filter((c) => c.source_kind === 'remote')
-                        .map((c) => (
-                          <li key={c.candidate_id}>
-                            <CandidateCard
-                              candidate={c}
-                              active={
-                                selection?.kind === 'candidate' &&
-                                selection.candidateId === c.candidate_id
-                              }
-                              onClick={() =>
-                                setSelection({ kind: 'candidate', candidateId: c.candidate_id })
-                              }
-                            />
-                          </li>
-                        ))}
-                    </ul>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </aside>
+                      </li>
+                    ))}
+                </ul>
+              )
+            ) : loading && skills.length === 0 ? (
+              <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('loading')}</p>
+            ) : error ? (
+              <div className="m-3 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                {error.message}
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                <div className="flex items-center gap-2 px-4 pb-1 pt-2">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    {t('systemCatalog')}
+                  </span>
+                  <div className="flex-1 border-t border-border" />
+                </div>
 
-        <section className="flex flex-1 overflow-y-auto">
-          {selectedSkill ? (
+                {skills.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-1 px-6 py-8 text-center">
+                    <p className="text-sm text-muted-foreground">{t('noMatch')}</p>
+                    <p className="text-xs text-muted-foreground/70">{t('noMatchHint')}</p>
+                  </div>
+                ) : (
+                  <ul className="flex flex-col gap-1.5 p-3">
+                    {skills.map((s: WorkspaceSkillEntry) => (
+                      <li key={s.id}>
+                        <WorkspaceSkillCard
+                          skill={s}
+                          active={selection?.kind === 'skill' && selection.id === s.id}
+                          onClick={() => setSelection({ kind: 'skill', id: s.id })}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {(candidates.filter((c) => c.source_kind === 'remote').length > 0 || searching) && (
+                  <>
+                    <div className="flex items-center gap-2 px-4 py-2">
+                      <span className="text-xs font-semibold text-muted-foreground">
+                        {t('externalSources')}
+                      </span>
+                      {searching && (
+                        <div className="ml-auto flex items-center gap-1.5">
+                          <div className="flex gap-1">
+                            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                            <div className="animation-delay-200 h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                            <div className="animation-delay-400 h-1.5 w-1.5 animate-bounce rounded-full bg-muted-foreground" />
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex-1 border-t border-border" />
+                    </div>
+                    {searching &&
+                    candidates.filter((c) => c.source_kind === 'remote').length === 0 ? (
+                      <div className="flex flex-col gap-1.5 px-3 pb-3">
+                        {[1, 2, 3].map((i) => (
+                          <div
+                            key={i}
+                            className="h-[76px] animate-pulse rounded-lg border border-border bg-accent"
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <ul className="flex flex-col gap-1.5 px-3 pb-3">
+                        {candidates
+                          .filter((c) => c.source_kind === 'remote')
+                          .map((c) => (
+                            <li key={c.candidate_id}>
+                              <CandidateCard
+                                candidate={c}
+                                active={
+                                  selection?.kind === 'candidate' &&
+                                  selection.candidateId === c.candidate_id
+                                }
+                                onClick={() =>
+                                  setSelection({ kind: 'candidate', candidateId: c.candidate_id })
+                                }
+                              />
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        }
+        detail={
+          selectedSkill ? (
             <WorkspaceSkillDetail
               wsId={wsId}
               skill={selectedSkill}
@@ -194,13 +197,9 @@ export default function WorkspaceSkillsPage({ params }: { params: Promise<{ wsId
             />
           ) : selectedCandidate ? (
             <CandidateDetailPanel wsId={wsId} candidate={selectedCandidate} />
-          ) : (
-            <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-              {t('selectSkill')}
-            </div>
-          )}
-        </section>
-      </div>
+          ) : null
+        }
+      />
 
       <UploadWorkspaceSkillModal
         wsId={wsId}

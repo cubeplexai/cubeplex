@@ -15,6 +15,7 @@ import {
 import { MCPToolbar } from '@/components/mcp/MCPToolbar'
 import { MCPConnectorList } from '@/components/mcp/MCPConnectorList'
 import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'
+import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
 
 export default function AdminMcpPage() {
   const t = useTranslations('mcpAdmin')
@@ -120,65 +121,72 @@ export default function AdminMcpPage() {
         onFilterChange={setFilter}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside
-          aria-label="connector-list"
-          className="w-[360px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
-        >
-          <div className="border-b border-border/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {t('installs')}
-          </div>
-          <MCPConnectorList
-            connectors={connectors}
-            loading={loading}
-            search={search}
-            filter={filter}
-            selectedId={selectedId}
-            onSelect={handleSelect}
-          />
-          <div className="border-t border-border/60">
-            <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {t('templates')}
+      <ListDetailLayout
+        selected={selectedId !== null || mode === 'custom_install' || mode === 'install_template'}
+        onBack={() => {
+          setSelectedId(null)
+          setMode(null)
+          setInstallTemplate(null)
+        }}
+        backLabel={t('back')}
+        placeholder={null}
+        railClassName="bg-card/20 px-0 py-0"
+        list={
+          <div aria-label="connector-list">
+            <div className="border-b border-border/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t('installs')}
             </div>
-            <div className="flex flex-col gap-1.5 p-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedId(null)
-                  setInstallTemplate(null)
-                  setMode('custom_install')
-                }}
-                data-testid="mcp-add-custom-connector"
-                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/40 p-3 text-left text-sm font-medium hover:border-border hover:bg-accent/40"
-              >
-                <span aria-hidden>+</span>
-                {t('addCustomConnector')}
-              </button>
-              {availableTemplates.map((tpl) => (
+            <MCPConnectorList
+              connectors={connectors}
+              loading={loading}
+              search={search}
+              filter={filter}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+            />
+            <div className="border-t border-border/60">
+              <div className="px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('templates')}
+              </div>
+              <div className="flex flex-col gap-1.5 p-3">
                 <button
-                  key={tpl.template_id}
                   type="button"
                   onClick={() => {
                     setSelectedId(null)
-                    setInstallTemplate(tpl)
-                    setMode('install_template')
+                    setInstallTemplate(null)
+                    setMode('custom_install')
                   }}
-                  data-testid={`template-row-${tpl.slug}`}
-                  className="flex w-full flex-col gap-0.5 rounded-lg border border-border/70 bg-card/40 p-3 text-left hover:border-border hover:bg-accent/40"
+                  data-testid="mcp-add-custom-connector"
+                  className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/40 p-3 text-left text-sm font-medium hover:border-border hover:bg-accent/40"
                 >
-                  <span className="truncate text-sm font-semibold">{tpl.name}</span>
-                  {tpl.description && (
-                    <span className="line-clamp-1 text-xs text-muted-foreground">
-                      {tpl.description}
-                    </span>
-                  )}
+                  <span aria-hidden>+</span>
+                  {t('addCustomConnector')}
                 </button>
-              ))}
+                {availableTemplates.map((tpl) => (
+                  <button
+                    key={tpl.template_id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedId(null)
+                      setInstallTemplate(tpl)
+                      setMode('install_template')
+                    }}
+                    data-testid={`template-row-${tpl.slug}`}
+                    className="flex w-full flex-col gap-0.5 rounded-lg border border-border/70 bg-card/40 p-3 text-left hover:border-border hover:bg-accent/40"
+                  >
+                    <span className="truncate text-sm font-semibold">{tpl.name}</span>
+                    {tpl.description && (
+                      <span className="line-clamp-1 text-xs text-muted-foreground">
+                        {tpl.description}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </aside>
-
-        <section className="flex flex-1 overflow-y-auto">
+        }
+        detail={
           <MCPAdminDetailPanel
             connector={selected}
             mode={mode}
@@ -188,8 +196,8 @@ export default function AdminMcpPage() {
             onDelete={handleDelete}
             onInstalled={handleInstalled}
           />
-        </section>
-      </div>
+        }
+      />
     </div>
   )
 }

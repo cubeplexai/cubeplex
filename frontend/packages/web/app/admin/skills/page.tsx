@@ -10,6 +10,7 @@ import { AdminCandidateDetailPanel } from '@/components/admin/skills/AdminCandid
 import { UploadSkillModal } from '@/components/admin/skills/UploadSkillModal'
 import { useAdminSkills } from '@/hooks/useAdminSkills'
 import { PageHeader } from '@/components/management/PageHeader'
+import { ListDetailLayout } from '@/components/shared/ListDetailLayout'
 
 type Selection = { kind: 'skill'; id: string } | { kind: 'candidate'; candidateId: string }
 
@@ -55,27 +56,30 @@ export default function SkillsPage() {
         onExternalSearch={(q) => void search(q)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside
-          aria-label="skills-list"
-          className="w-[360px] shrink-0 overflow-y-auto border-r border-border/70 bg-card/20"
-        >
-          <SkillsList
-            skills={skills}
-            loading={loading}
-            error={error}
-            selectedId={selection?.kind === 'skill' ? selection.id : null}
-            onSelect={(id) => setSelection({ kind: 'skill', id })}
-            candidates={candidates}
-            searching={searching}
-            externalOnly={externalOnly}
-            selectedCandidateId={selection?.kind === 'candidate' ? selection.candidateId : null}
-            onSelectCandidate={(id) => setSelection({ kind: 'candidate', candidateId: id })}
-          />
-        </aside>
-
-        <section className="flex flex-1 overflow-y-auto">
-          {selectedCandidate ? (
+      <ListDetailLayout
+        selected={selection !== null}
+        onBack={() => setSelection(null)}
+        backLabel={t('back')}
+        placeholder={null}
+        railClassName="bg-card/20 px-0 py-0"
+        list={
+          <div aria-label="skills-list">
+            <SkillsList
+              skills={skills}
+              loading={loading}
+              error={error}
+              selectedId={selection?.kind === 'skill' ? selection.id : null}
+              onSelect={(id) => setSelection({ kind: 'skill', id })}
+              candidates={candidates}
+              searching={searching}
+              externalOnly={externalOnly}
+              selectedCandidateId={selection?.kind === 'candidate' ? selection.candidateId : null}
+              onSelectCandidate={(id) => setSelection({ kind: 'candidate', candidateId: id })}
+            />
+          </div>
+        }
+        detail={
+          selectedCandidate ? (
             <AdminCandidateDetailPanel
               candidate={selectedCandidate}
               onInstalled={() => void refresh()}
@@ -85,9 +89,9 @@ export default function SkillsPage() {
               skillId={selection?.kind === 'skill' ? selection.id : null}
               onActionDone={() => void refresh()}
             />
-          )}
-        </section>
-      </div>
+          )
+        }
+      />
 
       <UploadSkillModal
         open={uploadOpen}
