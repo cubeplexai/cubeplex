@@ -395,7 +395,7 @@ class ProviderService:
         """
 
         def factory() -> Any:
-            snap = LLMSnapshot(providers={provider_name: cfg}, presets=(), task_presets={})
+            snap = LLMSnapshot(providers={provider_name: cfg}, model_presets=(), task_routing={})
             return build_provider(snap, provider_name, cache_policy=None)
 
         return factory
@@ -407,7 +407,7 @@ class ProviderService:
         logic the runtime uses (``provider._resolve_capability``), avoiding a
         second copy of the override-precedence rule.
         """
-        snap = LLMSnapshot(providers={provider_name: cfg}, presets=(), task_presets={})
+        snap = LLMSnapshot(providers={provider_name: cfg}, model_presets=(), task_routing={})
         provider = build_provider(snap, provider_name, cache_policy=None)
         return provider._resolve_capability(model_id)
 

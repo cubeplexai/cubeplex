@@ -1,26 +1,56 @@
 """E2E tests for /api/v1/ws/{workspace_id}/model-presets.
 
-Workspace-side listing endpoint: returns the effective preset list
-(label + is_default) — org row if present, else system row, else empty.
-Chain refs are NOT exposed.
+Workspace-side listing endpoint: returns the effective preset summaries
+(key / kind / primary / description / is_default) — org row if present,
+else system row, else empty. Fallback refs are NOT exposed.
 """
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import pytest
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from cubebox.db.engine import _build_database_url
+from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 pytestmark = pytest.mark.e2e  # belt + suspenders alongside conftest auto-mark
 
 
-async def _seed_preset(
+async def _purge_system_presets_row() -> None:
+    """Drop the system-level (org_id IS NULL) model_presets row.
+
+    App lifespan re-seeds this row in the legacy ``{presets, chain}`` shape
+    (the seeder migration is a separate task), which the new
+    ``ModelPresetsConfig`` schema rejects at load time. Tests that read the
+    snapshot / system fallback must start from a clean system row.
+    """
+    eng = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as s:
+            await s.execute(
+                delete(OrgSettings).where(
+                    OrgSettings.org_id.is_(None),  # type: ignore[union-attr]
+                    OrgSettings.key == MODEL_PRESETS_KEY,  # type: ignore[arg-type]
+                )
+            )
+            await s.commit()
+    finally:
+        await eng.dispose()
+
+
+async def _seed_config(
     admin: httpx.AsyncClient,
     *,
     provider_name: str,
     model_id: str,
-    label: str,
 ) -> str:
-    """Create one provider+model, then PUT an org-level preset using that ref.
+    """Create one provider+model, then PUT an org config: `pro` tier + a custom.
 
     Returns the chain ref ("slug/model_id").
     """
@@ -50,34 +80,53 @@ async def _seed_preset(
     assert resp.status_code == 201, resp.text
 
     ref = f"{slug}/{model_id}"
-    resp = await admin.put(
-        "/api/v1/admin/model-presets",
-        json={
-            "presets": [{"label": label, "chain": [ref], "is_default": True}],
-            "task_presets": {},
+    off = {"enabled": False, "primary": None, "fallbacks": []}
+    payload: dict[str, Any] = {
+        "tiers": {
+            "lite": dict(off),
+            "flash": dict(off),
+            "pro": {"enabled": True, "primary": ref, "fallbacks": []},
+            "max": dict(off),
         },
-    )
+        "custom_presets": [
+            {"label": "fancy", "primary": ref, "fallbacks": [], "description": "a custom one"}
+        ],
+        "default_preset": "pro",
+        "task_routing": {},
+    }
+    resp = await admin.put("/api/v1/admin/model-presets", json=payload)
     assert resp.status_code == 200, resp.text
     return ref
 
 
-async def test_member_sees_effective_preset_list(
+async def test_member_sees_effective_preset_summaries(
     admin_client: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """Admin (also a member) GETs the workspace listing after seeding one preset."""
+    """Admin (also a member) GETs the workspace listing after seeding presets."""
     client, ws_id = admin_client
-    await _seed_preset(client, provider_name="ws-list-provider", model_id="m1", label="primary")
+    await _purge_system_presets_row()
+    ref = await _seed_config(client, provider_name="ws-list-provider", model_id="m1")
 
     resp = await client.get(f"/api/v1/ws/{ws_id}/model-presets")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "presets" in body
-    labels = [p["label"] for p in body["presets"]]
-    assert "primary" in labels, body
-    primary = next(p for p in body["presets"] if p["label"] == "primary")
-    assert primary["is_default"] is True
-    # Chain refs MUST NOT leak through the workspace endpoint.
-    assert "chain" not in primary
+    by_key = {p["key"]: p for p in body["presets"]}
+
+    assert "pro" in by_key, body
+    pro = by_key["pro"]
+    assert pro["kind"] == "tier"
+    assert pro["primary"] == ref
+    assert pro["is_default"] is True
+    # Tiers carry no stored description; frontend supplies i18n copy by key.
+    assert pro["description"] == ""
+
+    assert "fancy" in by_key, body
+    fancy = by_key["fancy"]
+    assert fancy["kind"] == "custom"
+    assert fancy["primary"] == ref
+    assert fancy["is_default"] is False
+    assert fancy["description"] == "a custom one"
 
 
 async def test_non_member_of_workspace_403(
@@ -96,20 +145,20 @@ async def test_non_member_of_workspace_403(
     assert resp.status_code == 403, resp.text
 
 
-async def test_member_sees_empty_list_when_no_presets(
+async def test_member_sees_well_formed_list_when_no_presets(
     member_client: tuple[httpx.AsyncClient, str],
 ) -> None:
-    """Fresh member workspace with no admin-written presets returns an empty
-    list (or whatever the system fallback provides) without 5xx-ing."""
+    """Fresh member workspace with no admin-written presets returns a
+    well-formed list (or whatever the system fallback provides) without 5xx-ing."""
     client, ws_id = member_client
+    await _purge_system_presets_row()
 
     resp = await client.get(f"/api/v1/ws/{ws_id}/model-presets")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert isinstance(body["presets"], list)
-    # Don't assert empty: bootstrap may seed a system-level row. The
-    # contract is 200 + well-formed shape.
     for p in body["presets"]:
-        assert "label" in p
+        assert p["kind"] in ("tier", "custom")
+        assert "key" in p
+        assert "primary" in p
         assert "is_default" in p
-        assert "chain" not in p

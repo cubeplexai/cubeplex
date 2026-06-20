@@ -1,29 +1,27 @@
 """API schemas for model preset admin + workspace endpoints.
 
 The admin body is structurally identical to the on-disk
-OrgSettings.model_presets value, so we re-export the existing schema
-under an API-namespaced name.
+OrgSettings.model_presets value, so we re-export the storage schema under
+an API-namespaced name.
 """
+
+from typing import Literal
 
 from pydantic import BaseModel
 
-from cubebox.llm.snapshot_schema import LLMPresetSchema as AdminPresetEntry
-from cubebox.llm.snapshot_schema import ModelPresetsValue as AdminModelPresetsBody
-
-__all__ = [
-    "AdminModelPresetsBody",
-    "AdminPresetEntry",
-    "WorkspacePresetSummary",
-    "WorkspacePresetsResponse",
-]
+from cubebox.llm.snapshot_schema import ModelPresetsConfig as AdminModelPresetsBody
 
 
 class WorkspacePresetSummary(BaseModel):
-    """Per-preset summary exposed to workspace users (no chain refs)."""
-
-    label: str
+    key: str
+    kind: Literal["tier", "custom"]
+    primary: str
+    description: str
     is_default: bool
 
 
 class WorkspacePresetsResponse(BaseModel):
     presets: list[WorkspacePresetSummary]
+
+
+__all__ = ["AdminModelPresetsBody", "WorkspacePresetSummary", "WorkspacePresetsResponse"]
