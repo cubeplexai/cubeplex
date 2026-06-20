@@ -165,7 +165,7 @@ export function InputBar({
       // which lets the backend use the workspace default.
       const selection = workspaceId ? getPresetSelectionStore(workspaceId).getState() : null
       const sendOptions = selection
-        ? { preset_label: selection.presetLabel, thinking: selection.thinking }
+        ? { preset_label: selection.modelPresetKey, thinking: selection.thinking }
         : undefined
       await send(client, conversationId!, text, ids, optimisticAttachments, sendOptions)
     } catch (err) {

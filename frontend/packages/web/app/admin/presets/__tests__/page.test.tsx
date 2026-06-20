@@ -9,6 +9,7 @@ import { CSRF_COOKIE_NAME } from '@cubebox/core'
 import AdminPresetsPage from '../page'
 import { PresetEditor } from '../PresetEditor'
 import type { AdminModelPresetsResponse } from '@/lib/api/presets'
+import type { ModelPresetsConfig } from '@/lib/types/presets'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -25,6 +26,20 @@ vi.mock('@cubebox/core', async (importOriginal) => {
     createApiClient: vi.fn(() => fakeClient),
   }
 })
+
+function sampleConfig(): ModelPresetsConfig {
+  return {
+    tiers: {
+      lite: { enabled: true, primary: 'openai/gpt-5', fallbacks: [] },
+      flash: { enabled: false, primary: null, fallbacks: [] },
+      pro: { enabled: true, primary: 'anthropic/claude-opus-4-7', fallbacks: [] },
+      max: { enabled: false, primary: null, fallbacks: [] },
+    },
+    custom_presets: [],
+    default_preset: 'pro',
+    task_routing: {},
+  }
+}
 
 function renderWithIntl(node: React.ReactElement): ReturnType<typeof render> {
   return render(
@@ -47,14 +62,11 @@ describe('AdminPresetsPage (shell)', () => {
     document.cookie = `${CSRF_COOKIE_NAME}=test-csrf; path=/`
   })
 
-  it('loads the initial preset row and the provider→model catalog', async () => {
+  it('loads the tier editor and the provider→model catalog', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : input.toString()
       if (url === '/api/v1/admin/model-presets') {
-        return jsonResponse({
-          value: { presets: [], task_presets: {} },
-          origin: 'none',
-        })
+        return jsonResponse({ value: sampleConfig(), origin: 'org' })
       }
       throw new Error(`unexpected fetch ${url}`)
     })
@@ -81,8 +93,10 @@ describe('AdminPresetsPage (shell)', () => {
 
     renderWithIntl(<AdminPresetsPage />)
 
+    // The editor mounted with data: page heading + the Pro tier row.
     await waitFor(() => expect(screen.queryByRole('heading', { level: 1 })).not.toBeNull())
     expect(screen.getByRole('heading', { name: en.adminPresets.title })).toBeTruthy()
+    expect(screen.getByText(en.adminPresets.modelTiers.pro.name)).toBeTruthy()
 
     // Provider catalog endpoints were hit.
     const calls = vi.mocked(fakeClient.get).mock.calls.map((c) => String(c[0]))
@@ -97,47 +111,26 @@ describe('PresetEditor', () => {
   })
 
   function initialResponse(): AdminModelPresetsResponse {
-    return {
-      value: {
-        presets: [
-          { label: 'main', chain: ['openai/gpt-5'], is_default: true },
-          { label: 'fast', chain: ['openai/gpt-5-mini'], is_default: false },
-        ],
-        task_presets: { title: 'fast' },
-      },
-      origin: 'org',
-    }
+    return { value: sampleConfig(), origin: 'org' }
   }
 
-  it('renders presets and omits unset task_presets keys from PUT body', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(jsonResponse({ value: initialResponse().value, origin: 'org' }, 200))
+  it('renders the tier rows from the loaded config', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse({ value: sampleConfig(), origin: 'org' }, 200),
+    )
 
     renderWithIntl(
       <PresetEditor
         initial={initialResponse()}
-        availableModels={['openai/gpt-5', 'openai/gpt-5-mini']}
+        availableModels={['openai/gpt-5', 'anthropic/claude-opus-4-7']}
       />,
     )
 
-    const inputs = screen.getAllByRole('textbox') as HTMLInputElement[]
-    const labelInputs = inputs.filter((i) => i.placeholder === 'main')
-    expect(labelInputs.map((i) => i.value)).toEqual(['main', 'fast'])
-
-    const saveBtn = screen.getByRole('button', { name: en.adminPresets.save })
-    fireEvent.click(saveBtn)
-
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled())
-    const putCall = fetchSpy.mock.calls.find(([, init]) => init?.method === 'PUT')
-    expect(putCall).toBeDefined()
-    const sent = JSON.parse(putCall![1]!.body as string) as {
-      task_presets: Record<string, string>
-    }
-    expect(sent.task_presets).toEqual({ title: 'fast' })
-    // compaction + summarize must not be sent as empty strings.
-    expect(sent.task_presets.compaction).toBeUndefined()
-    expect(sent.task_presets.summarize).toBeUndefined()
+    // All four tier names render.
+    expect(screen.getByText(en.adminPresets.modelTiers.lite.name)).toBeTruthy()
+    expect(screen.getByText(en.adminPresets.modelTiers.pro.name)).toBeTruthy()
+    // The enabled Pro tier exposes its primary ref.
+    expect(screen.getByText('anthropic/claude-opus-4-7')).toBeTruthy()
   })
 
   it('highlights missing refs on a 400 broken_preset response', async () => {
@@ -146,8 +139,8 @@ describe('PresetEditor', () => {
         {
           status: 'error',
           error_code: 'broken_preset',
-          message: "preset 'main' has missing refs: openai/gpt-5",
-          details: "missing_refs=['openai/gpt-5']",
+          message: "preset 'pro' has missing refs: anthropic/claude-opus-4-7",
+          details: "missing_refs=['anthropic/claude-opus-4-7']",
         },
         400,
       ),
@@ -156,16 +149,20 @@ describe('PresetEditor', () => {
     renderWithIntl(
       <PresetEditor
         initial={initialResponse()}
-        availableModels={['openai/gpt-5', 'openai/gpt-5-mini']}
+        availableModels={['openai/gpt-5', 'anthropic/claude-opus-4-7']}
       />,
     )
 
+    // Disable the Lite tier: dirty + still valid (default 'pro' remains
+    // available), so Save is enabled. Then save to trigger the 400.
+    const liteSwitch = document.getElementById('tier-enabled-lite')!
+    fireEvent.click(liteSwitch)
     fireEvent.click(screen.getByRole('button', { name: en.adminPresets.save }))
 
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeNull())
     // The banner mentions the broken_preset hint.
-    expect(screen.getByRole('alert').textContent).toContain('Fix the highlighted refs')
-    // The offending chain entry shows the "Missing" badge.
+    expect(screen.getByRole('alert').textContent).toContain(en.adminPresets.errorBrokenPreset)
+    // The offending ref shows the "Missing" badge.
     expect(screen.getAllByText(en.adminPresets.missingRefBadge).length).toBeGreaterThan(0)
   })
 })
