@@ -1,16 +1,30 @@
 """load_llm_snapshot — read DB providers + OrgSettings system row."""
 
+from typing import Any
+
 import pytest
 
 from cubebox.llm.errors import CorruptPresetsRowError
-from cubebox.llm.snapshot import LLMPreset, load_llm_snapshot
+from cubebox.llm.snapshot import ModelPreset, load_llm_snapshot
 from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 from cubebox.models.provider import Model, Provider
 
 
-@pytest.mark.asyncio
-async def test_snapshot_loads_system_provider_and_preset(async_session, encryption_backend):
-    # Seed a system provider + model.
+def _presets_value(primary: str = "acme/m1", default: str = "pro") -> dict[str, Any]:
+    """A valid ModelPresetsConfig row with one enabled tier (pro)."""
+    return {
+        "tiers": {
+            "lite": {"enabled": False, "primary": None},
+            "flash": {"enabled": False, "primary": None},
+            "pro": {"enabled": True, "primary": primary},
+            "max": {"enabled": False, "primary": None},
+        },
+        "default_preset": default,
+        "task_routing": {},
+    }
+
+
+def _add_acme_provider_and_model(async_session) -> None:
     p = Provider(
         org_id=None,
         name="acme",
@@ -21,34 +35,34 @@ async def test_snapshot_loads_system_provider_and_preset(async_session, encrypti
         enabled=True,
     )
     async_session.add(p)
-    await async_session.flush()
-    async_session.add(
-        Model(
-            org_id=None,
-            provider_id=p.id,
-            model_id="m1",
-            display_name="m1",
-            reasoning=False,
-            input_modalities=["text"],
-            cost_input=0,
-            cost_output=0,
-            cost_cache_read=0,
-            cost_cache_write=0,
-            context_window=128000,
-            max_tokens=32000,
-            enabled=True,
-        )
+    return p
+
+
+def _make_model(provider_id: str, model_id: str = "m1") -> Model:
+    return Model(
+        org_id=None,
+        provider_id=provider_id,
+        model_id=model_id,
+        display_name=model_id,
+        reasoning=False,
+        input_modalities=["text"],
+        cost_input=0,
+        cost_output=0,
+        cost_cache_read=0,
+        cost_cache_write=0,
+        context_window=128000,
+        max_tokens=32000,
+        enabled=True,
     )
-    # Seed system model_presets row.
+
+
+@pytest.mark.asyncio
+async def test_snapshot_loads_system_provider_and_preset(async_session, encryption_backend):
+    p = _add_acme_provider_and_model(async_session)
+    await async_session.flush()
+    async_session.add(_make_model(p.id))
     async_session.add(
-        OrgSettings(
-            org_id=None,
-            key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [{"label": "default", "chain": ["acme/m1"], "is_default": True}],
-                "task_presets": {},
-            },
-        )
+        OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=_presets_value())
     )
     await async_session.commit()
 
@@ -56,7 +70,16 @@ async def test_snapshot_loads_system_provider_and_preset(async_session, encrypti
         async_session, org_id="org_test", encryption_backend=encryption_backend
     )
     assert "acme" in snap.providers
-    assert snap.presets == (LLMPreset(label="default", chain=("acme/m1",), is_default=True),)
+    assert snap.model_presets == (
+        ModelPreset(
+            key="pro",
+            primary="acme/m1",
+            fallbacks=(),
+            kind="tier",
+            is_default=True,
+            description="",
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -65,57 +88,24 @@ async def test_org_row_replaces_system_row(async_session, encryption_backend):
         OrgSettings(
             org_id=None,
             key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [{"label": "sys", "chain": ["acme/m1"], "is_default": True}],
-                "task_presets": {},
-            },
+            value=_presets_value(default="pro"),
         )
     )
+    # Org row enables a custom preset labelled "org" as the default.
+    org_value = _presets_value(default="org")
+    org_value["custom_presets"] = [{"label": "org", "primary": "acme/m1"}]
     async_session.add(
-        OrgSettings(
-            org_id="org_test",
-            key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [{"label": "org", "chain": ["acme/m1"], "is_default": True}],
-                "task_presets": {},
-            },
-        )
+        OrgSettings(org_id="org_test", key=MODEL_PRESETS_KEY, value=org_value)
     )
-    # Seed provider/model so refs validate.
-    p = Provider(
-        org_id=None,
-        name="acme",
-        slug="acme",
-        provider_type="openai-completions",
-        base_url="https://x",
-        auth_type="api_key",
-        enabled=True,
-    )
-    async_session.add(p)
+    p = _add_acme_provider_and_model(async_session)
     await async_session.flush()
-    async_session.add(
-        Model(
-            org_id=None,
-            provider_id=p.id,
-            model_id="m1",
-            display_name="m1",
-            reasoning=False,
-            input_modalities=["text"],
-            cost_input=0,
-            cost_output=0,
-            cost_cache_read=0,
-            cost_cache_write=0,
-            context_window=128000,
-            max_tokens=32000,
-            enabled=True,
-        )
-    )
+    async_session.add(_make_model(p.id))
     await async_session.commit()
 
     snap = await load_llm_snapshot(
         async_session, org_id="org_test", encryption_backend=encryption_backend
     )
-    assert [p.label for p in snap.presets] == ["org"]
+    assert [pr.key for pr in snap.model_presets if pr.is_default] == ["org"]
 
 
 @pytest.mark.asyncio
@@ -143,31 +133,12 @@ async def test_load_providers_is_not_n_plus_one(async_session, encryption_backen
         async_session.add(prov)
         await async_session.flush()
         for j in range(2):
-            async_session.add(
-                Model(
-                    org_id=None,
-                    provider_id=prov.id,
-                    model_id=f"m{j}",
-                    display_name=f"m{j}",
-                    reasoning=False,
-                    input_modalities=["text"],
-                    cost_input=0,
-                    cost_output=0,
-                    cost_cache_read=0,
-                    cost_cache_write=0,
-                    context_window=128000,
-                    max_tokens=32000,
-                    enabled=True,
-                )
-            )
+            async_session.add(_make_model(prov.id, model_id=f"m{j}"))
     async_session.add(
         OrgSettings(
             org_id=None,
             key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [{"label": "d", "chain": ["prov0/m0"], "is_default": True}],
-                "task_presets": {},
-            },
+            value=_presets_value(primary="prov0/m0"),
         )
     )
     await async_session.commit()
@@ -201,19 +172,10 @@ async def test_load_providers_is_not_n_plus_one(async_session, encryption_backen
 
 @pytest.mark.asyncio
 async def test_malformed_row_raises_corrupt_presets_row_error(async_session, encryption_backend):
-    # Two is_default=true → schema rejects.
+    # default_preset references an unavailable preset → schema rejects.
+    bad_value = _presets_value(default="ghost")
     async_session.add(
-        OrgSettings(
-            org_id=None,
-            key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [
-                    {"label": "a", "chain": ["x/y"], "is_default": True},
-                    {"label": "b", "chain": ["x/z"], "is_default": True},
-                ],
-                "task_presets": {},
-            },
-        )
+        OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=bad_value)
     )
     await async_session.commit()
     with pytest.raises(CorruptPresetsRowError) as exc:

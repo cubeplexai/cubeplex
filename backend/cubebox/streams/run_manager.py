@@ -2101,7 +2101,7 @@ class RunManager:
         from cubebox.db.engine import async_session_maker
         from cubebox.llm.builder import build_chain_model
         from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
-        from cubebox.llm.resolver import resolve_preset
+        from cubebox.llm.resolver import resolve_model_preset
         from cubebox.llm.snapshot import LLMSnapshot, load_llm_snapshot
 
         # Reuse the snapshot the caller (e.g. _execute_run pre-resolving
@@ -2120,7 +2120,7 @@ class RunManager:
                 )
                 await llm_session.commit()
 
-        preset = resolve_preset(snap, preset_label)
+        preset = resolve_model_preset(snap, preset_label)
 
         async def _publish_failover_dict(rid: str, data_payload: dict[str, Any]) -> None:
             event = FailoverEvent(
@@ -3260,7 +3260,7 @@ class RunManager:
             # _build_agent_for_conversation call reuses it instead of loading
             # the same providers/credentials again (Fix-8).
             from cubebox.db.engine import async_session_maker
-            from cubebox.llm.resolver import parse_model_ref, resolve_preset
+            from cubebox.llm.resolver import parse_model_ref, resolve_model_preset
             from cubebox.llm.snapshot import load_llm_snapshot
 
             context_window: int = 0
@@ -3271,7 +3271,7 @@ class RunManager:
                     )
                     await ctx_session.commit()
                 extra_ref_holder["llm_snapshot"] = ctx_snap
-                _ctx_preset = resolve_preset(ctx_snap, None)
+                _ctx_preset = resolve_model_preset(ctx_snap, None)
                 _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
                 _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
                 context_window = int(_model_cfg.context_window or 0)
@@ -3805,7 +3805,7 @@ class RunManager:
             # Stash snapshot in extra_ref_holder so _build_agent_for_conversation
             # reuses it via _run_cubepi_respond_path (Fix-8).
             from cubebox.db.engine import async_session_maker
-            from cubebox.llm.resolver import parse_model_ref, resolve_preset
+            from cubebox.llm.resolver import parse_model_ref, resolve_model_preset
             from cubebox.llm.snapshot import load_llm_snapshot
 
             context_window: int = 0
@@ -3816,7 +3816,7 @@ class RunManager:
                     )
                     await ctx_session.commit()
                 extra_ref_holder["llm_snapshot"] = ctx_snap
-                _ctx_preset = resolve_preset(ctx_snap, None)
+                _ctx_preset = resolve_model_preset(ctx_snap, None)
                 _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
                 _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
                 context_window = int(_model_cfg.context_window or 0)

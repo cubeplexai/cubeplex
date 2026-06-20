@@ -22,7 +22,7 @@ import pytest
 from cubepi.hitl import CheckpointedChannel
 
 from cubebox.llm.config import ProviderConfig
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
 from cubebox.streams.run_manager import RunContext, RunManager
 
 pytestmark = pytest.mark.asyncio
@@ -87,8 +87,16 @@ async def _build(
                 }
             ),
         },
-        presets=(LLMPreset(label="default", chain=("anthropic/claude-stub",), is_default=True),),
-        task_presets={},
+        model_presets=(
+            ModelPreset(
+                key="default",
+                primary="anthropic/claude-stub",
+                fallbacks=(),
+                kind="tier",
+                is_default=True,
+            ),
+        ),
+        task_routing={},
     )
 
     async def _fake_load(*_a: Any, **_kw: Any) -> LLMSnapshot:

@@ -7,18 +7,18 @@ from cubebox.llm.config import (
     ModelCost,
     ProviderConfig,
 )
-from cubebox.llm.resolver import parse_model_ref, resolve_preset, resolve_task_preset
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot, load_llm_snapshot
+from cubebox.llm.resolver import parse_model_ref, resolve_model_preset, resolve_task_preset
+from cubebox.llm.snapshot import LLMSnapshot, ModelPreset, load_llm_snapshot
 
 __all__ = [
     "LLMConfig",
     "ModelConfig",
     "ModelCost",
     "ProviderConfig",
-    "LLMPreset",
+    "ModelPreset",
     "LLMSnapshot",
     "load_llm_snapshot",
-    "resolve_preset",
+    "resolve_model_preset",
     "resolve_task_preset",
     "parse_model_ref",
     "build_provider",
