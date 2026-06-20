@@ -8,6 +8,7 @@ import { usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
 import { getArtifactIcon } from '@/components/panel/artifact/artifactIcons'
 import { buildDownloadUrl, buildPreviewUrl } from '@/components/panel/artifact/previewUtils'
+import { ArtifactHtmlThumb } from './ArtifactHtmlThumb'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +27,10 @@ function isImageArtifact(artifact: Artifact): boolean {
   return artifact.artifact_type === 'image' || (artifact.mime_type?.startsWith('image/') ?? false)
 }
 
+function isHtmlArtifact(artifact: Artifact): boolean {
+  return artifact.artifact_type === 'website' || artifact.mime_type === 'text/html'
+}
+
 export function ArtifactLibraryCard({
   artifact,
   workspaceId,
@@ -37,8 +42,12 @@ export function ArtifactLibraryCard({
   const conversationHref = `/w/${workspaceId}/conversations/${artifact.conversation_id}`
 
   const [thumbFailed, setThumbFailed] = useState(false)
-  const showThumb = isImageArtifact(artifact) && !thumbFailed
-  const thumbFile = artifact.entry_file || artifact.path.split('/').pop() || ''
+  const showImage = isImageArtifact(artifact) && !thumbFailed
+  const showHtml = !showImage && isHtmlArtifact(artifact)
+  // Website artifacts default to index.html (matching HtmlPreview); others use
+  // the explicit entry file or the path basename.
+  const fallbackFile = isHtmlArtifact(artifact) ? 'index.html' : ''
+  const thumbFile = artifact.entry_file || artifact.path.split('/').pop() || fallbackFile
   const thumbUrl = buildPreviewUrl(artifact, thumbFile, null, workspaceId)
 
   const handlePreview = useCallback(() => {
@@ -55,7 +64,7 @@ export function ArtifactLibraryCard({
       data-testid="artifact-card"
     >
       <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
-        {showThumb ? (
+        {showImage ? (
           // eslint-disable-next-line @next/next/no-img-element -- artifact preview is an authed same-origin URL, not a static asset
           <img
             src={thumbUrl}
@@ -65,6 +74,8 @@ export function ArtifactLibraryCard({
             className="size-full object-cover"
             data-testid="artifact-card-thumb"
           />
+        ) : showHtml ? (
+          <ArtifactHtmlThumb src={thumbUrl} title={artifact.name} />
         ) : (
           <div className="flex size-full items-center justify-center">
             {/* eslint-disable-next-line react-hooks/static-components -- Icon is a component reference from getArtifactIcon */}
