@@ -21,10 +21,14 @@ env = os.getenv("ENV_FOR_DYNACONF", "development")
 settings_files = [
     str(backend_dir / "config.yaml"),  # Base configuration
     str(backend_dir / f"config.{env}.yaml"),
-    str(backend_dir / f"config.{env}.local.yaml"),
-    # Helm deploys mount non-secret overrides via a ConfigMap (.local.yaml)
-    # and credentials via a Secret (.secrets.yaml). Both are dynaconf-merged
-    # so operators can split safe-vs-sensitive without an init container.
+    # NOTE: do NOT list config.<env>.local.yaml here — dynaconf already
+    # auto-loads each settings file's ".local." sibling. Listing it again
+    # loads it twice, and with dynaconf_merge that doubles every list value
+    # (e.g. llm.fallback_models accumulates each entry twice).
+    # Helm deploys mount non-secret overrides via a ConfigMap (.local.yaml,
+    # picked up by the auto-load) and credentials via a Secret (.secrets.yaml,
+    # listed below). Both are dynaconf-merged so operators can split
+    # safe-vs-sensitive without an init container.
     str(backend_dir / f"config.{env}.secrets.yaml"),
 ]
 
