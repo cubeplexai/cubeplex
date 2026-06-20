@@ -1,8 +1,8 @@
 import { jsonHeaders, readApiError } from '@/lib/csrf'
-import type { AdminModelPresetsBody, WorkspacePresetSummary } from '@/lib/types/presets'
+import type { ModelPresetsConfig, WorkspacePresetSummary } from '@/lib/types/presets'
 
 export interface AdminModelPresetsResponse {
-  value: AdminModelPresetsBody | null
+  value: ModelPresetsConfig | null
   origin: 'org' | 'system' | 'none'
 }
 
@@ -12,7 +12,7 @@ export async function fetchAdminModelPresets(): Promise<AdminModelPresetsRespons
   return res.json()
 }
 
-export async function putAdminModelPresets(body: AdminModelPresetsBody): Promise<void> {
+export async function putAdminModelPresets(body: ModelPresetsConfig): Promise<void> {
   const res = await fetch('/api/v1/admin/model-presets', {
     method: 'PUT',
     credentials: 'include',
