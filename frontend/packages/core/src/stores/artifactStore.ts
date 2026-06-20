@@ -26,6 +26,9 @@ export interface ArtifactStore {
   /** Clear artifacts for a conversation */
   clearConversation: (conversationId: string) => void
 
+  /** Remove a single artifact from a conversation's map */
+  removeArtifact: (conversationId: string, artifactId: string) => void
+
   /** Cached version lists per artifactId */
   versions: Record<string, ArtifactVersion[]>
 
@@ -101,6 +104,14 @@ export const useArtifactStore = create<ArtifactStore>((set, get) => ({
     set((state) => {
       const { [conversationId]: _, ...rest } = state.artifacts
       return { artifacts: rest }
+    }),
+
+  removeArtifact: (conversationId, artifactId) =>
+    set((state) => {
+      const conv = state.artifacts[conversationId]
+      if (!conv || !(artifactId in conv)) return state
+      const { [artifactId]: _, ...restConv } = conv
+      return { artifacts: { ...state.artifacts, [conversationId]: restConv } }
     }),
 
   async loadVersions(client, conversationId, artifactId) {
