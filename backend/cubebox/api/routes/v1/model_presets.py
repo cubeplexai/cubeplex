@@ -36,6 +36,13 @@ async def get_workspace_model_presets(
     )
     return WorkspacePresetsResponse(
         presets=[
-            WorkspacePresetSummary(label=p.label, is_default=p.is_default) for p in snap.presets
+            WorkspacePresetSummary(
+                key=p.key,
+                kind=p.kind,
+                primary=p.primary,
+                description=p.description,
+                is_default=p.is_default,
+            )
+            for p in snap.model_presets
         ],
     )

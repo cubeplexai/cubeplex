@@ -139,11 +139,11 @@ async def build_usage_summary(
             summary["turn"] = turn
             summary["context_tokens"] = context_tokens
 
-        from cubebox.llm.resolver import parse_model_ref, resolve_preset
+        from cubebox.llm.resolver import parse_model_ref, resolve_model_preset
         from cubebox.llm.snapshot import load_llm_snapshot
 
         snap = await load_llm_snapshot(session, org_id, encryption_backend)
-        preset = resolve_preset(snap, None)
+        preset = resolve_model_preset(snap, None)
         slug, model_id = parse_model_ref(preset.chain[0])
         provider_cfg = snap.providers[slug]
         model_cfg = next(m for m in provider_cfg.models if m.id == model_id)

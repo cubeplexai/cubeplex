@@ -31,6 +31,37 @@ CALLER_ORG = "org-caller"
 OTHER_ORG = "org-other"
 
 
+def _off_tiers() -> dict[str, dict[str, object]]:
+    return {
+        t: {"enabled": False, "primary": None, "fallbacks": []}
+        for t in ("lite", "flash", "pro", "max")
+    }
+
+
+def _config_with_custom(label: str, ref: str) -> dict[str, object]:
+    """A ModelPresetsConfig whose only available preset is a custom one
+    named ``label`` pointing at ``ref`` (the default)."""
+    return {
+        "tiers": _off_tiers(),
+        "custom_presets": [{"label": label, "primary": ref, "fallbacks": []}],
+        "default_preset": label,
+        "task_routing": {},
+    }
+
+
+def _empty_config() -> dict[str, object]:
+    """A config with one enabled tier (so default_preset is satisfiable)
+    that does NOT reference acme/m1 — used as a shadowing org row."""
+    tiers = _off_tiers()
+    tiers["pro"] = {"enabled": True, "primary": "other/x", "fallbacks": []}
+    return {
+        "tiers": tiers,
+        "custom_presets": [],
+        "default_preset": "pro",
+        "task_routing": {},
+    }
+
+
 @pytest.fixture()
 async def db_session():
     """In-memory SQLite session for fast unit tests."""
@@ -104,12 +135,7 @@ async def test_delete_blocked_when_caller_org_preset_references_model(
         OrgSettings(
             org_id=CALLER_ORG,
             key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [
-                    {"label": "ultra", "chain": ["acme/m1"], "is_default": True},
-                ],
-                "task_presets": {},
-            },
+            value=_config_with_custom("ultra", "acme/m1"),
         )
     )
     await db_session.commit()
@@ -134,12 +160,7 @@ async def test_delete_allowed_when_only_other_org_references_model(
         OrgSettings(
             org_id=OTHER_ORG,
             key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [
-                    {"label": "secret-other-org", "chain": ["acme/m1"], "is_default": True},
-                ],
-                "task_presets": {},
-            },
+            value=_config_with_custom("secret-other-org", "acme/m1"),
         )
     )
     await db_session.commit()
@@ -164,12 +185,7 @@ async def test_delete_blocked_when_only_system_row_references_model(
         OrgSettings(
             org_id=None,
             key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [
-                    {"label": "sys-default", "chain": ["acme/m1"], "is_default": True},
-                ],
-                "task_presets": {},
-            },
+            value=_config_with_custom("sys-default", "acme/m1"),
         )
     )
     await db_session.commit()
@@ -200,19 +216,14 @@ async def test_delete_allowed_when_system_row_references_but_org_row_exists(
         OrgSettings(
             org_id=None,
             key=MODEL_PRESETS_KEY,
-            value={
-                "presets": [
-                    {"label": "sys-default", "chain": ["acme/m1"], "is_default": True},
-                ],
-                "task_presets": {},
-            },
+            value=_config_with_custom("sys-default", "acme/m1"),
         )
     )
     db_session.add(
         OrgSettings(
             org_id=CALLER_ORG,
             key=MODEL_PRESETS_KEY,
-            value={"presets": [], "task_presets": {}},
+            value=_empty_config(),
         )
     )
     await db_session.commit()

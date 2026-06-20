@@ -1358,7 +1358,7 @@ async def send_message(
     # BrokenPresetError / NoDefaultPresetError) and those need to surface as
     # 4xx without leaving orphaned attachment state or a bumped has_messages /
     # updated_at on a turn that never ran.
-    from cubebox.llm.resolver import resolve_preset
+    from cubebox.llm.resolver import resolve_model_preset
     from cubebox.llm.snapshot import load_llm_snapshot
 
     async with async_session_maker() as _validate_session:
@@ -1370,7 +1370,7 @@ async def send_message(
     # resolve_preset raises one of UnknownPresetError / BrokenPresetError /
     # NoDefaultPresetError, all of which are APIException subclasses with the
     # right status_code; the registered handler maps them to HTTP responses.
-    resolve_preset(_snap, request_obj.preset_label)
+    resolve_model_preset(_snap, request_obj.preset_label)
 
     (
         _topic_id,
