@@ -42,8 +42,20 @@ describe('PresetPicker', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({
         presets: [
-          { label: 'main', is_default: true },
-          { label: 'mini', is_default: false },
+          {
+            key: 'pro',
+            kind: 'tier',
+            primary: 'anthropic/claude-opus-4-7',
+            description: '',
+            is_default: true,
+          },
+          {
+            key: 'lite',
+            kind: 'tier',
+            primary: 'openai/gpt-5',
+            description: '',
+            is_default: false,
+          },
         ],
       }),
     )
@@ -58,14 +70,26 @@ describe('PresetPicker', () => {
     })
   })
 
-  it('renders the trigger with the persisted label as the selected value', async () => {
-    // Persist a known label before render.
-    getPresetSelectionStore('ws_persist').getState().setPresetLabel('mini')
+  it('renders the trigger with the persisted key as the selected value', async () => {
+    // Persist a known key before render.
+    getPresetSelectionStore('ws_persist').getState().setModelPresetKey('lite')
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({
         presets: [
-          { label: 'main', is_default: true },
-          { label: 'mini', is_default: false },
+          {
+            key: 'pro',
+            kind: 'tier',
+            primary: 'anthropic/claude-opus-4-7',
+            description: '',
+            is_default: true,
+          },
+          {
+            key: 'lite',
+            kind: 'tier',
+            primary: 'openai/gpt-5',
+            description: '',
+            is_default: false,
+          },
         ],
       }),
     )
@@ -75,22 +99,30 @@ describe('PresetPicker', () => {
     await waitFor(() => {
       expect(getPresetSelectionStore('ws_persist').getState().presets).toHaveLength(2)
     })
-    // Persisted label remained valid after mount-time validation.
-    expect(getPresetSelectionStore('ws_persist').getState().presetLabel).toBe('mini')
+    // Persisted key remained valid after mount-time validation.
+    expect(getPresetSelectionStore('ws_persist').getState().modelPresetKey).toBe('lite')
   })
 
-  it('resets a stale persisted label to null when missing from fresh list', async () => {
-    getPresetSelectionStore('ws_stale').getState().setPresetLabel('ghost')
+  it('resets a stale persisted key to null when missing from fresh list', async () => {
+    getPresetSelectionStore('ws_stale').getState().setModelPresetKey('ghost')
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse({
-        presets: [{ label: 'main', is_default: true }],
+        presets: [
+          {
+            key: 'pro',
+            kind: 'tier',
+            primary: 'anthropic/claude-opus-4-7',
+            description: '',
+            is_default: true,
+          },
+        ],
       }),
     )
 
     renderWithIntl(<PresetPicker wsId="ws_stale" />)
 
     await waitFor(() => {
-      expect(getPresetSelectionStore('ws_stale').getState().presetLabel).toBeNull()
+      expect(getPresetSelectionStore('ws_stale').getState().modelPresetKey).toBeNull()
     })
   })
 
@@ -103,6 +135,6 @@ describe('PresetPicker', () => {
       // Trigger renders with placeholder (no value).
       expect(screen.getByRole('combobox', { name: 'Model preset' })).toBeInTheDocument()
     })
-    expect(getPresetSelectionStore('ws_offline').getState().presetLabel).toBeNull()
+    expect(getPresetSelectionStore('ws_offline').getState().modelPresetKey).toBeNull()
   })
 })

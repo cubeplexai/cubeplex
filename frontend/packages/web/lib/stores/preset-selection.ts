@@ -5,7 +5,7 @@
  * Persisted to localStorage under `preset-selection-v1:${wsId}` so each
  * workspace has its own remembered choice (D4). Only the user's
  * choices persist via `partialize`; the workspace preset list is always
- * refetched on mount and validated against the persisted `presetLabel`.
+ * refetched on mount and validated against the persisted `modelPresetKey`.
  */
 
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
@@ -16,13 +16,13 @@ import type { ThinkingLevel, WorkspacePresetSummary } from '@/lib/types/presets'
 export interface PresetSelectionState {
   /** The workspace preset list, refetched on mount. Not persisted. */
   presets: WorkspacePresetSummary[]
-  /** Selected preset label; `null` means "use workspace default". */
-  presetLabel: string | null
+  /** Selected preset key (tier name or custom label); `null` = workspace default. */
+  modelPresetKey: string | null
   /** Selected thinking level; default `"off"` (Standard in UI). */
   thinking: ThinkingLevel
 
   setPresets: (p: WorkspacePresetSummary[]) => void
-  setPresetLabel: (l: string | null) => void
+  setModelPresetKey: (key: string | null) => void
   setThinking: (t: ThinkingLevel) => void
   reset: () => void
 }
@@ -50,26 +50,28 @@ export function getPresetSelectionStore(
     persist(
       (set) => ({
         presets: [],
-        presetLabel: null,
+        modelPresetKey: null,
         thinking: 'off' as ThinkingLevel,
         setPresets: (presets) => set({ presets }),
-        setPresetLabel: (presetLabel) => set({ presetLabel }),
+        setModelPresetKey: (modelPresetKey) => set({ modelPresetKey }),
         setThinking: (thinking) => set({ thinking }),
-        reset: () => set({ presetLabel: null, thinking: 'off' as ThinkingLevel }),
+        reset: () => set({ modelPresetKey: null, thinking: 'off' as ThinkingLevel }),
       }),
       {
         name: storageKey(wsId),
         // Whitelist: only the user's choices persist. The presets list is
-        // always refetched and validated against `presetLabel` on mount.
+        // always refetched and validated against `modelPresetKey` on mount.
         partialize: (state) => ({
-          presetLabel: state.presetLabel,
+          modelPresetKey: state.modelPresetKey,
           thinking: state.thinking,
         }),
-        // v2 dropped the `minimal` level (deepseek's schema doesn't accept it
-        // and we never had a sensible mapping for the other providers either).
-        // Rewrite stale persisted values so the dropdown doesn't render an
-        // orphan selection after upgrade.
-        version: 2,
+        // v3 renamed the persisted selection field `presetLabel` →
+        // `modelPresetKey`. A stale `presetLabel` is simply dropped on read;
+        // the PresetPicker re-validates the selection against the fresh key
+        // list on mount and resets it to null if unknown, so no key remap is
+        // needed. v2 dropped the `minimal` thinking level (deepseek's schema
+        // rejects it); rewrite stale values so the dropdown has no orphan.
+        version: 3,
         migrate: (persisted, _version) => {
           const p = (persisted as Partial<PresetSelectionState>) ?? {}
           if ((p.thinking as string) === 'minimal') p.thinking = 'low'

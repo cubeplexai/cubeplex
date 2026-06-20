@@ -90,7 +90,7 @@ describe('InputBar', () => {
     // Reset the per-`wsId` preset selection so each test starts from "no
     // explicit choice / thinking off". The store factory caches a single
     // hook instance per wsId; clearing state on the cached store is safe.
-    getPresetSelectionStore('ws-1').setState({ presetLabel: null, thinking: 'off' })
+    getPresetSelectionStore('ws-1').setState({ modelPresetKey: null, thinking: 'off' })
   })
 
   it('keeps the textarea editable once a streamed run is in flight (for steering)', async () => {
@@ -181,7 +181,7 @@ describe('InputBar', () => {
   })
 
   it('forwards the current preset_label and thinking selection on send', async () => {
-    getPresetSelectionStore('ws-1').setState({ presetLabel: 'reasoning', thinking: 'medium' })
+    getPresetSelectionStore('ws-1').setState({ modelPresetKey: 'reasoning', thinking: 'medium' })
     storeMocks.send.mockResolvedValue(undefined)
 
     renderWithIntl(<InputBar conversationId="conv-1" />)

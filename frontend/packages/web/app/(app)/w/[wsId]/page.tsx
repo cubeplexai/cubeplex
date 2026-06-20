@@ -85,7 +85,7 @@ export default function WorkspaceHomePage({
       // a different mode between turns."
       const selection = getPresetSelectionStore(wsId).getState()
       const sendOptions = {
-        preset_label: selection.presetLabel,
+        preset_label: selection.modelPresetKey,
         thinking: selection.thinking,
       }
       send(client, convId, content, attachedIds, optimisticAttachments, sendOptions).catch(

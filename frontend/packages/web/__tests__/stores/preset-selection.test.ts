@@ -28,25 +28,31 @@ describe('preset-selection store', () => {
   it('isolates state between distinct wsIds', () => {
     const wsA = getPresetSelectionStore('ws_a')
     const wsB = getPresetSelectionStore('ws_b')
-    wsA.getState().setPresetLabel('alpha')
-    wsB.getState().setPresetLabel('beta')
-    expect(wsA.getState().presetLabel).toBe('alpha')
-    expect(wsB.getState().presetLabel).toBe('beta')
+    wsA.getState().setModelPresetKey('alpha')
+    wsB.getState().setModelPresetKey('beta')
+    expect(wsA.getState().modelPresetKey).toBe('alpha')
+    expect(wsB.getState().modelPresetKey).toBe('beta')
   })
 
-  it('persists only presetLabel + thinking (partialize whitelist)', () => {
+  it('persists only modelPresetKey + thinking (partialize whitelist)', () => {
     const ws = getPresetSelectionStore('ws_persist')
     ws.getState().setPresets([
-      { label: 'main', is_default: true },
-      { label: 'mini', is_default: false },
+      {
+        key: 'pro',
+        kind: 'tier',
+        primary: 'anthropic/claude-opus-4-7',
+        description: '',
+        is_default: true,
+      },
+      { key: 'lite', kind: 'tier', primary: 'openai/gpt-5', description: '', is_default: false },
     ])
-    ws.getState().setPresetLabel('mini')
+    ws.getState().setModelPresetKey('lite')
     ws.getState().setThinking('high')
 
     const raw = localStorage.getItem('preset-selection-v1:ws_persist')
     expect(raw).not.toBeNull()
     const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> }
-    expect(parsed.state).toEqual({ presetLabel: 'mini', thinking: 'high' })
+    expect(parsed.state).toEqual({ modelPresetKey: 'lite', thinking: 'high' })
     // The presets list must not be persisted — it is refetched on mount.
     expect(parsed.state.presets).toBeUndefined()
   })
@@ -60,12 +66,20 @@ describe('preset-selection store', () => {
 
   it('reset() returns selections to defaults but leaves presets', () => {
     const ws = getPresetSelectionStore('ws_reset')
-    ws.getState().setPresets([{ label: 'main', is_default: true }])
-    ws.getState().setPresetLabel('main')
+    ws.getState().setPresets([
+      {
+        key: 'pro',
+        kind: 'tier',
+        primary: 'anthropic/claude-opus-4-7',
+        description: '',
+        is_default: true,
+      },
+    ])
+    ws.getState().setModelPresetKey('pro')
     ws.getState().setThinking('high')
     ws.getState().reset()
     const st = ws.getState()
-    expect(st.presetLabel).toBeNull()
+    expect(st.modelPresetKey).toBeNull()
     expect(st.thinking).toBe('off')
     expect(st.presets).toHaveLength(1)
   })
@@ -73,8 +87,8 @@ describe('preset-selection store', () => {
   it('clearAllPresetSelectionStores() removes persisted keys and registry', () => {
     const a = getPresetSelectionStore('ws_a')
     const b = getPresetSelectionStore('ws_b')
-    a.getState().setPresetLabel('x')
-    b.getState().setPresetLabel('y')
+    a.getState().setModelPresetKey('x')
+    b.getState().setModelPresetKey('y')
     expect(localStorage.getItem('preset-selection-v1:ws_a')).not.toBeNull()
     expect(localStorage.getItem('preset-selection-v1:ws_b')).not.toBeNull()
 
@@ -85,7 +99,7 @@ describe('preset-selection store', () => {
     // New call after clear returns a fresh store instance.
     const aAfter = getPresetSelectionStore('ws_a')
     expect(aAfter).not.toBe(a)
-    expect(aAfter.getState().presetLabel).toBeNull()
+    expect(aAfter.getState().modelPresetKey).toBeNull()
   })
 
   it('clearAllPresetSelectionStores() wipes prefix-matched entries written outside this tab', () => {
@@ -94,11 +108,11 @@ describe('preset-selection store', () => {
     // map is empty for these keys, but the localStorage records exist.
     localStorage.setItem(
       'preset-selection-v1:ws_other_tab',
-      JSON.stringify({ state: { presetLabel: 'leaked', thinking: 'high' }, version: 0 }),
+      JSON.stringify({ state: { modelPresetKey: 'leaked', thinking: 'high' }, version: 0 }),
     )
     localStorage.setItem(
       'preset-selection-v1:ws_another',
-      JSON.stringify({ state: { presetLabel: 'also-leaked', thinking: 'off' }, version: 0 }),
+      JSON.stringify({ state: { modelPresetKey: 'also-leaked', thinking: 'off' }, version: 0 }),
     )
     // An unrelated key must survive.
     localStorage.setItem('not-our-key', 'keep-me')

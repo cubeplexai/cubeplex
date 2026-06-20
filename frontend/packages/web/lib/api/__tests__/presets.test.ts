@@ -5,7 +5,21 @@ import {
   putAdminModelPresets,
   fetchWorkspaceModelPresets,
 } from '@/lib/api/presets'
-import type { AdminModelPresetsBody } from '@/lib/types/presets'
+import type { ModelPresetsConfig } from '@/lib/types/presets'
+
+function sampleConfig(): ModelPresetsConfig {
+  return {
+    tiers: {
+      lite: { enabled: true, primary: 'openai/gpt-5', fallbacks: [] },
+      flash: { enabled: false, primary: null, fallbacks: [] },
+      pro: { enabled: true, primary: 'anthropic/claude-opus-4-7', fallbacks: [] },
+      max: { enabled: false, primary: null, fallbacks: [] },
+    },
+    custom_presets: [],
+    default_preset: 'pro',
+    task_routing: { title: 'lite' },
+  }
+}
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
@@ -28,10 +42,7 @@ describe('presets API client', () => {
   describe('fetchAdminModelPresets', () => {
     it('GETs /api/v1/admin/model-presets with credentials and returns parsed body', async () => {
       const payload = {
-        value: {
-          presets: [{ label: 'main', chain: ['claude-haiku'], is_default: true }],
-          task_presets: { title: 'main' },
-        },
+        value: sampleConfig(),
         origin: 'org' as const,
       }
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(payload))
@@ -68,10 +79,7 @@ describe('presets API client', () => {
         .spyOn(globalThis, 'fetch')
         .mockResolvedValue(new Response(null, { status: 204 }))
 
-      const body: AdminModelPresetsBody = {
-        presets: [{ label: 'main', chain: ['claude-haiku'], is_default: true }],
-        task_presets: { title: 'main' },
-      }
+      const body: ModelPresetsConfig = sampleConfig()
 
       await putAdminModelPresets(body)
 
@@ -86,17 +94,22 @@ describe('presets API client', () => {
       expect(init?.body).toBe(JSON.stringify(body))
     })
 
-    it('accepts task_presets with only a subset of keys', async () => {
+    it('serializes a custom preset + partial task routing unchanged', async () => {
       const fetchSpy = vi
         .spyOn(globalThis, 'fetch')
         .mockResolvedValue(new Response(null, { status: 204 }))
 
-      const body: AdminModelPresetsBody = {
-        presets: [
-          { label: 'main', chain: ['claude-haiku'], is_default: true },
-          { label: 'fast', chain: ['claude-haiku'], is_default: false },
+      const body: ModelPresetsConfig = {
+        ...sampleConfig(),
+        custom_presets: [
+          {
+            label: 'reasoning',
+            primary: 'anthropic/claude-opus-4-7',
+            fallbacks: ['openai/gpt-5'],
+            description: 'Deep reasoning',
+          },
         ],
-        task_presets: { summarize: 'fast' },
+        task_routing: { summarize: 'lite' },
       }
 
       await putAdminModelPresets(body)
@@ -112,10 +125,7 @@ describe('presets API client', () => {
           headers: { 'Content-Type': 'application/json' },
         }),
       )
-      const body: AdminModelPresetsBody = {
-        presets: [{ label: 'main', chain: ['claude-haiku'], is_default: true }],
-        task_presets: {},
-      }
+      const body: ModelPresetsConfig = sampleConfig()
       await expect(putAdminModelPresets(body)).rejects.toThrow(/invalid.*bad label/)
     })
   })
@@ -123,8 +133,20 @@ describe('presets API client', () => {
   describe('fetchWorkspaceModelPresets', () => {
     it('GETs the workspace-scoped endpoint and unwraps presets', async () => {
       const presets = [
-        { label: 'main', is_default: true },
-        { label: 'fast', is_default: false },
+        {
+          key: 'pro',
+          kind: 'tier' as const,
+          primary: 'anthropic/claude-opus-4-7',
+          description: 'Recommended.',
+          is_default: true,
+        },
+        {
+          key: 'lite',
+          kind: 'tier' as const,
+          primary: 'openai/gpt-5',
+          description: 'Fastest.',
+          is_default: false,
+        },
       ]
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets }))
 
