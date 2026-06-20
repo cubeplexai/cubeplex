@@ -73,6 +73,20 @@ function emptyBody(): AdminModelPresetsBody {
   return { presets: [], task_presets: {} }
 }
 
+// Canonical serialization for dirty-checking: presets compared in order with a
+// fixed key shape; task_presets keyed in TASK_KEYS order so re-adding a key in
+// a different order doesn't read as an edit.
+function canonicalize(b: AdminModelPresetsBody): string {
+  const tasks: Partial<Record<TaskPresetKey, string>> = {}
+  for (const k of TASK_KEYS) {
+    if (b.task_presets[k]) tasks[k] = b.task_presets[k]
+  }
+  return JSON.stringify({
+    presets: b.presets.map((p) => ({ label: p.label, chain: p.chain, is_default: p.is_default })),
+    task_presets: tasks,
+  })
+}
+
 /**
  * Move an array entry from index `from` to index `to`. `to` is the index the
  * moved item should occupy in the final array. Used by both arrow buttons
@@ -96,6 +110,9 @@ export function reorder<T>(arr: readonly T[], from: number, to: number): T[] {
 export function PresetEditor({ initial, availableModels }: PresetEditorProps): React.ReactElement {
   const t = useTranslations('adminPresets')
   const [body, setBody] = useState<AdminModelPresetsBody>(() => initial.value ?? emptyBody())
+  const [savedBody, setSavedBody] = useState<AdminModelPresetsBody>(
+    () => initial.value ?? emptyBody(),
+  )
   const [origin, setOrigin] = useState(initial.origin)
   const [saving, setSaving] = useState(false)
   const [banner, setBanner] = useState<string | null>(null)
@@ -193,6 +210,12 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
     })
   }
 
+  const discard = (): void => {
+    setBody(savedBody)
+    setBanner(null)
+    setMissingRefs(new Set())
+  }
+
   const buildPutBody = (): AdminModelPresetsBody => {
     // Omit any unset task_presets keys (Partial type — backend rejects empty strings).
     const taskPresets: Partial<Record<TaskPresetKey, string>> = {}
@@ -240,7 +263,9 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
         return
       }
       const data = (await res.json()) as AdminModelPresetsResponse
-      setBody(data.value ?? emptyBody())
+      const saved = data.value ?? emptyBody()
+      setBody(saved)
+      setSavedBody(saved)
       setOrigin(data.origin)
     } catch (err) {
       setBanner((err as Error).message)
@@ -248,6 +273,8 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
       setSaving(false)
     }
   }
+
+  const dirty = canonicalize(body) !== canonicalize(savedBody)
 
   return (
     <AdminPageShell
@@ -261,12 +288,6 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
             </span>
           ) : null}
         </>
-      }
-      action={
-        <Button onClick={() => void handleSave()} disabled={saving} aria-label={t('save')}>
-          {saving ? <Loader2 className="size-4 animate-spin" /> : null}
-          <span>{t('save')}</span>
-        </Button>
       }
     >
       {banner && (
@@ -438,6 +459,21 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
           ))}
         </div>
       </section>
+
+      <div className="sticky bottom-0 -mx-1 flex items-center justify-end gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2.5 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <Button variant="ghost" size="sm" onClick={discard} disabled={!dirty || saving}>
+          {t('discard')}
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => void handleSave()}
+          disabled={!dirty || saving}
+          aria-label={t('save')}
+        >
+          {saving ? <Loader2 className="size-4 animate-spin" /> : null}
+          <span>{t('save')}</span>
+        </Button>
+      </div>
     </AdminPageShell>
   )
 }

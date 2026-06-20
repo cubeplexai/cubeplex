@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTranslations } from 'next-intl'
@@ -7,6 +8,7 @@ import {
   Activity,
   BarChart3,
   Box,
+  ChevronRight,
   Cpu,
   Database,
   Globe,
@@ -26,13 +28,30 @@ import { AvatarPopover } from '@/components/sidebar/AvatarPopover'
 import { useAdminExtensions } from '@/hooks/useAdminExtensions'
 import { cn } from '@/lib/utils'
 
-type NavDef = {
+type NavLeaf = {
   href: string
   label: string
   icon: LucideIcon
 }
 
-function NavItem({ href, label, icon: Icon, active }: NavDef & { active: boolean }) {
+type NavGroup = {
+  key: string
+  label: string
+  icon: LucideIcon
+  children: NavLeaf[]
+}
+
+type NavEntry = NavLeaf | NavGroup
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return 'children' in entry
+}
+
+function isActiveHref(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(href + '/')
+}
+
+function NavItem({ href, label, icon: Icon, active }: NavLeaf & { active: boolean }) {
   return (
     <Link
       href={href}
@@ -52,30 +71,106 @@ function NavItem({ href, label, icon: Icon, active }: NavDef & { active: boolean
   )
 }
 
+function NavGroupItem({
+  group,
+  pathname,
+  open,
+  onToggle,
+}: {
+  group: NavGroup
+  pathname: string
+  open: boolean
+  onToggle: () => void
+}) {
+  const Icon = group.icon
+  const hasActiveChild = group.children.some((c) => isActiveHref(pathname, c.href))
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className={cn(
+          'flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors duration-fast',
+          hasActiveChild && !open
+            ? 'text-foreground font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+        )}
+      >
+        <Icon className={cn('size-3.5 shrink-0', hasActiveChild ? 'text-primary' : 'text-faint')} />
+        <span className="flex-1 truncate text-left">{group.label}</span>
+        <ChevronRight
+          className={cn('size-3.5 shrink-0 text-faint transition-transform', open && 'rotate-90')}
+        />
+      </button>
+      {open && (
+        <ul className="ml-[15px] mt-0.5 space-y-0.5 border-l border-border/60 pl-2">
+          {group.children.map((child) => (
+            <li key={child.href}>
+              <NavItem {...child} active={isActiveHref(pathname, child.href)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
 export function AdminSubNav() {
   const t = useTranslations('adminNav')
   const tLayout = useTranslations('adminLayout')
   const pathname = usePathname() ?? ''
   const { extensions } = useAdminExtensions()
+  const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({})
 
-  const NATIVE_ITEMS: NavDef[] = [
+  const ENTRIES: NavEntry[] = [
     { href: '/admin/settings', label: t('settings'), icon: Settings },
     { href: '/admin/members', label: t('members'), icon: Users },
     { href: '/admin/authentication', label: t('authentication'), icon: Shield },
-    { href: '/admin/models', label: t('models'), icon: Cpu },
-    { href: '/admin/presets', label: t('modelPresets'), icon: Layers },
+    {
+      key: 'models',
+      label: t('groupModels'),
+      icon: Cpu,
+      children: [
+        { href: '/admin/models', label: t('models'), icon: Cpu },
+        { href: '/admin/presets', label: t('modelPresets'), icon: Layers },
+      ],
+    },
     { href: '/admin/web-tools', label: t('webTools'), icon: Globe },
-    { href: '/admin/skills', label: t('skills'), icon: Sparkles },
-    { href: '/admin/skill-registries', label: t('skillRegistries'), icon: Database },
+    {
+      key: 'skills',
+      label: t('groupSkills'),
+      icon: Sparkles,
+      children: [
+        { href: '/admin/skills', label: t('skills'), icon: Sparkles },
+        { href: '/admin/skill-registries', label: t('skillRegistries'), icon: Database },
+      ],
+    },
     { href: '/admin/mcp', label: t('mcp'), icon: Plug },
     { href: '/admin/im', label: t('im'), icon: MessageSquare },
-    { href: '/admin/sandbox', label: t('sandbox'), icon: Box },
-    { href: '/admin/sandbox-env', label: t('sandboxEnv'), icon: KeyRound },
+    {
+      key: 'sandbox',
+      label: t('groupSandbox'),
+      icon: Box,
+      children: [
+        { href: '/admin/sandbox', label: t('sandbox'), icon: Box },
+        { href: '/admin/sandbox-env', label: t('sandboxEnv'), icon: KeyRound },
+      ],
+    },
     { href: '/admin/insights', label: t('insights'), icon: BarChart3 },
     { href: '/admin/traces', label: t('traces'), icon: Activity },
   ]
 
-  const extItems: NavDef[] = extensions.flatMap((ext) =>
+  // A group defaults to open when it holds the active route; an explicit
+  // toggle overrides that default.
+  const isGroupOpen = (group: NavGroup): boolean =>
+    openOverride[group.key] ?? group.children.some((c) => isActiveHref(pathname, c.href))
+
+  const toggleGroup = (group: NavGroup): void =>
+    setOpenOverride((prev) => ({ ...prev, [group.key]: !isGroupOpen(group) }))
+
+  const extItems: NavLeaf[] = extensions.flatMap((ext) =>
     ext.nav_items.map((item) => ({
       href: `/admin/ext/${ext.plugin}/${item.url_path}`,
       label: item.label,
@@ -89,14 +184,21 @@ export function AdminSubNav() {
       className="w-56 border-r border-border bg-card flex flex-col shrink-0"
     >
       <ul className="space-y-0.5 flex-1 overflow-y-auto p-2">
-        {NATIVE_ITEMS.map((item) => {
-          const active = pathname === item.href || pathname.startsWith(item.href + '/')
-          return (
-            <li key={item.href}>
-              <NavItem {...item} active={active} />
+        {ENTRIES.map((entry) =>
+          isGroup(entry) ? (
+            <NavGroupItem
+              key={entry.key}
+              group={entry}
+              pathname={pathname}
+              open={isGroupOpen(entry)}
+              onToggle={() => toggleGroup(entry)}
+            />
+          ) : (
+            <li key={entry.href}>
+              <NavItem {...entry} active={isActiveHref(pathname, entry.href)} />
             </li>
-          )
-        })}
+          ),
+        )}
 
         {extItems.length > 0 && (
           <>
@@ -108,14 +210,11 @@ export function AdminSubNav() {
                 {t('extensions')}
               </p>
             </li>
-            {extItems.map((item) => {
-              const active = pathname === item.href || pathname.startsWith(item.href + '/')
-              return (
-                <li key={item.href}>
-                  <NavItem {...item} active={active} />
-                </li>
-              )
-            })}
+            {extItems.map((item) => (
+              <li key={item.href}>
+                <NavItem {...item} active={isActiveHref(pathname, item.href)} />
+              </li>
+            ))}
           </>
         )}
       </ul>

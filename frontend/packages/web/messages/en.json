@@ -193,9 +193,13 @@
     "skills": "Skills",
     "skillsSubtitle": "Install built-in / uploaded skills to the org, then enable them per workspace.",
     "backToApp": "Back to app",
+    "back": "Back",
     "skillRegistries": "Skill Registries"
   },
   "adminNav": {
+    "groupModels": "Models",
+    "groupSkills": "Skills",
+    "groupSandbox": "Sandbox",
     "settings": "General",
     "models": "Model Providers",
     "modelPresets": "Model Settings",
@@ -1084,6 +1088,7 @@
     },
     "skillsList": {
       "title": "Skills",
+      "back": "Back",
       "subtitle": "Browse, enable, and install skills available to this workspace.",
       "loading": "Loading…",
       "noMatch": "No skills match these filters",
@@ -1459,6 +1464,7 @@
     "backlogRefPrefix": "Owner: {ref}"
   },
   "adminPresets": {
+    "discard": "Discard",
     "title": "Model Settings",
     "subtitle": "Configure preset chains and task-specific routing.",
     "loading": "Loading…",
@@ -1610,6 +1616,7 @@
     "createdAt": "Created {date}"
   },
   "mcpAdmin": {
+    "back": "Back",
     "searchPlaceholder": "Search connectors…",
     "searchAriaLabel": "Search MCP connectors",
     "filterByStatus": "Filter by status",
