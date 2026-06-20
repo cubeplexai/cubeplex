@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect } from 'react'
 import { Download, Package, Eye, PackagePlus, Loader2, Check, AlertCircle } from 'lucide-react'
 import type { Artifact } from '@cubebox/core'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore, useArtifactStore } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
 
 import { getArtifactIcon, getArtifactLabel } from '@/components/panel/artifact/artifactIcons'
@@ -127,12 +127,17 @@ export const ArtifactCard = memo(function ArtifactCard({ artifact }: ArtifactCar
   const label = getArtifactLabel(artifact)
   const openPreview = usePanelStore((s) => s.openArtifact)
   const { workspaceId } = useWorkspaceContext()
+  // Rendered from immutable message history: suppress if the artifact was
+  // deleted from the library this session (its files now 404).
+  const deleted = useArtifactStore((s) => s.isDeleted(artifact.id))
 
   const downloadUrl = workspaceId ? buildDownloadUrl(artifact, workspaceId) : '#'
 
   const handlePreview = useCallback(() => {
     openPreview(artifact.conversation_id, artifact.id)
   }, [openPreview, artifact.conversation_id, artifact.id])
+
+  if (deleted) return null
 
   return (
     <div

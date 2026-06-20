@@ -1,8 +1,9 @@
 'use client'
 
-import { use, useCallback, useEffect, useMemo, useState } from 'react'
+import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import {
   createApiClient,
   listWorkspaceArtifacts,
@@ -55,7 +56,10 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
 
   useEffect(() => {
     let cancelled = false
+    // Drop the previous workspace's list immediately so a failed reload can't
+    // leave stale cards rendered under the new workspace id.
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    setArtifacts([])
     setLoading(true)
     // Page through every accessible artifact so client-side type/name filtering
     // reflects the whole library, not just the first API page.
@@ -93,6 +97,41 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
     }
   }, [])
 
+  const panelOpen = view.type === 'artifact'
+
+  // Flag the group while the handle is dragged so the global resizable-panel
+  // flex transition doesn't animate the divider instead of tracking the pointer
+  // (mirrors AppShell's panel-dragging behavior).
+  const groupRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState(false)
+  useEffect(() => {
+    const root = groupRef.current
+    if (!root) return
+    const handle = root.querySelector<HTMLElement>('[data-slot="resizable-handle"]')
+    if (!handle) return
+    const onDown = (e: PointerEvent) => {
+      try {
+        handle.setPointerCapture(e.pointerId)
+      } catch {
+        /* capture failure is non-fatal; window fallback still runs */
+      }
+      setDragging(true)
+    }
+    const onUp = () => setDragging(false)
+    handle.addEventListener('pointerdown', onDown)
+    handle.addEventListener('pointerup', onUp)
+    handle.addEventListener('lostpointercapture', onUp)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+    return () => {
+      handle.removeEventListener('pointerdown', onDown)
+      handle.removeEventListener('pointerup', onUp)
+      handle.removeEventListener('lostpointercapture', onUp)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+    }
+  }, [panelOpen])
+
   const types = useMemo(
     () => Array.from(new Set(artifacts.map((a) => a.artifact_type))).sort(),
     [artifacts],
@@ -123,8 +162,6 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
       toast.error(t('deleteFailed'))
     }
   }, [pendingDelete, client, view, closePanel, removeArtifactFromStore, t])
-
-  const panelOpen = view.type === 'artifact'
 
   const grid = (
     <div className="flex h-full flex-col">
@@ -171,7 +208,11 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
 
   return (
     <>
-      <ResizablePanelGroup orientation="horizontal" className="h-full">
+      <ResizablePanelGroup
+        elementRef={groupRef}
+        orientation="horizontal"
+        className={cn('h-full', dragging && 'panel-dragging')}
+      >
         <ResizablePanel defaultSize={panelOpen ? 55 : 100} minSize={30}>
           {grid}
         </ResizablePanel>

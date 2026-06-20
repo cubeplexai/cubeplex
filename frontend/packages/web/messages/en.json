@@ -265,6 +265,7 @@
     "openSource": "Open source conversation",
     "download": "Download",
     "delete": "Delete",
+    "preview": "Preview",
     "moreActions": "More actions",
     "deleteConfirmTitle": "Delete artifact?",
     "deleteConfirmBody": "This permanently removes \"{name}\" and its files. This cannot be undone.",
