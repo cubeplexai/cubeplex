@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { Loader2 } from 'lucide-react'
 import {
   createApiClient,
   listWorkspaceArtifacts,
@@ -126,9 +127,13 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
         />
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-6">
-        {!loading && artifacts.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-1 items-center justify-center py-24">
+            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : artifacts.length === 0 ? (
           <ArtifactsEmptyState />
-        ) : filtered.length === 0 && !loading ? (
+        ) : filtered.length === 0 ? (
           <p className="py-16 text-center text-sm text-muted-foreground">{t('noResults')}</p>
         ) : (
           <div

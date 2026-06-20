@@ -56,7 +56,7 @@ export function ArtifactLibraryCard({
             className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity
               hover:bg-muted hover:text-foreground group-hover:opacity-100
               data-[popup-open]:opacity-100"
-            aria-label={t('preview')}
+            aria-label={t('moreActions')}
             data-testid="artifact-card-menu"
           >
             <MoreVertical className="size-4" />

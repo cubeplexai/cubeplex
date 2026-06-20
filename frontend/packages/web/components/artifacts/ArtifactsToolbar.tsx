@@ -29,6 +29,7 @@ export function ArtifactsToolbar({
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder={t('searchPlaceholder')}
+          aria-label={t('searchPlaceholder')}
           className="h-8 w-56 rounded-md border border-border bg-background pl-8 pr-3 text-sm
             outline-none transition-colors focus:border-primary/40"
           data-testid="artifacts-search"
@@ -59,6 +60,7 @@ function Chip({
 }): React.ReactElement {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         'rounded-full border px-2.5 py-1 text-xs capitalize transition-colors',
