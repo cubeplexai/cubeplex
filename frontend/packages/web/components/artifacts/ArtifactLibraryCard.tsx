@@ -1,13 +1,13 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { MoreVertical, Download, ExternalLink, Trash2 } from 'lucide-react'
 import { usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
 import { getArtifactIcon } from '@/components/panel/artifact/artifactIcons'
-import { buildDownloadUrl } from '@/components/panel/artifact/previewUtils'
+import { buildDownloadUrl, buildPreviewUrl } from '@/components/panel/artifact/previewUtils'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +22,10 @@ interface ArtifactLibraryCardProps {
   onDelete: (artifact: Artifact) => void
 }
 
+function isImageArtifact(artifact: Artifact): boolean {
+  return artifact.artifact_type === 'image' || (artifact.mime_type?.startsWith('image/') ?? false)
+}
+
 export function ArtifactLibraryCard({
   artifact,
   workspaceId,
@@ -32,6 +36,11 @@ export function ArtifactLibraryCard({
   const Icon = getArtifactIcon(artifact)
   const conversationHref = `/w/${workspaceId}/conversations/${artifact.conversation_id}`
 
+  const [thumbFailed, setThumbFailed] = useState(false)
+  const showThumb = isImageArtifact(artifact) && !thumbFailed
+  const thumbFile = artifact.entry_file || artifact.path.split('/').pop() || ''
+  const thumbUrl = buildPreviewUrl(artifact, thumbFile, null, workspaceId)
+
   const handlePreview = useCallback(() => {
     openArtifact(artifact.conversation_id, artifact.id)
   }, [openArtifact, artifact.conversation_id, artifact.id])
@@ -40,22 +49,34 @@ export function ArtifactLibraryCard({
     <div
       onClick={handlePreview}
       className={cn(
-        'group relative flex cursor-pointer flex-col gap-3 rounded-xl border border-border',
-        'bg-card p-4 transition-all hover:border-primary/30 hover:shadow-sm',
+        'group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border',
+        'bg-card transition-all hover:border-primary/30 hover:shadow-sm',
       )}
       data-testid="artifact-card"
     >
-      <div className="flex items-start justify-between">
-        <div className="flex size-10 items-center justify-center rounded-lg bg-primary/10">
-          {/* eslint-disable-next-line react-hooks/static-components -- Icon is a component reference from getArtifactIcon */}
-          <Icon className="size-5 text-primary" />
-        </div>
+      <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
+        {showThumb ? (
+          // eslint-disable-next-line @next/next/no-img-element -- artifact preview is an authed same-origin URL, not a static asset
+          <img
+            src={thumbUrl}
+            alt={artifact.name}
+            loading="lazy"
+            onError={() => setThumbFailed(true)}
+            className="size-full object-cover"
+            data-testid="artifact-card-thumb"
+          />
+        ) : (
+          <div className="flex size-full items-center justify-center">
+            {/* eslint-disable-next-line react-hooks/static-components -- Icon is a component reference from getArtifactIcon */}
+            <Icon className="size-8 text-muted-foreground/60" />
+          </div>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger
             onClick={(e) => e.stopPropagation()}
-            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity
-              hover:bg-muted hover:text-foreground group-hover:opacity-100
-              data-[popup-open]:opacity-100"
+            className="absolute right-2 top-2 rounded-md bg-background/70 p-1 text-muted-foreground
+              opacity-0 backdrop-blur-sm transition-opacity hover:bg-background hover:text-foreground
+              group-hover:opacity-100 data-[popup-open]:opacity-100"
             aria-label={t('moreActions')}
             data-testid="artifact-card-menu"
           >
@@ -83,7 +104,7 @@ export function ArtifactLibraryCard({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 p-3">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium text-foreground">{artifact.name}</span>
           {artifact.version > 1 && (
