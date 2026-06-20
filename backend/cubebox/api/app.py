@@ -519,6 +519,7 @@ def create_app(
         trigger_ingest,
         user_events_router,
         workspaces_router,
+        ws_artifacts_router,
         ws_browser,
         ws_mcp,
         ws_members,
@@ -545,6 +546,7 @@ def create_app(
     app.include_router(conversation_search_router, prefix="/api/v1")
     app.include_router(conversations_router, prefix="/api/v1")
     app.include_router(artifacts_router, prefix="/api/v1")
+    app.include_router(ws_artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
     app.include_router(shares.router, prefix="/api/v1")
     app.include_router(sso_routes.router, prefix="/api/v1")
