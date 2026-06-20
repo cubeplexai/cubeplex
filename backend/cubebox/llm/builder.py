@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from cubepi.providers.base import ThinkingLevel
 
 from cubebox.llm.resolver import parse_model_ref
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
 
 if TYPE_CHECKING:
     from cubepi.providers.anthropic import CacheMarkerPolicy
@@ -109,7 +109,7 @@ def build_bound_model(
 
 def build_chain_model(
     snap: LLMSnapshot,
-    preset: LLMPreset,
+    preset: ModelPreset,
     *,
     thinking: ThinkingLevel = "off",
     cache_policy_factory: Callable[[str], "CacheMarkerPolicy | None"] | None = None,
@@ -117,7 +117,7 @@ def build_chain_model(
 ) -> Any:
     """chain length 1 → BoundModel; >1 → FallbackBoundModel."""
     if len(preset.chain) == 0:
-        raise ValueError(f"preset {preset.label!r} has empty chain")
+        raise ValueError(f"preset {preset.key!r} has empty chain")
 
     if len(preset.chain) == 1:
         ref = preset.chain[0]

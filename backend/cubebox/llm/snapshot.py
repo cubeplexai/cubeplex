@@ -12,6 +12,7 @@ dicts; this contract is type-system enforcement, not runtime.
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
@@ -20,23 +21,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.llm.config import ProviderConfig
 from cubebox.llm.errors import CorruptPresetsRowError
-from cubebox.llm.snapshot_schema import ModelPresetsValue
+from cubebox.llm.snapshot_schema import ModelPresetsConfig, ModelTier
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class LLMPreset:
-    label: str
-    chain: tuple[str, ...]
+class ModelPreset:
+    key: str  # tier name or custom label
+    primary: str
+    fallbacks: tuple[str, ...]
+    kind: Literal["tier", "custom"]
     is_default: bool
+    description: str = ""  # "" for tiers (frontend supplies i18n copy by key)
+
+    @property
+    def chain(self) -> tuple[str, ...]:
+        return (self.primary, *self.fallbacks)
 
 
 @dataclass(frozen=True)
 class LLMSnapshot:
     providers: Mapping[str, ProviderConfig]
-    presets: tuple[LLMPreset, ...]
-    task_presets: Mapping[str, str]
+    model_presets: tuple[ModelPreset, ...]
+    task_routing: Mapping[str, str]
 
 
 async def load_llm_snapshot(
@@ -46,8 +54,10 @@ async def load_llm_snapshot(
 ) -> LLMSnapshot:
     """Read DB providers + OrgSettings → frozen snapshot. No YAML."""
     providers = await _load_providers(session, org_id, encryption_backend)
-    presets, task_presets = await _load_presets(session, org_id)
-    return LLMSnapshot(providers=providers, presets=presets, task_presets=task_presets)
+    model_presets, task_routing = await _load_presets(session, org_id)
+    return LLMSnapshot(
+        providers=providers, model_presets=model_presets, task_routing=task_routing
+    )
 
 
 async def _load_providers(
@@ -141,7 +151,7 @@ async def _load_providers(
 async def _load_presets(
     session: AsyncSession,
     org_id: str,
-) -> tuple[tuple[LLMPreset, ...], dict[str, str]]:
+) -> tuple[tuple[ModelPreset, ...], dict[str, str]]:
     from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
     # Org row overrides system row in full.
@@ -149,24 +159,43 @@ async def _load_presets(
         OrgSettings.org_id == org_id,  # type: ignore[arg-type]
         OrgSettings.key == MODEL_PRESETS_KEY,  # type: ignore[arg-type]
     )
-    org_row = (await session.execute(org_stmt)).scalar_one_or_none()
-    if org_row is None:
+    row = (await session.execute(org_stmt)).scalar_one_or_none()
+    if row is None:
         sys_stmt = select(OrgSettings).where(
             OrgSettings.org_id.is_(None),  # type: ignore[union-attr]
             OrgSettings.key == MODEL_PRESETS_KEY,  # type: ignore[arg-type]
         )
-        org_row = (await session.execute(sys_stmt)).scalar_one_or_none()
-    if org_row is None:
+        row = (await session.execute(sys_stmt)).scalar_one_or_none()
+    if row is None:
         return (), {}
     try:
-        parsed = ModelPresetsValue.model_validate(org_row.value)
+        cfg = ModelPresetsConfig.model_validate(row.value)
     except ValidationError as exc:
-        raise CorruptPresetsRowError(
-            org_id=org_row.org_id,
-            errors=exc.errors(),
-        ) from exc
-    presets = tuple(
-        LLMPreset(label=p.label, chain=tuple(p.chain), is_default=p.is_default)
-        for p in parsed.presets
-    )
-    return presets, dict(parsed.task_presets)
+        raise CorruptPresetsRowError(org_id=row.org_id, errors=exc.errors()) from exc
+    presets: list[ModelPreset] = []
+    for tier in ModelTier:  # def order: lite, flash, pro, max
+        s = cfg.tiers[tier]
+        if not s.enabled or not s.primary:
+            continue
+        presets.append(
+            ModelPreset(
+                key=tier.value,
+                primary=s.primary,
+                fallbacks=tuple(s.fallbacks),
+                kind="tier",
+                is_default=(cfg.default_preset == tier.value),
+                description="",
+            )
+        )
+    for c in cfg.custom_presets:
+        presets.append(
+            ModelPreset(
+                key=c.label,
+                primary=c.primary,
+                fallbacks=tuple(c.fallbacks),
+                kind="custom",
+                is_default=(cfg.default_preset == c.label),
+                description=c.description,
+            )
+        )
+    return tuple(presets), {k.value: v for k, v in cfg.task_routing.items()}

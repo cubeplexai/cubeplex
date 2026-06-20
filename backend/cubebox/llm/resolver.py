@@ -1,4 +1,4 @@
-"""Pure resolver — turns an LLMSnapshot + caller intent into an LLMPreset.
+"""Pure resolver — turns an LLMSnapshot + caller intent into a ModelPreset.
 
 Functions are sync, no I/O, no cubepi imports. Tests construct snapshots
 directly.
@@ -13,7 +13,7 @@ from cubebox.llm.errors import (
     NoDefaultPresetError,
     UnknownPresetError,
 )
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
 
 
 def parse_model_ref(ref: str) -> tuple[str, str]:
@@ -23,31 +23,31 @@ def parse_model_ref(ref: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def resolve_preset(snap: LLMSnapshot, label: str | None) -> LLMPreset:
-    if label is None:
-        preset = next((p for p in snap.presets if p.is_default), None)
+def resolve_model_preset(snap: LLMSnapshot, key: str | None) -> ModelPreset:
+    if key is None:
+        preset = next((p for p in snap.model_presets if p.is_default), None)
         if preset is None:
             raise NoDefaultPresetError()
     else:
-        preset = next((p for p in snap.presets if p.label == label), None)
+        preset = next((p for p in snap.model_presets if p.key == key), None)
         if preset is None:
-            raise UnknownPresetError(label)
+            raise UnknownPresetError(key)
     missing = _missing_refs(preset, snap.providers)
     if missing:
-        raise BrokenPresetError(preset.label, missing_refs=missing)
+        raise BrokenPresetError(preset.key, missing_refs=missing)
     return preset
 
 
-def resolve_task_preset(snap: LLMSnapshot, task: str) -> LLMPreset:
-    label = snap.task_presets.get(task)
-    if label is not None:
-        for p in snap.presets:
-            if p.label == label:
+def resolve_task_preset(snap: LLMSnapshot, task: str) -> ModelPreset:
+    key = snap.task_routing.get(task)
+    if key is not None:
+        for p in snap.model_presets:
+            if p.key == key:
                 return p
-    return resolve_preset(snap, None)
+    return resolve_model_preset(snap, None)
 
 
-def _missing_refs(preset: LLMPreset, providers: Mapping[str, ProviderConfig]) -> list[str]:
+def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) -> list[str]:
     missing: list[str] = []
     for ref in preset.chain:
         try:

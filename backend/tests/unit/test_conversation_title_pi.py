@@ -16,7 +16,7 @@ from cubepi.providers.base import BoundModel, Model
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 
 from cubebox.llm.config import ModelConfig, ProviderConfig
-from cubebox.llm.snapshot import LLMPreset, LLMSnapshot
+from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -40,8 +40,16 @@ def _snap() -> LLMSnapshot:
                 ],
             )
         },
-        presets=(LLMPreset(label="default", chain=("acme/title-m",), is_default=True),),
-        task_presets={"title": "default"},
+        model_presets=(
+            ModelPreset(
+                key="default",
+                primary="acme/title-m",
+                fallbacks=(),
+                kind="tier",
+                is_default=True,
+            ),
+        ),
+        task_routing={"title": "default"},
     )
 
 
@@ -57,7 +65,7 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, provider: FauxProvider) -> N
         return _snap()
 
     def _fake_build_chain_model(
-        snap: LLMSnapshot, preset: LLMPreset, *, thinking: str = "off", **_: Any
+        snap: LLMSnapshot, preset: ModelPreset, *, thinking: str = "off", **_: Any
     ) -> BoundModel:
         spec = Model(
             id="title-m",
