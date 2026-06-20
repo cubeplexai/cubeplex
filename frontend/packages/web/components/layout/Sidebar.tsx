@@ -33,6 +33,7 @@ import {
   Layers,
   type LucideIcon,
   MoreHorizontal,
+  Package,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -290,7 +291,7 @@ function RailTooltip({
 
 interface WorkspaceNavEntry {
   key: string
-  labelKey: 'skills' | 'mcp' | 'scheduledTasks' | 'settings' | 'triggers'
+  labelKey: 'skills' | 'mcp' | 'artifacts' | 'scheduledTasks' | 'settings' | 'triggers'
   icon: LucideIcon | React.ComponentType<{ className?: string }>
   href: string
   isActive: boolean
@@ -311,11 +312,13 @@ function WorkspaceNav({
   const triggersPrefix = `/w/${wsId}/triggers`
   const skillsPrefix = `/w/${wsId}/skills`
   const mcpPrefix = `/w/${wsId}/mcp`
+  const artifactsPrefix = `/w/${wsId}/artifacts`
   const onSettings = pathname?.startsWith(settingsPrefix) ?? false
   const onScheduledTasks = pathname?.startsWith(scheduledTasksPrefix) ?? false
   const onTriggers = pathname?.startsWith(triggersPrefix) ?? false
   const onSkills = pathname?.startsWith(skillsPrefix) ?? false
   const onMcp = pathname?.startsWith(mcpPrefix) ?? false
+  const onArtifacts = pathname?.startsWith(artifactsPrefix) ?? false
   const currentTab = searchParams.get('tab') ?? 'workspace'
 
   const entries: WorkspaceNavEntry[] = [
@@ -332,6 +335,13 @@ function WorkspaceNav({
       icon: VscMcp,
       href: mcpPrefix,
       isActive: onMcp,
+    },
+    {
+      key: 'artifacts',
+      labelKey: 'artifacts',
+      icon: Package,
+      href: artifactsPrefix,
+      isActive: onArtifacts,
     },
     {
       key: 'scheduledTasks',
