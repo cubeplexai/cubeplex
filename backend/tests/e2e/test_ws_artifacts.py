@@ -88,6 +88,7 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
                 text("DELETE FROM conversations WHERE id IN (:a, :b)"),
                 {"a": _MY_CONV, "b": _OTHER_CONV},
             )
+            await s.execute(text("DELETE FROM users WHERE id = :id"), {"id": _STRANGER_ID})
             await s.commit()
         await engine.dispose()
 

@@ -135,21 +135,21 @@ class ArtifactRepository(ScopedRepository[Artifact]):
         result = await self.session.execute(page_stmt)
         return list(result.scalars().all()), total
 
-    async def delete_with_versions(self, artifact_id: str) -> bool:
-        """Delete an artifact and its version rows. Returns False if not found."""
-        artifact = await self.get(artifact_id)
-        if artifact is None:
-            return False
+    async def delete_with_versions(self, artifact: Artifact) -> None:
+        """Delete an already-loaded artifact and its version rows.
+
+        The caller passes the loaded ``Artifact`` (already fetched for the
+        access check) so this does not re-SELECT the same row.
+        """
         await self.session.execute(
             delete(ArtifactVersion).where(
-                cast(Any, ArtifactVersion.artifact_id) == artifact_id,
+                cast(Any, ArtifactVersion.artifact_id) == artifact.id,
                 cast(Any, ArtifactVersion.org_id) == self.org_id,
                 cast(Any, ArtifactVersion.workspace_id) == self.workspace_id,
             )
         )
         await self.session.delete(artifact)
         await self.session.commit()
-        return True
 
 
 class ArtifactVersionRepository(ScopedRepository[ArtifactVersion]):
