@@ -36,6 +36,7 @@ from cubebox.api.routes.v1.conversations import router as conversations_router
 from cubebox.api.routes.v1.memory import router as memory_router
 from cubebox.api.routes.v1.user_events import router as user_events_router
 from cubebox.api.routes.v1.workspaces import router as workspaces_router
+from cubebox.api.routes.v1.ws_artifacts import router as ws_artifacts_router
 
 __all__ = [
     "admin_router",
@@ -48,6 +49,7 @@ __all__ = [
     "admin_traces",
     "mcp_oauth",
     "artifacts_router",
+    "ws_artifacts_router",
     "attachments_router",
     "auth_router",
     "conversation_search_router",

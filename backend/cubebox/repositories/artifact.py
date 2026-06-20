@@ -1,6 +1,9 @@
 """Artifact repository."""
 
 from datetime import UTC, datetime
+from typing import Any, cast
+
+from sqlalchemy import delete, func, select
 
 from cubebox.models import Artifact
 from cubebox.models.artifact_version import ArtifactVersion
@@ -99,6 +102,54 @@ class ArtifactRepository(ScopedRepository[Artifact]):
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_by_workspace(
+        self,
+        *,
+        accessible_conv_subq: Any,
+        artifact_type: str | None = None,
+        name_query: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[Artifact], int]:
+        """List artifacts in the workspace restricted to accessible conversations.
+
+        ``accessible_conv_subq`` is a single-column subquery of conversation
+        IDs the caller may access (see
+        ``ConversationRepository.accessible_id_subquery``). Optional filters:
+        ``artifact_type`` (exact) and ``name_query`` (case-insensitive
+        substring). Ordered newest-updated first. Returns ``(items, total)``.
+        """
+        stmt = self._scoped_select().where(
+            cast(Any, Artifact.conversation_id).in_(accessible_conv_subq)
+        )
+        if artifact_type:
+            stmt = stmt.where(Artifact.artifact_type == artifact_type)
+        if name_query:
+            stmt = stmt.where(cast(Any, Artifact.name).ilike(f"%{name_query}%"))
+
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = (await self.session.execute(count_stmt)).scalar_one()
+
+        page_stmt = stmt.order_by(cast(Any, Artifact.updated_at).desc()).limit(limit).offset(offset)
+        result = await self.session.execute(page_stmt)
+        return list(result.scalars().all()), total
+
+    async def delete_with_versions(self, artifact_id: str) -> bool:
+        """Delete an artifact and its version rows. Returns False if not found."""
+        artifact = await self.get(artifact_id)
+        if artifact is None:
+            return False
+        await self.session.execute(
+            delete(ArtifactVersion).where(
+                cast(Any, ArtifactVersion.artifact_id) == artifact_id,
+                cast(Any, ArtifactVersion.org_id) == self.org_id,
+                cast(Any, ArtifactVersion.workspace_id) == self.workspace_id,
+            )
+        )
+        await self.session.delete(artifact)
+        await self.session.commit()
+        return True
 
 
 class ArtifactVersionRepository(ScopedRepository[ArtifactVersion]):

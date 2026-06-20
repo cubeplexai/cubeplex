@@ -86,6 +86,15 @@ class ConversationRepository(ScopedRepository[Conversation]):
             )
         )
 
+    def accessible_id_subquery(self) -> Any:
+        """Subquery of conversation IDs the caller may access.
+
+        Reuses the visibility WHERE from ``_scoped_select`` (creator +
+        topic/conversation participation) and projects only ``id`` so it can
+        feed an ``Artifact.conversation_id.in_(...)`` filter.
+        """
+        return self._scoped_select().with_only_columns(cast(Any, Conversation.id))
+
     async def create(self, title: str, *, draft: bool = False) -> Conversation:
         conv = Conversation(
             title=title,
