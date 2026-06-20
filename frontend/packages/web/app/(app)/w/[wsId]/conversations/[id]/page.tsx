@@ -1,6 +1,7 @@
 'use client'
 
 import { use, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   createApiClient,
   useArtifactStore,
@@ -21,6 +22,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   const setActive = useConversationStore((s) => s.setActive)
   const conversations = useConversationStore((s) => s.conversations)
   const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)
+  const focusArtifactId = useSearchParams().get('artifact')
   const [status, setStatus] = useState<'loading' | 'ok' | 'notfound' | 'forbidden'>('loading')
 
   const client = useMemo(() => {
@@ -41,6 +43,16 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     })()
     loadArtifacts(client, conversationId)
   }, [conversationId, client, setActive, loadArtifacts])
+
+  // Arriving from the artifacts library with `?artifact=<id>` auto-opens that
+  // artifact's preview. Runs after the reset effect above (declaration order),
+  // so it isn't clobbered by its close(); the panel fills in once loadArtifacts
+  // populates the store.
+  useEffect(() => {
+    if (focusArtifactId) {
+      usePanelStore.getState().openArtifact(conversationId, focusArtifactId)
+    }
+  }, [conversationId, focusArtifactId])
 
   if (status === 'notfound') {
     return (

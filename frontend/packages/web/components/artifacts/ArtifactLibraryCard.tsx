@@ -39,7 +39,8 @@ export function ArtifactLibraryCard({
   const t = useTranslations('artifactsPage')
   const openArtifact = usePanelStore((s) => s.openArtifact)
   const Icon = getArtifactIcon(artifact)
-  const conversationHref = `/w/${workspaceId}/conversations/${artifact.conversation_id}`
+  // Carry the artifact id so the conversation page auto-opens its preview panel.
+  const conversationHref = `/w/${workspaceId}/conversations/${artifact.conversation_id}?artifact=${artifact.id}`
 
   const [thumbFailed, setThumbFailed] = useState(false)
   const showImage = isImageArtifact(artifact) && !thumbFailed
