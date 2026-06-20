@@ -57,6 +57,7 @@
     "moreActions": "更多",
     "skills": "技能",
     "mcp": "MCP",
+    "artifacts": "成果库",
     "memory": "记忆",
     "scheduledTasks": "定时任务",
     "members": "成员",
@@ -252,6 +253,25 @@
       "result": "结果",
       "rawAttributes": "原始属性"
     }
+  },
+  "artifactsPage": {
+    "title": "成果库",
+    "subtitle": "你的智能体在各个会话里产生的成果。",
+    "searchPlaceholder": "按名称搜索…",
+    "filterAll": "全部",
+    "empty": "暂无成果",
+    "emptyHint": "智能体保存的成果会出现在这里。",
+    "noResults": "没有符合筛选条件的成果。",
+    "openSource": "打开来源会话",
+    "download": "下载",
+    "delete": "删除",
+    "preview": "预览",
+    "deleteConfirmTitle": "删除成果？",
+    "deleteConfirmBody": "将永久删除「{name}」及其文件，且无法恢复。",
+    "deleteConfirmCancel": "取消",
+    "deleteConfirmAction": "删除",
+    "deleteFailed": "删除成果失败",
+    "loadFailed": "加载成果失败"
   },
   "chat": {
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。",

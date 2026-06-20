@@ -57,6 +57,7 @@
     "moreActions": "More",
     "skills": "Skills",
     "mcp": "MCP",
+    "artifacts": "Artifacts",
     "memory": "Memory",
     "scheduledTasks": "Scheduled Tasks",
     "members": "Members",
@@ -252,6 +253,25 @@
       "result": "Result",
       "rawAttributes": "Raw attributes"
     }
+  },
+  "artifactsPage": {
+    "title": "Artifacts",
+    "subtitle": "Deliverables your agents produced across conversations.",
+    "searchPlaceholder": "Search by name…",
+    "filterAll": "All",
+    "empty": "No artifacts yet",
+    "emptyHint": "Artifacts your agents save will show up here.",
+    "noResults": "No artifacts match your filters.",
+    "openSource": "Open source conversation",
+    "download": "Download",
+    "delete": "Delete",
+    "preview": "Preview",
+    "deleteConfirmTitle": "Delete artifact?",
+    "deleteConfirmBody": "This permanently removes \"{name}\" and its files. This cannot be undone.",
+    "deleteConfirmCancel": "Cancel",
+    "deleteConfirmAction": "Delete",
+    "deleteFailed": "Failed to delete artifact",
+    "loadFailed": "Failed to load artifacts"
   },
   "chat": {
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry.",
