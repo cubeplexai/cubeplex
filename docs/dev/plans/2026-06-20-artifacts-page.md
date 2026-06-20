@@ -10,6 +10,16 @@
 
 **Spec:** `docs/dev/specs/2026-06-20-artifacts-page-design.md`
 
+> **Execution note (2026-06-20):** Task 11 (frontend Playwright E2E) was **dropped**.
+> Investigation confirmed an `artifacts` row can only be created via a live agent
+> run (`save_artifact` / `generate_image` are sandbox-backed LLM tools; there is no
+> HTTP create endpoint or test seeder reachable from Playwright). With no seeded
+> artifact, the only non-real-LLM frontend test would be an empty-state / nav
+> presence check — which CLAUDE.md "Testing Principles" explicitly forbids as a
+> standalone test, and which the existing `chat-skill-artifact-preview.spec.ts`
+> precedent already pushes down to backend E2E. The list / delete / visibility
+> invariants are owned by `backend/tests/e2e/test_ws_artifacts.py` (Task 3).
+
 **Worktree note:** Work in this worktree. First run `cat .worktree.env` — backend is `127.0.0.1:8050`, frontend `:3050`, slot 50. Use `uv run` for backend, `pnpm` for frontend. Do not use ports 8000/3000.
 
 **"Accessible artifact" definition:** an artifact whose `conversation_id` resolves through `ConversationRepository`'s scoped visibility (creator + topic/conversation participation). This reuses the existing conversation-access boundary; we do not add a creator-only filter.
