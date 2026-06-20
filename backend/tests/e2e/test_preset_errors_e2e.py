@@ -45,6 +45,22 @@ from tests.e2e.conftest import (
 )
 
 
+def _tiered_value(*, primary: str, fallbacks: list[str] | None = None) -> dict[str, Any]:
+    """A valid tiered ModelPresetsConfig value: only `pro` enabled (default)."""
+    off = {"enabled": False, "primary": None, "fallbacks": []}
+    return {
+        "tiers": {
+            "lite": dict(off),
+            "flash": dict(off),
+            "pro": {"enabled": True, "primary": primary, "fallbacks": list(fallbacks or [])},
+            "max": dict(off),
+        },
+        "custom_presets": [],
+        "default_preset": "pro",
+        "task_routing": {},
+    }
+
+
 def _make_test_app() -> Any:
     """Create a test app wired with NullPool DB + sandbox_factory=None."""
     url = _build_database_url()
@@ -134,16 +150,7 @@ async def _seed_alpha_provider_and_default_preset() -> None:
                 OrgSettings(
                     org_id=DEFAULT_ORG_ID,
                     key=MODEL_PRESETS_KEY,
-                    value={
-                        "presets": [
-                            {
-                                "label": "default",
-                                "chain": ["alpha/m1"],
-                                "is_default": True,
-                            }
-                        ],
-                        "task_presets": {},
-                    },
+                    value=_tiered_value(primary="alpha/m1"),
                 )
             )
             await session.commit()
@@ -161,16 +168,7 @@ async def _seed_broken_default_preset() -> None:
                 OrgSettings(
                     org_id=DEFAULT_ORG_ID,
                     key=MODEL_PRESETS_KEY,
-                    value={
-                        "presets": [
-                            {
-                                "label": "default",
-                                "chain": ["ghost/x"],
-                                "is_default": True,
-                            }
-                        ],
-                        "task_presets": {},
-                    },
+                    value=_tiered_value(primary="ghost/x"),
                 )
             )
             await session.commit()

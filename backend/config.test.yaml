@@ -26,8 +26,14 @@ test:
   # LLM: provider / base_url / api_key / model id 全部通过 env 注入
   # 仓库内看不到真实 endpoint 或模型名
   llm:
-    default_model: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}"
-    fallback_models: []
+    model_presets:
+      tiers:
+        lite:  { enabled: true,  primary: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}", fallbacks: [] }
+        flash: { enabled: false, primary: null, fallbacks: [] }
+        pro:   { enabled: true,  primary: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}", fallbacks: [] }
+        max:   { enabled: false, primary: null, fallbacks: [] }
+      default_preset: pro
+      task_routing: {}
     providers:
       deepseek:
         base_url: https://api.deepseek.com/anthropic

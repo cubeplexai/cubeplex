@@ -10,8 +10,8 @@ from cubebox.llm.snapshot import LLMSnapshot
 def _snap(**provider_kwargs: object) -> LLMSnapshot:
     return LLMSnapshot(
         providers={"acme": ProviderConfig(api="openai-completions", **provider_kwargs)},
-        presets=(),
-        task_presets={},
+        model_presets=(),
+        task_routing={},
     )
 
 
@@ -36,8 +36,8 @@ def test_build_provider_anthropic_messages_with_cache_policy() -> None:
                 api_key="k",
             ),
         },
-        presets=(),
-        task_presets={},
+        model_presets=(),
+        task_routing={},
     )
     p = build_provider(snap, "anthr", cache_policy=CubeboxCacheMarkerPolicy())
     assert isinstance(p, AnthropicProvider)
@@ -45,4 +45,4 @@ def test_build_provider_anthropic_messages_with_cache_policy() -> None:
 
 def test_build_provider_unknown_slug_raises() -> None:
     with pytest.raises(ValueError, match="acme"):
-        build_provider(LLMSnapshot(providers={}, presets=(), task_presets={}), "acme")
+        build_provider(LLMSnapshot(providers={}, model_presets=(), task_routing={}), "acme")

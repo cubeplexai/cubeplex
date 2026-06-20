@@ -41,6 +41,22 @@ from tests.e2e.conftest import (
 )
 
 
+def _tiered_value(*, primary: str, fallbacks: list[str]) -> dict[str, Any]:
+    """A valid tiered ModelPresetsConfig value: only `pro` enabled (default)."""
+    off = {"enabled": False, "primary": None, "fallbacks": []}
+    return {
+        "tiers": {
+            "lite": dict(off),
+            "flash": dict(off),
+            "pro": {"enabled": True, "primary": primary, "fallbacks": list(fallbacks)},
+            "max": dict(off),
+        },
+        "custom_presets": [],
+        "default_preset": "pro",
+        "task_routing": {},
+    }
+
+
 def _make_fallback_test_app() -> Any:
     """Create a test app wired with NullPool DB + sandbox_factory=None."""
     url = _build_database_url()
@@ -125,22 +141,13 @@ async def _seed_fallback_providers_and_preset() -> None:
                     )
                 )
 
-            # Org-level preset row — overrides any system default; chain
-            # [primary/m1, backup/m1] is the default preset.
+            # Org-level preset row — overrides any system default; the `pro`
+            # tier (default) resolves to chain [primary/m1, backup/m1].
             session.add(
                 OrgSettings(
                     org_id=DEFAULT_ORG_ID,
                     key=MODEL_PRESETS_KEY,
-                    value={
-                        "presets": [
-                            {
-                                "label": "default",
-                                "chain": ["primary/m1", "backup/m1"],
-                                "is_default": True,
-                            }
-                        ],
-                        "task_presets": {},
-                    },
+                    value=_tiered_value(primary="primary/m1", fallbacks=["backup/m1"]),
                 )
             )
             await session.commit()

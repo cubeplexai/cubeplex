@@ -118,24 +118,36 @@ async def _seed_switching_providers_and_presets() -> None:
                     )
                 )
 
+            # Two custom presets: "big" (default) and "small". Tiers are off;
+            # routing is exercised purely via custom labels here.
+            off = {"enabled": False, "primary": None, "fallbacks": []}
             session.add(
                 OrgSettings(
                     org_id=DEFAULT_ORG_ID,
                     key=MODEL_PRESETS_KEY,
                     value={
-                        "presets": [
+                        "tiers": {
+                            "lite": dict(off),
+                            "flash": dict(off),
+                            "pro": dict(off),
+                            "max": dict(off),
+                        },
+                        "custom_presets": [
                             {
                                 "label": "big",
-                                "chain": ["big/m1"],
-                                "is_default": True,
+                                "primary": "big/m1",
+                                "fallbacks": [],
+                                "description": "",
                             },
                             {
                                 "label": "small",
-                                "chain": ["small/m1"],
-                                "is_default": False,
+                                "primary": "small/m1",
+                                "fallbacks": [],
+                                "description": "",
                             },
                         ],
-                        "task_presets": {},
+                        "default_preset": "big",
+                        "task_routing": {},
                     },
                 )
             )

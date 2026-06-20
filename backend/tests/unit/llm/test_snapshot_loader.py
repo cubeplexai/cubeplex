@@ -61,9 +61,7 @@ async def test_snapshot_loads_system_provider_and_preset(async_session, encrypti
     p = _add_acme_provider_and_model(async_session)
     await async_session.flush()
     async_session.add(_make_model(p.id))
-    async_session.add(
-        OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=_presets_value())
-    )
+    async_session.add(OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=_presets_value()))
     await async_session.commit()
 
     snap = await load_llm_snapshot(
@@ -94,9 +92,7 @@ async def test_org_row_replaces_system_row(async_session, encryption_backend):
     # Org row enables a custom preset labelled "org" as the default.
     org_value = _presets_value(default="org")
     org_value["custom_presets"] = [{"label": "org", "primary": "acme/m1"}]
-    async_session.add(
-        OrgSettings(org_id="org_test", key=MODEL_PRESETS_KEY, value=org_value)
-    )
+    async_session.add(OrgSettings(org_id="org_test", key=MODEL_PRESETS_KEY, value=org_value))
     p = _add_acme_provider_and_model(async_session)
     await async_session.flush()
     async_session.add(_make_model(p.id))
@@ -174,9 +170,7 @@ async def test_load_providers_is_not_n_plus_one(async_session, encryption_backen
 async def test_malformed_row_raises_corrupt_presets_row_error(async_session, encryption_backend):
     # default_preset references an unavailable preset → schema rejects.
     bad_value = _presets_value(default="ghost")
-    async_session.add(
-        OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=bad_value)
-    )
+    async_session.add(OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=bad_value))
     await async_session.commit()
     with pytest.raises(CorruptPresetsRowError) as exc:
         await load_llm_snapshot(async_session, "org_test", encryption_backend)

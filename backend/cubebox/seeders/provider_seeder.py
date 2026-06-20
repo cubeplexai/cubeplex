@@ -354,20 +354,18 @@ async def seed_system_providers_from_config(
     logger.info("System provider seed complete")
 
 
-async def seed_default_presets_from_config(session: AsyncSession) -> None:
-    """Translate YAML default_model / fallback_models / *_model into an
-    OrgSettings(org_id=NULL, key='model_presets') row. Idempotent: writes
-    only if row does not exist; never overrides admin edits.
+async def seed_model_presets_from_config(session: AsyncSession) -> None:
+    """Seed the system OrgSettings.model_presets row from llm.model_presets.
+
+    Idempotent: skip if the system row exists (never clobber admin edits).
     """
+    from cubebox.llm.snapshot_schema import ModelPresetsConfig
     from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
-    cfg: dict[str, Any] = dict(settings.get("llm", {}))
-    default_model = cfg.get("default_model")
-    if not default_model:
-        logger.info("No default_model in config — skipping preset seed")
+    raw = dict(settings.get("llm", {})).get("model_presets")
+    if not raw:
+        logger.info("No llm.model_presets in config — skipping preset seed")
         return
-
-    # Skip when row already exists.
     existing = (
         await session.execute(
             select(OrgSettings).where(
@@ -377,43 +375,10 @@ async def seed_default_presets_from_config(session: AsyncSession) -> None:
         )
     ).scalar_one_or_none()
     if existing is not None:
-        logger.debug("OrgSettings.model_presets already present — preserving")
+        logger.debug("system model_presets row present — preserving")
         return
-
-    fallback = list(cfg.get("fallback_models") or [])
-    default_chain = [str(default_model)] + [str(m) for m in fallback]
-
-    presets: list[dict[str, Any]] = [
-        {"label": "default", "chain": default_chain, "is_default": True}
-    ]
-    task_presets: dict[str, str] = {}
-
-    def _add_task_preset(task_key: str, ref: str) -> None:
-        label = f"task-{task_key}"
-        presets.append({"label": label, "chain": [ref], "is_default": False})
-        task_presets[task_key] = label
-
-    title_model = cfg.get("title_model")
-    if title_model and title_model != default_model:
-        _add_task_preset("title", str(title_model))
-
-    summarize_model = cfg.get("summarize_model")
-    if summarize_model and summarize_model != default_model:
-        _add_task_preset("summarize", str(summarize_model))
-
-    comp_cfg = cfg.get("compaction") or {}
-    comp_model = comp_cfg.get("summary_model")
-    if comp_model:
-        ref = f"{comp_cfg.get('summary_provider', '')}/{comp_model}".strip("/")
-        if ref and "/" in ref and ref != default_model:
-            _add_task_preset("compaction", ref)
-
-    row = OrgSettings(
-        org_id=None,
-        key=MODEL_PRESETS_KEY,
-        value={"presets": presets, "task_presets": task_presets},
-    )
-    session.add(row)
+    cfg = ModelPresetsConfig.model_validate(raw)
+    session.add(OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=cfg.model_dump(mode="json")))
     await session.flush()
     await session.commit()
-    logger.info("Seeded OrgSettings.model_presets (default chain: %s)", default_chain)
+    logger.info("Seeded system model_presets (default=%s)", cfg.default_preset)
