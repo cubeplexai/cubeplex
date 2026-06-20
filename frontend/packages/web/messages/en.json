@@ -1503,7 +1503,39 @@
     "errorTitle": "Save failed",
     "errorBrokenPreset": "One or more chain entries reference models that don't exist. Fix the highlighted refs and try again.",
     "errorDuplicateLabel": "Label must be unique.",
-    "errorGeneric": "Save failed (HTTP {status})."
+    "errorGeneric": "Save failed (HTTP {status}).",
+    "modelTiers": {
+      "lite": {
+        "name": "Lite",
+        "description": "Fastest and cheapest. Best for simple, high-volume tasks."
+      },
+      "flash": {
+        "name": "Flash",
+        "description": "Fast with solid quality. A balanced everyday choice."
+      },
+      "pro": { "name": "Pro", "description": "Recommended. Strong reasoning for most work." },
+      "max": {
+        "name": "Max",
+        "description": "Most capable. For the hardest, highest-stakes tasks."
+      }
+    },
+    "taskRouting": {
+      "heading": "Task routing",
+      "hint": "Route specific internal tasks through a preset. Leave on default to use the default preset.",
+      "useDefault": "Default · {preset}",
+      "title": { "name": "Title", "hint": "Names new conversations." },
+      "summarize": { "name": "Summarize", "hint": "Summarizes long content." },
+      "compaction": { "name": "Compaction", "hint": "Compresses context when the chat gets long." }
+    },
+    "tierEnabled": "Enabled",
+    "primary": "Primary model",
+    "fallbacks": "Fallbacks",
+    "addCustom": "Add preset",
+    "customLabel": "Label",
+    "customDescription": "Description",
+    "customSectionHeading": "Custom presets",
+    "tiersSectionHeading": "Tiers",
+    "defaultBadge": "Default"
   },
   "adminSandbox": {
     "title": "Sandbox",
