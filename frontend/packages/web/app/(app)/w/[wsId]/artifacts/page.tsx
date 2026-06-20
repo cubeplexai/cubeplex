@@ -45,6 +45,7 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
   const view = usePanelStore((s) => s.view)
   const closePanel = usePanelStore((s) => s.close)
   const seedArtifact = useArtifactStore((s) => s.addOrUpdate)
+  const removeArtifactFromStore = useArtifactStore((s) => s.removeArtifact)
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -56,18 +57,29 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
     let cancelled = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
-    listWorkspaceArtifacts(client)
-      .then(({ artifacts: list }) => {
+    // Page through every accessible artifact so client-side type/name filtering
+    // reflects the whole library, not just the first API page.
+    ;(async () => {
+      try {
+        const PAGE = 200
+        const all: Artifact[] = []
+        for (let offset = 0; ; offset += PAGE) {
+          const { artifacts: page, total } = await listWorkspaceArtifacts(client, {
+            limit: PAGE,
+            offset,
+          })
+          all.push(...page)
+          if (page.length < PAGE || all.length >= total) break
+        }
         if (cancelled) return
-        setArtifacts(list)
-        for (const a of list) seedArtifact(a.conversation_id, a)
-      })
-      .catch(() => {
+        setArtifacts(all)
+        for (const a of all) seedArtifact(a.conversation_id, a)
+      } catch {
         if (!cancelled) toast.error(t('loadFailed'))
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false)
-      })
+      }
+    })()
     return () => {
       cancelled = true
     }
@@ -103,11 +115,14 @@ export default function WorkspaceArtifactsPage({ params }: PageProps): React.Rea
     try {
       await deleteArtifact(client, target.id)
       setArtifacts((prev) => prev.filter((a) => a.id !== target.id))
+      // Also drop it from the shared store so other views (e.g. the source
+      // conversation's ArtifactGallery) don't render a now-404 artifact.
+      removeArtifactFromStore(target.conversation_id, target.id)
       if (view.type === 'artifact' && view.artifactId === target.id) closePanel()
     } catch {
       toast.error(t('deleteFailed'))
     }
-  }, [pendingDelete, client, view, closePanel, t])
+  }, [pendingDelete, client, view, closePanel, removeArtifactFromStore, t])
 
   const panelOpen = view.type === 'artifact'
 

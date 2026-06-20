@@ -55,7 +55,11 @@ export function ArtifactHtmlThumb({ src, title }: ArtifactHtmlThumbProps): React
         <iframe
           src={src}
           title={title}
-          sandbox="allow-scripts allow-same-origin"
+          // No allow-same-origin: agent-authored HTML must not run with
+          // same-origin access to the session cookie / authenticated requests.
+          // The initial document GET still carries cookies, so the thumbnail
+          // renders; only the embedded scripts are confined to an opaque origin.
+          sandbox="allow-scripts"
           tabIndex={-1}
           aria-hidden
           loading="lazy"
