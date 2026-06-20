@@ -497,7 +497,19 @@ export function PresetEditor({ initial, availableModels }: PresetEditorProps): R
                 onValueChange={(v) => setTaskRouting(task, !v || v === NOT_SET ? undefined : v)}
               >
                 <SelectTrigger className="w-56" aria-label={t(TASK_NAME_KEY[task])}>
-                  <SelectValue />
+                  <SelectValue>
+                    {(value: string) => {
+                      if (!value || value === NOT_SET) {
+                        return (
+                          <span className="text-muted-foreground">
+                            {t('taskRouting.useDefault', { preset: body.default_preset })}
+                          </span>
+                        )
+                      }
+                      const primary = primaryByKey.get(value)
+                      return primary ? `${value} · ${modelIdOf(primary)}` : value
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NOT_SET}>
