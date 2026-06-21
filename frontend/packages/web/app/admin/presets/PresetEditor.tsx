@@ -726,6 +726,9 @@ function RefPicker({
             setOpen(true)
           }}
           onFocus={() => setOpen(true)}
+          // Reopen on click too: after picking an option the input keeps focus
+          // (the option's onMouseDown preventDefault), so onFocus won't refire.
+          onClick={() => setOpen(true)}
           onBlur={() => {
             window.setTimeout(() => setOpen(false), 120)
           }}
