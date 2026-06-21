@@ -11,7 +11,10 @@ import {
 } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
 
-import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
+import {
+  consumeLocallyCreatedConversation,
+  getPresetSelectionStore,
+} from '@/lib/stores/preset-selection'
 import type { ThinkingLevel } from '@/lib/types/presets'
 
 import { AppShell } from '@/components/layout/AppShell'
@@ -54,16 +57,19 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
       else if (res.ok) {
         setStatus('ok')
         // Sync the composer to this conversation's stored model setting, once
-        // per open/switch (the effect is keyed by conversationId). For a NEW
-        // chat the home page handles the first send before this route mounts,
-        // so the persisted last-used value stays the default there.
+        // per open/switch (the effect is keyed by conversationId). Skip it for a
+        // conversation we just created locally — the composer already holds the
+        // user's choice and the first send's model_setting write may not have
+        // committed yet (a server read here would reset the picker to default).
         try {
           const convo = (await res.json()) as Conversation
           if (cancelled) return
-          const store = getPresetSelectionStore(wsId).getState()
-          if (store.modelKey === before.modelKey && store.thinking === before.thinking) {
-            store.setModelKey(convo.model_key ?? null)
-            store.setThinking((convo.thinking ?? 'medium') as ThinkingLevel)
+          if (!consumeLocallyCreatedConversation(conversationId)) {
+            const store = getPresetSelectionStore(wsId).getState()
+            if (store.modelKey === before.modelKey && store.thinking === before.thinking) {
+              store.setModelKey(convo.model_key ?? null)
+              store.setThinking((convo.thinking ?? 'medium') as ThinkingLevel)
+            }
           }
         } catch {
           // Best-effort: a malformed body just leaves the persisted default.

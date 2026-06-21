@@ -11,7 +11,11 @@ import {
 } from '@cubebox/core'
 import { InputBar } from '@/components/layout/InputBar'
 import { PromptCards } from '@/components/chat/PromptCards'
-import { getPresetSelectionStore, validatedModelKey } from '@/lib/stores/preset-selection'
+import {
+  getPresetSelectionStore,
+  markConversationLocallyCreated,
+  validatedModelKey,
+} from '@/lib/stores/preset-selection'
 
 export default function WorkspaceHomePage({
   params,
@@ -93,6 +97,10 @@ export default function WorkspaceHomePage({
           console.error('Failed to send message:', err)
         },
       )
+      // The composer already holds the user's choice for this brand-new
+      // conversation; tell the conversation page to skip its open-sync so a
+      // not-yet-committed model_setting read doesn't reset the picker.
+      markConversationLocallyCreated(convId)
       router.push(`/w/${wsId}/conversations/${convId}`)
     } catch (err) {
       console.error('Failed to create conversation:', err)

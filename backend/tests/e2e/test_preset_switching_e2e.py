@@ -318,3 +318,45 @@ async def test_explicit_preset_label_routes_to_small(
             assert row.thinking == "high", row.thinking
     finally:
         await test_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unknown_model_key_falls_back_to_default(
+    switching_client: httpx.AsyncClient,
+) -> None:
+    """A model_key whose preset no longer exists (e.g. a custom preset deleted
+    after a conversation stored it) falls back to the workspace default instead
+    of 400, and the conversation's stored key is healed to null on send."""
+    client = switching_client
+    ws_id = DEFAULT_WS_ID
+    conv_id = await _create_conversation(client, ws_id, "switch-ghost")
+
+    events = await _stream_to_done(
+        client,
+        ws_id,
+        conv_id,
+        {"content": "hi", "model_key": "ghost", "thinking": "high"},
+    )
+
+    errors = [e for e in events if e.get("type") == "error"]
+    assert not errors, f"unexpected error events: {errors!r}"
+
+    # The stale key resolves to the default 'big' preset, not a 400.
+    text = _collect_text(events)
+    assert "big" in text.lower(), f"expected default 'big' answer; got: {text!r}"
+
+    # The conversation heals: the unknown key is persisted as null (default),
+    # not the stale 'ghost', so the next send no longer carries a dead key.
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            row = (
+                await session.execute(
+                    select(Conversation).where(Conversation.id == conv_id)  # type: ignore[arg-type]
+                )
+            ).scalar_one()
+            assert row.model_key is None, row.model_key
+            assert row.thinking == "high", row.thinking
+    finally:
+        await test_engine.dispose()

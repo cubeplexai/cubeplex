@@ -45,6 +45,25 @@ export function validatedModelKey(state: PresetSelectionState): string | null {
   return state.presets.some((p) => p.key === state.modelKey) ? state.modelKey : null
 }
 
+/**
+ * Conversations created locally this session whose composer selection is
+ * already authoritative. The conversation-open sync must NOT overwrite the
+ * composer for these: the first send's `model_setting` write may not have
+ * committed when the conversation page reads the row (read-after-write race),
+ * so the server would return the pre-write default and reset the picker.
+ * The marker is consumed once — a later genuine re-open syncs normally.
+ */
+const locallyCreatedConversations = new Set<string>()
+
+export function markConversationLocallyCreated(conversationId: string): void {
+  locallyCreatedConversations.add(conversationId)
+}
+
+/** Returns true (and clears the marker) if this conversation was just created locally. */
+export function consumeLocallyCreatedConversation(conversationId: string): boolean {
+  return locallyCreatedConversations.delete(conversationId)
+}
+
 const stores = new Map<string, UseBoundStore<StoreApi<PresetSelectionState>>>()
 
 /**
