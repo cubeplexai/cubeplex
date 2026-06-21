@@ -33,6 +33,18 @@ function storageKey(wsId: string): string {
   return `${STORAGE_PREFIX}${wsId}`
 }
 
+/**
+ * The selected key to actually send, validated against the current preset list:
+ * a key that no longer exists (e.g. a since-deleted custom preset, or a value
+ * synced from a conversation whose preset was removed) coerces to `null` =
+ * "use the workspace default". Without this the backend rejects the unknown key
+ * with a 400 and the conversation can't send. Empty `presets` (not yet fetched)
+ * also coerces to `null` — a safe fallback to the default.
+ */
+export function validatedModelKey(state: PresetSelectionState): string | null {
+  return state.presets.some((p) => p.key === state.modelKey) ? state.modelKey : null
+}
+
 const stores = new Map<string, UseBoundStore<StoreApi<PresetSelectionState>>>()
 
 /**

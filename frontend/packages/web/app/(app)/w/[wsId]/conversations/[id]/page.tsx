@@ -38,8 +38,17 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   useEffect(() => {
     usePanelStore.getState().close()
     setActive(conversationId)
+    // Snapshot the composer selection at open time. A late response (the user
+    // switched conversations before this fetch resolved) is dropped via
+    // `cancelled`; an edit the user made while the fetch was in flight is
+    // respected by the `before` equality check below — neither gets clobbered
+    // by this conversation's stored setting.
+    let cancelled = false
+    const opened = getPresetSelectionStore(wsId).getState()
+    const before = { modelKey: opened.modelKey, thinking: opened.thinking }
     ;(async () => {
       const res = await client.get(`/api/v1/conversations/${conversationId}`)
+      if (cancelled) return
       if (res.status === 404) setStatus('notfound')
       else if (res.status === 403) setStatus('forbidden')
       else if (res.ok) {
@@ -50,15 +59,21 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
         // so the persisted last-used value stays the default there.
         try {
           const convo = (await res.json()) as Conversation
+          if (cancelled) return
           const store = getPresetSelectionStore(wsId).getState()
-          store.setModelKey(convo.model_key ?? null)
-          store.setThinking((convo.thinking ?? 'medium') as ThinkingLevel)
+          if (store.modelKey === before.modelKey && store.thinking === before.thinking) {
+            store.setModelKey(convo.model_key ?? null)
+            store.setThinking((convo.thinking ?? 'medium') as ThinkingLevel)
+          }
         } catch {
           // Best-effort: a malformed body just leaves the persisted default.
         }
       } else setStatus('notfound')
     })()
     loadArtifacts(client, conversationId)
+    return () => {
+      cancelled = true
+    }
   }, [conversationId, client, wsId, setActive, loadArtifacts])
 
   // Arriving from the artifacts library with `?artifact=<id>` auto-opens that

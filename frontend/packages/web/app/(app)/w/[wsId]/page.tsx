@@ -11,7 +11,7 @@ import {
 } from '@cubebox/core'
 import { InputBar } from '@/components/layout/InputBar'
 import { PromptCards } from '@/components/chat/PromptCards'
-import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
+import { getPresetSelectionStore, validatedModelKey } from '@/lib/stores/preset-selection'
 
 export default function WorkspaceHomePage({
   params,
@@ -85,7 +85,7 @@ export default function WorkspaceHomePage({
       // a different mode between turns."
       const selection = getPresetSelectionStore(wsId).getState()
       const sendOptions = {
-        model_key: selection.modelKey,
+        model_key: validatedModelKey(selection),
         thinking: selection.thinking,
       }
       send(client, convId, content, attachedIds, optimisticAttachments, sendOptions).catch(

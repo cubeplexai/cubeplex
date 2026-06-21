@@ -169,7 +169,15 @@ describe('InputBar', () => {
   })
 
   it('forwards the current model_key and thinking selection on send', async () => {
-    getPresetSelectionStore('ws-1').setState({ modelKey: 'reasoning', thinking: 'medium' })
+    getPresetSelectionStore('ws-1').setState({
+      modelKey: 'reasoning',
+      thinking: 'medium',
+      // The send validates the key against the loaded presets, so a forwarded
+      // key must exist in the list (a stale key would coerce to null).
+      presets: [
+        { key: 'reasoning', kind: 'custom', primary: 'p/m', description: '', is_default: false },
+      ],
+    })
     storeMocks.send.mockResolvedValue(undefined)
 
     renderWithIntl(<InputBar conversationId="conv-1" />)

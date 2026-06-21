@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   clearAllPresetSelectionStores,
   getPresetSelectionStore,
+  validatedModelKey,
+  type PresetSelectionState,
 } from '@/lib/stores/preset-selection'
 
 function resetWorld(): void {
@@ -124,5 +126,36 @@ describe('preset-selection store', () => {
     expect(localStorage.getItem('preset-selection-v1:ws_other_tab')).toBeNull()
     expect(localStorage.getItem('preset-selection-v1:ws_another')).toBeNull()
     expect(localStorage.getItem('not-our-key')).toBe('keep-me')
+  })
+
+  describe('validatedModelKey', () => {
+    const make = (modelKey: string | null, keys: string[]): PresetSelectionState =>
+      ({
+        modelKey,
+        thinking: 'medium',
+        presets: keys.map((key) => ({
+          key,
+          kind: 'tier' as const,
+          primary: 'p/m',
+          description: '',
+          is_default: false,
+        })),
+      }) as PresetSelectionState
+
+    it('keeps a key that exists in the current preset list', () => {
+      expect(validatedModelKey(make('pro', ['lite', 'pro']))).toBe('pro')
+    })
+
+    it('coerces a stale/unknown key to null (would 400 on send)', () => {
+      expect(validatedModelKey(make('research', ['lite', 'pro']))).toBeNull()
+    })
+
+    it('coerces to null when presets are not loaded yet', () => {
+      expect(validatedModelKey(make('pro', []))).toBeNull()
+    })
+
+    it('passes null through (workspace default)', () => {
+      expect(validatedModelKey(make(null, ['lite', 'pro']))).toBeNull()
+    })
   })
 })
