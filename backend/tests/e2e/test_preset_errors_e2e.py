@@ -239,7 +239,7 @@ async def test_unknown_preset_label_400(preset_error_client: httpx.AsyncClient) 
 
     resp = await client.post(
         f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json={"content": "hello", "preset_label": "ghost"},
+        json={"content": "hello", "model_key": "ghost"},
     )
     assert resp.status_code == 400, resp.text
     body = resp.json()
