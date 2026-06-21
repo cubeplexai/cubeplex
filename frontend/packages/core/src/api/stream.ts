@@ -6,16 +6,16 @@ import { streamRun } from './runStreams'
 /**
  * Request body for ``POST /api/v1/conversations/{id}/messages``.
  *
- * ``preset_label`` selects an admin-defined model preset (label only — the
+ * ``model_key`` selects the model (a tier name or a custom label — the
  * resolved chain lives server-side). ``null`` or omitted means "use the
- * workspace default preset". ``thinking`` overrides the per-message
- * reasoning depth and is sticky across messages on the composer side, so it
- * is sent on every request rather than only when it changes.
+ * workspace default". ``thinking`` overrides the per-message reasoning depth
+ * and is sticky across messages on the composer side, so it is sent on every
+ * request rather than only when it changes.
  */
 export interface SendMessageRequest {
   content: string
   attachments?: string[]
-  preset_label?: string | null
+  model_key?: string | null
   thinking?: ThinkingLevel
 }
 
@@ -148,7 +148,7 @@ export async function* streamMessages(
   content: string,
   attachmentIds?: string[],
   signal?: AbortSignal,
-  options?: { preset_label?: string | null; thinking?: ThinkingLevel },
+  options?: { model_key?: string | null; thinking?: ThinkingLevel },
 ): AsyncGenerator<AgentEvent> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -163,8 +163,8 @@ export async function* streamMessages(
   if (attachmentIds && attachmentIds.length) requestBody.attachments = attachmentIds
   // ``null`` is intentional: backend treats it the same as a missing key
   // (workspace default), but sending it explicitly lets us round-trip the
-  // user's "no preset chosen" choice when the prior turn had one.
-  if (options?.preset_label !== undefined) requestBody.preset_label = options.preset_label
+  // user's "no model chosen" choice when the prior turn had one.
+  if (options?.model_key !== undefined) requestBody.model_key = options.model_key
   if (options?.thinking !== undefined) requestBody.thinking = options.thinking
   try {
     const res = await fetch(`${client.baseUrl}${path}`, {

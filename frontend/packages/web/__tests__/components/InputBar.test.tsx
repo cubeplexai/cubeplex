@@ -90,7 +90,7 @@ describe('InputBar', () => {
     // Reset the per-`wsId` preset selection so each test starts from "no
     // explicit choice / thinking off". The store factory caches a single
     // hook instance per wsId; clearing state on the cached store is safe.
-    getPresetSelectionStore('ws-1').setState({ modelPresetKey: null, thinking: 'off' })
+    getPresetSelectionStore('ws-1').setState({ modelKey: null, thinking: 'off' })
   })
 
   it('keeps the textarea editable once a streamed run is in flight (for steering)', async () => {
@@ -168,8 +168,8 @@ describe('InputBar', () => {
     expect(screen.getByRole('button', { name: 'Model and thinking effort' })).toBeInTheDocument()
   })
 
-  it('forwards the current preset_label and thinking selection on send', async () => {
-    getPresetSelectionStore('ws-1').setState({ modelPresetKey: 'reasoning', thinking: 'medium' })
+  it('forwards the current model_key and thinking selection on send', async () => {
+    getPresetSelectionStore('ws-1').setState({ modelKey: 'reasoning', thinking: 'medium' })
     storeMocks.send.mockResolvedValue(undefined)
 
     renderWithIntl(<InputBar conversationId="conv-1" />)
@@ -183,10 +183,10 @@ describe('InputBar', () => {
     // send(client, conversationId, text, ids, optimisticAttachments, options)
     expect(callArgs[1]).toBe('conv-1')
     expect(callArgs[2]).toBe('hello')
-    expect(callArgs[5]).toEqual({ preset_label: 'reasoning', thinking: 'medium' })
+    expect(callArgs[5]).toEqual({ model_key: 'reasoning', thinking: 'medium' })
   })
 
-  it('sends preset_label: null when the user has not picked a preset', async () => {
+  it('sends model_key: null when the user has not picked a model', async () => {
     storeMocks.send.mockResolvedValue(undefined)
     renderWithIntl(<InputBar conversationId="conv-1" />)
     fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'hi' } })
@@ -195,7 +195,7 @@ describe('InputBar', () => {
     await waitFor(() => {
       expect(storeMocks.send).toHaveBeenCalled()
     })
-    expect(storeMocks.send.mock.calls[0][5]).toEqual({ preset_label: null, thinking: 'off' })
+    expect(storeMocks.send.mock.calls[0][5]).toEqual({ model_key: null, thinking: 'off' })
   })
 
   it('creates a draft conversation on first file pick when onCreateConversation is provided', async () => {

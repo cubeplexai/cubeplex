@@ -35,10 +35,10 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
   const tTier = useTranslations('adminPresets.modelTiers')
   const useStore = useMemo(() => getPresetSelectionStore(wsId), [wsId])
   const presets = useStore((s) => s.presets)
-  const modelPresetKey = useStore((s) => s.modelPresetKey)
+  const modelKey = useStore((s) => s.modelKey)
   const thinking = useStore((s) => s.thinking)
   const setPresets = useStore((s) => s.setPresets)
-  const setModelPresetKey = useStore((s) => s.setModelPresetKey)
+  const setModelKey = useStore((s) => s.setModelKey)
   const setThinking = useStore((s) => s.setThinking)
 
   // The store's `thinking` is persisted; on the server it's the default
@@ -59,16 +59,16 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
         if (cancelled) return
         setPresets(fresh)
         const valid = new Set(fresh.map((p) => p.key))
-        const current = useStore.getState().modelPresetKey
-        if (current !== null && !valid.has(current)) setModelPresetKey(null)
+        const current = useStore.getState().modelKey
+        if (current !== null && !valid.has(current)) setModelKey(null)
       })
       .catch(() => {
-        // Swallow — sending without preset_label means the workspace default.
+        // Swallow — sending without model_key means the workspace default.
       })
     return () => {
       cancelled = true
     }
-  }, [wsId, setPresets, setModelPresetKey, useStore])
+  }, [wsId, setPresets, setModelKey, useStore])
 
   // Built statically so next-intl's typed-key check sees every referenced key.
   const tierName: Record<ModelTier, string> = {
@@ -89,7 +89,7 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
     p.kind === 'tier' ? tierDesc[p.key as ModelTier] : p.description
 
   const defaultPreset = presets.find((p) => p.is_default) ?? null
-  const effectiveKey = modelPresetKey ?? defaultPreset?.key ?? null
+  const effectiveKey = modelKey ?? defaultPreset?.key ?? null
   const selected = presets.find((p) => p.key === effectiveKey) ?? null
 
   return (
@@ -134,7 +134,7 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
               <button
                 key={p.key}
                 type="button"
-                onClick={() => setModelPresetKey(p.key)}
+                onClick={() => setModelKey(p.key)}
                 aria-pressed={active}
                 className={cn(
                   'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',

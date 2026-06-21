@@ -65,7 +65,7 @@ describe('ModelPicker', () => {
   })
 
   it('keeps a valid persisted key after mount-time validation', async () => {
-    getPresetSelectionStore('ws_persist').getState().setModelPresetKey('lite')
+    getPresetSelectionStore('ws_persist').getState().setModelKey('lite')
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: PRESETS }))
 
     renderWithIntl(<ModelPicker wsId="ws_persist" />)
@@ -73,17 +73,17 @@ describe('ModelPicker', () => {
     await waitFor(() => {
       expect(getPresetSelectionStore('ws_persist').getState().presets).toHaveLength(2)
     })
-    expect(getPresetSelectionStore('ws_persist').getState().modelPresetKey).toBe('lite')
+    expect(getPresetSelectionStore('ws_persist').getState().modelKey).toBe('lite')
   })
 
   it('resets a stale persisted key to null when missing from the fresh list', async () => {
-    getPresetSelectionStore('ws_stale').getState().setModelPresetKey('ghost')
+    getPresetSelectionStore('ws_stale').getState().setModelKey('ghost')
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: [PRESETS[0]] }))
 
     renderWithIntl(<ModelPicker wsId="ws_stale" />)
 
     await waitFor(() => {
-      expect(getPresetSelectionStore('ws_stale').getState().modelPresetKey).toBeNull()
+      expect(getPresetSelectionStore('ws_stale').getState().modelKey).toBeNull()
     })
   })
 
@@ -95,7 +95,7 @@ describe('ModelPicker', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: en.chat.modelPickerAria })).toBeInTheDocument()
     })
-    expect(getPresetSelectionStore('ws_offline').getState().modelPresetKey).toBeNull()
+    expect(getPresetSelectionStore('ws_offline').getState().modelKey).toBeNull()
   })
 
   it('defaults the thinking level to medium', () => {
