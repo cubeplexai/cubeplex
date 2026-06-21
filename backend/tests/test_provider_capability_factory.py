@@ -28,7 +28,7 @@ def _bare_provider_config(
 
 
 def _build(cfg: ProviderConfig, *, slug: str = "acme") -> Any:
-    snap = LLMSnapshot(providers={slug: cfg}, presets=(), task_presets={})
+    snap = LLMSnapshot(providers={slug: cfg}, model_presets=(), task_routing={})
     return build_provider(snap, slug)
 
 
