@@ -111,4 +111,12 @@ describe('resolveSandboxHref', () => {
       hash: null,
     })
   })
+
+  it('clamps encoded-slash traversal hidden inside one raw segment', () => {
+    expect(resolveSandboxHref(BASE, '%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd')).toEqual({
+      kind: 'sandbox',
+      path: '/workspace',
+      hash: null,
+    })
+  })
 })
