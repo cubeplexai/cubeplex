@@ -130,10 +130,13 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
                   )}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-sm font-medium">{nameOf(p)}</span>
+                  <span className="flex items-baseline gap-1.5">
+                    <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+                      {p.primary}
+                    </span>
+                    <span className="shrink-0 text-sm font-medium">{nameOf(p)}</span>
                     {p.is_default && (
-                      <Badge variant="secondary" className="px-1 text-[10px]">
+                      <Badge variant="secondary" className="shrink-0 px-1 text-[10px]">
                         {t('defaultPresetBadge')}
                       </Badge>
                     )}
@@ -141,9 +144,6 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
                   {descOf(p) ? (
                     <span className="mt-0.5 block text-xs text-muted-foreground">{descOf(p)}</span>
                   ) : null}
-                  <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground/70">
-                    {p.primary}
-                  </span>
                 </span>
               </button>
             )
