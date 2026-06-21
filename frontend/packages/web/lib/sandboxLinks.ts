@@ -24,9 +24,14 @@ export function resolveSandboxHref(filePath: string, href: string): SandboxHref 
   // Drop query string — sandbox file lookup doesn't accept ?key=value, and
   // markdown usually embeds query only for cache-busting on assets.
   const rawPath = beforeHash.split('?', 1)[0]
+  // Decode the whole path BEFORE splitting on `/` so encoded slashes
+  // (`%2f`) and encoded dots (`%2e`) can't smuggle traversal inside a
+  // single raw segment. Falls back to the literal string on a malformed
+  // escape; backend remains the security boundary either way.
+  const decoded = safeDecode(rawPath)
 
   const baseDir = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : ''
-  const joined = rawPath.startsWith('/') ? `${SANDBOX_ROOT}${rawPath}` : `${baseDir}/${rawPath}`
+  const joined = decoded.startsWith('/') ? `${SANDBOX_ROOT}${decoded}` : `${baseDir}/${decoded}`
   const normalized = normalizePath(joined)
   // Clamp to sandbox root: a malformed href like `../../../../etc/passwd` should
   // not produce a path the rest of the UI tries to fetch from outside /workspace.
@@ -39,12 +44,8 @@ export function resolveSandboxHref(filePath: string, href: string): SandboxHref 
 
 function normalizePath(p: string): string {
   const stack: string[] = []
-  for (const rawSeg of p.split('/')) {
-    if (rawSeg === '') continue
-    // Decode FIRST so encoded `%2e%2e` is recognised as `..` instead of
-    // being pushed as a literal segment that slips past the traversal check.
-    const seg = safeDecode(rawSeg)
-    if (seg === '.') continue
+  for (const seg of p.split('/')) {
+    if (seg === '' || seg === '.') continue
     if (seg === '..') {
       if (stack.length > 0) stack.pop()
       continue
