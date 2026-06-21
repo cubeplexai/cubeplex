@@ -229,3 +229,28 @@ async def test_no_default_preset_500(preset_error_client: httpx.AsyncClient) -> 
     after_has_messages, after_updated_at = await _read_conversation_state(conv_id)
     assert after_has_messages == before_has_messages, (before_has_messages, after_has_messages)
     assert after_updated_at == before_updated_at, (before_updated_at, after_updated_at)
+
+
+@pytest.mark.asyncio
+async def test_unknown_key_with_no_default_still_500_before_mutation(
+    preset_error_client: httpx.AsyncClient,
+) -> None:
+    """An unknown model_key falls back to the default — but if there is no
+    default either, it must STILL fail synchronously (500 no_default_preset)
+    before any mutation, not slip into the stream after the row was changed."""
+    # Fixture already wiped all model_presets rows; no seeding here.
+    client = preset_error_client
+    ws_id = DEFAULT_WS_ID
+    conv_id = await _create_conversation(client, ws_id, "unknown-no-default")
+    before_has_messages, before_updated_at = await _read_conversation_state(conv_id)
+
+    resp = await client.post(
+        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
+        json={"content": "hello", "model_key": "ghost"},
+    )
+    assert resp.status_code == 500, resp.text
+    assert resp.json().get("error_code") == "no_default_preset", resp.text
+
+    after_has_messages, after_updated_at = await _read_conversation_state(conv_id)
+    assert after_has_messages == before_has_messages, (before_has_messages, after_has_messages)
+    assert after_updated_at == before_updated_at, (before_updated_at, after_updated_at)

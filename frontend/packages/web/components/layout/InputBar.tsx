@@ -18,6 +18,11 @@ interface InputBarProps {
   onSubmit?: (content: string, files: File[]) => void | Promise<void>
   onCreateConversation?: () => Promise<string>
   isLoading?: boolean
+  // True while the opened conversation's stored model selection is still being
+  // synced into the composer. New-turn sends are blocked until it resolves so a
+  // send in the sync window can't ship the previous conversation's model. Steer
+  // (mid-stream) is unaffected — it doesn't read the model selection.
+  modelSyncPending?: boolean
 }
 
 function isInteractiveTarget(target: EventTarget): boolean {
@@ -30,6 +35,7 @@ export function InputBar({
   onSubmit,
   onCreateConversation,
   isLoading = false,
+  modelSyncPending = false,
 }: InputBarProps): React.ReactElement {
   const t = useTranslations('input')
   const tShell = useTranslations('shellLayout')
@@ -119,6 +125,7 @@ export function InputBar({
       messageIsStreaming ||
       uploadInFlight ||
       hasPendingHitl ||
+      modelSyncPending ||
       (!content.trim() && stagedFileCount === 0)
     )
       return
@@ -340,7 +347,8 @@ export function InputBar({
                   (!content.trim() && stagedFileCount === 0) ||
                   (isSubmitting && !messageIsStreaming) ||
                   uploadInFlight ||
-                  hasPendingHitl
+                  hasPendingHitl ||
+                  (modelSyncPending && !messageIsStreaming)
                 }
                 title={hasPendingHitl ? t('pendingHitlLock') : undefined}
                 className={cn(

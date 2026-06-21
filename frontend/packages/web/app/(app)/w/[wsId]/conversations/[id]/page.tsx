@@ -31,6 +31,14 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)
   const focusArtifactId = useSearchParams().get('artifact')
   const [status, setStatus] = useState<'loading' | 'ok' | 'notfound' | 'forbidden'>('loading')
+  // The conversation whose stored model selection has been synced into the
+  // composer. Derived `modelSyncPending` blocks new-turn sends until the open
+  // conversation's setting has loaded, so a send right after a conversation
+  // switch can't ship the previous conversation's model. Tracked as an id (set
+  // only in the async callback) rather than a boolean toggled in the effect
+  // body, which would be a synchronous setState-in-effect.
+  const [syncedConvId, setSyncedConvId] = useState<string | null>(null)
+  const modelSyncPending = syncedConvId !== conversationId
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -73,6 +81,8 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
           }
         } catch {
           // Best-effort: a malformed body just leaves the persisted default.
+        } finally {
+          if (!cancelled) setSyncedConvId(conversationId)
         }
       } else setStatus('notfound')
     })()
@@ -120,7 +130,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
       <ArtifactGallery conversationId={conversationId} />
       <MessageList conversationId={conversationId} />
       <div className="border-t border-border px-4 py-3 bg-background">
-        <InputBar conversationId={conversationId} />
+        <InputBar conversationId={conversationId} modelSyncPending={modelSyncPending} />
       </div>
     </AppShell>
   )

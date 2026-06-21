@@ -1380,6 +1380,11 @@ async def send_message(
         resolve_model_preset(_snap, request_obj.model_key)
         effective_model_key = request_obj.model_key
     except UnknownPresetError:
+        # Re-validate the default synchronously so BrokenPresetError /
+        # NoDefaultPresetError still raise (4xx) BEFORE any mutation, exactly
+        # like the non-fallback path — never let them slip into the stream after
+        # has_messages / updated_at / model_key were already changed.
+        resolve_model_preset(_snap, None)
         effective_model_key = None
 
     (
