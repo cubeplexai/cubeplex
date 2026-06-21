@@ -6,6 +6,7 @@ import { csrfHeaders } from '@/lib/csrf'
 import { useSandboxFileContent } from '@/hooks/useSandboxFileContent'
 import type { SandboxFileEntry } from '@/hooks/useSandboxFiles'
 import { PreviewLoading } from '@/components/panel/artifact/PreviewLoading'
+import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 
 const OFFICE_EXTENSIONS = new Set(['.docx', '.xlsx', '.pptx'])
 const TEXT_EXTENSIONS = new Set([
@@ -72,12 +73,14 @@ interface SandboxFilePreviewProps {
   entry: SandboxFileEntry
   workspaceId: string
   conversationId?: string | null
+  onNavigate?: (path: string) => void
 }
 
 export function SandboxFilePreview({
   entry,
   workspaceId,
   conversationId,
+  onNavigate,
 }: SandboxFilePreviewProps) {
   const ext = getExtension(entry.name)
 
@@ -91,12 +94,74 @@ export function SandboxFilePreview({
       <HtmlFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
+  if (ext === '.md' && onNavigate) {
+    return (
+      <MarkdownFilePreview
+        entry={entry}
+        workspaceId={workspaceId}
+        conversationId={conversationId}
+        onNavigate={onNavigate}
+      />
+    )
+  }
   if (isTextFile(entry.name)) {
     return (
       <TextFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
   return <FallbackPreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+}
+
+function MarkdownFilePreview({
+  entry,
+  workspaceId,
+  conversationId,
+  onNavigate,
+}: {
+  entry: SandboxFileEntry
+  workspaceId: string
+  conversationId?: string | null
+  onNavigate: (path: string) => void
+}) {
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
+
+  const resolveAssetUrl = useCallback(
+    (path: string) => {
+      const convQs = conversationId ? `&conversation_id=${encodeURIComponent(conversationId)}` : ''
+      return (
+        `/api/v1/ws/${workspaceId}` +
+        `/sandbox/files/download` +
+        `?path=${encodeURIComponent(path)}${convQs}`
+      )
+    },
+    [workspaceId, conversationId],
+  )
+
+  if (loading) return <PreviewLoading />
+  if (error?.message === 'FILE_TOO_LARGE') {
+    return (
+      <FallbackPreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
+    )
+  }
+  if (error) {
+    return <div className="p-4 text-sm text-destructive">Failed to load: {error.message}</div>
+  }
+  if (content == null) return null
+
+  return (
+    <div className="h-full overflow-auto">
+      <MarkdownWithCitations
+        className="prose prose-sm dark:prose-invert max-w-none p-4"
+        sandbox={{
+          filePath: entry.path,
+          onNavigate,
+          resolveAssetUrl,
+        }}
+      >
+        {content}
+      </MarkdownWithCitations>
+    </div>
+  )
 }
 
 function TextFilePreview({

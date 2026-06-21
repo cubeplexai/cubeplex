@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { FolderOpen, Globe, Loader2, TerminalSquare, RefreshCw, X } from 'lucide-react'
 import { usePanelStore } from '@cubebox/core'
 import { useSWRConfig } from 'swr'
@@ -31,9 +31,17 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
   const [activeTab, setActiveTab] = useState<SandboxTab>('files')
   const [refreshing, setRefreshing] = useState(false)
   const close = usePanelStore((s) => s.close)
+  const sandboxView = usePanelStore((s) => (s.view.type === 'sandbox' ? s.view : null))
+  const initialFilePath = sandboxView?.initialFilePath ?? null
+  const sandboxRevision = sandboxView?.revision ?? null
   const { mutate } = useSWRConfig()
   const browserRefreshRef = useRef<(() => void) | null>(null)
   const terminalRefreshRef = useRef<(() => Promise<unknown>) | null>(null)
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing from external panel store
+    if (initialFilePath) setActiveTab('files')
+  }, [initialFilePath, sandboxRevision])
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -102,7 +110,12 @@ export function SandboxPanel({ workspaceId, conversationId }: SandboxPanelProps)
           </div>
         )}
         {activeTab === 'files' && (
-          <SandboxFilesView workspaceId={workspaceId} conversationId={conversationId} />
+          <SandboxFilesView
+            workspaceId={workspaceId}
+            conversationId={conversationId}
+            initialFilePath={initialFilePath}
+            initialFilePathRevision={sandboxRevision}
+          />
         )}
         {activeTab === 'browser' && (
           <BrowserView

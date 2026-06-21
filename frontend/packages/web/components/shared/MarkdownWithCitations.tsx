@@ -1,8 +1,8 @@
 'use client'
 
 import ReactMarkdown from 'react-markdown'
-import { memo } from 'react'
-import type { ComponentProps } from 'react'
+import { memo, useMemo } from 'react'
+import type { ComponentProps, MouseEvent } from 'react'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
 import remarkMath from 'remark-math'
@@ -13,6 +13,7 @@ import 'katex/dist/katex.min.css'
 import { useConversationStore } from '@cubebox/core'
 import { renderWithCitations } from '@/lib/citations'
 import { CitationMarker } from '@/components/chat/CitationMarker'
+import { resolveSandboxHref } from '@/lib/sandboxLinks'
 
 const CITATION_RE = /【\d+-\d+】/
 
@@ -39,10 +40,21 @@ function fixCjkBoldQuotes(text: string): string {
     .replace(/(["\u201d\u300d])\s*\*\*/g, '**$1')
 }
 
+export interface SandboxMarkdownContext {
+  /** Absolute sandbox path of the markdown file being rendered. */
+  filePath: string
+  /** Called when the user clicks a link that resolves to another sandbox file. */
+  onNavigate: (path: string) => void
+  /** Translates an asset path inside the sandbox into a fetchable URL (used for images). */
+  resolveAssetUrl: (path: string) => string
+}
+
 interface MarkdownWithCitationsProps {
   children: string
   className?: string
   conversationId?: string
+  /** When set, links/images that resolve inside the sandbox become navigable / fetchable. */
+  sandbox?: SandboxMarkdownContext
 }
 
 /**
@@ -54,16 +66,25 @@ function MarkdownWithCitationsImpl({
   children,
   className,
   conversationId: conversationIdProp,
+  sandbox,
 }: MarkdownWithCitationsProps) {
   const activeId = useConversationStore((s) => s.activeId)
   const conversationId = conversationIdProp ?? activeId ?? ''
   const md = fixCjkBoldQuotes(children)
   const hasCitations = CITATION_RE.test(md)
+  const sandboxComponents = useMemo(
+    () => (sandbox ? buildSandboxComponents(sandbox) : null),
+    [sandbox],
+  )
 
   if (!hasCitations) {
     return (
       <div className={className}>
-        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} rehypePlugins={REHYPE_PLUGINS}>
+        <ReactMarkdown
+          remarkPlugins={REMARK_PLUGINS}
+          rehypePlugins={REHYPE_PLUGINS}
+          components={sandboxComponents ?? undefined}
+        >
           {md}
         </ReactMarkdown>
       </div>
@@ -76,6 +97,7 @@ function MarkdownWithCitationsImpl({
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={REHYPE_PLUGINS}
         components={{
+          ...(sandboxComponents ?? {}),
           p: ({ children: c }) => <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>,
           li: ({ children: c }) => (
             <li>{renderWithCitations(c, conversationId, CitationMarker)}</li>
@@ -116,3 +138,55 @@ function MarkdownWithCitationsImpl({
 }
 
 export const MarkdownWithCitations = memo(MarkdownWithCitationsImpl)
+
+type MarkdownComponents = NonNullable<ComponentProps<typeof ReactMarkdown>['components']>
+
+function buildSandboxComponents(sandbox: SandboxMarkdownContext): MarkdownComponents {
+  return {
+    a: ({ href, children, ...rest }) => {
+      if (!href) return <a {...rest}>{children}</a>
+      const resolved = resolveSandboxHref(sandbox.filePath, href)
+      if (resolved.kind === 'sandbox') {
+        const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
+          if (e.defaultPrevented) return
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+          e.preventDefault()
+          sandbox.onNavigate(resolved.path)
+        }
+        return (
+          <a
+            {...rest}
+            href={sandbox.resolveAssetUrl(resolved.path) + (resolved.hash ?? '')}
+            onClick={onClick}
+            data-sandbox-link={resolved.path}
+          >
+            {children}
+          </a>
+        )
+      }
+      if (resolved.kind === 'anchor') {
+        return (
+          <a {...rest} href={resolved.hash}>
+            {children}
+          </a>
+        )
+      }
+      return (
+        <a {...rest} href={resolved.href}>
+          {children}
+        </a>
+      )
+    },
+    img: ({ src, alt, ...rest }) => {
+      // sandbox-served images are dynamic, same-origin authed URLs — next/image doesn't apply.
+      /* eslint-disable @next/next/no-img-element */
+      if (typeof src !== 'string' || !src) return <img src={src} alt={alt} {...rest} />
+      const resolved = resolveSandboxHref(sandbox.filePath, src)
+      if (resolved.kind === 'sandbox') {
+        return <img {...rest} src={sandbox.resolveAssetUrl(resolved.path)} alt={alt} />
+      }
+      return <img {...rest} src={src} alt={alt} />
+      /* eslint-enable @next/next/no-img-element */
+    },
+  }
+}

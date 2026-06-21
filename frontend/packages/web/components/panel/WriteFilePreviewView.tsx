@@ -6,6 +6,7 @@ import type { ToolCallRef } from '@cubebox/core'
 import { proseClasses } from '@/lib/utils'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { parseWriteFileArgs, resolveLiveWriteFile } from '@/lib/writeFilePreview'
+import { useSandboxMarkdownContext } from '@/hooks/useSandboxMarkdownContext'
 
 interface WriteFilePreviewViewProps {
   args: Record<string, unknown>
@@ -209,6 +210,7 @@ export function WriteFilePreviewView({ args, result, toolRef }: WriteFilePreview
   const mode = detectMode(filePath)
   const language = detectLanguage(filePath)
   const isStreaming = parsed.status === 'streaming_args'
+  const sandboxCtx = useSandboxMarkdownContext(parsed.filePath || null)
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current
@@ -249,7 +251,12 @@ export function WriteFilePreviewView({ args, result, toolRef }: WriteFilePreview
         </div>
 
         {mode === 'markdown' ? (
-          <MarkdownWithCitations className={`p-4 ${proseClasses}`}>{content}</MarkdownWithCitations>
+          <MarkdownWithCitations
+            className={`p-4 ${proseClasses}`}
+            sandbox={sandboxCtx ?? undefined}
+          >
+            {content}
+          </MarkdownWithCitations>
         ) : mode === 'code' ? (
           <CodePreview code={content} language={language} />
         ) : (

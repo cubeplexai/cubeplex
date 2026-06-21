@@ -56,7 +56,7 @@ export type PanelView =
       type: 'attachment'
       info: AttachmentPanelInfo
     }
-  | { type: 'sandbox' }
+  | { type: 'sandbox'; initialFilePath?: string; revision?: number }
   | { type: 'skill-candidate'; candidateId: string; repo: string | null; sourceName: string }
 
 export interface PanelStore {
@@ -77,12 +77,15 @@ export interface PanelStore {
 
   openSandbox: () => void
 
+  openSandboxFile: (path: string) => void
+
   openSkillCandidate: (candidateId: string, repo: string | null, sourceName: string) => void
 
   close: () => void
 }
 
 let highlightCounter = 0
+let sandboxRevisionCounter = 0
 
 export const usePanelStore = create<PanelStore>((set) => ({
   view: { type: 'closed' },
@@ -112,6 +115,11 @@ export const usePanelStore = create<PanelStore>((set) => ({
     }),
 
   openSandbox: () => set({ view: { type: 'sandbox' } }),
+
+  openSandboxFile: (path) =>
+    set({
+      view: { type: 'sandbox', initialFilePath: path, revision: ++sandboxRevisionCounter },
+    }),
 
   openSkillCandidate: (candidateId, repo, sourceName) =>
     set({ view: { type: 'skill-candidate', candidateId, repo, sourceName } }),

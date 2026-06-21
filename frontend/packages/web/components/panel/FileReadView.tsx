@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { getFileVisual } from '@/lib/fileIcons'
 import { cn } from '@/lib/utils'
+import { useSandboxMarkdownContext } from '@/hooks/useSandboxMarkdownContext'
 
 interface Props {
   args: Record<string, unknown>
@@ -107,7 +108,7 @@ export function FileReadView({
         </div>
       </header>
       <MetaStrip parsed={parsed} args={args} />
-      <Body parsed={parsed} highlightText={highlightText} highlightKey={highlightKey} />
+      <Body parsed={parsed} path={path} highlightText={highlightText} highlightKey={highlightKey} />
     </div>
   )
 }
@@ -175,15 +176,18 @@ function Chip({
 
 function Body({
   parsed,
+  path,
   highlightText,
   highlightKey,
 }: {
   parsed: FileReadResult | null
+  path: string
   highlightText?: string | null
   highlightKey?: number
 }): React.ReactElement {
   const t = useTranslations('panel.fileRead')
   const bodyRef = useRef<HTMLDivElement>(null)
+  const sandboxCtx = useSandboxMarkdownContext(path || null)
   useEffect(() => {
     if (!highlightText || !bodyRef.current) return
     const el = bodyRef.current
@@ -205,7 +209,10 @@ function Body({
   if (parsed.kind === 'text') {
     return (
       <div ref={bodyRef} className="flex-1 overflow-y-auto p-4">
-        <MarkdownWithCitations className="prose prose-sm dark:prose-invert max-w-none">
+        <MarkdownWithCitations
+          className="prose prose-sm dark:prose-invert max-w-none"
+          sandbox={sandboxCtx ?? undefined}
+        >
           {(parsed as TextOutput).content}
         </MarkdownWithCitations>
       </div>
@@ -221,7 +228,10 @@ function Body({
               {cell.cell_type === 'code' ? `In [${i + 1}]` : cell.cell_type}
             </div>
             {cell.cell_type === 'markdown' ? (
-              <MarkdownWithCitations className="prose prose-sm dark:prose-invert max-w-none">
+              <MarkdownWithCitations
+                className="prose prose-sm dark:prose-invert max-w-none"
+                sandbox={sandboxCtx ?? undefined}
+              >
                 {cell.source}
               </MarkdownWithCitations>
             ) : (
