@@ -1368,10 +1368,19 @@ async def send_message(
             ctx.org_id,
             raw_request.app.state.encryption_backend,
         )
-    # resolve_model_preset raises one of UnknownPresetError / BrokenPresetError /
-    # NoDefaultPresetError, all of which are APIException subclasses with the
-    # right status_code; the registered handler maps them to HTTP responses.
-    resolve_model_preset(_snap, request_obj.model_key)
+    # Validate the requested model selection. BrokenPresetError (the preset's
+    # model refs are missing) and NoDefaultPresetError stay 4xx. An
+    # UnknownPresetError means the chosen key (a tier/custom preset) was since
+    # deleted — a stale client cache, or a key stored on the conversation whose
+    # preset is gone. Fall back to the workspace default instead of bricking the
+    # send with a 400, and persist the fallback so the conversation heals.
+    from cubebox.llm.errors import UnknownPresetError
+
+    try:
+        resolve_model_preset(_snap, request_obj.model_key)
+        effective_model_key = request_obj.model_key
+    except UnknownPresetError:
+        effective_model_key = None
 
     (
         _topic_id,
@@ -1409,7 +1418,7 @@ async def send_message(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
-        model_setting=(request_obj.model_key, request_obj.thinking),
+        model_setting=(effective_model_key, request_obj.thinking),
     )
 
     run_manager = raw_request.app.state.run_manager
@@ -1432,7 +1441,7 @@ async def send_message(
             content=request_obj.content,
             attachments=list(request_obj.attachments),
             ctx=run_ctx,
-            model_key=request_obj.model_key,
+            model_key=effective_model_key,
             thinking=request_obj.thinking,
         )
     except RuntimeError as exc:

@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   clearAllPresetSelectionStores,
+  consumeLocallyCreatedConversation,
   getPresetSelectionStore,
+  markConversationLocallyCreated,
   validatedModelKey,
   type PresetSelectionState,
 } from '@/lib/stores/preset-selection'
@@ -156,6 +158,19 @@ describe('preset-selection store', () => {
 
     it('passes null through (workspace default)', () => {
       expect(validatedModelKey(make(null, ['lite', 'pro']))).toBeNull()
+    })
+  })
+
+  describe('locally-created conversation marker', () => {
+    it('consumes the marker exactly once (skip first open-sync, then sync)', () => {
+      markConversationLocallyCreated('conv_new')
+      expect(consumeLocallyCreatedConversation('conv_new')).toBe(true)
+      // Already consumed: a later genuine re-open syncs normally.
+      expect(consumeLocallyCreatedConversation('conv_new')).toBe(false)
+    })
+
+    it('returns false for a conversation that was not locally created', () => {
+      expect(consumeLocallyCreatedConversation('conv_existing')).toBe(false)
     })
   })
 })

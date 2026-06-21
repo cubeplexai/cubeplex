@@ -4,10 +4,10 @@ These tests verify that LLMConfigError subclasses surface as HTTP errors
 (not as mid-stream SSE error events) when ``send_message`` validates the
 preset synchronously before scheduling the background run.
 
-Three error paths:
+Two error paths (an unknown ``model_key`` is NOT an error — it falls back to
+the workspace default; see ``test_unknown_model_key_falls_back_to_default`` in
+test_preset_switching_e2e.py):
 
-* ``unknown_preset`` (400) — caller passes ``preset_label`` that doesn't
-  match any seeded preset.
 * ``broken_preset`` (400) — default preset's chain references a
   non-existent provider/model.
 * ``no_default_preset`` (500) — no ``model_presets`` row at all
@@ -112,52 +112,6 @@ async def _wipe_preset_seed_rows() -> None:
         await test_engine.dispose()
 
 
-async def _seed_alpha_provider_and_default_preset() -> None:
-    """One system provider 'alpha' with model 'm1' + default preset alpha/m1."""
-    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
-    maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
-    try:
-        async with maker() as session:
-            provider = DBProvider(
-                org_id=None,
-                name="alpha",
-                slug="alpha",
-                provider_type="openai-completions",
-                base_url="https://alpha.test/v1",
-                auth_type="api_key",
-                enabled=True,
-            )
-            session.add(provider)
-            await session.flush()
-            session.add(
-                DBModel(
-                    org_id=None,
-                    provider_id=provider.id,
-                    model_id="m1",
-                    display_name="alpha-m1",
-                    reasoning=False,
-                    input_modalities=["text"],
-                    cost_input=0.0,
-                    cost_output=0.0,
-                    cost_cache_read=0.0,
-                    cost_cache_write=0.0,
-                    context_window=128_000,
-                    max_tokens=4096,
-                    enabled=True,
-                )
-            )
-            session.add(
-                OrgSettings(
-                    org_id=DEFAULT_ORG_ID,
-                    key=MODEL_PRESETS_KEY,
-                    value=_tiered_value(primary="alpha/m1"),
-                )
-            )
-            await session.commit()
-    finally:
-        await test_engine.dispose()
-
-
 async def _seed_broken_default_preset() -> None:
     """Default preset whose chain references a non-existent provider/model."""
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
@@ -225,34 +179,6 @@ async def _read_conversation_state(conv_id: str) -> tuple[bool, Any]:
             return bool(row.has_messages), row.updated_at
     finally:
         await test_engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_unknown_preset_label_400(preset_error_client: httpx.AsyncClient) -> None:
-    """preset_label not in OrgSettings.model_presets → 400 unknown_preset."""
-    await _seed_alpha_provider_and_default_preset()
-
-    client = preset_error_client
-    ws_id = DEFAULT_WS_ID
-    conv_id = await _create_conversation(client, ws_id, "unknown-preset")
-    before_has_messages, before_updated_at = await _read_conversation_state(conv_id)
-
-    resp = await client.post(
-        f"/api/v1/ws/{ws_id}/conversations/{conv_id}/messages",
-        json={"content": "hello", "model_key": "ghost"},
-    )
-    assert resp.status_code == 400, resp.text
-    body = resp.json()
-    assert body.get("error_code") == "unknown_preset", body
-    assert "ghost" in body.get("message", ""), body
-
-    # Locks the ordering invariant: preset validation must run BEFORE any
-    # mutation (attachment mark or has_messages / updated_at bump). If this
-    # assertion fires, the validation block has drifted back below the
-    # mutations and a 4xx will leave orphan state on the row.
-    after_has_messages, after_updated_at = await _read_conversation_state(conv_id)
-    assert after_has_messages == before_has_messages, (before_has_messages, after_has_messages)
-    assert after_updated_at == before_updated_at, (before_updated_at, after_updated_at)
 
 
 @pytest.mark.asyncio
