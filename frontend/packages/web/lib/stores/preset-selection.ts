@@ -5,7 +5,7 @@
  * Persisted to localStorage under `preset-selection-v1:${wsId}` so each
  * workspace has its own remembered choice (D4). Only the user's
  * choices persist via `partialize`; the workspace preset list is always
- * refetched on mount and validated against the persisted `modelPresetKey`.
+ * refetched on mount and validated against the persisted `modelKey`.
  */
 
 import { create, type StoreApi, type UseBoundStore } from 'zustand'
@@ -16,13 +16,13 @@ import type { ThinkingLevel, WorkspacePresetSummary } from '@/lib/types/presets'
 export interface PresetSelectionState {
   /** The workspace preset list, refetched on mount. Not persisted. */
   presets: WorkspacePresetSummary[]
-  /** Selected preset key (tier name or custom label); `null` = workspace default. */
-  modelPresetKey: string | null
+  /** Selected model key (tier name or custom label); `null` = workspace default. */
+  modelKey: string | null
   /** Selected thinking level; default `"medium"`. */
   thinking: ThinkingLevel
 
   setPresets: (p: WorkspacePresetSummary[]) => void
-  setModelPresetKey: (key: string | null) => void
+  setModelKey: (key: string | null) => void
   setThinking: (t: ThinkingLevel) => void
   reset: () => void
 }
@@ -50,12 +50,12 @@ export function getPresetSelectionStore(
     persist(
       (set) => ({
         presets: [],
-        modelPresetKey: null,
+        modelKey: null,
         thinking: 'medium' as ThinkingLevel,
         setPresets: (presets) => set({ presets }),
-        setModelPresetKey: (modelPresetKey) => set({ modelPresetKey }),
+        setModelKey: (modelKey) => set({ modelKey }),
         setThinking: (thinking) => set({ thinking }),
-        reset: () => set({ modelPresetKey: null, thinking: 'medium' as ThinkingLevel }),
+        reset: () => set({ modelKey: null, thinking: 'medium' as ThinkingLevel }),
       }),
       {
         name: storageKey(wsId),
@@ -64,24 +64,23 @@ export function getPresetSelectionStore(
         // waiting for the refetch (stale-while-revalidate: the mount-time fetch
         // still refreshes the list + revalidates `modelPresetKey`).
         partialize: (state) => ({
-          modelPresetKey: state.modelPresetKey,
+          modelKey: state.modelKey,
           thinking: state.thinking,
           presets: state.presets,
         }),
-        // v3 renamed the persisted selection field `presetLabel` →
-        // `modelPresetKey`. A stale `presetLabel` is simply dropped on read;
-        // the ModelPicker re-validates the selection against the fresh key
-        // list on mount and resets it to null if unknown, so no key remap is
-        // needed. v2 dropped the `minimal` thinking level (deepseek's schema
-        // rejects it); rewrite stale values so the dropdown has no orphan.
-        // v4 changed the default thinking level off → medium. Drop any
-        // persisted `thinking` so it re-defaults to medium; keep the model
-        // choice. (v3 renamed presetLabel → modelPresetKey; v2 dropped the
-        // `minimal` level.)
-        version: 4,
+        // v5 renamed the persisted selection field `modelPresetKey` →
+        // `modelKey`. A stale `modelPresetKey` is migrated below; the
+        // ModelPicker re-validates the selection against the fresh key list
+        // on mount and resets it to null if unknown, so no further key remap
+        // is needed. v2 dropped the `minimal` thinking level (deepseek's
+        // schema rejects it); rewrite stale values so the dropdown has no
+        // orphan. v4 changed the default thinking level off → medium. Drop
+        // any persisted `thinking` so it re-defaults to medium; keep the
+        // model choice.
+        version: 5,
         migrate: (persisted, _version) => {
-          const p = (persisted as Partial<PresetSelectionState>) ?? {}
-          return { modelPresetKey: p.modelPresetKey ?? null } as PresetSelectionState
+          const p = (persisted as Partial<PresetSelectionState> & { modelPresetKey?: string }) ?? {}
+          return { modelKey: p.modelKey ?? p.modelPresetKey ?? null } as PresetSelectionState
         },
       },
     ),

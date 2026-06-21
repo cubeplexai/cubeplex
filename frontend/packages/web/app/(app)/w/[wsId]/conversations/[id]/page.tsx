@@ -4,11 +4,15 @@ import { use, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   createApiClient,
+  type Conversation,
   useArtifactStore,
   useConversationStore,
   usePanelStore,
 } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
+
+import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
+import type { ThinkingLevel } from '@/lib/types/presets'
 
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
@@ -38,11 +42,24 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
       const res = await client.get(`/api/v1/conversations/${conversationId}`)
       if (res.status === 404) setStatus('notfound')
       else if (res.status === 403) setStatus('forbidden')
-      else if (res.ok) setStatus('ok')
-      else setStatus('notfound')
+      else if (res.ok) {
+        setStatus('ok')
+        // Sync the composer to this conversation's stored model setting, once
+        // per open/switch (the effect is keyed by conversationId). For a NEW
+        // chat the home page handles the first send before this route mounts,
+        // so the persisted last-used value stays the default there.
+        try {
+          const convo = (await res.json()) as Conversation
+          const store = getPresetSelectionStore(wsId).getState()
+          store.setModelKey(convo.model_key ?? null)
+          store.setThinking((convo.thinking ?? 'medium') as ThinkingLevel)
+        } catch {
+          // Best-effort: a malformed body just leaves the persisted default.
+        }
+      } else setStatus('notfound')
     })()
     loadArtifacts(client, conversationId)
-  }, [conversationId, client, setActive, loadArtifacts])
+  }, [conversationId, client, wsId, setActive, loadArtifacts])
 
   // Arriving from the artifacts library with `?artifact=<id>` auto-opens that
   // artifact's preview. Runs after the reset effect above (declaration order),
