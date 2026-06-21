@@ -194,6 +194,19 @@ describe('InputBar', () => {
     expect(callArgs[5]).toEqual({ model_key: 'reasoning', thinking: 'medium' })
   })
 
+  it('blocks send while the conversation model is still syncing', () => {
+    storeMocks.send.mockResolvedValue(undefined)
+
+    renderWithIntl(<InputBar conversationId="conv-1" modelSyncPending />)
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'hello' } })
+
+    // The send button is disabled until sync completes, and clicking it (or
+    // hitting Enter) must not start a turn with the prior conversation's model.
+    expect(screen.getByTestId('send-button')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('send-button'))
+    expect(storeMocks.send).not.toHaveBeenCalled()
+  })
+
   it('sends model_key: null when the user has not picked a model', async () => {
     storeMocks.send.mockResolvedValue(undefined)
     renderWithIntl(<InputBar conversationId="conv-1" />)
