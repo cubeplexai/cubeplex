@@ -80,7 +80,6 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
   const defaultPreset = presets.find((p) => p.is_default) ?? null
   const effectiveKey = modelPresetKey ?? defaultPreset?.key ?? null
   const selected = presets.find((p) => p.key === effectiveKey) ?? null
-  const modelLabel = selected ? nameOf(selected) : t('presetPlaceholder')
 
   return (
     <Popover>
@@ -97,10 +96,16 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
         )}
       >
         <Cpu aria-hidden className="size-3.5 text-muted-foreground" />
-        <span className="font-medium">{modelLabel}</span>
-        <span aria-hidden className="text-muted-foreground/60">
-          ·
-        </span>
+        {/* Hidden until presets load so the button never flashes the generic
+            placeholder before resolving to the real default ("Pro"). */}
+        {selected ? (
+          <>
+            <span className="font-medium">{nameOf(selected)}</span>
+            <span aria-hidden className="text-muted-foreground/60">
+              ·
+            </span>
+          </>
+        ) : null}
         <span className="text-muted-foreground">{t(THINKING_LABEL_KEY[thinking])}</span>
         <ChevronDown aria-hidden className="size-3.5 text-muted-foreground" />
       </PopoverTrigger>
