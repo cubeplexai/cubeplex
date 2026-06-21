@@ -149,9 +149,8 @@ async def build_usage_summary(
         model_cfg = next(m for m in provider_cfg.models if m.id == model_id)
         summary["context_window"] = model_cfg.context_window
     except Exception:
-        logger.warning(
-            "Failed to build usage summary for conversation %s",
+        logger.opt(exception=True).warning(
+            "Failed to build usage summary for conversation {}",
             conversation_id,
-            exc_info=True,
         )
     return summary

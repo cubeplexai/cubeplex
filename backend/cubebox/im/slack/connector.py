@@ -270,7 +270,7 @@ class SlackConnector:
                 return profile.get("email") or None
             return None
         except Exception:
-            logger.warning("[Slack] resolve_email failed for %s", open_id, exc_info=True)
+            logger.opt(exception=True).warning("[Slack] resolve_email failed for {}", open_id)
             return None
 
     # ------------------------------------------------------------------

@@ -381,4 +381,4 @@ async def seed_model_presets_from_config(session: AsyncSession) -> None:
     session.add(OrgSettings(org_id=None, key=MODEL_PRESETS_KEY, value=cfg.model_dump(mode="json")))
     await session.flush()
     await session.commit()
-    logger.info("Seeded system model_presets (default=%s)", cfg.default_preset)
+    logger.info("Seeded system model_presets (default={})", cfg.default_preset)
