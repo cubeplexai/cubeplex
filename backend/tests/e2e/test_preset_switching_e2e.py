@@ -1,11 +1,11 @@
-"""End-to-end preset switching: per-message preset_label picks the right chain.
+"""End-to-end preset switching: per-message model_key picks the right chain.
 
 Two FauxProviders ("big" and "small") are registered. The default preset
 points at "big"; an additional non-default preset points at "small".
 
-* Without ``preset_label`` → default ("big") is used; reply contains "big".
-* With ``preset_label="small"`` → the "small" preset is used; reply
-  contains "small".
+* Without ``model_key`` → default ("big") is used; reply contains "big".
+* With ``model_key="small"`` → the "small" preset is used; reply
+  contains "small", and the conversation row persists ``model_key``.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import cubebox.db as _cubebox_db
 from cubebox.api.app import create_app
 from cubebox.db.engine import _build_database_url, engine
 from cubebox.db.session import get_session
+from cubebox.models import Conversation
 from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 from cubebox.models.provider import Model as DBModel
 from cubebox.models.provider import Provider as DBProvider
@@ -281,7 +282,7 @@ async def test_default_preset_routes_to_big(
 async def test_explicit_preset_label_routes_to_small(
     switching_client: httpx.AsyncClient,
 ) -> None:
-    """preset_label='small' → small preset is used instead of default."""
+    """model_key='small' → small preset is used instead of default."""
     client = switching_client
     ws_id = DEFAULT_WS_ID
     conv_id = await _create_conversation(client, ws_id, "switch-small")
@@ -290,7 +291,7 @@ async def test_explicit_preset_label_routes_to_small(
         client,
         ws_id,
         conv_id,
-        {"content": "hi", "preset_label": "small"},
+        {"content": "hi", "model_key": "small", "thinking": "high"},
     )
 
     errors = [e for e in events if e.get("type") == "error"]
@@ -301,3 +302,19 @@ async def test_explicit_preset_label_routes_to_small(
         f"expected 'small' answer; got: {text!r}\nevent types: {[e.get('type') for e in events]!r}"
     )
     assert "big" not in text.lower(), f"unexpected 'big' in reply: {text!r}"
+
+    # The send path must persist the chosen model setting on the conversation
+    # row so the frontend can restore it on reload.
+    test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            row = (
+                await session.execute(
+                    select(Conversation).where(Conversation.id == conv_id)  # type: ignore[arg-type]
+                )
+            ).scalar_one()
+            assert row.model_key == "small", row.model_key
+            assert row.thinking == "high", row.thinking
+    finally:
+        await test_engine.dispose()

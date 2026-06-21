@@ -44,6 +44,13 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
     has_messages: bool = Field(default=False, index=True)
     is_pinned: bool = Field(default=False)
     is_group_chat: bool = Field(default=False)
+    # Per-conversation model setting the user last sent with. ``model_key`` is
+    # the stable selection key (a tier name like "pro" or a custom-preset
+    # label), NULL meaning "use the workspace default". ``thinking`` is the
+    # reasoning level stored as a plain str (the typed ThinkingLevel lives at
+    # the API/runtime layer).
+    model_key: str | None = Field(default=None, max_length=64)
+    thinking: str = Field(default="medium", max_length=16)
     deleted_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

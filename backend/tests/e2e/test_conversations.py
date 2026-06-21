@@ -5,9 +5,19 @@ Tests CRUD operations and the message streaming endpoint.
 
 import httpx
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
-from tests.e2e.conftest import DEFAULT_WS_ID
+from cubebox.db.engine import _build_database_url
+from cubebox.repositories import ConversationRepository
+from tests.e2e.conftest import (
+    DEFAULT_ORG_ID,
+    DEFAULT_TEST_EMAIL,
+    DEFAULT_WS_ID,
+    _ensure_default_user_and_membership,
+)
 from tests.e2e.helpers import parse_sse_stream
 
 pytestmark = pytest.mark.e2e
@@ -327,3 +337,84 @@ class TestSendMessage:
             json={"content": "Hello"},
         )
         assert response.status_code == 404
+
+
+@pytest_asyncio.fixture
+async def _default_user_id() -> str:
+    """Resolve the seeded default user's id for repo-scoped tests."""
+    from sqlalchemy import select
+
+    from cubebox.models import User
+
+    await _ensure_default_user_and_membership()
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    try:
+        maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with maker() as session:
+            user = (
+                await session.execute(select(User).where(User.email == DEFAULT_TEST_EMAIL))
+            ).scalar_one()
+            return user.id
+    finally:
+        await engine.dispose()
+
+
+class TestConversationModelSetting:
+    """Persistence + serialization of the per-conversation model setting."""
+
+    @pytest.mark.asyncio
+    async def test_mark_active_persists_model_setting(self, _default_user_id: str) -> None:
+        """mark_active(model_setting=...) stores the key + thinking; a plain
+        mark_active afterwards leaves them untouched."""
+        engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+        try:
+            maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with maker() as session:
+                repo = ConversationRepository(
+                    session,
+                    org_id=DEFAULT_ORG_ID,
+                    workspace_id=DEFAULT_WS_ID,
+                    user_id=_default_user_id,
+                )
+                conv = await repo.create(title="model-setting", draft=True)
+
+                await repo.mark_active(conv.id, model_setting=("pro", "high"))
+                await session.refresh(conv)
+                assert conv.model_key == "pro"
+                assert conv.thinking == "high"
+
+                # A timestamp-only mark_active (the install-fallback caller)
+                # must NOT clobber the previously stored model setting.
+                await repo.mark_active(conv.id)
+                await session.refresh(conv)
+                assert conv.model_key == "pro"
+                assert conv.thinking == "high"
+        finally:
+            await engine.dispose()
+
+    @pytest.mark.asyncio
+    async def test_get_conversation_returns_model_setting(
+        self, async_client: httpx.AsyncClient, _default_user_id: str
+    ) -> None:
+        """GET /conversations/{id} surfaces model_key + thinking."""
+        engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+        try:
+            maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with maker() as session:
+                repo = ConversationRepository(
+                    session,
+                    org_id=DEFAULT_ORG_ID,
+                    workspace_id=DEFAULT_WS_ID,
+                    user_id=_default_user_id,
+                )
+                conv = await repo.create(title="serialize-model-setting")
+                await repo.mark_active(conv.id, model_setting=("ultra", "low"))
+                conv_id = conv.id
+        finally:
+            await engine.dispose()
+
+        resp = await async_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{conv_id}")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["model_key"] == "ultra"
+        assert data["thinking"] == "low"

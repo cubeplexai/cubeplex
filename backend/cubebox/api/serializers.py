@@ -27,4 +27,6 @@ def serialize_conversation(c: Conversation) -> dict[str, Any]:
         "is_group_chat": c.is_group_chat,
         "created_at": utc_isoformat(c.created_at),
         "updated_at": utc_isoformat(c.updated_at),
+        "model_key": c.model_key,
+        "thinking": c.thinking,
     }

@@ -202,7 +202,12 @@ class ConversationRepository(ScopedRepository[Conversation]):
             conv.updated_at = datetime.now(UTC)
             await self.session.commit()
 
-    async def mark_active(self, conversation_id: str) -> None:
+    async def mark_active(
+        self,
+        conversation_id: str,
+        *,
+        model_setting: tuple[str | None, str] | None = None,
+    ) -> None:
         """Mark the conversation as having user activity.
 
         Always sets ``has_messages=True`` and bumps ``updated_at`` to now.
@@ -210,12 +215,20 @@ class ConversationRepository(ScopedRepository[Conversation]):
         visible immediately, even if the stream errors) and at stream end
         (so the timestamp reflects the latest activity for recency
         ordering in ``list_all``).
+
+        ``model_setting`` is an optional ``(model_key, thinking)`` pair. When
+        provided (the send path), it persists the user's per-conversation
+        model selection; ``model_key=None`` inside the tuple means "use the
+        workspace default" and is distinct from passing no tuple at all,
+        which leaves the stored setting untouched (the install-fallback path).
         """
         conv = await self.get(conversation_id)
         if not conv:
             return
         conv.has_messages = True
         conv.updated_at = datetime.now(UTC)
+        if model_setting is not None:
+            conv.model_key, conv.thinking = model_setting
         await self.session.commit()
 
     async def set_pin(self, conversation_id: str, is_pinned: bool) -> Conversation | None:

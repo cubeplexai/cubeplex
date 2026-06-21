@@ -207,6 +207,7 @@ async def _update_conversation_timestamp(
     org_id: str,
     workspace_id: str,
     user_id: str,
+    model_setting: tuple[str | None, str] | None = None,
 ) -> None:
     """Mark conversation as active and refresh its timestamp.
 
@@ -229,7 +230,7 @@ async def _update_conversation_timestamp(
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
-            await save_conv_repo.mark_active(conversation_id)
+            await save_conv_repo.mark_active(conversation_id, model_setting=model_setting)
     finally:
         await save_engine.dispose()
 
@@ -908,7 +909,7 @@ class SendMessageRequest(BaseModel):
 
     content: str = ""
     attachments: list[str] = []
-    preset_label: str | None = None
+    model_key: str | None = None
     thinking: ThinkingLevel = "off"
 
 
@@ -1370,7 +1371,7 @@ async def send_message(
     # resolve_preset raises one of UnknownPresetError / BrokenPresetError /
     # NoDefaultPresetError, all of which are APIException subclasses with the
     # right status_code; the registered handler maps them to HTTP responses.
-    resolve_model_preset(_snap, request_obj.preset_label)
+    resolve_model_preset(_snap, request_obj.model_key)
 
     (
         _topic_id,
@@ -1408,6 +1409,7 @@ async def send_message(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
+        model_setting=(request_obj.model_key, request_obj.thinking),
     )
 
     run_manager = raw_request.app.state.run_manager
@@ -1430,7 +1432,7 @@ async def send_message(
             content=request_obj.content,
             attachments=list(request_obj.attachments),
             ctx=run_ctx,
-            preset_label=request_obj.preset_label,
+            model_key=request_obj.model_key,
             thinking=request_obj.thinking,
         )
     except RuntimeError as exc:
