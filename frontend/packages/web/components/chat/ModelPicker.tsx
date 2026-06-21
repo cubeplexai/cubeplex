@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { Check, ChevronDown, Sparkles } from 'lucide-react'
+import { Check, ChevronDown, Cpu } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -87,12 +87,16 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
       <PopoverTrigger
         aria-label={t('modelPickerAria')}
         className={cn(
-          'flex h-8 items-center gap-1.5 rounded border border-input bg-transparent px-2.5',
-          'text-sm whitespace-nowrap transition-colors outline-none hover:bg-accent',
+          'flex h-8 items-center gap-1.5 rounded border border-transparent bg-transparent px-2',
+          'text-sm whitespace-nowrap transition-colors outline-none',
+          // Borderless until hovered / open, so it blends into the composer
+          // instead of reading as a framed control inside the input box.
+          'hover:border-border hover:bg-accent',
+          'aria-expanded:border-border aria-expanded:bg-accent',
           'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
         )}
       >
-        <Sparkles aria-hidden className="size-3.5 text-muted-foreground" />
+        <Cpu aria-hidden className="size-3.5 text-muted-foreground" />
         <span className="font-medium">{modelLabel}</span>
         <span aria-hidden className="text-muted-foreground/60">
           ·
