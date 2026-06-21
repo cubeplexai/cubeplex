@@ -214,9 +214,8 @@ async def api_exception_handler(_request: Request, exc: APIException) -> JSONRes
         JSONResponse with error information
     """
     # Log the error with stack trace
-    logger.error(
+    logger.opt(exception=True).error(
         f"API Error: {exc.error_code} - {exc.message}",
-        exc_info=True,
     )
 
     return JSONResponse(
@@ -236,9 +235,8 @@ async def generic_exception_handler(_request: Request, exc: Exception) -> JSONRe
         JSONResponse with error information
     """
     # Log the error with full stack trace
-    logger.error(
+    logger.opt(exception=True).error(
         f"Unhandled exception: {type(exc).__name__}",
-        exc_info=True,
     )
 
     error_response = {

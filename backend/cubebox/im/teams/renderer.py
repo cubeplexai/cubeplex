@@ -156,7 +156,7 @@ class TeamsOpDispatcher:
             try:
                 await self._connector.edit_message(s.bot_message_id, remaining)
             except Exception:
-                logger.warning("[Teams] finalize edit failed", exc_info=True)
+                logger.opt(exception=True).warning("[Teams] finalize edit failed")
                 await self.emergency_text(remaining[:TEAMS_MSG_LIMIT])
         else:
             while remaining:
@@ -178,7 +178,7 @@ class TeamsOpDispatcher:
         try:
             await self._connector.send_message(text[:TEAMS_MSG_LIMIT])
         except Exception:
-            logger.warning("[Teams] emergency text send failed", exc_info=True)
+            logger.opt(exception=True).warning("[Teams] emergency text send failed")
 
     async def aclose(self) -> None:
         pass

@@ -184,7 +184,7 @@ class SlackConnector:
             resp = await self._client.chat_postMessage(**kwargs)
             return str(resp["ts"]) if resp and resp.get("ts") else None
         except Exception:
-            logger.warning("[Slack] send_message failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] send_message failed")
             return None
 
     async def edit_message(self, message_ts: str, text: str) -> bool:
@@ -203,7 +203,7 @@ class SlackConnector:
         except Exception as exc:
             if self._is_rate_limit(exc):
                 raise SlackRateLimitError(f"edit rate limited: {exc}") from exc
-            logger.warning("[Slack] edit_message failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] edit_message failed")
             return False
 
     async def send_message_with_blocks(self, blocks: list[dict[str, Any]], text: str) -> str | None:
@@ -221,7 +221,7 @@ class SlackConnector:
             resp = await self._client.chat_postMessage(**kwargs)
             return str(resp["ts"]) if resp and resp.get("ts") else None
         except Exception:
-            logger.warning("[Slack] send_message_with_blocks failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] send_message_with_blocks failed")
             return None
 
     async def add_reaction(self, message_ts: str, emoji: str) -> bool:
@@ -236,7 +236,7 @@ class SlackConnector:
             )
             return True
         except Exception:
-            logger.warning("[Slack] add_reaction failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] add_reaction failed")
             return False
 
     async def remove_reaction(self, message_ts: str, emoji: str) -> bool:
@@ -251,7 +251,7 @@ class SlackConnector:
             )
             return True
         except Exception:
-            logger.warning("[Slack] remove_reaction failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] remove_reaction failed")
             return False
 
     # ------------------------------------------------------------------
@@ -291,7 +291,7 @@ class SlackConnector:
             resp = await self._client.chat_postMessage(**kwargs)
             return str(resp["ts"]) if resp and resp.get("ts") else None
         except Exception:
-            logger.warning("[Slack] send_to_chat failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] send_to_chat failed")
             return None
 
     # ------------------------------------------------------------------

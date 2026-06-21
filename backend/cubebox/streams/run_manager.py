@@ -1246,11 +1246,13 @@ class RunManager:
                     try:
                         await handler(json.loads(msg["data"]))
                     except Exception:
-                        logger.warning("control handler error on {}", channel, exc_info=True)
+                        logger.opt(exception=True).warning("control handler error on {}", channel)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning("control listener {} dropped; reconnecting", channel, exc_info=True)
+                logger.opt(exception=True).warning(
+                    "control listener {} dropped; reconnecting", channel
+                )
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, 5.0)
             finally:
@@ -1792,10 +1794,9 @@ class RunManager:
                                     (m.id, m.type.value, m.content) for m in _personal
                                 ]
                             except Exception:
-                                logger.warning(
+                                logger.opt(exception=True).warning(
                                     "reflection: failed to load existing memory for run_id={}",
                                     run_id,
-                                    exc_info=True,
                                 )
 
                             # Locate the original user message by identity so
@@ -1836,8 +1837,8 @@ class RunManager:
                         self._reflection_tasks.add(_refl_task)
                         _refl_task.add_done_callback(self._reflection_tasks.discard)
                 except Exception:
-                    logger.warning(
-                        "failed to schedule reflection for run_id={}", run_id, exc_info=True
+                    logger.opt(exception=True).warning(
+                        "failed to schedule reflection for run_id={}", run_id
                     )
 
                 # T6: classify the terminal state. Three success outcomes:
@@ -2978,7 +2979,7 @@ class RunManager:
             self._consolidation_tasks.add(task)
             task.add_done_callback(self._consolidation_tasks.discard)
         except Exception:
-            logger.warning("memory consolidation gate failed", exc_info=True)
+            logger.opt(exception=True).warning("memory consolidation gate failed")
 
     async def _bump_topic_activity(self, ctx: RunContext) -> None:
         """Bump ``Topic.last_activity_at`` so the sidebar reflects new traffic.
@@ -3470,7 +3471,7 @@ class RunManager:
                 await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
             raise
         except Exception as exc:
-            logger.error("Run {} failed: {}", run_id, exc, exc_info=True)
+            logger.opt(exception=True).error("Run {} failed: {}", run_id, exc)
             # Model/provider/context_window are fallbacks for non-cubepi
             # exceptions. Cubepi typed errors already carry tokens_in etc.
             _classify_params: dict[str, Any] = {
@@ -4003,7 +4004,7 @@ class RunManager:
                 await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
             raise
         except Exception as exc:
-            logger.error("Respond run {} failed: {}", run_id, exc, exc_info=True)
+            logger.opt(exception=True).error("Respond run {} failed: {}", run_id, exc)
             # Don't clear DB pending — leaving it allows the user to retry
             # the answer. Don't finalize meta status here either: if the body
             # finally block already ran, it CAS-wrote whatever status

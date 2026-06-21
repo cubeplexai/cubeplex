@@ -135,8 +135,8 @@ async def _connect_feishu(
             try:
                 await starter(account)
             except Exception:
-                logger.warning(
-                    "[IM ws] long-connection startup failed for {}", account.id, exc_info=True
+                logger.opt(exception=True).warning(
+                    "[IM ws] long-connection startup failed for {}", account.id
                 )
     return _to_out(account)
 
@@ -164,8 +164,8 @@ async def _connect_discord(
         try:
             await starter(account)
         except Exception:
-            logger.warning(
-                "[IM ws] discord gateway startup failed for {}", account.id, exc_info=True
+            logger.opt(exception=True).warning(
+                "[IM ws] discord gateway startup failed for {}", account.id
             )
     return _to_out(account)
 
@@ -193,7 +193,9 @@ async def _connect_slack(
         try:
             await starter(account)
         except Exception:
-            logger.warning("[IM ws] slack gateway startup failed for {}", account.id, exc_info=True)
+            logger.opt(exception=True).warning(
+                "[IM ws] slack gateway startup failed for {}", account.id
+            )
     return _to_out(account)
 
 
@@ -220,10 +222,9 @@ async def _connect_dingtalk(
         try:
             await starter(account)
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM ws] dingtalk gateway startup failed for {}",
                 account.id,
-                exc_info=True,
             )
     return _to_out(account)
 
@@ -252,7 +253,7 @@ async def _connect_teams(
         try:
             await starter(account)
         except Exception:
-            logger.warning("[IM ws] teams app init failed for {}", account.id, exc_info=True)
+            logger.opt(exception=True).warning("[IM ws] teams app init failed for {}", account.id)
     return _to_out(account)
 
 
@@ -327,10 +328,9 @@ async def delete_account(
         try:
             await lc.disconnect()
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM ws] long-connection disconnect failed on delete for {}",
                 account_id,
-                exc_info=True,
             )
     gateways = getattr(request.app.state, "im_gateways", None) or {}
     gw = gateways.pop(account_id, None)
@@ -338,10 +338,9 @@ async def delete_account(
         try:
             await gw.stop()
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM ws] gateway stop failed on delete for {}",
                 account_id,
-                exc_info=True,
             )
 
 
@@ -378,10 +377,9 @@ async def disable_workspace_account(
         try:
             await lc.disconnect()
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM ws] long-conn disconnect failed on disable for {}",
                 account_id,
-                exc_info=True,
             )
     gateways = getattr(request.app.state, "im_gateways", None) or {}
     gw = gateways.pop(account_id, None)
@@ -389,10 +387,9 @@ async def disable_workspace_account(
         try:
             await gw.stop()
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM ws] gateway stop failed on disable for {}",
                 account_id,
-                exc_info=True,
             )
     return _to_out(updated)
 
@@ -429,10 +426,9 @@ async def enable_workspace_account(
             try:
                 await starter(updated)
             except Exception:
-                logger.warning(
+                logger.opt(exception=True).warning(
                     "[IM ws] long-conn startup failed on enable for {}",
                     account_id,
-                    exc_info=True,
                 )
     return _to_out(updated)
 

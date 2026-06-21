@@ -533,7 +533,7 @@ class OutboundRunTailer:
         try:
             await self._connector.on_processing_start(self._state)
         except Exception:
-            logger.warning("on_processing_start raised; continuing", exc_info=True)
+            logger.opt(exception=True).warning("on_processing_start raised; continuing")
 
         last_id = "0"
         succeeded = False
@@ -560,15 +560,15 @@ class OutboundRunTailer:
                         try:
                             await self._artifact_dispatcher.handle(artifact_payload)
                         except Exception:
-                            logger.warning("artifact dispatch failed", exc_info=True)
+                            logger.opt(exception=True).warning("artifact dispatch failed")
                     if op is None:
                         continue
                     delivered = await self._dispatch_op(op, is_terminal=op.final)
                     try:
                         await self.maybe_register_awaiting_responder(ev_payload=ev.payload)
                     except Exception:
-                        logger.warning(
-                            "[outbound] register_awaiting_responder raised", exc_info=True
+                        logger.opt(exception=True).warning(
+                            "[outbound] register_awaiting_responder raised"
                         )
                     if op.final:
                         done = True
@@ -588,14 +588,14 @@ class OutboundRunTailer:
                 else:
                     await self._connector.on_processing_failed(self._state)
             except Exception:
-                logger.warning("on_processing_* hook raised", exc_info=True)
+                logger.opt(exception=True).warning("on_processing_* hook raised")
             # Release the dispatcher's platform resources. Idempotent and
             # safe even when dispatcher is a test fake.
             if self._dispatcher is not None:
                 try:
                     await self._dispatcher.aclose()
                 except Exception:
-                    logger.warning("[outbound] dispatcher.aclose() raised", exc_info=True)
+                    logger.opt(exception=True).warning("[outbound] dispatcher.aclose() raised")
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
         """Delegate one OutboundOp to the injected OpDispatcher.

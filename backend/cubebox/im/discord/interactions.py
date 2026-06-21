@@ -56,7 +56,7 @@ async def handle_component_interaction(
         else:
             await interaction.response.send_message("操作已过期或已被处理。", ephemeral=True)
     except Exception:
-        logger.warning("[Discord] interaction handler failed", exc_info=True)
+        logger.opt(exception=True).warning("[Discord] interaction handler failed")
         try:
             await interaction.response.send_message("处理失败。", ephemeral=True)
         except Exception:

@@ -100,11 +100,10 @@ class SlackGateway:
         def _on_task_done(task: asyncio.Task[None]) -> None:
             exc = task.exception() if not task.cancelled() else None
             if exc is not None:
-                logger.error(
+                logger.opt(exception=True).error(
                     "[Slack] gateway task crashed for {}: {}",
                     account.id,
                     exc,
-                    exc_info=exc,
                 )
 
         self._task.add_done_callback(_on_task_done)

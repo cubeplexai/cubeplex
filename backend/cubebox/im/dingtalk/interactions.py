@@ -54,4 +54,4 @@ async def handle_card_action(
             run_manager=run_manager,
         )
     except Exception:
-        logger.warning("[DingTalk] card action handler failed", exc_info=True)
+        logger.opt(exception=True).warning("[DingTalk] card action handler failed")

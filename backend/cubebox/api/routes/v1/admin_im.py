@@ -93,10 +93,9 @@ async def _disconnect_account(request: Request, account_id: str) -> None:
         try:
             await lc.disconnect()
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM admin] failed to disconnect long-connection for {}",
                 account_id,
-                exc_info=True,
             )
     gateways = getattr(request.app.state, "im_gateways", None) or {}
     gw = gateways.pop(account_id, None)
@@ -104,10 +103,9 @@ async def _disconnect_account(request: Request, account_id: str) -> None:
         try:
             await gw.stop()
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM admin] failed to stop gateway for {}",
                 account_id,
-                exc_info=True,
             )
 
 

@@ -152,7 +152,7 @@ class TeamsConnector:
             result = await self._app.send(self._channel_id, text)
             return str(result.id) if result and hasattr(result, "id") else None
         except Exception:
-            logger.warning("[Teams] send_message failed", exc_info=True)
+            logger.opt(exception=True).warning("[Teams] send_message failed")
             return None
 
     async def edit_message(self, activity_id: str, text: str) -> bool:
@@ -171,7 +171,7 @@ class TeamsConnector:
         except Exception as exc:
             if _is_rate_limit(exc):
                 raise TeamsRateLimitError(f"edit rate limited: {exc}") from exc
-            logger.warning("[Teams] edit_message failed", exc_info=True)
+            logger.opt(exception=True).warning("[Teams] edit_message failed")
             return False
 
     async def send_typing(self) -> None:
@@ -184,7 +184,7 @@ class TeamsConnector:
 
             await self._app.send(self._channel_id, TypingActivityInput())
         except Exception:
-            logger.debug("[Teams] typing indicator failed", exc_info=True)
+            logger.opt(exception=True).debug("[Teams] typing indicator failed")
 
     async def send_card(self, card: dict[str, Any]) -> str | None:
         if self._app is None or not self._channel_id:
@@ -203,7 +203,7 @@ class TeamsConnector:
             result = await self._app.send(self._channel_id, msg)
             return str(result.id) if result and hasattr(result, "id") else None
         except Exception:
-            logger.warning("[Teams] send_card failed", exc_info=True)
+            logger.opt(exception=True).warning("[Teams] send_card failed")
             return None
 
     # ------------------------------------------------------------------
@@ -240,7 +240,7 @@ class TeamsConnector:
             result = await self._app.send(chat_id, text)
             return str(result.id) if result and hasattr(result, "id") else None
         except Exception:
-            logger.warning("[Teams] send_to_chat failed", exc_info=True)
+            logger.opt(exception=True).warning("[Teams] send_to_chat failed")
             return None
 
 

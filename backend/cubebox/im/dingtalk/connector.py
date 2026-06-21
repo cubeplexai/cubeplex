@@ -164,7 +164,7 @@ class DingtalkConnector:
             logger.warning("[DingTalk] send_markdown failed: {}", resp.text)
             return None
         except Exception:
-            logger.warning("[DingTalk] send_markdown error", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] send_markdown error")
             return None
 
     async def reply_markdown(
@@ -213,7 +213,7 @@ class DingtalkConnector:
             logger.warning("[DingTalk] reply_markdown failed: {}", resp.text)
             return None
         except Exception:
-            logger.warning("[DingTalk] reply_markdown error", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] reply_markdown error")
             return None
 
     # ------------------------------------------------------------------
@@ -248,7 +248,7 @@ class DingtalkConnector:
             logger.warning("[DingTalk] create_and_deliver_card failed: {}", resp.text)
             return False
         except Exception:
-            logger.warning("[DingTalk] create_and_deliver_card error", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] create_and_deliver_card error")
             return False
 
     async def streaming_update_card(
@@ -287,7 +287,7 @@ class DingtalkConnector:
         except DingtalkRateLimitError:
             raise
         except Exception:
-            logger.warning("[DingTalk] streaming_update error", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] streaming_update error")
             return False
 
     async def update_card_actions(
@@ -313,7 +313,7 @@ class DingtalkConnector:
             logger.warning("[DingTalk] update_card_actions failed: {}", resp.text)
             return False
         except Exception:
-            logger.warning("[DingTalk] update_card_actions error", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] update_card_actions error")
             return False
 
     # ------------------------------------------------------------------
@@ -335,7 +335,7 @@ class DingtalkConnector:
             email = result.get("email") or result.get("org_email") or ""
             return email.strip().lower() if email else None
         except Exception:
-            logger.warning("[DingTalk] resolve_email error", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] resolve_email error")
             return None
 
     # ------------------------------------------------------------------

@@ -65,9 +65,8 @@ class TeamsGraphClient:
                 data: dict[str, Any] = resp.json()
                 return str(data.get("mail") or data.get("userPrincipalName") or "") or None
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[Teams] Graph email lookup failed for {}",
                 aad_object_id,
-                exc_info=True,
             )
             return None

@@ -63,10 +63,9 @@ class IMArtifactDispatcher:
             store = get_objectstore_client()
             data, _ctype = await store.download_file(key)
         except (ClientError, Exception):
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM artifacts] download failed for {}; falling back to share link",
                 item.id,
-                exc_info=True,
             )
             await self._fill_share_url(item, artifact)
             return
