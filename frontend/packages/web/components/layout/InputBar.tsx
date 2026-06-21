@@ -290,7 +290,7 @@ export function InputBar({
         </div>
       )}
       <div
-        className="flex flex-col rounded-lg border border-transparent bg-raised transition focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/30 duration-base"
+        className="flex flex-col rounded-lg border border-transparent bg-raised transition focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/30 has-[[aria-expanded=true]]:border-primary has-[[aria-expanded=true]]:ring-2 has-[[aria-expanded=true]]:ring-ring/30 duration-base"
         onMouseDown={handleShellMouseDown}
       >
         <textarea

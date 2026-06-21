@@ -141,6 +141,9 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
                   {descOf(p) ? (
                     <span className="mt-0.5 block text-xs text-muted-foreground">{descOf(p)}</span>
                   ) : null}
+                  <span className="mt-0.5 block truncate font-mono text-[10px] text-muted-foreground/70">
+                    {p.primary}
+                  </span>
                 </span>
               </button>
             )
