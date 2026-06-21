@@ -1355,7 +1355,7 @@ async def send_message(
     # its own snapshot inside _build_agent_for_conversation.
     #
     # NOTE: this runs BEFORE the attachment mark_attached_bulk and conversation
-    # timestamp bump below. resolve_preset can raise (UnknownPresetError /
+    # timestamp bump below. resolve_model_preset can raise (UnknownPresetError /
     # BrokenPresetError / NoDefaultPresetError) and those need to surface as
     # 4xx without leaving orphaned attachment state or a bumped has_messages /
     # updated_at on a turn that never ran.
@@ -1368,7 +1368,7 @@ async def send_message(
             ctx.org_id,
             raw_request.app.state.encryption_backend,
         )
-    # resolve_preset raises one of UnknownPresetError / BrokenPresetError /
+    # resolve_model_preset raises one of UnknownPresetError / BrokenPresetError /
     # NoDefaultPresetError, all of which are APIException subclasses with the
     # right status_code; the registered handler maps them to HTTP responses.
     resolve_model_preset(_snap, request_obj.model_key)
