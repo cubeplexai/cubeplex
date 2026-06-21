@@ -136,21 +136,32 @@ NOT need this — the cascade re-evaluates automatically.
   .node{fill:var(--muted);stroke:var(--border);}
   .label{fill:var(--fg);font:500 12px system-ui;text-anchor:middle;dominant-baseline:central;}
   .edge{stroke:var(--border);stroke-width:1.5;fill:none;}
-  .arrow{fill:var(--border);}
+  .edge.hl{stroke:var(--accent);}  /* emphasized edge — arrowhead follows via context-stroke */
 </style>
 <svg class="diag" viewBox="0 0 560 220" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-    <path class="arrow" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+  <!-- One shared marker; fill:context-stroke makes each arrowhead inherit its
+       OWN line's stroke, so a recoloured edge never gets a mismatched head. -->
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6"
+        orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M0 0 L10 5 L0 10 z" fill="context-stroke"/></marker></defs>
   <rect class="node" x="20"  y="80" width="120" height="60" rx="6"/>
   <text class="label" x="80"  y="110">Client</text>
   <rect class="node" x="220" y="80" width="120" height="60" rx="6"/>
   <text class="label" x="280" y="110">API</text>
   <rect class="node" x="420" y="80" width="120" height="60" rx="6"/>
   <text class="label" x="480" y="110">DB</text>
-  <line class="edge" x1="140" y1="110" x2="220" y2="110" marker-end="url(#a)"/>
-  <line class="edge" x1="340" y1="110" x2="420" y2="110" marker-end="url(#a)"/>
+  <line class="edge"    x1="140" y1="110" x2="220" y2="110" marker-end="url(#a)"/>
+  <line class="edge hl" x1="340" y1="110" x2="420" y2="110" marker-end="url(#a)"/>
 </svg>
 ```
+
+**Arrowheads must match their line.** Use one shared marker with
+`fill="context-stroke"` so every arrowhead inherits its own edge's `stroke` —
+an emphasized edge (`.hl` → `var(--accent)`) then gets a matching coloured head
+automatically. **Never give the arrow a hard-coded `fill`** (a fixed token or
+hex): a recoloured line would keep a mismatched grey head. Add
+`markerUnits="userSpaceOnUse"` so the head stays a constant size regardless of
+the line's `stroke-width`.
 
 #### C. Dashboard (metric cards + small chart)
 
