@@ -59,11 +59,14 @@ export function getPresetSelectionStore(
       }),
       {
         name: storageKey(wsId),
-        // Whitelist: only the user's choices persist. The presets list is
-        // always refetched and validated against `modelPresetKey` on mount.
+        // Persist the user's choices AND the last preset list, so the composer
+        // can render the model name immediately on the next mount instead of
+        // waiting for the refetch (stale-while-revalidate: the mount-time fetch
+        // still refreshes the list + revalidates `modelPresetKey`).
         partialize: (state) => ({
           modelPresetKey: state.modelPresetKey,
           thinking: state.thinking,
+          presets: state.presets,
         }),
         // v3 renamed the persisted selection field `presetLabel` →
         // `modelPresetKey`. A stale `presetLabel` is simply dropped on read;

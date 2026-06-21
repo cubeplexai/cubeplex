@@ -107,9 +107,10 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
         )}
       >
         <Cpu aria-hidden className="size-3.5 text-muted-foreground" />
-        {/* Hidden until presets load so the button never flashes the generic
-            placeholder before resolving to the real default ("Pro"). */}
-        {selected ? (
+        {/* Gated on client hydration too: with the presets cache persisted,
+            `selected` resolves on the first client render, but the server
+            rendered nothing — so defer to post-hydration to avoid a mismatch. */}
+        {mounted && selected ? (
           <>
             <span className="font-medium">{nameOf(selected)}</span>
             <span aria-hidden className="text-muted-foreground/60">
