@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import { useTranslations } from 'next-intl'
 import { Check, ChevronDown, Cpu } from 'lucide-react'
 
@@ -40,6 +40,17 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
   const setPresets = useStore((s) => s.setPresets)
   const setModelPresetKey = useStore((s) => s.setModelPresetKey)
   const setThinking = useStore((s) => s.setThinking)
+
+  // The store's `thinking` is persisted; on the server it's the default
+  // (medium). Gate its label on client hydration so the button never paints
+  // the SSR default before the persisted value hydrates ("Medium" → "High").
+  // useSyncExternalStore is the hydration-safe "are we on the client" read
+  // (false on the server snapshot, true once hydrated) — no setState-in-effect.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -106,7 +117,9 @@ export function ModelPicker({ wsId }: ModelPickerProps): React.ReactElement {
             </span>
           </>
         ) : null}
-        <span className="text-muted-foreground">{t(THINKING_LABEL_KEY[thinking])}</span>
+        {mounted ? (
+          <span className="text-muted-foreground">{t(THINKING_LABEL_KEY[thinking])}</span>
+        ) : null}
         <ChevronDown aria-hidden className="size-3.5 text-muted-foreground" />
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-72 p-0">
