@@ -34,7 +34,7 @@ describe('preset-selection store', () => {
     expect(wsB.getState().modelPresetKey).toBe('beta')
   })
 
-  it('persists only modelPresetKey + thinking (partialize whitelist)', () => {
+  it('persists modelPresetKey, thinking, and the cached presets list', () => {
     const ws = getPresetSelectionStore('ws_persist')
     ws.getState().setPresets([
       {
@@ -52,9 +52,11 @@ describe('preset-selection store', () => {
     const raw = localStorage.getItem('preset-selection-v1:ws_persist')
     expect(raw).not.toBeNull()
     const parsed = JSON.parse(raw as string) as { state: Record<string, unknown> }
-    expect(parsed.state).toEqual({ modelPresetKey: 'lite', thinking: 'high' })
-    // The presets list must not be persisted — it is refetched on mount.
-    expect(parsed.state.presets).toBeUndefined()
+    expect(parsed.state.modelPresetKey).toBe('lite')
+    expect(parsed.state.thinking).toBe('high')
+    // Presets are cached so the composer renders the model name on the next
+    // mount without waiting for the refetch (stale-while-revalidate).
+    expect(parsed.state.presets).toHaveLength(2)
   })
 
   it('uses a wsId-scoped storage key', () => {
