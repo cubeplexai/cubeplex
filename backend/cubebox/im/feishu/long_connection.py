@@ -333,7 +333,7 @@ class FeishuLongConnection:
                 if callable(stop):
                     stop()
             except Exception:
-                logger.debug("[Feishu LC] stop() raised", exc_info=True)
+                logger.opt(exception=True).debug("[Feishu LC] stop() raised")
         if self._ws_future is not None:
             self._ws_future.cancel()
 

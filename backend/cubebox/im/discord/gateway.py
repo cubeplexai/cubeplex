@@ -137,11 +137,10 @@ class DiscordGateway:
         def _on_task_done(task: asyncio.Task[None]) -> None:
             exc = task.exception() if not task.cancelled() else None
             if exc is not None:
-                logger.error(
+                logger.opt(exception=True).error(
                     "[Discord] gateway task crashed for {}: {}",
                     account.id,
                     exc,
-                    exc_info=exc,
                 )
 
         self._task.add_done_callback(_on_task_done)
@@ -151,7 +150,7 @@ class DiscordGateway:
             try:
                 await self._bot.close()
             except Exception:
-                logger.debug("[Discord] bot.close() raised", exc_info=True)
+                logger.opt(exception=True).debug("[Discord] bot.close() raised")
         if self._task is not None:
             self._task.cancel()
             try:

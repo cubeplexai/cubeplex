@@ -45,4 +45,4 @@ async def handle_block_action(
             run_manager=run_manager,
         )
     except Exception:
-        logger.warning("[Slack] block action handler failed", exc_info=True)
+        logger.opt(exception=True).warning("[Slack] block action handler failed")

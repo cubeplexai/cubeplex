@@ -179,7 +179,7 @@ class DiscordOpDispatcher:
             try:
                 await self._connector.edit_message(s.bot_message_id, remaining)
             except Exception:
-                logger.warning("[Discord] finalize edit failed", exc_info=True)
+                logger.opt(exception=True).warning("[Discord] finalize edit failed")
                 await self.emergency_text(remaining[:4000])
         else:
             while remaining:
@@ -203,7 +203,7 @@ class DiscordOpDispatcher:
         try:
             await self._connector._send_emergency_text(text)
         except Exception:
-            logger.warning("[Discord] emergency text send failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] emergency text send failed")
 
     async def aclose(self) -> None:
         pass

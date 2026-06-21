@@ -88,10 +88,9 @@ async def _load_bot_open_id_via_credentials(
         plaintext = await creds.get_decrypted(credential_id=credential_id, requesting_kind="im_bot")
         return str(json.loads(plaintext).get("bot_open_id") or "") or None
     except Exception:
-        logger.warning(
+        logger.opt(exception=True).warning(
             "[IM] could not load bot_open_id for credential {}; runtime shows never_connected",
             credential_id,
-            exc_info=True,
         )
         return None
 
@@ -218,10 +217,9 @@ class IMConnectorService:
             try:
                 await self._credentials.delete(credential_id=credential_id)
             except Exception:
-                logger.warning(
+                logger.opt(exception=True).warning(
                     "[IM] orphan credential {} could not be rolled back; manual cleanup needed",
                     credential_id,
-                    exc_info=True,
                 )
             raise
 
@@ -293,10 +291,9 @@ class IMConnectorService:
             try:
                 await self._credentials.delete(credential_id=credential_id)
             except Exception:
-                logger.warning(
+                logger.opt(exception=True).warning(
                     "[IM] orphan credential {} could not be rolled back",
                     credential_id,
-                    exc_info=True,
                 )
             raise
 
@@ -368,10 +365,9 @@ class IMConnectorService:
             try:
                 await self._credentials.delete(credential_id=credential_id)
             except Exception:
-                logger.warning(
+                logger.opt(exception=True).warning(
                     "[IM] orphan credential {} could not be rolled back",
                     credential_id,
-                    exc_info=True,
                 )
             raise
 
@@ -442,10 +438,9 @@ class IMConnectorService:
             try:
                 await self._credentials.delete(credential_id=credential_id)
             except Exception:
-                logger.warning(
+                logger.opt(exception=True).warning(
                     "[IM] orphan credential {} could not be rolled back",
                     credential_id,
-                    exc_info=True,
                 )
             raise
 
@@ -605,10 +600,9 @@ class IMConnectorService:
             try:
                 await self._credentials.delete(credential_id=credential_id)
             except Exception:
-                logger.warning(
+                logger.opt(exception=True).warning(
                     "[IM] orphan credential {} could not be rolled back",
                     credential_id,
-                    exc_info=True,
                 )
             raise
 
@@ -728,7 +722,7 @@ class IMConnectorService:
         try:
             await self._credentials.delete(credential_id=credential_id)
         except Exception:
-            logger.debug("[IM] credential delete after account removal failed", exc_info=True)
+            logger.opt(exception=True).debug("[IM] credential delete after account removal failed")
 
     async def set_enabled(
         self,

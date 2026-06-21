@@ -296,10 +296,9 @@ async def start(app: FastAPI, run_manager: Any) -> None:
             platform = _get_platform(wa.platform)
             await platform.on_account_enabled(wa, secrets=secrets, gateways=gateways)
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[IM] teams app init failed for account {} on startup",
                 wa.id,
-                exc_info=True,
             )
 
     # Expose the connector so the workspace POST /im/accounts route can
@@ -349,7 +348,7 @@ async def start(app: FastAPI, run_manager: Any) -> None:
                             )
                             await _connect_one(acct)
             except Exception:
-                logger.warning("[IM] lease sweep failed", exc_info=True)
+                logger.opt(exception=True).warning("[IM] lease sweep failed")
 
     sweep_task = asyncio.create_task(_sweep(), name="im-lease-sweep")
     app.state.im_lease_sweep = sweep_task
@@ -372,7 +371,7 @@ async def stop(app: FastAPI) -> None:
         try:
             await lc.disconnect()
         except Exception:
-            logger.warning("[IM] long-connection disconnect failed", exc_info=True)
+            logger.opt(exception=True).warning("[IM] long-connection disconnect failed")
 
     # Stop gateways (Discord)
     gws = getattr(app.state, "im_gateways", None) or {}
@@ -380,7 +379,7 @@ async def stop(app: FastAPI) -> None:
         try:
             await gw.stop()
         except Exception:
-            logger.warning("[IM] gateway stop failed", exc_info=True)
+            logger.opt(exception=True).warning("[IM] gateway stop failed")
 
     # Stop worker
     worker = getattr(app.state, "im_run_queue_worker", None)
@@ -388,7 +387,7 @@ async def stop(app: FastAPI) -> None:
         try:
             await worker.stop()
         except Exception:
-            logger.warning("[IM] queue worker stop failed", exc_info=True)
+            logger.opt(exception=True).warning("[IM] queue worker stop failed")
 
 
 __all__ = [

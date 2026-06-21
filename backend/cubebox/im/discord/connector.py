@@ -189,7 +189,7 @@ class DiscordConnector:
             msg = await channel.send(text)
             return str(msg.id)
         except Exception:
-            logger.warning("[Discord] send_message failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] send_message failed")
             return None
 
     async def edit_message(self, message_id: str, text: str) -> bool:
@@ -206,10 +206,10 @@ class DiscordConnector:
         except discord.HTTPException as exc:
             if exc.status == 429:
                 raise DiscordRateLimitError(f"edit rate limited: {exc}") from exc
-            logger.warning("[Discord] edit_message failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] edit_message failed")
             return False
         except Exception:
-            logger.warning("[Discord] edit_message failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] edit_message failed")
             return False
 
     async def add_reaction(self, message_id: str, emoji: str) -> bool:
@@ -223,7 +223,7 @@ class DiscordConnector:
             await msg.add_reaction(emoji)
             return True
         except Exception:
-            logger.warning("[Discord] add_reaction failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] add_reaction failed")
             return False
 
     async def remove_reaction(self, message_id: str, emoji: str) -> bool:
@@ -237,7 +237,7 @@ class DiscordConnector:
             await msg.remove_reaction(emoji, self._bot.user)
             return True
         except Exception:
-            logger.warning("[Discord] remove_reaction failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] remove_reaction failed")
             return False
 
     async def on_processing_start(self, state: Any) -> None:
@@ -268,7 +268,7 @@ class DiscordConnector:
             msg = await channel.send(text, view=view)
             return str(msg.id)
         except Exception:
-            logger.warning("[Discord] send_message_with_view failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] send_message_with_view failed")
             return None
 
     async def _send_emergency_text(self, text: str) -> str | None:
@@ -291,5 +291,5 @@ class DiscordConnector:
                 msg = await channel.send(text)
             return str(msg.id)
         except Exception:
-            logger.warning("[Discord] send_to_chat failed", exc_info=True)
+            logger.opt(exception=True).warning("[Discord] send_to_chat failed")
             return None

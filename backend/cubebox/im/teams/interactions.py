@@ -61,7 +61,7 @@ async def handle_card_action(
     try:
         question_id = await resolve_full_question_id(run_id, short_qid)
     except Exception:
-        logger.warning("[Teams] question_id resolution failed", exc_info=True)
+        logger.opt(exception=True).warning("[Teams] question_id resolution failed")
         return False
 
     return await resume_paused_run(

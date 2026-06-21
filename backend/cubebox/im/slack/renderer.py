@@ -164,7 +164,7 @@ class SlackOpDispatcher:
             try:
                 await self._connector.edit_message(s.bot_message_id, remaining)
             except Exception:
-                logger.warning("[Slack] finalize edit failed", exc_info=True)
+                logger.opt(exception=True).warning("[Slack] finalize edit failed")
                 await self.emergency_text(remaining[:4000])
         else:
             while remaining:
@@ -192,7 +192,7 @@ class SlackOpDispatcher:
         try:
             await self._connector.send_message(text[:4000])
         except Exception:
-            logger.warning("[Slack] emergency text send failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] emergency text send failed")
 
     async def aclose(self) -> None:
         pass

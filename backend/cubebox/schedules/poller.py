@@ -90,7 +90,7 @@ class ScheduledTaskPoller:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.warning("scheduled-task poll failed", exc_info=True)
+                logger.opt(exception=True).warning("scheduled-task poll failed")
             await asyncio.sleep(self._poll_interval + random.uniform(0, self._jitter))
 
     async def poll_once(self) -> None:

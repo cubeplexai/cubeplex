@@ -72,7 +72,7 @@ async def _resolve_run_context(
             bool(row.is_group_chat),
         )
     except Exception:
-        logger.warning("[resume] _resolve_run_context failed for {}", run_id, exc_info=True)
+        logger.opt(exception=True).warning("[resume] _resolve_run_context failed for {}", run_id)
         return None
 
 
@@ -198,10 +198,9 @@ async def resume_paused_run(
         logger.warning("[resume] resume_run_with_answer rejected: {}", exc)
         return False
     except Exception:
-        logger.warning(
+        logger.opt(exception=True).warning(
             "[resume] resume_run_with_answer raised unexpectedly for run_id={}",
             run_id,
-            exc_info=True,
         )
         return False
 
@@ -226,7 +225,7 @@ async def resolve_full_question_id(run_id: str, short_qid: str) -> str:
         if pending is not None and pending.question_id.startswith(short_qid):
             return pending.question_id
     except Exception:
-        logger.warning("[IM] resolve_full_question_id failed", exc_info=True)
+        logger.opt(exception=True).warning("[IM] resolve_full_question_id failed")
     return short_qid
 
 

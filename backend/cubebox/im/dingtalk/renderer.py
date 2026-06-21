@@ -192,7 +192,7 @@ class DingtalkOpDispatcher:
                 open_conversation_id=self._open_conversation_id,
             )
         except Exception:
-            logger.warning("[DingTalk] emergency text send failed", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] emergency text send failed")
 
     async def aclose(self) -> None:
         if self._connector._http_own is not None:

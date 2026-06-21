@@ -179,7 +179,7 @@ async def apply_ops(
                 else:
                     await service.archive(op["id"])
         except Exception:
-            logger.warning("consolidation op failed: {}", op, exc_info=True)
+            logger.opt(exception=True).warning("consolidation op failed: {}", op)
 
 
 DEFAULT_MIN_HOURS = 6.0
@@ -325,7 +325,7 @@ async def run_consolidation(
 
         await mark_consolidated(redis, prefix, conversation_id, cutoff=cutoff, consumed=consumed)
     except Exception:
-        logger.warning("memory consolidation failed for {}", conversation_id, exc_info=True)
+        logger.opt(exception=True).warning("memory consolidation failed for {}", conversation_id)
         # Leave last/counter unchanged → retries next eligible run.
     finally:
         await release_lock(redis, prefix, conversation_id, token)

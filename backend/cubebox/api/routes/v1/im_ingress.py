@@ -99,10 +99,9 @@ async def _try_decrypt_against_enabled_accounts(
                 credential_id=candidate.credential_id, requesting_kind="im_bot"
             )
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[Feishu ingress] credential decrypt failed for {} during encrypted-payload routing",
                 candidate.id,
-                exc_info=True,
             )
             continue
         candidate_secrets: dict[str, Any] = json.loads(secret_json)
@@ -345,7 +344,7 @@ async def _handle_feishu_link_command(
             secret=secret,
         )
     except Exception:
-        logger.warning("[Feishu] sign_link_token failed", exc_info=True)
+        logger.opt(exception=True).warning("[Feishu] sign_link_token failed")
         if connector is not None:
             await connector.send_to_chat(event.channel_id, event.reply_to_id, "生成绑定链接失败。")
         return
@@ -460,7 +459,7 @@ async def _handle_card_action(
         # resume_paused_run is contracted to never raise, but keep the
         # belt-and-braces guard so a downstream regression can't turn a
         # card click into a Feishu retry storm.
-        logger.warning("[Feishu ingress] resume_paused_run raised", exc_info=True)
+        logger.opt(exception=True).warning("[Feishu ingress] resume_paused_run raised")
         return True, "暂时无法响应"
 
     if not ok:
@@ -613,7 +612,7 @@ async def _handle_teams_link_command(
             secret=secret,
         )
     except Exception:
-        logger.warning("[Teams] sign_link_token failed", exc_info=True)
+        logger.opt(exception=True).warning("[Teams] sign_link_token failed")
         if connector is not None:
             await connector.send_to_chat(event.channel_id, None, "Failed to generate link.")
         return

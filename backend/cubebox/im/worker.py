@@ -287,7 +287,7 @@ class IMRunQueueWorker:
                     lease_seconds=self._lease_seconds,
                 )
             except Exception:
-                logger.warning("[IM worker] poll error", exc_info=True)
+                logger.opt(exception=True).warning("[IM worker] poll error")
                 ran = False
             # ``ran=False`` covers both "queue was empty" and "start_run
             # raised" (process_one_queue_item returns False in both cases —

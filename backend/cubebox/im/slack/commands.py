@@ -47,7 +47,7 @@ def register_commands(
                 secret=get_jwt_secret(),
             )
         except Exception:
-            logger.warning("[Slack] sign_link_token failed", exc_info=True)
+            logger.opt(exception=True).warning("[Slack] sign_link_token failed")
             await respond("Failed to generate link.", response_type="ephemeral")
             return
 

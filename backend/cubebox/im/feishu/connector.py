@@ -631,9 +631,9 @@ class FeishuConnector:
             try:
                 await self.add_reaction(target, _REACTION_FAILURE)
             except Exception:
-                logger.warning("[Feishu] add failure reaction raised", exc_info=True)
+                logger.opt(exception=True).warning("[Feishu] add failure reaction raised")
         except Exception:
-            logger.warning("[Feishu] on_processing_failed hook raised", exc_info=True)
+            logger.opt(exception=True).warning("[Feishu] on_processing_failed hook raised")
 
 
 __all__ = [

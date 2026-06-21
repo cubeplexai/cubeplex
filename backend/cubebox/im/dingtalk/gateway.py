@@ -83,11 +83,10 @@ class DingtalkGateway:
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.warning(
+                    logger.opt(exception=True).warning(
                         "[DingTalk] Stream disconnected for {}, reconnecting in {:.0f}s",
                         account.id,
                         backoff,
-                        exc_info=True,
                     )
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, 60.0)
@@ -103,10 +102,9 @@ class DingtalkGateway:
                     await self.refresh_access_token()
                     logger.debug("[DingTalk] token refreshed for {}", account.id)
                 except Exception:
-                    logger.warning(
+                    logger.opt(exception=True).warning(
                         "[DingTalk] token refresh failed for {}",
                         account.id,
-                        exc_info=True,
                     )
 
         self._refresh_task = asyncio.create_task(
@@ -207,7 +205,7 @@ class DingtalkGateway:
                 secret=get_jwt_secret(),
             )
         except Exception:
-            logger.warning("[DingTalk] sign_link_token failed", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] sign_link_token failed")
             return
 
         base = get_frontend_base_url()
@@ -303,9 +301,8 @@ class DingtalkGateway:
                     )
                 return tpl_id
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[DingTalk] card template registration failed",
-                exc_info=True,
             )
             return ""
 
@@ -325,5 +322,5 @@ class _CallbackHandler(dingtalk_stream.CallbackHandler):  # type: ignore[misc]
             data = json.loads(callback.data) if isinstance(callback.data, str) else callback.data
             await self._handler(data)
         except Exception:
-            logger.warning("[DingTalk] callback handler error", exc_info=True)
+            logger.opt(exception=True).warning("[DingTalk] callback handler error")
         return dingtalk_stream.AckMessage.STATUS_OK, "OK"

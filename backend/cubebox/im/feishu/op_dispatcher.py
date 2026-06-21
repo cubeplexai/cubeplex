@@ -42,9 +42,8 @@ class FeishuOpDispatcher:
         try:
             card_id = await cardkit.create_entity(card_json)
         except Exception:
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[outbound] CardKit create_entity failed; engaging emergency text",
-                exc_info=True,
             )
             state.card_unavailable = True
             await self._emergency_card_create_fallback(state)
@@ -54,7 +53,7 @@ class FeishuOpDispatcher:
         try:
             msg_id = await self._connector.send_card_init_message(card_id)
         except Exception:
-            logger.warning("[outbound] send_card_init_message raised", exc_info=True)
+            logger.opt(exception=True).warning("[outbound] send_card_init_message raised")
             msg_id = None
         state.bot_message_id = msg_id
         if msg_id is None:
@@ -96,7 +95,7 @@ class FeishuOpDispatcher:
             note_flood_strike(state)
             return False
         except Exception:
-            logger.warning("[outbound] stream_text failed", exc_info=True)
+            logger.opt(exception=True).warning("[outbound] stream_text failed")
             return False
 
     async def dispatch_patch(self, state: RenderState) -> bool:
@@ -127,7 +126,7 @@ class FeishuOpDispatcher:
             await self._maybe_surface_pending_via_emergency(state)
             return False
         except Exception:
-            logger.warning("[outbound] patch_card failed", exc_info=True)
+            logger.opt(exception=True).warning("[outbound] patch_card failed")
             await self._maybe_surface_pending_via_emergency(state)
             return False
 
@@ -162,9 +161,8 @@ class FeishuOpDispatcher:
             # exception and only fires the failed-hook reaction; the buffered
             # final answer never reaches the user. Treat as
             # delivered=False so the emergency-text fallback below runs.
-            logger.warning(
+            logger.opt(exception=True).warning(
                 "[outbound] cardkit.finalize raised; falling back to emergency text",
-                exc_info=True,
             )
             delivered = False
         if not delivered:
@@ -188,7 +186,7 @@ class FeishuOpDispatcher:
         try:
             await self._connector._send_emergency_text(text)
         except Exception:
-            logger.warning("[outbound] emergency text send failed", exc_info=True)
+            logger.opt(exception=True).warning("[outbound] emergency text send failed")
 
     async def aclose(self) -> None:
         """Release the CardKit HTTP/2 connection pool."""
@@ -197,7 +195,7 @@ class FeishuOpDispatcher:
             try:
                 await aclose_fn()
             except Exception:
-                logger.warning("[outbound] cardkit.aclose() raised", exc_info=True)
+                logger.opt(exception=True).warning("[outbound] cardkit.aclose() raised")
 
     # -- private helpers --
 

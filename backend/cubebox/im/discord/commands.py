@@ -28,7 +28,7 @@ async def register_commands(bot: commands.Bot) -> None:
         synced = await bot.tree.sync()
         logger.info("[Discord] Synced {} slash commands", len(synced))
     except Exception:
-        logger.warning("[Discord] Failed to sync slash commands", exc_info=True)
+        logger.opt(exception=True).warning("[Discord] Failed to sync slash commands")
 
 
 async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bot) -> None:
@@ -114,7 +114,7 @@ async def _initiate_link(
             secret=get_jwt_secret(),
         )
     except Exception:
-        logger.warning("[Discord] sign_link_token failed", exc_info=True)
+        logger.opt(exception=True).warning("[Discord] sign_link_token failed")
         await interaction.followup.send("生成绑定链接失败。", ephemeral=True)
         return
 
