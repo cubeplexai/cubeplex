@@ -9,9 +9,7 @@ import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
 import { PendingSteers } from '@/components/layout/PendingSteers'
-import { PresetPicker } from '@/components/chat/PresetPicker'
-import { ThinkingControl } from '@/components/chat/ThinkingControl'
-import { ThinkingBadge } from '@/components/chat/ThinkingBadge'
+import { ModelPicker } from '@/components/chat/ModelPicker'
 import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 
@@ -320,9 +318,7 @@ export function InputBar({
           <div className="ml-auto flex items-center gap-1">
             {workspaceId && (
               <>
-                <PresetPicker wsId={workspaceId} />
-                <ThinkingControl wsId={workspaceId} />
-                <ThinkingBadge wsId={workspaceId} />
+                <ModelPicker wsId={workspaceId} />
               </>
             )}
             {showStop ? (

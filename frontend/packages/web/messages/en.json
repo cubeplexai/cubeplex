@@ -303,11 +303,16 @@
     "presetAriaLabel": "Model preset",
     "defaultPresetBadge": "default",
     "thinkingAriaLabel": "Thinking level",
-    "thinkingLevelOff": "Standard",
+    "thinkingLevelOff": "Off",
     "thinkingLevelLow": "Low",
     "thinkingLevelMedium": "Medium",
     "thinkingLevelHigh": "High",
-    "thinkingLevelXhigh": "Extra High"
+    "thinkingLevelXhigh": "Extra High",
+    "modelPickerAria": "Model and thinking effort",
+    "modelSectionLabel": "Model",
+    "effortLabel": "Effort",
+    "effortFaster": "Faster",
+    "effortSmarter": "Smarter"
   },
   "subagent": {
     "cluster": "Agent cluster",

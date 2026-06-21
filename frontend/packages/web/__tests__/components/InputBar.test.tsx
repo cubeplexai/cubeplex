@@ -163,21 +163,9 @@ describe('InputBar', () => {
     })
   })
 
-  it('renders the preset picker + thinking control toolbar when a workspace is present', () => {
+  it('renders the model picker in the toolbar when a workspace is present', () => {
     renderWithIntl(<InputBar conversationId="conv-1" />)
-    expect(screen.getByLabelText('Model preset')).toBeInTheDocument()
-    expect(screen.getByLabelText('Thinking level')).toBeInTheDocument()
-    // The badge is hidden when thinking is "off" (default) so the toolbar
-    // doesn't show a chip for the standard case.
-    expect(screen.queryByRole('status', { name: /^Thinking level/ })).not.toBeInTheDocument()
-  })
-
-  it('shows the ThinkingBadge inline whenever the thinking level is non-off', () => {
-    getPresetSelectionStore('ws-1').setState({ thinking: 'high' })
-    renderWithIntl(<InputBar conversationId="conv-1" />)
-    const badge = screen.getByRole('status', { name: 'Thinking level high' })
-    expect(badge).toBeInTheDocument()
-    expect(badge).toHaveTextContent('thinking: high')
+    expect(screen.getByRole('button', { name: 'Model and thinking effort' })).toBeInTheDocument()
   })
 
   it('forwards the current preset_label and thinking selection on send', async () => {

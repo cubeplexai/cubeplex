@@ -18,7 +18,7 @@ export interface PresetSelectionState {
   presets: WorkspacePresetSummary[]
   /** Selected preset key (tier name or custom label); `null` = workspace default. */
   modelPresetKey: string | null
-  /** Selected thinking level; default `"off"` (Standard in UI). */
+  /** Selected thinking level; default `"medium"`. */
   thinking: ThinkingLevel
 
   setPresets: (p: WorkspacePresetSummary[]) => void
@@ -51,11 +51,11 @@ export function getPresetSelectionStore(
       (set) => ({
         presets: [],
         modelPresetKey: null,
-        thinking: 'off' as ThinkingLevel,
+        thinking: 'medium' as ThinkingLevel,
         setPresets: (presets) => set({ presets }),
         setModelPresetKey: (modelPresetKey) => set({ modelPresetKey }),
         setThinking: (thinking) => set({ thinking }),
-        reset: () => set({ modelPresetKey: null, thinking: 'off' as ThinkingLevel }),
+        reset: () => set({ modelPresetKey: null, thinking: 'medium' as ThinkingLevel }),
       }),
       {
         name: storageKey(wsId),
@@ -67,15 +67,18 @@ export function getPresetSelectionStore(
         }),
         // v3 renamed the persisted selection field `presetLabel` →
         // `modelPresetKey`. A stale `presetLabel` is simply dropped on read;
-        // the PresetPicker re-validates the selection against the fresh key
+        // the ModelPicker re-validates the selection against the fresh key
         // list on mount and resets it to null if unknown, so no key remap is
         // needed. v2 dropped the `minimal` thinking level (deepseek's schema
         // rejects it); rewrite stale values so the dropdown has no orphan.
-        version: 3,
+        // v4 changed the default thinking level off → medium. Drop any
+        // persisted `thinking` so it re-defaults to medium; keep the model
+        // choice. (v3 renamed presetLabel → modelPresetKey; v2 dropped the
+        // `minimal` level.)
+        version: 4,
         migrate: (persisted, _version) => {
           const p = (persisted as Partial<PresetSelectionState>) ?? {}
-          if ((p.thinking as string) === 'minimal') p.thinking = 'low'
-          return p as PresetSelectionState
+          return { modelPresetKey: p.modelPresetKey ?? null } as PresetSelectionState
         },
       },
     ),

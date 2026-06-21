@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import en from '../../messages/en.json'
 
-import { PresetPicker } from '@/components/chat/PresetPicker'
+import { ModelPicker } from '@/components/chat/ModelPicker'
 import {
   clearAllPresetSelectionStores,
   getPresetSelectionStore,
@@ -26,6 +26,17 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
   })
 }
 
+const PRESETS = [
+  {
+    key: 'pro',
+    kind: 'tier',
+    primary: 'anthropic/claude-opus-4-7',
+    description: '',
+    is_default: true,
+  },
+  { key: 'lite', kind: 'tier', primary: 'openai/gpt-5', description: '', is_default: false },
+]
+
 beforeEach(() => {
   localStorage.clear()
   clearAllPresetSelectionStores()
@@ -37,30 +48,13 @@ afterEach(() => {
   clearAllPresetSelectionStores()
 })
 
-describe('PresetPicker', () => {
+describe('ModelPicker', () => {
   it('fetches the workspace preset list on mount and stores it', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        presets: [
-          {
-            key: 'pro',
-            kind: 'tier',
-            primary: 'anthropic/claude-opus-4-7',
-            description: '',
-            is_default: true,
-          },
-          {
-            key: 'lite',
-            kind: 'tier',
-            primary: 'openai/gpt-5',
-            description: '',
-            is_default: false,
-          },
-        ],
-      }),
-    )
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse({ presets: PRESETS }))
 
-    renderWithIntl(<PresetPicker wsId="ws_fetch" />)
+    renderWithIntl(<ModelPicker wsId="ws_fetch" />)
 
     expect(fetchSpy).toHaveBeenCalledWith('/api/v1/ws/ws_fetch/model-presets', {
       credentials: 'include',
@@ -70,56 +64,23 @@ describe('PresetPicker', () => {
     })
   })
 
-  it('renders the trigger with the persisted key as the selected value', async () => {
-    // Persist a known key before render.
+  it('keeps a valid persisted key after mount-time validation', async () => {
     getPresetSelectionStore('ws_persist').getState().setModelPresetKey('lite')
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        presets: [
-          {
-            key: 'pro',
-            kind: 'tier',
-            primary: 'anthropic/claude-opus-4-7',
-            description: '',
-            is_default: true,
-          },
-          {
-            key: 'lite',
-            kind: 'tier',
-            primary: 'openai/gpt-5',
-            description: '',
-            is_default: false,
-          },
-        ],
-      }),
-    )
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: PRESETS }))
 
-    renderWithIntl(<PresetPicker wsId="ws_persist" />)
+    renderWithIntl(<ModelPicker wsId="ws_persist" />)
 
     await waitFor(() => {
       expect(getPresetSelectionStore('ws_persist').getState().presets).toHaveLength(2)
     })
-    // Persisted key remained valid after mount-time validation.
     expect(getPresetSelectionStore('ws_persist').getState().modelPresetKey).toBe('lite')
   })
 
-  it('resets a stale persisted key to null when missing from fresh list', async () => {
+  it('resets a stale persisted key to null when missing from the fresh list', async () => {
     getPresetSelectionStore('ws_stale').getState().setModelPresetKey('ghost')
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse({
-        presets: [
-          {
-            key: 'pro',
-            kind: 'tier',
-            primary: 'anthropic/claude-opus-4-7',
-            description: '',
-            is_default: true,
-          },
-        ],
-      }),
-    )
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ presets: [PRESETS[0]] }))
 
-    renderWithIntl(<PresetPicker wsId="ws_stale" />)
+    renderWithIntl(<ModelPicker wsId="ws_stale" />)
 
     await waitFor(() => {
       expect(getPresetSelectionStore('ws_stale').getState().modelPresetKey).toBeNull()
@@ -129,12 +90,15 @@ describe('PresetPicker', () => {
   it('keeps the selection null when fetch fails (composer falls back to default)', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'))
 
-    renderWithIntl(<PresetPicker wsId="ws_offline" />)
+    renderWithIntl(<ModelPicker wsId="ws_offline" />)
 
     await waitFor(() => {
-      // Trigger renders with placeholder (no value).
-      expect(screen.getByRole('combobox', { name: 'Model preset' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: en.chat.modelPickerAria })).toBeInTheDocument()
     })
     expect(getPresetSelectionStore('ws_offline').getState().modelPresetKey).toBeNull()
+  })
+
+  it('defaults the thinking level to medium', () => {
+    expect(getPresetSelectionStore('ws_default').getState().thinking).toBe('medium')
   })
 })
