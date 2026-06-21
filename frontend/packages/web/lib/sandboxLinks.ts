@@ -19,12 +19,21 @@ export function resolveSandboxHref(filePath: string, href: string): SandboxHref 
   if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return { kind: 'external', href }
   if (href.startsWith('//')) return { kind: 'external', href }
 
-  const [rawPath, ...hashParts] = href.split('#')
+  const [beforeHash, ...hashParts] = href.split('#')
   const hash = hashParts.length > 0 ? '#' + hashParts.join('#') : null
+  // Drop query string — sandbox file lookup doesn't accept ?key=value, and
+  // markdown usually embeds query only for cache-busting on assets.
+  const rawPath = beforeHash.split('?', 1)[0]
 
   const baseDir = filePath.includes('/') ? filePath.slice(0, filePath.lastIndexOf('/')) : ''
   const joined = rawPath.startsWith('/') ? `${SANDBOX_ROOT}${rawPath}` : `${baseDir}/${rawPath}`
-  const path = normalizePath(joined)
+  const normalized = normalizePath(joined)
+  // Clamp to sandbox root: a malformed href like `../../../../etc/passwd` should
+  // not produce a path the rest of the UI tries to fetch from outside /workspace.
+  const path =
+    normalized === SANDBOX_ROOT || normalized.startsWith(`${SANDBOX_ROOT}/`)
+      ? normalized
+      : SANDBOX_ROOT
   return { kind: 'sandbox', path, hash }
 }
 
@@ -36,7 +45,17 @@ function normalizePath(p: string): string {
       if (stack.length > 0) stack.pop()
       continue
     }
-    stack.push(seg)
+    // Decode percent-escapes so filenames with spaces (`Roadmap%202026.md`)
+    // become real filesystem paths; consumers re-encode when building URLs.
+    stack.push(safeDecode(seg))
   }
   return '/' + stack.join('/')
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
 }

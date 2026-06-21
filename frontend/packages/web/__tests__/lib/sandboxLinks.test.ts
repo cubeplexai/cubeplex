@@ -71,4 +71,36 @@ describe('resolveSandboxHref', () => {
       hash: '#section',
     })
   })
+
+  it('decodes percent-escaped filenames', () => {
+    expect(resolveSandboxHref(BASE, 'Roadmap%202026.md')).toEqual({
+      kind: 'sandbox',
+      path: '/workspace/docs/Roadmap 2026.md',
+      hash: null,
+    })
+  })
+
+  it('strips query string but keeps fragment', () => {
+    expect(resolveSandboxHref(BASE, 'assets/flow.png?v=1#top')).toEqual({
+      kind: 'sandbox',
+      path: '/workspace/docs/assets/flow.png',
+      hash: '#top',
+    })
+  })
+
+  it('keeps invalid percent escapes literal instead of throwing', () => {
+    expect(resolveSandboxHref(BASE, 'bad%2.md')).toEqual({
+      kind: 'sandbox',
+      path: '/workspace/docs/bad%2.md',
+      hash: null,
+    })
+  })
+
+  it('clamps parent traversal past workspace root', () => {
+    expect(resolveSandboxHref(BASE, '../../../../etc/passwd')).toEqual({
+      kind: 'sandbox',
+      path: '/workspace',
+      hash: null,
+    })
+  })
 })
