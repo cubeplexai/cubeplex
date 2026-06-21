@@ -80,7 +80,7 @@ describe('preset-selection store', () => {
     ws.getState().reset()
     const st = ws.getState()
     expect(st.modelPresetKey).toBeNull()
-    expect(st.thinking).toBe('off')
+    expect(st.thinking).toBe('medium')
     expect(st.presets).toHaveLength(1)
   })
 

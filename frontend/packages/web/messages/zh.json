@@ -303,11 +303,16 @@
     "presetAriaLabel": "模型预设",
     "defaultPresetBadge": "默认",
     "thinkingAriaLabel": "思考深度",
-    "thinkingLevelOff": "标准",
+    "thinkingLevelOff": "关",
     "thinkingLevelLow": "低",
     "thinkingLevelMedium": "中",
     "thinkingLevelHigh": "高",
-    "thinkingLevelXhigh": "超高"
+    "thinkingLevelXhigh": "超高",
+    "modelPickerAria": "模型与思考深度",
+    "modelSectionLabel": "模型",
+    "effortLabel": "思考深度",
+    "effortFaster": "更快",
+    "effortSmarter": "更聪明"
   },
   "subagent": {
     "cluster": "Agent 集群",
