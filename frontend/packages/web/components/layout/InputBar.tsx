@@ -10,7 +10,7 @@ import { AttachmentChips } from '@/components/chat/AttachmentChips'
 import { UploadDropzone } from '@/components/chat/UploadDropzone'
 import { PendingSteers } from '@/components/layout/PendingSteers'
 import { ModelPicker } from '@/components/chat/ModelPicker'
-import { getPresetSelectionStore } from '@/lib/stores/preset-selection'
+import { getPresetSelectionStore, validatedModelKey } from '@/lib/stores/preset-selection'
 import { useComposerDraft } from '@/hooks/useComposerDraft'
 
 interface InputBarProps {
@@ -163,7 +163,7 @@ export function InputBar({
       // which lets the backend use the workspace default.
       const selection = workspaceId ? getPresetSelectionStore(workspaceId).getState() : null
       const sendOptions = selection
-        ? { model_key: selection.modelKey, thinking: selection.thinking }
+        ? { model_key: validatedModelKey(selection), thinking: selection.thinking }
         : undefined
       await send(client, conversationId!, text, ids, optimisticAttachments, sendOptions)
     } catch (err) {
