@@ -103,4 +103,12 @@ describe('resolveSandboxHref', () => {
       hash: null,
     })
   })
+
+  it('clamps encoded parent traversal', () => {
+    expect(resolveSandboxHref(BASE, '%2e%2e/%2e%2e/%2e%2e/%2e%2e/etc/passwd')).toEqual({
+      kind: 'sandbox',
+      path: '/workspace',
+      hash: null,
+    })
+  })
 })

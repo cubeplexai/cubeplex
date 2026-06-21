@@ -39,15 +39,17 @@ export function resolveSandboxHref(filePath: string, href: string): SandboxHref 
 
 function normalizePath(p: string): string {
   const stack: string[] = []
-  for (const seg of p.split('/')) {
-    if (seg === '' || seg === '.') continue
+  for (const rawSeg of p.split('/')) {
+    if (rawSeg === '') continue
+    // Decode FIRST so encoded `%2e%2e` is recognised as `..` instead of
+    // being pushed as a literal segment that slips past the traversal check.
+    const seg = safeDecode(rawSeg)
+    if (seg === '.') continue
     if (seg === '..') {
       if (stack.length > 0) stack.pop()
       continue
     }
-    // Decode percent-escapes so filenames with spaces (`Roadmap%202026.md`)
-    // become real filesystem paths; consumers re-encode when building URLs.
-    stack.push(safeDecode(seg))
+    stack.push(seg)
   }
   return '/' + stack.join('/')
 }
