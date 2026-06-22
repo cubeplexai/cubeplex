@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from cubebox.agents.actions.context import ScopeContext
 from cubebox.agents.actions.types import (
@@ -99,9 +99,18 @@ async def create_task(
 @router.get("", response_model=ScheduledTaskListOut)
 async def list_tasks(
     ctx: Annotated[RequestContext, Depends(require_member)],
+    topic_id: Annotated[str | None, Query()] = None,
+    im_account_id: Annotated[str | None, Query()] = None,
+    im_channel_id: Annotated[str | None, Query()] = None,
 ) -> ScheduledTaskListOut:
     async with async_session_maker() as session:
-        tasks = await _svc.list_tasks(_scope(ctx), session)
+        tasks = await _svc.list_tasks(
+            _scope(ctx),
+            session,
+            topic_id=topic_id,
+            im_account_id=im_account_id,
+            im_channel_id=im_channel_id,
+        )
     return ScheduledTaskListOut(tasks=[_to_out(t) for t in tasks])
 
 
@@ -118,12 +127,37 @@ async def get_task(
     return _to_out(task)
 
 
+_PATCH_MODE_LOCKED_FIELDS: frozenset[str] = frozenset(
+    {
+        "target_mode",
+        "target_conversation_id",
+        "im_account_id",
+        "im_channel_id",
+        "im_scope_key",
+        "im_scope_kind",
+    }
+)
+
+
 @router.patch("/{task_id}", response_model=ScheduledTaskOut)
 async def patch_task(
     task_id: str,
     body: ScheduledTaskPatch,
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> ScheduledTaskOut:
+    # Mode-bound destination fields are immutable post-create. We gate on
+    # `model_fields_set` membership so an explicit `null` is rejected just
+    # like a non-null value would be — the user's intent is to change the
+    # destination shape, which only delete-and-recreate supports.
+    locked = _PATCH_MODE_LOCKED_FIELDS & body.model_fields_set
+    if locked:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "target_mode / target_conversation_id / im_* cannot be changed via PATCH; "
+                "delete and recreate the schedule"
+            ),
+        )
     async with async_session_maker() as session:
         try:
             data = body.model_dump(exclude_unset=True)
