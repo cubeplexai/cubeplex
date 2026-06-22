@@ -69,6 +69,14 @@ untouched.
 
 ### Constraints
 
+Neither `scheduled_tasks` nor `triggers` carries a CHECK constraint on
+the discriminator column today (verified via `\d scheduled_tasks` and
+`\d triggers` against the development database). The migration simply
+**adds** new constraints — no `drop_constraint` call is needed for the
+discriminator. The value-space expansion of `target_mode` /
+`conversation_policy` is enforced entirely by the new shape CHECKs
+below.
+
 DB-level CHECK constraints stay **minimal** to avoid colliding with
 `ON DELETE SET NULL` cascades:
 
@@ -105,66 +113,159 @@ row's `topic_id` through. The existing block at
 topic-pinned fixed targets is deleted — the new constraint disallows
 `topic_id` in `fixed` mode entirely.
 
-### `im_channel` mode
+### `im_channel` mode — enqueue, don't run inline
 
-Extract a shared helper:
+The IM outbound tailer (`runtime.py::_on_run_started`) is a closure
+constructed at app startup capturing 8+ dependencies (Redis state, key
+prefix, gateway cache, secret cache, session maker, `RunManager`,
+config). A schedule/trigger dispatcher running outside that closure
+cannot recreate it without re-plumbing the whole runtime. So
+**schedule/trigger `im_channel` dispatch does not call `start_run` or
+`on_run_started` itself** — it enqueues a normal `IMRunQueueItem` and
+lets the existing `IMRunQueueWorker` do the run + tailer wiring.
+
+Extract two helpers:
 
 ```
 backend/cubebox/im/conversation_resolver.py
 
+@dataclass(frozen=True)
+class ResolvedIMConversation:
+    conversation_id: str
+    topic_id: str | None
+    is_group_chat: bool
+    sandbox_mode: str | None
+
 async def resolve_im_conversation(
     session,
     account: IMConnectorAccount,
+    *,
     channel_id: str,
     scope_key: str,
-    *,
+    scope_kind: str,
+    effective_user_id: str,
+    title_hint: str,
     origin: Literal["inbound", "schedule", "trigger"],
-) -> Conversation:
-    # 1. get_or_create_thread_link(account.id, channel_id, scope_key)
-    # 2. If link exists and link.conversation is alive, reuse it.
-    # 3. Otherwise mint a new Conversation using IMChannelBinding
-    #    (mode / topic_id / sandbox_mode) and repoint the link.
-    # 4. Stamp Conversation.metadata.im_origin = {origin, ...} for trace.
+) -> ResolvedIMConversation:
+    # Replicates the full inbound side-effect set in im/inbound.py:160-292:
+    # 1. Read IMChannelBinding(account_id, channel_id).
+    # 2. If shared mode and binding.topic_id is None:
+    #    - Create Topic, set binding.topic_id.
+    #    - Insert TopicParticipant(role=owner) for acting_user_id.
+    #    - Insert TopicParticipant(role=member) for effective_user_id
+    #      when different from acting_user_id.
+    # 3. If shared mode and binding.topic_id is set:
+    #    - Auto-join effective_user as TopicParticipant if missing.
+    # 4. get_or_create_thread_link(...) with a make_conversation_id
+    #    closure that mints Conversation(topic_id, is_group_chat=is_shared)
+    #    AND inserts ConversationParticipant for effective_user_id when shared.
+    # 5. If link was NOT newly created and shared mode: post-link
+    #    participant top-up for effective_user_id (ConversationParticipant
+    #    + TopicParticipant idempotent inserts).
+    # 6. Return ResolvedIMConversation with binding-derived fields so the
+    #    caller can build RunContext correctly.
 ```
 
-`im/inbound.py:218` (`_make_conversation_id`) is rewritten to call this
-helper. Schedule and trigger dispatchers each add an `im_channel` branch:
+```
+backend/cubebox/im/run_handoff.py
+
+async def enqueue_im_channel_run(
+    session,
+    *,
+    account: IMConnectorAccount,
+    conversation_id: str,
+    content: str,
+    channel_id: str,
+    scope_key: str,
+    scope_kind: str,
+    owner_user_id: str,
+    platform_event_id: str,   # idempotency key — see below
+) -> None:
+    # 1. Resolve sender_im_user_id from IMIdentityLink (may be None).
+    # 2. INSERT IMWebhookReceipt(account_id, platform_event_id,
+    #    status='completed').
+    #    Unique (account_id, platform_event_id) guarantees idempotency:
+    #    a retried dispatcher tick on the same scheduled-occurrence row
+    #    cannot create a duplicate.
+    # 3. INSERT IMRunQueueItem(account_id, receipt_id, conversation_id,
+    #    content, channel_id, scope_key, scope_kind, sender_im_user_id,
+    #    sender_open_id=None, reply_to_id=None, inbound_message_id=None,
+    #    status='pending').
+    # Both writes happen inside the calling transaction; on the
+    # dispatcher's commit the worker can claim the row.
+```
+
+`im/inbound.py:160-292` is refactored to call `resolve_im_conversation`
+for the conversation + participant work; the existing
+`IMRunQueueItem`/`IMWebhookReceipt` writes there stay as-is (real
+inbound has a real webhook event id).
+
+Schedule dispatcher pseudo-flow:
 
 ```
 schedule dispatch (target_mode == 'im_channel'):
+    run_row = ScheduledTaskRun(
+        scheduled_task_id=task.id, scheduled_for=tick_at,
+        state='claimed', claimed_at=now,
+        conversation_id=None, run_id=None,
+    )
+    session.add(run_row); session.flush()  # gets run_row.id
+
     account = session.get(IMConnectorAccount, task.im_account_id)
     if account is None:
-        record ScheduledTaskRun(status='failed',
-                                reason='im_account_unlinked')
-        return
+        run_row.state = 'failed'
+        run_row.detail = 'im_account_unlinked'
+        session.commit(); return
 
-    conv = await resolve_im_conversation(
-        session, account, task.im_channel_id, task.im_scope_key,
+    resolved = await resolve_im_conversation(
+        session, account,
+        channel_id=task.im_channel_id,
+        scope_key=task.im_scope_key,
+        scope_kind=derive_scope_kind(task.im_scope_key),
+        effective_user_id=task.owner_user_id,
+        title_hint=task.prompt[:80],
         origin='schedule',
     )
-    append_user_message(
-        conv,
-        task.prompt,
-        metadata={"synthetic": True,
-                  "trigger_source": "schedule",
-                  "schedule_id": task.id},
+    run_row.conversation_id = resolved.conversation_id
+    run_row.state = 'enqueued'
+    # run_id stays NULL; the worker assigns it when it picks the item up.
+
+    await enqueue_im_channel_run(
+        session, account=account,
+        conversation_id=resolved.conversation_id,
+        content=task.prompt,
+        channel_id=task.im_channel_id,
+        scope_key=task.im_scope_key,
+        scope_kind=derive_scope_kind(task.im_scope_key),
+        owner_user_id=task.owner_user_id,
+        platform_event_id=f"schedule:{run_row.id}",
     )
-    await RunManager.start_run(conv, ...)
+    await session.commit()
 ```
 
-Trigger dispatch mirrors the same logic with `origin='trigger'` and
-`trigger_id` / `event_id` in metadata. The synthetic-message marker
-matches the upstream cubepi convention so the frontend can filter it.
+`fixed` and `new_each_run` keep calling `RunManager.start_run` inline as
+they do today.
+
+Trigger pipeline mirrors the same logic — `TriggerEvent` row, then
+`enqueue_im_channel_run(platform_event_id=f"trigger:{event_row.id}")`.
+
+### Observability for `im_channel` ScheduledTaskRun rows
+
+Because run execution is async via the worker, `ScheduledTaskRun.run_id`
+stays NULL after dispatch for `im_channel` mode. State transitions stop
+at `state='enqueued'`. End-of-run reconciliation (claiming, retries,
+success/failure) is owned by the IM worker on the queue item, not by
+the schedule poller. This is acceptable for v1 — the user observes the
+run by looking at the IM channel. A follow-up task can add a reconciler
+that ties IMRunQueueItem terminal state back to ScheduledTaskRun via
+the deterministic `platform_event_id` if richer observability is
+needed.
 
 ### Outbound routing
 
-Because the run is bound to a Conversation whose `IMThreadLink` ties it
-to the IM account, the existing `OutboundRunTailer` and per-platform
-`OpDispatcher` fan run events back to the IM channel without any new
-outbound code path. Whether `IMRunQueueItem` outbox rows are required
-for the tailer to pick up the run is a question to verify during
-implementation; if needed, the dispatcher writes one before
-`start_run`. Either way, **no new outbound code path is introduced**.
+Because we enqueue a real `IMRunQueueItem`, the existing worker calls
+`RunManager.start_run` and then `_on_run_started`, which builds the
+per-platform tailer. **No new outbound code path is introduced.**
 
 ## Agent tool: defaults and IM context
 
@@ -299,7 +400,8 @@ No new endpoints, no scope changes.
 | Case | Behavior |
 |---|---|
 | Topic deleted | `topic_id` SET NULL; schedule keeps running, destination column shows "New conversation". |
-| IM account deleted | `im_account_id` SET NULL; next fire writes `ScheduledTaskRun(status='failed', reason='im_account_unlinked')`; schedule row preserved for cleanup. |
+| IM account deleted | `im_account_id` SET NULL; next fire writes `ScheduledTaskRun(state='failed', detail='im_account_unlinked')` (or `TriggerEvent(status='failed', last_error='im_account_unlinked')` on the trigger side); schedule/trigger row preserved for cleanup. |
+| Schedule dispatcher commit fails mid-flight | Whole tick is one DB transaction (`ScheduledTaskRun` + `IMWebhookReceipt` + `IMRunQueueItem` written together). A crash before `commit()` leaves zero rows; the next poller tick re-attempts cleanly. A crash after `commit()` is identical to "row already exists" — the unique constraint on `(scheduled_task_id, scheduled_for)` blocks duplicate insertion. |
 | User runs `/new` then schedule fires | `IMThreadLink` is gone; `resolve_im_conversation` mints a fresh conversation and link. New thread appears in the IM channel — consistent with "channel survives, conversation can rotate." |
 | Multiple schedules on same channel/scope | All resolve to the same conversation if the link exists; concurrent run handling is whatever `RunManager` already does. |
 | IM binding switches `isolated` ↔ `shared` | Live binding: next fire sees the new mode. If shared mode pins a new topic, future schedule firings land there. |
@@ -314,16 +416,16 @@ No new endpoints, no scope changes.
 Single alembic revision per area (one for schedules, one for triggers,
 or one combined — implementation choice). `target_mode` and
 `conversation_policy` are `text` columns today (no Postgres ENUM type
-involved), so the value-space expansion is done by replacing the
-existing CHECK constraint. For each table:
+involved); there is also no existing CHECK constraint on these columns,
+so the migration only **adds** constraints, never drops. For each
+table:
 
-1. Drop the old CHECK on `target_mode` / `conversation_policy`; add the
-   new one with the expanded value list.
-2. Add the four new nullable columns with FKs (`ON DELETE SET NULL` on
+1. Add the four new nullable columns with FKs (`ON DELETE SET NULL` on
    `topic_id` and `im_account_id`; `im_channel_id` / `im_scope_key` are
    plain text and need no FK).
-3. Add the two indexes.
-4. Add the minimal CHECK constraints (per the data-model section).
+2. Add the two indexes.
+3. Add the minimal CHECK constraints (per the data-model section),
+   including the value-space enforcement on the discriminator column.
 
 All existing rows have `target_mode ∈ {fixed, new_each_run}` and the new
 columns null, which is valid under the new constraints. No data
