@@ -14,7 +14,6 @@ different surface.
 import mimetypes
 import posixpath
 import secrets
-from datetime import datetime
 from typing import Annotated, Any, cast
 from urllib.parse import quote
 
@@ -206,7 +205,6 @@ async def list_sandbox_files(
     ctx: Annotated[RequestContext, Depends(require_member)],
     session: Annotated[AsyncSession, Depends(get_session)],
     path: str = Query(default="/workspace"),
-    pattern: str = Query(default="*"),
     conversation_id: str | None = Query(default=None),
 ) -> list[SandboxFileEntry]:
     """List direct children of a directory in the sandbox."""
@@ -236,9 +234,9 @@ async def list_sandbox_files(
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("filesystem operations require OpenSandbox backend")
         raw = sandbox._sandbox  # noqa: SLF001
-        from opensandbox.models.filesystem import SearchEntry
+        from opensandbox.models.filesystem import DirectoryListEntry
 
-        entries = await raw.files.search(SearchEntry(path=normalized, pattern=pattern))
+        entries = await raw.files.list_directory(DirectoryListEntry(path=normalized, depth=1))
     except SandboxError as exc:
         logger.warning(
             "sandbox file listing failed for ws {}: {}",
@@ -250,50 +248,22 @@ async def list_sandbox_files(
             detail="sandbox unavailable; please retry",
         ) from exc
 
-    # The search API returns only file entries (never directories), so we
-    # derive immediate child directories from the paths of deeper entries.
-    direct_files: list[SandboxFileEntry] = []
-    child_dirs: dict[str, datetime] = {}  # dir_name → latest modified_at
-
+    result: list[SandboxFileEntry] = []
     for e in entries:
-        entry_path = posixpath.normpath(e.path)
-        parent = posixpath.dirname(entry_path)
-        if parent == normalized:
-            name = posixpath.basename(entry_path)
-            if name and not name.startswith("."):
-                direct_files.append(
-                    SandboxFileEntry(
-                        path=entry_path,
-                        name=name,
-                        is_dir=False,
-                        size=e.size,
-                        modified_at=utc_isoformat(e.modified_at),
-                    )
-                )
-        else:
-            # Entry is deeper — extract the immediate child directory name.
-            rel = posixpath.relpath(entry_path, normalized)
-            dir_name = rel.split("/")[0]
-            if not dir_name or dir_name.startswith("."):
-                continue
-            if dir_name not in child_dirs:
-                child_dirs[dir_name] = e.modified_at
-            elif dir_name and e.modified_at > child_dirs[dir_name]:
-                child_dirs[dir_name] = e.modified_at
-
-    dir_entries = [
-        SandboxFileEntry(
-            path=posixpath.join(normalized, name),
-            name=name,
-            is_dir=True,
-            size=0,
-            modified_at=utc_isoformat(ts),
+        name = posixpath.basename(posixpath.normpath(e.path))
+        if not name or name.startswith("."):
+            continue
+        is_dir = e.entry_type == "directory"
+        result.append(
+            SandboxFileEntry(
+                path=e.path,
+                name=name,
+                is_dir=is_dir,
+                size=0 if is_dir else e.size,
+                modified_at=utc_isoformat(e.modified_at),
+            )
         )
-        for name, ts in child_dirs.items()
-    ]
-
-    result = dir_entries + direct_files
-    result.sort(key=lambda e: (not e.is_dir, e.name.lower()))
+    result.sort(key=lambda r: (not r.is_dir, r.name.lower()))
     return result
 
 
