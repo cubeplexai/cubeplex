@@ -12,6 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { RailCard } from '@/components/shared/RailCard'
 import { formatNextFire, formatScheduleSummary } from '../lib/format'
+import { DestinationCell } from './DestinationCell'
 
 interface ScheduledTaskCardProps {
   task: ScheduledTaskOut
@@ -53,7 +54,13 @@ export function ScheduledTaskCard({
           {task.status === 'active' ? 'Active' : 'Paused'}
         </Badge>
       }
-      secondary={formatScheduleSummary(task)}
+      secondary={
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>{formatScheduleSummary(task)}</span>
+          <span className="text-muted-foreground/60">·</span>
+          <DestinationCell task={task} />
+        </span>
+      }
       meta={formatNextFire(task)}
       actions={
         canMutate ? (
