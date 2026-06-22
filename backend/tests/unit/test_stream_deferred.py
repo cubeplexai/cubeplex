@@ -25,7 +25,7 @@ from cubepi.providers.base import (
     Usage,
 )
 
-from cubebox.agents.stream import StreamConverter
+from cubebox.agents.stream import StreamConverter, unwrap_deferred_in_message_dicts
 
 
 def _mk_assistant(tool_calls: list[ToolCall] | None = None) -> AssistantMessage:
@@ -386,3 +386,140 @@ def test_streaming_handles_escaped_quote_in_string_value() -> None:
     )
     body = json.loads(emits[0][0]["delta"])
     assert body == {"msg": 'say "hi"'}
+
+
+# ---------------------------------------------------------------------------
+# Persisted-message unwrap — /messages, /bootstrap, /shares display path
+#
+# cubepi's resolve_tool_call rewrites the ToolCall at execute time, but the
+# checkpointed AssistantMessage keeps the dispatcher block (cubepi never
+# mutates the persisted assistant message for prompt-cache reasons). Without
+# unwrap_deferred_in_message_dicts, reloads of completed conversations would
+# show `deferred_tool_call` cards while the live stream showed real names.
+
+
+def test_unwrap_rewrites_persisted_deferred_assistant_tool_call() -> None:
+    """The dispatcher block in a checkpointed assistant message is rewritten
+    to the resolved real tool name + inner args for display."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": "tc1",
+                    "name": "deferred_tool_call",
+                    "arguments": {
+                        "tool_name": "file_write",
+                        "arguments": {"path": "a.txt"},
+                    },
+                }
+            ],
+        }
+    ]
+    out = unwrap_deferred_in_message_dicts(messages)
+    assert out[0]["content"][0] == {
+        "type": "tool_call",
+        "id": "tc1",
+        "name": "file_write",
+        "arguments": {"path": "a.txt"},
+    }
+
+
+def test_unwrap_leaves_non_deferred_tool_call_untouched() -> None:
+    """A persisted tool_call from a non-deferred path (e.g. a builtin or
+    subagent tool) passes through with name and arguments intact."""
+    block = {
+        "type": "tool_call",
+        "id": "tc1",
+        "name": "show_widget",
+        "arguments": {"kind": "panel"},
+    }
+    out = unwrap_deferred_in_message_dicts([{"role": "assistant", "content": [block]}])
+    assert out[0]["content"][0] == block
+
+
+def test_unwrap_passes_through_user_and_tool_result_messages() -> None:
+    """Only AssistantMessages can carry ToolCall blocks. User and tool_result
+    messages must not be mutated even if they happen to contain a key named
+    `name` or `arguments` somewhere in their payload."""
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+        {
+            "role": "tool_result",
+            "tool_call_id": "tc1",
+            "tool_name": "file_write",
+            "content": [{"type": "text", "text": "ok"}],
+        },
+    ]
+    out = unwrap_deferred_in_message_dicts(messages)
+    assert out == messages
+
+
+def test_unwrap_preserves_malformed_wrapper_so_error_chain_stays() -> None:
+    """A wrapper whose inner `tool_name` is missing or non-string passes
+    through unchanged. cubepi's resolver falls through to the dispatcher's
+    `_execute`, which yields an is_error AgentToolResult ("Unknown deferred
+    tool: ..."); rewriting the assistant block here would hide that and
+    leave the user with an inscrutable error against an invented name."""
+    malformed = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": "tc1",
+                    "name": "deferred_tool_call",
+                    "arguments": {"tool_name": None, "arguments": {"x": 1}},
+                }
+            ],
+        }
+    ]
+    out = unwrap_deferred_in_message_dicts(malformed)
+    assert out == malformed
+
+
+def test_unwrap_does_not_mutate_input_messages() -> None:
+    """The helper runs on the model_dump'd output and must not mutate the
+    caller's list — callers may still hold references to the dicts."""
+    block = {
+        "type": "tool_call",
+        "id": "tc1",
+        "name": "deferred_tool_call",
+        "arguments": {"tool_name": "file_write", "arguments": {"path": "a.txt"}},
+    }
+    msg = {"role": "assistant", "content": [block]}
+    input_messages = [msg]
+    unwrap_deferred_in_message_dicts(input_messages)
+    # Original list / dict / block references unchanged.
+    assert input_messages[0] is msg
+    assert msg["content"][0] is block
+    assert block["name"] == "deferred_tool_call"
+    assert block["arguments"] == {"tool_name": "file_write", "arguments": {"path": "a.txt"}}
+
+
+def test_unwrap_handles_mixed_assistant_content_blocks() -> None:
+    """An assistant message can mix text/thinking/tool_call blocks; unwrap
+    only touches the deferred tool_call block and leaves the rest alone."""
+    msg = {
+        "role": "assistant",
+        "content": [
+            {"type": "text", "text": "Calling file_write…"},
+            {"type": "thinking", "thinking": "I should write the file."},
+            {
+                "type": "tool_call",
+                "id": "tc1",
+                "name": "deferred_tool_call",
+                "arguments": {
+                    "tool_name": "file_write",
+                    "arguments": {"path": "a.txt"},
+                },
+            },
+        ],
+    }
+    out = unwrap_deferred_in_message_dicts([msg])
+    content = out[0]["content"]
+    assert content[0]["type"] == "text"
+    assert content[1]["type"] == "thinking"
+    assert content[2]["name"] == "file_write"
+    assert content[2]["arguments"] == {"path": "a.txt"}

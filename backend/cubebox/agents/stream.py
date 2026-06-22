@@ -588,3 +588,71 @@ def convert_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
 def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
     """One-off translation of a single AgentEvent. See :func:`convert_event_to_sse`."""
     return StreamConverter().convert_agent_event(evt)
+
+
+def unwrap_deferred_in_message_dicts(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Rewrite persisted ``deferred_tool_call`` wrapper blocks to their resolved
+    real tool form, for read-side display.
+
+    cubepi's ``resolve_tool_call`` rewrites the dispatched call at execute time
+    but does NOT mutate the persisted AssistantMessage — the dispatcher block
+    stays in checkpoint history as ``name="deferred_tool_call"`` with the
+    wrapper arguments. The tool_result, by contrast, gets persisted under the
+    resolved name (cubepi emits ``ToolExecutionEndEvent`` with the rewritten
+    ``rtc.name``), so without this read-side fix a reloaded conversation
+    renders mismatched cards (``deferred_tool_call`` request → real-name
+    result) and loses any frontend rendering keyed off real tool names.
+
+    We touch only the dict copy — the underlying cubepi messages remain
+    intact, so model replay still sees the dispatcher block (whichever name
+    is in the prompt cache stays in the prompt cache). Malformed wrappers
+    (inner ``tool_name`` not a string) pass through unchanged so cubepi's
+    "Unknown deferred tool" error chain stays visible in the UI.
+    """
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            out.append(msg)
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            out.append(msg)
+            continue
+        new_content: list[Any] = []
+        rewrote = False
+        for block in content:
+            unwrapped = _unwrap_deferred_block(block)
+            if unwrapped is not block:
+                rewrote = True
+            new_content.append(unwrapped)
+        if not rewrote:
+            out.append(msg)
+            continue
+        new_msg = dict(msg)
+        new_msg["content"] = new_content
+        out.append(new_msg)
+    return out
+
+
+def _unwrap_deferred_block(block: Any) -> Any:
+    if (
+        not isinstance(block, dict)
+        or block.get("type") != "tool_call"
+        or block.get("name") != _DEFERRED_DISPATCH_TOOL_NAME
+    ):
+        return block
+    wrapper = block.get("arguments")
+    if not isinstance(wrapper, dict):
+        return block
+    inner_name = wrapper.get("tool_name")
+    if not isinstance(inner_name, str):
+        return block
+    inner_args = wrapper.get("arguments")
+    if not isinstance(inner_args, dict):
+        inner_args = {}
+    new_block = dict(block)
+    new_block["name"] = inner_name
+    new_block["arguments"] = inner_args
+    return new_block

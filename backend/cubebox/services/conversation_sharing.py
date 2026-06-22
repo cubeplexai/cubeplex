@@ -51,11 +51,13 @@ def filter_messages_for_snapshot(
 
 async def build_snapshot(conversation_id: str) -> list[dict[str, Any]]:
     """Load messages from cubepi checkpointer, filter for public snapshot."""
+    from cubebox.agents.stream import unwrap_deferred_in_message_dicts
+
     async with init_checkpointer() as cp:
         data = await cp.load(conversation_id)
     if data is None:
         return []
-    raw = [m.model_dump(mode="json") for m in data.messages]
+    raw = unwrap_deferred_in_message_dicts([m.model_dump(mode="json") for m in data.messages])
     return filter_messages_for_snapshot(raw)
 
 
