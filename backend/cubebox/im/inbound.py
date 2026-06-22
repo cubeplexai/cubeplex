@@ -16,22 +16,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from cubebox.im.conversation_resolver import resolve_im_conversation
 from cubebox.im.identity import IdentityResolver, RejectionNotifier, resolve_or_reject
 from cubebox.im.types import InboundEvent
-from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_channel_binding import IMChannelBinding
 from cubebox.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMWebhookReceipt,
 )
-from cubebox.models.topic import Topic, TopicParticipant
-from cubebox.repositories.im_connector import get_or_create_thread_link
 
 
 @dataclass(slots=True)
@@ -133,170 +128,38 @@ async def ingest_inbound_event(
         # resolver is configured — preserves existing behavior.
         effective_user_id: str = account.acting_user_id
         if identity_resolver is not None and rejection_notifier is not None:
-            resolved = await resolve_or_reject(
+            resolved_user_id = await resolve_or_reject(
                 session=session,
                 account=account,
                 event=event,
                 resolver=identity_resolver,
                 notifier=rejection_notifier,
             )
-            if resolved is None:
+            if resolved_user_id is None:
                 # Mark receipt terminal so the worker (and dashboards)
                 # don't conflate this with a still-pending row.
                 receipt.status = "rejected"
                 await session.commit()
                 return IngestResult(outcome="rejected", conversation_id=None)
-            effective_user_id = resolved
+            effective_user_id = resolved_user_id
 
-        # Look up channel binding for shared-mode detection
-        binding = (
-            await session.execute(
-                select(IMChannelBinding).where(
-                    IMChannelBinding.account_id == account.id,  # type: ignore[arg-type]
-                    IMChannelBinding.channel_id == event.channel_id,  # type: ignore[arg-type]
-                )
-            )
-        ).scalar_one_or_none()
-        is_shared = binding is not None and binding.mode == "shared"
-
-        # Shared-mode first message: create topic + owner participant
-        topic_id: str | None = None
-        if is_shared:
-            assert binding is not None  # mypy narrowing
-            if binding.topic_id is None:
-                topic = Topic(
-                    org_id=account.org_id,
-                    workspace_id=account.workspace_id,
-                    creator_user_id=account.acting_user_id,
-                    title=binding.channel_name or event.channel_id,
-                    sandbox_mode=binding.sandbox_mode or "dedicated",
-                    max_participants=100,
-                )
-                session.add(topic)
-                await session.flush()
-                binding.topic_id = topic.id
-                session.add(binding)
-                # Owner participant (the acting user who owns the bot)
-                session.add(
-                    TopicParticipant(
-                        topic_id=topic.id,
-                        user_id=account.acting_user_id,
-                        role="owner",
-                    )
-                )
-                # If sender is a different user, add as member
-                if effective_user_id != account.acting_user_id:
-                    session.add(
-                        TopicParticipant(
-                            topic_id=topic.id,
-                            user_id=effective_user_id,
-                            role="member",
-                        )
-                    )
-                await session.flush()
-            else:
-                # Existing topic: auto-join sender if not already present
-                existing_tp = (
-                    await session.execute(
-                        select(TopicParticipant).where(
-                            TopicParticipant.topic_id == binding.topic_id,
-                            TopicParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing_tp is None:
-                    session.add(
-                        TopicParticipant(
-                            topic_id=binding.topic_id,
-                            user_id=effective_user_id,
-                            role="member",
-                        )
-                    )
-                    await session.flush()
-            topic_id = binding.topic_id
-
-        async def _make_conversation_id() -> str:
-            conv = Conversation(
-                org_id=account.org_id,
-                workspace_id=account.workspace_id,
-                creator_user_id=effective_user_id,
-                title=(event.text[:80] or "IM conversation"),
-                topic_id=topic_id,
-                is_group_chat=is_shared,
-            )
-            session.add(conv)
-            await session.flush()
-            if is_shared:
-                session.add(
-                    ConversationParticipant(
-                        org_id=account.org_id,
-                        workspace_id=account.workspace_id,
-                        conversation_id=conv.id,
-                        user_id=effective_user_id,
-                    )
-                )
-                await session.flush()
-            return conv.id
-
-        link, _created = await get_or_create_thread_link(
+        resolved = await resolve_im_conversation(
             session,
-            org_id=account.org_id,
-            workspace_id=account.workspace_id,
-            account_id=account.id,
+            account,
             channel_id=event.channel_id,
             scope_key=event.scope_key,
             scope_kind=event.scope_kind,
-            make_conversation_id=_make_conversation_id,
+            effective_user_id=effective_user_id,
+            title_hint=event.text,
+            origin="inbound",
         )
-
-        # Existing shared-mode conversation: auto-join sender as participant
-        if not _created and is_shared:
-            assert binding is not None
-            existing_cp = (
-                await session.execute(
-                    select(ConversationParticipant).where(
-                        ConversationParticipant.conversation_id == link.conversation_id,  # type: ignore[arg-type]
-                        ConversationParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing_cp is None:
-                session.add(
-                    ConversationParticipant(
-                        org_id=account.org_id,
-                        workspace_id=account.workspace_id,
-                        conversation_id=link.conversation_id,
-                        user_id=effective_user_id,
-                    )
-                )
-            # Also ensure topic participant (idempotent with the block above,
-            # but covers the case where the link already existed before this
-            # sender's first message).
-            if binding.topic_id is not None:
-                existing_tp = (
-                    await session.execute(
-                        select(TopicParticipant).where(
-                            TopicParticipant.topic_id == binding.topic_id,
-                            TopicParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
-                        )
-                    )
-                ).scalar_one_or_none()
-                if existing_tp is None:
-                    session.add(
-                        TopicParticipant(
-                            topic_id=binding.topic_id,
-                            user_id=effective_user_id,
-                            role="member",
-                        )
-                    )
-            await session.flush()
 
         item = IMRunQueueItem(
             org_id=account.org_id,
             workspace_id=account.workspace_id,
             account_id=account.id,
             receipt_id=receipt.id,
-            conversation_id=link.conversation_id,
+            conversation_id=resolved.conversation_id,
             content=event.text,
             channel_id=event.channel_id,
             scope_key=event.scope_key,
@@ -326,4 +189,4 @@ async def ingest_inbound_event(
             if not _is_receipt_unique_violation(exc):
                 raise
             return IngestResult(outcome="duplicate", conversation_id=None)
-        return IngestResult(outcome="enqueued", conversation_id=link.conversation_id)
+        return IngestResult(outcome="enqueued", conversation_id=resolved.conversation_id)
