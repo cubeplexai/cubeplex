@@ -240,6 +240,18 @@ class ScheduledTaskPoller:
                 row.detail = "task expired before dispatch"
                 await session.commit()
                 return
+            if task.target_mode == "im_channel":
+                # IM-mode dispatch owns the row's terminal state itself —
+                # the receipt + queue item + state flip commit in one tx.
+                # No pre-stamp because no run_id exists yet; the IM worker
+                # mints one when it drains the queue.
+                await dispatch_scheduled_run(
+                    task=task,
+                    run_manager=self._run_manager,
+                    session=session,
+                    run_row=row,
+                )
+                return
             # Pre-stamp run_id while the row is still 'claimed' so the
             # completion hook can find the row by run_id even if the
             # background run finishes faster than the post-dispatch UPDATE
@@ -299,6 +311,10 @@ class ScheduledTaskPoller:
             # conversation" link because conversation_id stayed NULL).
             # Only flip state → 'started' when it is still 'claimed' — a
             # CASE expression keeps the terminal state intact otherwise.
+            # ``result`` is never None on this branch: the im_channel path
+            # returned earlier; fixed/new_each_run always produce a
+            # DispatchResult.
+            assert result is not None
             await session.execute(
                 update(ScheduledTaskRun)
                 .where(ScheduledTaskRun.id == row.id)  # type: ignore[arg-type]
