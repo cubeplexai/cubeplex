@@ -1447,7 +1447,7 @@ class RunManager:
           - MCP tools (workspace-enabled HTTP MCP servers)
         """
         from cubebox.agents.checkpointer import init_checkpointer
-        from cubebox.agents.stream import convert_agent_event_to_sse
+        from cubebox.agents.stream import StreamConverter
         from cubebox.middleware.citations.counter import citation_counter_var
 
         # extra_ref late-binding: compaction, skills, and todo all need access
@@ -1513,6 +1513,10 @@ class RunManager:
 
             _user_msg_seen = 0
             auto_detach = _build_auto_detach_listener(agent)
+            # One per-run StreamConverter so progressive `deferred_tool_call`
+            # unwrap can stitch deltas across events; without persistent state
+            # we couldn't peel the wrapper JSON as it streams.
+            stream_converter = StreamConverter()
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
                 # Runs on the same event loop as _run_cubepi_path, so
@@ -1527,7 +1531,7 @@ class RunManager:
                     _user_msg_seen += 1
                     if _user_msg_seen == 1:
                         return  # seed prompt — already shown optimistically
-                for d in convert_agent_event_to_sse(evt):
+                for d in stream_converter.convert_agent_event(evt):
                     sse_queue.put_nowait(d)
 
             agent.subscribe(_on_event)
@@ -1906,7 +1910,7 @@ class RunManager:
           meta row while our claim still owns it.
         """
         from cubebox.agents.checkpointer import init_checkpointer
-        from cubebox.agents.stream import convert_agent_event_to_sse
+        from cubebox.agents.stream import StreamConverter
         from cubebox.middleware.citations.counter import citation_counter_var
         from cubebox.streams.hitl_resume import (
             classify_terminal_status,
@@ -1954,13 +1958,17 @@ class RunManager:
             extra_ref_holder["extra"] = agent._extra
 
             auto_detach = _build_auto_detach_listener(agent)
+            # One per-run StreamConverter — see comment on the prompt path
+            # variant above; the deferred-call unwrap needs persistent state
+            # across deltas inside a single run.
+            stream_converter = StreamConverter()
 
             def _on_event(evt: Any, _signal: Any = None) -> None:
                 # auto_detach runs first so a follow-up HitlRequestEvent
                 # detaches the agent before SSE conversion; T6 reads
                 # `auto_detach.detached` in the terminal block below.
                 auto_detach(evt, _signal)
-                for d in convert_agent_event_to_sse(evt):
+                for d in stream_converter.convert_agent_event(evt):
                     sse_queue.put_nowait(d)
 
             agent.subscribe(_on_event)
