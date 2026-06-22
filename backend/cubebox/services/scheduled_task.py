@@ -32,6 +32,24 @@ from cubebox.schedules.compute import (
     latest_due_before,
     next_fire_after,
 )
+from cubebox.services.schedule_target_spec import (
+    ScheduleTargetError,
+    validate_destination_scope,
+)
+
+# Destination columns whose value is fixed at create time. Both REST and
+# agent paths share this lock so a PATCH (no matter the source) cannot
+# silently change where a schedule's runs land.
+_FORBIDDEN_PATCH_DESTINATION_FIELDS: frozenset[str] = frozenset(
+    {
+        "target_mode",
+        "target_conversation_id",
+        "im_account_id",
+        "im_channel_id",
+        "im_scope_key",
+        "im_scope_kind",
+    }
+)
 
 # Fields whose change requires recomputing next_fire_at.  Editing only
 # name/prompt/target_* must NOT slide the schedule.
@@ -150,6 +168,19 @@ class ScheduledTaskService:
                 session, ctx, data.get("target_conversation_id", "")
             )
 
+        # Cross-workspace FK guard: the FK constraints only check that the
+        # row exists; they don't enforce that it lives in this workspace.
+        try:
+            await validate_destination_scope(
+                session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                topic_id=data.get("topic_id"),
+                im_account_id=data.get("im_account_id"),
+            )
+        except ScheduleTargetError as exc:
+            raise ActionInvalidInput(str(exc)) from exc
+
         run_at = data.get("run_at")
         end_at = data.get("end_at")
         task = ScheduledTask(
@@ -189,6 +220,18 @@ class ScheduledTaskService:
         task = await self._load_for_mutation(ctx, session, task_id)
         self._validate_patch(data)
 
+        # Destination immutability — defense in depth. The HTTP layer already
+        # blocks these via Pydantic's ``model_fields_set`` gate, but the
+        # legacy ``scheduled_tasks_update`` agent action sends a raw data
+        # dict and would otherwise bypass that. Reject here so every caller
+        # (route + tool + future action) hits the same wall.
+        forbidden = _FORBIDDEN_PATCH_DESTINATION_FIELDS & data.keys()
+        if forbidden:
+            raise ActionInvalidInput(
+                f"Cannot change destination fields after creation: {sorted(forbidden)}. "
+                "Delete the schedule and create a new one instead."
+            )
+
         # topic_id is patchable only when the existing row is new_each_run;
         # for fixed/im_channel a topic_id is structurally meaningless.
         if "topic_id" in data and task.target_mode != "new_each_run":
@@ -197,19 +240,20 @@ class ScheduledTaskService:
                 f"(current target_mode={task.target_mode!r})"
             )
 
-        # Conversation ownership check when switching to / staying in fixed
-        if data.get("target_mode") == "fixed" or (
-            data.get("target_conversation_id") is not None and task.target_mode == "fixed"
-        ):
-            conv_repo = ConversationRepository(
-                session,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-                user_id=task.owner_user_id,
-            )
-            target = data.get("target_conversation_id") or task.target_conversation_id
-            if target is None or await conv_repo.get_by_id(target) is None:
-                raise ActionInvalidInput("target_conversation_id must be the owner's conversation")
+        # Cross-workspace FK guard for the one destination field PATCH can
+        # change (topic_id). im_account_id is in the forbidden set above, so
+        # we never need to re-check it here.
+        if "topic_id" in data and data["topic_id"] is not None:
+            try:
+                await validate_destination_scope(
+                    session,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    topic_id=data.get("topic_id"),
+                    im_account_id=None,
+                )
+            except ScheduleTargetError as exc:
+                raise ActionInvalidInput(str(exc)) from exc
 
         touched_schedule = False
         for field in (
@@ -220,8 +264,6 @@ class ScheduledTaskService:
             "interval_seconds",
             "run_at",
             "timezone",
-            "target_mode",
-            "target_conversation_id",
         ):
             val = data.get(field)
             if val is None:

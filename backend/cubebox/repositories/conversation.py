@@ -102,6 +102,23 @@ class ConversationRepository(ScopedRepository[Conversation]):
         draft: bool = False,
         topic_id: str | None = None,
     ) -> Conversation:
+        # Cross-workspace FK guard at the persistence boundary so any caller
+        # (dispatch, REST routes, agent tools) that passes a topic_id from
+        # another workspace gets rejected before the row is written. The
+        # FK constraint on topic_id only verifies existence; it doesn't
+        # check that the topic belongs to this repo's (org_id, workspace_id).
+        if topic_id is not None:
+            topic = (
+                await self.session.execute(
+                    select(cast(Any, Topic.id)).where(
+                        cast(Any, Topic.id) == topic_id,
+                        cast(Any, Topic.org_id) == self.org_id,
+                        cast(Any, Topic.workspace_id) == self.workspace_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if topic is None:
+                raise ValueError(f"topic_id {topic_id!r} not found in this workspace")
         conv = Conversation(
             title=title,
             org_id=self.org_id,

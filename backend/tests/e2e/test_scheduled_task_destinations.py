@@ -374,6 +374,38 @@ async def cleanup_destinations(
             text("DELETE FROM im_connector_accounts WHERE workspace_id = :ws"),
             {"ws": ws_id},
         )
+        # Cross-workspace FK tests mint a sibling workspace in the same
+        # org (see _seed_topic_in_other_workspace /
+        # _seed_im_account_in_other_workspace). Wipe any non-primary
+        # workspace under the test's org so the next test sees a clean
+        # slate. The primary ws (passed in via fixture) is deleted by the
+        # outer authenticated_client teardown.
+        await session.execute(
+            text(
+                "DELETE FROM topics WHERE workspace_id IN "
+                "(SELECT id FROM workspaces WHERE org_id = "
+                "(SELECT org_id FROM workspaces WHERE id = :ws) "
+                "AND id != :ws)"
+            ),
+            {"ws": ws_id},
+        )
+        await session.execute(
+            text(
+                "DELETE FROM im_connector_accounts WHERE workspace_id IN "
+                "(SELECT id FROM workspaces WHERE org_id = "
+                "(SELECT org_id FROM workspaces WHERE id = :ws) "
+                "AND id != :ws)"
+            ),
+            {"ws": ws_id},
+        )
+        await session.execute(
+            text(
+                "DELETE FROM workspaces WHERE org_id = "
+                "(SELECT org_id FROM workspaces WHERE id = :ws) "
+                "AND id != :ws"
+            ),
+            {"ws": ws_id},
+        )
         await session.commit()
 
 
@@ -1023,3 +1055,222 @@ async def test_idempotent_dispatch_on_retry(
         row = await session.get(ScheduledTaskRun, run_row_id)
         assert row is not None
         assert row.state == "succeeded"
+
+
+# ---------------------------------------------------------------------------
+# Cross-workspace FK isolation (R4 hardening)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_topic_in_other_workspace(*, org_id: str, creator_user_id: str) -> tuple[str, str]:
+    """Mint a second workspace in the same org and seed a topic there.
+
+    Returns ``(other_workspace_id, other_topic_id)``. The caller's identity
+    is irrelevant for *what we're testing* (the cross-workspace FK guard),
+    but the topic still needs a real ``creator_user_id`` — Topic has an FK
+    to ``users.id``. We reuse the test's logged-in user id since users are
+    org-scoped only via memberships, not by workspace.
+    """
+    from cubebox.models import Workspace as WorkspaceModel
+    from cubebox.models.topic import Topic
+
+    async with _db.async_session_maker() as session:
+        other_ws = WorkspaceModel(org_id=org_id, name=f"other-{secrets.token_hex(4)}")
+        session.add(other_ws)
+        await session.flush()
+        topic = Topic(
+            org_id=org_id,
+            workspace_id=other_ws.id,
+            title="topic-in-other-ws",
+            creator_user_id=creator_user_id,
+        )
+        session.add(topic)
+        await session.commit()
+        await session.refresh(other_ws)
+        await session.refresh(topic)
+        return other_ws.id, topic.id
+
+
+async def _seed_im_account_in_other_workspace(
+    *, org_id: str, owner_user_id: str
+) -> tuple[str, str]:
+    """Seed an IM account in a second workspace under the same org.
+
+    Returns ``(other_workspace_id, im_account_id)``.
+    """
+    from cubebox.models import Workspace as WorkspaceModel
+
+    cred_id = generate_public_id("cred")
+    async with _db.async_session_maker() as session:
+        other_ws = WorkspaceModel(org_id=org_id, name=f"other-{secrets.token_hex(4)}")
+        session.add(other_ws)
+        await session.flush()
+        await session.execute(
+            text(
+                "INSERT INTO credentials (id, org_id, kind, name, value_encrypted,"
+                " cred_metadata, created_by_user_id, created_at, updated_at)"
+                " VALUES (:id, :org, 'im_bot', :name, '\\x00'::bytea,"
+                " '{}'::jsonb, :uid, NOW(), NOW())"
+            ),
+            {
+                "id": cred_id,
+                "org": org_id,
+                "name": f"im-account:xws:{cred_id}",
+                "uid": owner_user_id,
+            },
+        )
+        account = IMConnectorAccount(
+            org_id=org_id,
+            workspace_id=other_ws.id,
+            platform="feishu",
+            external_account_id=f"xws-{secrets.token_hex(4)}",
+            acting_user_id=owner_user_id,
+            credential_id=cred_id,
+        )
+        session.add(account)
+        await session.commit()
+        await session.refresh(account)
+        return other_ws.id, account.id
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_topic_from_other_workspace(
+    cleanup_destinations: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Bug it catches: service layer accepts a topic_id from another
+    workspace because FK only checks existence — workspace A admin could
+    POST a schedule with workspace B's topic_id and the dispatcher would
+    create runs under B's topic."""
+    client, ws_id = cleanup_destinations
+    org_id = await _resolve_org_id(ws_id)
+    user_id = await _get_my_user_id(client)
+    _other_ws, other_topic_id = await _seed_topic_in_other_workspace(
+        org_id=org_id, creator_user_id=user_id
+    )
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/scheduled-tasks",
+        json={
+            "name": "x-ws-topic",
+            "prompt": "p",
+            "schedule_kind": "interval",
+            "interval_seconds": 3600,
+            "target_mode": "new_each_run",
+            "topic_id": other_topic_id,
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "topic_id" in r.text
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_im_account_from_other_workspace(
+    cleanup_destinations: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Bug it catches: service accepts im_account_id from another workspace.
+    Workspace A admin posts a schedule that references workspace B's account;
+    every fire dispatches into B's IM channel."""
+    client, ws_id = cleanup_destinations
+    org_id = await _resolve_org_id(ws_id)
+    user_id = await _get_my_user_id(client)
+    _other_ws, foreign_account = await _seed_im_account_in_other_workspace(
+        org_id=org_id, owner_user_id=user_id
+    )
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/scheduled-tasks",
+        json={
+            "name": "x-ws-im",
+            "prompt": "p",
+            "schedule_kind": "interval",
+            "interval_seconds": 3600,
+            "target_mode": "im_channel",
+            "im_account_id": foreign_account,
+            "im_channel_id": "C-x",
+            "im_scope_key": "dm",
+            "im_scope_kind": "dm",
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "im_account_id" in r.text
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_destination_field_changes(
+    cleanup_destinations: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Bug it catches: ScheduledTaskService.update silently writes
+    destination fields, letting an agent path mutate target_mode after the
+    HTTP layer's lock — would either skew dispatch or trip the DB CHECK
+    constraint and 500."""
+    from cubebox.agents.actions.context import ScopeContext
+    from cubebox.agents.actions.types import ActionInvalidInput
+    from cubebox.models import Role
+    from cubebox.services.scheduled_task import ScheduledTaskService
+
+    client, ws_id = cleanup_destinations
+    org_id = await _resolve_org_id(ws_id)
+    user_id = await _get_my_user_id(client)
+    task_id = await _create_schedule_row(
+        org_id=org_id,
+        ws_id=ws_id,
+        owner_user_id=user_id,
+        target_mode="new_each_run",
+        name="immutable",
+    )
+    ctx = ScopeContext(
+        org_id=org_id,
+        workspace_id=ws_id,
+        user_id=user_id,
+        role=Role.ADMIN,
+        conversation_id=None,
+    )
+    svc = ScheduledTaskService()
+    forbidden_payloads: list[dict[str, Any]] = [
+        {"target_mode": "fixed"},
+        {"target_conversation_id": "conv-foo"},
+        {"im_account_id": "imacct-foo"},
+        {"im_channel_id": "C-foo"},
+        {"im_scope_key": "dm"},
+        {"im_scope_kind": "dm"},
+    ]
+    for payload in forbidden_payloads:
+        async with _db.async_session_maker() as session:
+            with pytest.raises(ActionInvalidInput, match="destination"):
+                await svc.update(ctx, session, task_id, payload)
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_topic_id_from_other_workspace(
+    cleanup_destinations: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Bug it catches: service.update lets the caller patch topic_id with a
+    topic that lives in another workspace; the FK passes but dispatch
+    routes new conversations under a foreign workspace's topic."""
+    from cubebox.agents.actions.context import ScopeContext
+    from cubebox.agents.actions.types import ActionInvalidInput
+    from cubebox.models import Role
+    from cubebox.services.scheduled_task import ScheduledTaskService
+
+    client, ws_id = cleanup_destinations
+    org_id = await _resolve_org_id(ws_id)
+    user_id = await _get_my_user_id(client)
+    task_id = await _create_schedule_row(
+        org_id=org_id,
+        ws_id=ws_id,
+        owner_user_id=user_id,
+        target_mode="new_each_run",
+        name="x-ws-topic-patch",
+    )
+    _other_ws, foreign_topic = await _seed_topic_in_other_workspace(
+        org_id=org_id, creator_user_id=user_id
+    )
+    ctx = ScopeContext(
+        org_id=org_id,
+        workspace_id=ws_id,
+        user_id=user_id,
+        role=Role.ADMIN,
+        conversation_id=None,
+    )
+    svc = ScheduledTaskService()
+    async with _db.async_session_maker() as session:
+        with pytest.raises(ActionInvalidInput, match="topic_id"):
+            await svc.update(ctx, session, task_id, {"topic_id": foreign_topic})

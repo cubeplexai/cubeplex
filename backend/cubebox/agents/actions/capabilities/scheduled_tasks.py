@@ -131,14 +131,6 @@ class UpdateInput(BaseModel):
             "current schedule."
         ),
     )
-    target: Literal["new_each_run", "current_conversation"] | None = Field(
-        default=None,
-        description=(
-            "Same semantics as on create. Omit to leave the target unchanged. "
-            "'current_conversation' resolves to the conversation this tool was "
-            "called from — no ID needed."
-        ),
-    )
     end_at: datetime | None = None
 
 
@@ -258,18 +250,10 @@ async def _handle_update(ctx: ScopeContext, session: AsyncSession, inp: UpdateIn
             case OnceSchedule():
                 data["run_at"] = sched.run_at
 
-    if "target" in set_fields and inp.target is not None:
-        if inp.target == "current_conversation":
-            if ctx.conversation_id is None:
-                raise ActionInvalidInput(
-                    "target='current_conversation' requires a conversation context; "
-                    "either start from within a conversation or use target='new_each_run'."
-                )
-            data["target_mode"] = "fixed"
-            data["target_conversation_id"] = ctx.conversation_id
-        else:
-            data["target_mode"] = "new_each_run"
-            data["target_conversation_id"] = None
+    # Destination fields (target_mode / target_conversation_id / im_*) are
+    # immutable after create — enforced by ScheduledTaskService.update so
+    # the DB CHECK constraint can never disagree with the agent's intent.
+    # See: backend/docs/scheduled-tasks-destinations.md (destination lock).
 
     task = await _svc.update(ctx, session, inp.task_id, data)
     return _task_summary(task)
@@ -359,16 +343,15 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
             description=(
                 "Update fields on an existing scheduled task. Omit any field to leave "
                 "it unchanged. `schedule` is replaced whole (same discriminated shape "
-                "as create); there is no partial-schedule update. `target` uses the "
-                "same sentinel as create. Examples:\n"
+                "as create); there is no partial-schedule update. The destination "
+                "(target_mode / conversation / IM channel) is fixed at create time "
+                "and cannot be changed via update — delete the schedule and create a "
+                "new one to move it. Examples:\n"
                 "  rename only:\n"
                 '    {"task_id":"stask-1gBGEPTNA5c1Ou","name":"renamed"}\n'
                 "  switch to a different cron:\n"
                 '    {"task_id":"stask-1gBGEPTNA5c1Ou",'
                 '"schedule":{"kind":"cron","cron_expr":"0 10 * * *"}}\n'
-                "  pin to the current conversation:\n"
-                '    {"task_id":"stask-1gBGEPTNA5c1Ou",'
-                '"target":"current_conversation"}\n'
                 "Only call when the user has explicitly asked."
             ),
             input_model=UpdateInput,

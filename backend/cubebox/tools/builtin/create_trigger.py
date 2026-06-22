@@ -31,7 +31,11 @@ from cubebox.models.im_connector import IMThreadLink
 from cubebox.models.public_id import PREFIX_TRIGGER, generate_public_id
 from cubebox.repositories import MembershipRepository, TriggerRepository
 from cubebox.services.credential import CredentialService
-from cubebox.services.schedule_target_spec import ScheduleTargetError, TriggerTargetSpec
+from cubebox.services.schedule_target_spec import (
+    ScheduleTargetError,
+    TriggerTargetSpec,
+    validate_destination_scope,
+)
 
 _DEFAULT_SOURCE_CONFIG: dict[str, Any] = {
     "signature_header": "X-Signature",
@@ -158,6 +162,21 @@ def make_create_trigger_tool(
                     im_scope_key=im_scope_key,
                     im_scope_kind=im_scope_kind,
                 ).validate()
+            except ScheduleTargetError as exc:
+                return _error(str(exc))
+
+            # Cross-workspace FK guard. im_account_id only comes from the
+            # current conversation's IMThreadLink (which is already scoped),
+            # but topic_id can be passed explicitly — refuse anything that
+            # doesn't live in this workspace.
+            try:
+                await validate_destination_scope(
+                    session,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    topic_id=topic_id,
+                    im_account_id=im_account_id,
+                )
             except ScheduleTargetError as exc:
                 return _error(str(exc))
 
