@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from sqlalchemy import select
-from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.conversation import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
@@ -123,7 +123,7 @@ async def resolve_im_conversation(
             existing_tp = (
                 await session.execute(
                     select(TopicParticipant).where(
-                        TopicParticipant.topic_id == binding.topic_id,
+                        TopicParticipant.topic_id == binding.topic_id,  # type: ignore[arg-type]
                         TopicParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
                     )
                 )
@@ -196,7 +196,7 @@ async def resolve_im_conversation(
             existing_tp = (
                 await session.execute(
                     select(TopicParticipant).where(
-                        TopicParticipant.topic_id == binding.topic_id,
+                        TopicParticipant.topic_id == binding.topic_id,  # type: ignore[arg-type]
                         TopicParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
                     )
                 )

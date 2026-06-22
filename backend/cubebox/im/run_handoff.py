@@ -21,7 +21,7 @@ receipt on retry and short-circuit, preventing a second queue row.
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.im_connector import (
     IMConnectorAccount,
