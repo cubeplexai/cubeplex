@@ -847,12 +847,18 @@ class SandboxManager:
             logger.info("Found {} expired sandbox(es) to clean up", len(expired))
 
             for record in expired:
-                scoped_repo = UserSandboxRepository(
-                    session,
-                    org_id=record.org_id,
-                    workspace_id=record.workspace_id,
-                )
-                await self._kill_record(session, scoped_repo, record, conn_config)
+                try:
+                    scoped_repo = UserSandboxRepository(
+                        session,
+                        org_id=record.org_id,
+                        workspace_id=record.workspace_id,
+                    )
+                    await self._kill_record(session, scoped_repo, record, conn_config)
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "Unexpected error cleaning up sandbox {}",
+                        record.sandbox_id,
+                    )
 
     async def _resume_record(
         self,
@@ -1367,8 +1373,11 @@ class SandboxManager:
             logger.info("Killed sandbox {}", record.sandbox_id)
             killed = True
         except Exception as exc:
-            if isinstance(exc, ProviderApiError) and exc.status_code == 404:
-                logger.info("Sandbox {} already gone (404)", record.sandbox_id)
+            gone = isinstance(exc, ProviderApiError) and (
+                exc.status_code == 404 or "not found" in str(exc).lower()
+            )
+            if gone:
+                logger.info("Sandbox {} already gone: {}", record.sandbox_id, exc)
                 killed = True
             else:
                 logger.warning(
