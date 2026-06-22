@@ -47,10 +47,29 @@ class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
 
     prompt: str = Field()
 
-    target_mode: str = Field(max_length=16)  # fixed | new_each_run
+    # fixed | new_each_run | im_channel — see ck_scheduled_tasks_target_mode
+    target_mode: str = Field(default="new_each_run", max_length=16)
     target_conversation_id: str | None = Field(
         default=None, foreign_key="conversations.id", max_length=20
     )
+    topic_id: str | None = Field(
+        default=None,
+        foreign_key="topics.id",
+        max_length=20,
+        nullable=True,
+        index=True,
+        ondelete="SET NULL",
+    )
+    im_account_id: str | None = Field(
+        default=None,
+        foreign_key="im_connector_accounts.id",
+        max_length=20,
+        nullable=True,
+        ondelete="SET NULL",
+    )
+    im_channel_id: str | None = Field(default=None, max_length=128, nullable=True)
+    im_scope_key: str | None = Field(default=None, max_length=255, nullable=True)
+    im_scope_kind: str | None = Field(default=None, max_length=32, nullable=True)
 
     next_fire_at: datetime | None = Field(
         default=None,
