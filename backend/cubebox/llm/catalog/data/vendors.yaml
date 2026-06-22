@@ -68,8 +68,12 @@
     - { region: cn, protocol: openai-completions, plan: coding, host: https://coding.dashscope.aliyuncs.com, path: /v1, capability: qwen-compat }
   models:
     - { model_id: qwen3-max, display_name: Qwen3 Max, plan: general, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: qwen3.7-plus, display_name: Qwen 3.7 Plus, plan: coding, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: qwen3.6-plus, display_name: Qwen 3.6 Plus, plan: [general, coding], context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
     - { model_id: qwen3.6-flash, display_name: Qwen 3.6 Flash, plan: general, context_window: 131072, max_tokens: 16384, input_modalities: [text, image], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: kimi-k2.5, display_name: Kimi K2.5, plan: coding, context_window: 262144, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: glm-5, display_name: GLM-5, plan: coding, context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: MiniMax-M2.5, display_name: MiniMax M2.5, plan: coding, context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
 
 - vendor: volcengine
   display_name: 豆包 (火山方舟)
