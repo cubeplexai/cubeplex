@@ -1,19 +1,26 @@
-"""cubepi event → cubebox SSE event dict translation (M1.3+).
+"""cubepi event → cubebox SSE event dict translation.
 
-Two translation layers:
+Two layers:
 
-1. ``convert_event_to_sse`` — low-level; translates a single
-   cubepi ``StreamEvent`` (provider-level) into 0..1 cubebox SSE dicts.
-   Used when the caller has direct access to the raw provider stream.
+1. ``StreamConverter`` — stateful per-stream translator. Use one instance per
+   agent run when you need progressive unwrap of cubepi's
+   ``deferred_tool_call`` dispatcher (the LLM-streamed deltas carry the
+   wrapper JSON ``{"tool_name": ..., "arguments": ...}``; cubepi rewrites the
+   call at execute time, so the ``tool_result`` arrives under the real name
+   but the streamed ``tool_call_delta`` events would otherwise look like
+   ``deferred_tool_call`` until ``toolcall_end``).
 
-2. ``convert_agent_event_to_sse`` — high-level; translates a
-   cubepi ``AgentEvent`` (agent-loop-level) into 0..N cubebox SSE dicts.
-   Used by the run_manager cubepi dispatch path (M1.5+), which subscribes
-   to the Agent's listener channel and receives AgentEvents.
+2. ``convert_event_to_sse`` / ``convert_agent_event_to_sse`` — stateless
+   one-off wrappers around a fresh ``StreamConverter`` instance. Suitable for
+   tests and any caller that processes a single event in isolation; the
+   deferred unwrap still works for a complete event (e.g. ``toolcall_end``)
+   but cannot stitch deltas across calls.
 
 cubebox SSE event types (consumed by frontend):
     text_delta, reasoning, tool_call, tool_call_delta, tool_result,
-    usage, error, done.
+    usage, error, done, artifact, injected_message,
+    sandbox_confirm_request, sandbox_confirm_resolved,
+    ask_user_request, ask_user_resolved.
 """
 
 from __future__ import annotations
@@ -38,6 +45,12 @@ from cubepi.providers.base import (
     ToolCall,
     UserMessage,
 )
+
+# cubepi's deferred dispatcher exposes this tool name to the model. Matches
+# ``DISPATCH_TOOL_NAME`` in cubepi.deferred._dispatch_tool; pinned by string
+# because it's a wire contract — changing it requires coordinated updates on
+# both sides.
+_DEFERRED_DISPATCH_TOOL_NAME = "deferred_tool_call"
 
 
 def _stringify_tool_result(result: Any) -> tuple[str, Any]:
@@ -99,78 +112,381 @@ def _artifact_event_from_tool_result(
     }
 
 
-def convert_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
-    """Translate a single cubepi StreamEvent into 0..1 cubebox SSE event dicts."""
-    t = evt.type
+# ---------------------------------------------------------------------------
+# Streaming JSON scanner — extracts top-level `tool_name` / `arguments` value
+# spans from a partial deferred-call wrapper while it's being streamed.
+# ---------------------------------------------------------------------------
 
-    if t == "text_delta":
-        return [{"type": "text_delta", "delta": evt.delta or ""}]
 
-    if t == "thinking_delta":
-        return [{"type": "reasoning", "delta": evt.delta or ""}]
+def _scan_string(raw: str, start: int) -> tuple[int, bool]:
+    """Scan a JSON string starting at ``raw[start] == '"'``.
 
-    if t == "toolcall_delta":
-        out: dict[str, Any] = {
-            "type": "tool_call_delta",
-            "delta": evt.delta or "",
-            "index": evt.content_index,
-        }
-        if evt.partial is not None and evt.content_index is not None:
+    Returns ``(end_offset, done)`` where ``end_offset`` points at the closing
+    ``"`` (so ``raw[start:end_offset + 1]`` is the full JSON string literal).
+    ``done`` is True only when the closing quote is present.
+    """
+    n = len(raw)
+    if start >= n or raw[start] != '"':
+        return start, False
+    i = start + 1
+    while i < n:
+        c = raw[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c == '"':
+            return i, True
+        i += 1
+    return n, False
+
+
+def _scan_object(raw: str, start: int) -> tuple[int, bool]:
+    """Scan a JSON object starting at ``raw[start] == '{'``.
+
+    Returns ``(end_offset, done)`` where ``end_offset`` is the index JUST PAST
+    the closing ``}`` (so ``raw[start:end_offset]`` is the full object).
+    Tracks string state so braces inside string values don't pop depth early.
+    """
+    n = len(raw)
+    if start >= n or raw[start] != "{":
+        return start, False
+    depth = 1
+    in_string = False
+    i = start + 1
+    while i < n:
+        c = raw[i]
+        if in_string:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1, True
+        i += 1
+    return n, False
+
+
+def _scan_array(raw: str, start: int) -> tuple[int, bool]:
+    n = len(raw)
+    if start >= n or raw[start] != "[":
+        return start, False
+    depth = 1
+    in_string = False
+    i = start + 1
+    while i < n:
+        c = raw[i]
+        if in_string:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                in_string = False
+            i += 1
+            continue
+        if c == '"':
+            in_string = True
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return i + 1, True
+        i += 1
+    return n, False
+
+
+def _scan_value(raw: str, start: int) -> tuple[int, bool]:
+    """Skip past any JSON value beginning at ``raw[start]``."""
+    n = len(raw)
+    if start >= n:
+        return start, False
+    c = raw[start]
+    if c == '"':
+        end, done = _scan_string(raw, start)
+        return (end + 1, True) if done else (end, False)
+    if c == "{":
+        return _scan_object(raw, start)
+    if c == "[":
+        return _scan_array(raw, start)
+    for lit in ("true", "false", "null"):
+        if raw.startswith(lit, start):
+            return start + len(lit), True
+    if c == "-" or c.isdigit():
+        i = start
+        if raw[i] == "-":
+            i += 1
+        while i < n and (raw[i].isdigit() or raw[i] in ".eE+-"):
+            i += 1
+        # We can't tell whether a number is "done" mid-stream without lookahead;
+        # treat it as done iff we hit a JSON structural char after digits.
+        if i < n and raw[i] in ",}] \t\n\r":
+            return i, True
+        return i, False
+    return start, False
+
+
+def _scan_deferred_wrapper(raw: str) -> tuple[str | None, int | None, int | None]:
+    """Scan a partial ``deferred_tool_call`` wrapper JSON object.
+
+    Returns ``(tool_name, args_value_start, args_value_end)`` — any field that
+    is not yet resolvable from ``raw`` is ``None``. ``args_value_*`` are byte
+    offsets into ``raw``: ``args_value_start`` points at the inner ``{`` and
+    ``args_value_end`` at the index JUST PAST the inner closing ``}``.
+    """
+    tool_name: str | None = None
+    args_start: int | None = None
+    args_end: int | None = None
+
+    n = len(raw)
+    i = 0
+    while i < n and raw[i] in " \t\n\r":
+        i += 1
+    if i >= n or raw[i] != "{":
+        return None, None, None
+    i += 1
+
+    while i < n:
+        while i < n and raw[i] in " \t\n\r,":
+            i += 1
+        if i >= n or raw[i] == "}":
+            break
+        if raw[i] != '"':
+            break
+        key_end, key_done = _scan_string(raw, i)
+        if not key_done:
+            break
+        try:
+            key = json.loads(raw[i : key_end + 1])
+        except json.JSONDecodeError:
+            break
+        i = key_end + 1
+        while i < n and raw[i] in " \t\n\r":
+            i += 1
+        if i >= n or raw[i] != ":":
+            break
+        i += 1
+        while i < n and raw[i] in " \t\n\r":
+            i += 1
+        if i >= n:
+            break
+
+        if key == "tool_name" and tool_name is None:
+            if raw[i] != '"':
+                break
+            v_end, v_done = _scan_string(raw, i)
+            if not v_done:
+                break
             try:
-                block = evt.partial.content[evt.content_index]
-            except (IndexError, TypeError):
-                block = None
-            if isinstance(block, ToolCall):
-                out["id"] = block.id
-                out["name"] = block.name
-        return [out]
+                tool_name = json.loads(raw[i : v_end + 1])
+            except json.JSONDecodeError:
+                break
+            i = v_end + 1
+        elif key == "arguments" and args_start is None:
+            if raw[i] != "{":
+                break
+            args_start = i
+            v_end, v_done = _scan_object(raw, i)
+            if v_done:
+                args_end = v_end
+                i = v_end
+            else:
+                # Inner object still streaming — start known, end unknown.
+                break
+        else:
+            v_end, v_done = _scan_value(raw, i)
+            if not v_done:
+                break
+            i = v_end
 
-    if t == "toolcall_end":
+    return tool_name, args_start, args_end
+
+
+# ---------------------------------------------------------------------------
+# Streaming converter — holds per-content-index state across deltas so the
+# deferred-call wrapper can be peeled progressively as the LLM streams it.
+# ---------------------------------------------------------------------------
+
+
+class _DeferredCallState:
+    """State for one in-flight deferred_tool_call streaming through the agent."""
+
+    __slots__ = ("raw", "tool_id", "tool_name", "args_value_start", "emitted_inner_chars")
+
+    def __init__(self, tool_id: str) -> None:
+        self.raw: str = ""
+        self.tool_id: str = tool_id
+        self.tool_name: str | None = None
+        self.args_value_start: int | None = None
+        self.emitted_inner_chars: int = 0
+
+
+class StreamConverter:
+    """Stateful translator from cubepi events to cubebox SSE dicts.
+
+    Use one instance per agent run / subscriber listener. The state holds
+    in-progress ``deferred_tool_call`` buffers keyed by ``content_index`` —
+    cubepi's provider emits ``toolcall_delta`` events whose ``partial`` carries
+    the resolved wrapper name (``deferred_tool_call``) but not the raw JSON
+    being streamed inside ``arguments``; that JSON only exists as the
+    concatenation of every ``delta`` chunk we receive. We accumulate locally,
+    pull the inner ``tool_name`` and inner ``arguments`` value span out via
+    :func:`_scan_deferred_wrapper`, and emit synthetic ``tool_call_delta``
+    events whose ``name`` / ``delta`` look like a direct call to the real
+    tool — so the frontend card renders with the real title and only the
+    inner JSON streams into the args view.
+    """
+
+    def __init__(self) -> None:
+        self._deferred: dict[int, _DeferredCallState] = {}
+
+    # ------------------------------------------------------------------
+    # Top-level entrypoints
+
+    def convert(self, evt: StreamEvent) -> list[dict[str, Any]]:
+        """Translate a single cubepi StreamEvent into 0..N cubebox SSE dicts."""
+        t = evt.type
+        if t == "text_delta":
+            return [{"type": "text_delta", "delta": evt.delta or ""}]
+        if t == "thinking_delta":
+            return [{"type": "reasoning", "delta": evt.delta or ""}]
+        if t == "toolcall_delta":
+            return self._on_toolcall_delta(evt)
+        if t == "toolcall_end":
+            return self._on_toolcall_end(evt)
+        if t == "done":
+            return [{"type": "done"}]
+        if t == "error":
+            return [{"type": "error", "error": evt.error_message or "unknown error"}]
+        return []
+
+    def convert_agent_event(self, evt: AgentEvent) -> list[dict[str, Any]]:
+        """Translate a single cubepi AgentEvent into 0..N cubebox SSE dicts."""
+        if isinstance(evt, MessageUpdateEvent):
+            return self.convert(evt.stream_event)
+        return _convert_terminal_agent_event(evt)
+
+    # ------------------------------------------------------------------
+    # toolcall_delta / toolcall_end with deferred unwrap
+
+    def _block_for(self, evt: StreamEvent) -> ToolCall | None:
         if evt.partial is None or evt.content_index is None:
-            return []
+            return None
         try:
             block = evt.partial.content[evt.content_index]
         except (IndexError, TypeError):
+            return None
+        return block if isinstance(block, ToolCall) else None
+
+    def _on_toolcall_delta(self, evt: StreamEvent) -> list[dict[str, Any]]:
+        block = self._block_for(evt)
+        idx = evt.content_index
+        delta_chunk = evt.delta or ""
+
+        if block is None or block.name != _DEFERRED_DISPATCH_TOOL_NAME:
+            out: dict[str, Any] = {
+                "type": "tool_call_delta",
+                "delta": delta_chunk,
+                "index": idx,
+            }
+            if block is not None:
+                out["id"] = block.id
+                out["name"] = block.name
+            return [out]
+
+        assert idx is not None  # _block_for guarantees both partial and index
+        state = self._deferred.setdefault(idx, _DeferredCallState(tool_id=block.id))
+        state.raw += delta_chunk
+
+        tool_name, args_start, args_end = _scan_deferred_wrapper(state.raw)
+        if tool_name is not None and state.tool_name is None:
+            state.tool_name = tool_name
+        if args_start is not None and state.args_value_start is None:
+            state.args_value_start = args_start
+
+        # Emit only once BOTH the real name and the inner-args open brace are
+        # in view — otherwise we'd either label the args under the wrong title
+        # or stream a wrapper prefix the frontend has no use for.
+        if state.tool_name is None or state.args_value_start is None:
             return []
-        if not isinstance(block, ToolCall):
+
+        slice_end = args_end if args_end is not None else len(state.raw)
+        slice_start = state.args_value_start + state.emitted_inner_chars
+        if slice_end <= slice_start:
             return []
+        new_chars = state.raw[slice_start:slice_end]
+        state.emitted_inner_chars += len(new_chars)
+        return [
+            {
+                "type": "tool_call_delta",
+                "delta": new_chars,
+                "index": idx,
+                "id": state.tool_id,
+                "name": state.tool_name,
+            }
+        ]
+
+    def _on_toolcall_end(self, evt: StreamEvent) -> list[dict[str, Any]]:
+        block = self._block_for(evt)
+        if block is None:
+            return []
+        idx = evt.content_index
+        assert idx is not None
+
+        if block.name != _DEFERRED_DISPATCH_TOOL_NAME:
+            self._deferred.pop(idx, None)
+            return [
+                {
+                    "type": "tool_call",
+                    "id": block.id,
+                    "name": block.name,
+                    "arguments": block.arguments,
+                }
+            ]
+
+        # block.arguments at toolcall_end is the parsed wrapper dict:
+        # {"tool_name": "<real>", "arguments": {...}}. cubepi's resolver will
+        # rewrite the call to <real> + inner arguments before execute; we
+        # surface the same shape to the frontend so the tool_call event lines
+        # up with the eventual tool_result event (which uses the real name).
+        wrapper = block.arguments or {}
+        inner_name = wrapper.get("tool_name") if isinstance(wrapper, dict) else None
+        inner_args = wrapper.get("arguments") if isinstance(wrapper, dict) else None
+        self._deferred.pop(idx, None)
+        if not isinstance(inner_name, str):
+            # Malformed wrapper — emit the raw dispatcher call so cubepi's
+            # error fallback ("Unknown deferred tool: ...") still surfaces in
+            # the same card.
+            return [
+                {
+                    "type": "tool_call",
+                    "id": block.id,
+                    "name": block.name,
+                    "arguments": block.arguments,
+                }
+            ]
+        if not isinstance(inner_args, dict):
+            inner_args = {}
         return [
             {
                 "type": "tool_call",
                 "id": block.id,
-                "name": block.name,
-                "arguments": block.arguments,
+                "name": inner_name,
+                "arguments": inner_args,
             }
         ]
 
-    if t == "done":
-        return [{"type": "done"}]
 
-    if t == "error":
-        return [{"type": "error", "error": evt.error_message or "unknown error"}]
-
-    # Silent: start, text_start/end, thinking_start/end, toolcall_start
-    return []
-
-
-def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
-    """Translate a single cubepi AgentEvent into 0..N cubebox SSE event dicts.
-
-    The cubepi Agent exposes AgentEvents via its subscribe() listener channel.
-    AgentEvents are higher-level than StreamEvents:
-
-    - ``MessageUpdateEvent`` wraps a ``stream_event: StreamEvent`` — we unwrap
-      and delegate to ``convert_event_to_sse`` for text/thinking/tool deltas.
-    - ``ToolExecutionEndEvent`` carries the completed tool result — translated to
-      a ``tool_result`` SSE dict.
-    - ``AgentEndEvent`` emits ``done``.
-    - All other AgentEvents (agent_start, turn_start/end, message_start/end,
-      tool_execution_start/update) are silently dropped; they carry no content
-      that cubebox's frontend currently needs.
-    """
-    if isinstance(evt, MessageUpdateEvent):
-        return convert_event_to_sse(evt.stream_event)
-
+def _convert_terminal_agent_event(evt: AgentEvent) -> list[dict[str, Any]]:
+    """Translation for AgentEvents that don't carry streaming state."""
     if isinstance(evt, ToolExecutionEndEvent):
         text, details = _stringify_tool_result(evt.result)
         out: list[dict[str, Any]] = [
@@ -183,9 +499,6 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
                 "is_error": evt.is_error,
             }
         ]
-        # save_artifact embeds the registered artifact in its result content.
-        # Emit a standalone artifact event so the frontend artifact store is
-        # populated live (not only after a page reload via loadArtifacts).
         artifact_event = _artifact_event_from_tool_result(evt.tool_name, evt.is_error, text)
         if artifact_event is not None:
             out.append(artifact_event)
@@ -237,9 +550,6 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
         return []
 
     if isinstance(evt, HitlAnswerEvent):
-        # Distinguish ask (dict answer) from approve (ApproveAnswer object).
-        # Cancelled answers (answer=None) default to sandbox_confirm_resolved —
-        # in v1 there is no cancel endpoint so this branch is unreachable.
         if isinstance(evt.answer, dict):
             return [
                 {
@@ -261,8 +571,20 @@ def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
             resolved["reason"] = evt.answer.reason
         return [resolved]
 
-    # Silently drop all other AgentEvent types:
-    # AgentStartEvent, AgentEndEvent (done is emitted by run_manager with usage),
-    # TurnStartEvent, TurnEndEvent, MessageStartEvent,
-    # ToolExecutionStartEvent, ToolExecutionUpdateEvent
     return []
+
+
+def convert_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
+    """One-off translation of a single StreamEvent.
+
+    Allocates a fresh :class:`StreamConverter`, so deferred unwrap works only
+    when the event already carries the complete information (e.g. a
+    ``toolcall_end`` with a parsed wrapper dict). For progressive delta
+    unwrap across multiple events, hold a long-lived ``StreamConverter``.
+    """
+    return StreamConverter().convert(evt)
+
+
+def convert_agent_event_to_sse(evt: AgentEvent) -> list[dict[str, Any]]:
+    """One-off translation of a single AgentEvent. See :func:`convert_event_to_sse`."""
+    return StreamConverter().convert_agent_event(evt)
