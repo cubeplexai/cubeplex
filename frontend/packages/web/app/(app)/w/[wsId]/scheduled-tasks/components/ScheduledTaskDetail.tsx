@@ -103,7 +103,7 @@ export function ScheduledTaskDetail({
             <div className="flex flex-col gap-0.5">
               <span className="text-xs text-muted-foreground">{t('detailDestination')}</span>
               <span className="text-sm font-medium">
-                <DestinationCell task={task} />
+                <DestinationCell wsId={wsId} task={task} />
               </span>
             </div>
             <div className="flex flex-col gap-0.5">

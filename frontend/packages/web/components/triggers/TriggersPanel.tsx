@@ -82,6 +82,7 @@ export function TriggersPanel({ wsId }: TriggersPanelProps) {
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className={PANE_CONTENT_WIDTH}>
             <TriggersList
+              wsId={wsId}
               triggers={sorted}
               loading={loading}
               onToggleEnabled={handleToggleEnabled}
@@ -95,6 +96,7 @@ export function TriggersPanel({ wsId }: TriggersPanelProps) {
           selected={selectedTriggerId !== null}
           list={
             <TriggersList
+              wsId={wsId}
               triggers={sorted}
               // Rail only renders when triggers exist; never collapse it to a
               // loading state during the detail panel's background refetch.

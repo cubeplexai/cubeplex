@@ -8,6 +8,8 @@ import type { Trigger } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 
 interface DestinationCellProps {
+  /** Workspace for resolving /api/v1/topics → workspace-scoped path. */
+  wsId: string
   trigger: Trigger
   className?: string
 }
@@ -22,9 +24,13 @@ interface DestinationCellProps {
  * Trigger destinations are immutable once created (see ``UpdateTriggerBody``
  * in @cubebox/core); we never have to keep this cell in sync with form edits.
  */
-export function DestinationCell({ trigger, className }: DestinationCellProps) {
+export function DestinationCell({ wsId, trigger, className }: DestinationCellProps) {
   const t = useTranslations('triggers')
-  const client = useMemo(() => createApiClient(''), [])
+  const client = useMemo(() => {
+    const c = createApiClient('')
+    c.setWorkspaceId(wsId)
+    return c
+  }, [wsId])
 
   const [topicTitle, setTopicTitle] = useState<string | null>(null)
 

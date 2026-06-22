@@ -276,6 +276,7 @@ export function ScheduledTaskFormDialog({
                   <div className="flex flex-col gap-1.5">
                     <Label id="task-topic-label">{t('targetTopic')}</Label>
                     <TopicPicker
+                      wsId={wsId}
                       id="task-topic"
                       aria-labelledby="task-topic-label"
                       value={topicId}

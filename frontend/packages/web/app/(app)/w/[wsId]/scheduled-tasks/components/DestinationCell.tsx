@@ -8,6 +8,8 @@ import type { ScheduledTaskOut } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 
 interface DestinationCellProps {
+  /** Workspace whose /topics + /conversations routes the chip looks up. */
+  wsId: string
   task: ScheduledTaskOut
   className?: string
 }
@@ -21,9 +23,13 @@ interface DestinationCellProps {
  *                        muted "New conversation" label.
  *   - ``im_channel``   → IM-channel pill showing the channel id.
  */
-export function DestinationCell({ task, className }: DestinationCellProps) {
+export function DestinationCell({ wsId, task, className }: DestinationCellProps) {
   const t = useTranslations('scheduledTasks')
-  const client = useMemo(() => createApiClient(''), [])
+  const client = useMemo(() => {
+    const c = createApiClient('')
+    c.setWorkspaceId(wsId)
+    return c
+  }, [wsId])
 
   const [conversationTitle, setConversationTitle] = useState<string | null>(null)
   const [topicTitle, setTopicTitle] = useState<string | null>(null)

@@ -7,6 +7,9 @@ import type { Topic } from '@cubebox/core'
 import { cn } from '@/lib/utils'
 
 interface TopicPickerProps {
+  /** Workspace whose topics should be listed. Required so the API client
+   *  resolves /api/v1/topics to the workspace-scoped path. */
+  wsId: string
   /** Currently-selected topic id, or ``null`` for "no topic" (standalone). */
   value: string | null
   onChange: (topicId: string | null) => void
@@ -32,6 +35,7 @@ interface TopicPickerProps {
  * the scheduled-tasks form ships its own near-identical picker.
  */
 export function TriggerTopicPicker({
+  wsId,
   value,
   onChange,
   clearable = true,
@@ -46,7 +50,11 @@ export function TriggerTopicPicker({
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
 
-  const client = useMemo(() => createApiClient(''), [])
+  const client = useMemo(() => {
+    const c = createApiClient('')
+    c.setWorkspaceId(wsId)
+    return c
+  }, [wsId])
 
   useEffect(() => {
     let cancelled = false
