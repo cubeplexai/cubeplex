@@ -186,8 +186,8 @@ default:
     #   cpu: CPU limit (e.g., "100m" = 0.1 core, "1" = 1 core, "2" = 2 cores)
     #   memory: Memory limit (e.g., "100Mi", "512Mi", "2Gi", "4Gi")
     resource:
-      cpu: "1"
-      memory: "1Gi"
+      cpu: "2"
+      memory: "4Gi"
     volume:
       enabled: true
       mount_path: "/workspace"
