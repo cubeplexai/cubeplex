@@ -164,6 +164,7 @@ export function ScheduledTasksList({
             return (
               <ScheduledTaskCard
                 key={task.id}
+                wsId={wsId}
                 task={task}
                 isSelected={selectedId === task.id}
                 canMutate={canMutate}

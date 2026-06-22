@@ -190,7 +190,7 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
                 {t('destinationLabelDetailHint')}
               </span>
             </div>
-            <DestinationCell trigger={trigger} />
+            <DestinationCell wsId={wsId} trigger={trigger} />
           </div>
 
           <div className="border-t border-border/40 pt-4 flex items-center justify-between">

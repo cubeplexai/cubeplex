@@ -15,6 +15,7 @@ import { formatNextFire, formatScheduleSummary } from '../lib/format'
 import { DestinationCell } from './DestinationCell'
 
 interface ScheduledTaskCardProps {
+  wsId: string
   task: ScheduledTaskOut
   isSelected: boolean
   canMutate: boolean
@@ -27,6 +28,7 @@ interface ScheduledTaskCardProps {
 }
 
 export function ScheduledTaskCard({
+  wsId,
   task,
   isSelected,
   canMutate,
@@ -58,7 +60,7 @@ export function ScheduledTaskCard({
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>{formatScheduleSummary(task)}</span>
           <span className="text-muted-foreground/60">·</span>
-          <DestinationCell task={task} />
+          <DestinationCell wsId={wsId} task={task} />
         </span>
       }
       meta={formatNextFire(task)}

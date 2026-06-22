@@ -262,6 +262,7 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
               <div className="flex flex-col gap-1.5">
                 <Label id="trigger-topic-label">{t('destTopic')}</Label>
                 <TriggerTopicPicker
+                  wsId={wsId}
                   id="trigger-topic"
                   aria-labelledby="trigger-topic-label"
                   value={topicId}

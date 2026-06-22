@@ -17,6 +17,7 @@ import {
 import { DestinationCell } from './DestinationCell'
 
 interface TriggersListProps {
+  wsId: string
   triggers: Trigger[]
   loading: boolean
   onToggleEnabled: (id: string, enabled: boolean) => Promise<void>
@@ -27,6 +28,7 @@ interface TriggersListProps {
 }
 
 export function TriggersList({
+  wsId,
   triggers,
   loading,
   onToggleEnabled,
@@ -85,7 +87,7 @@ export function TriggersList({
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span>{trigger.source_type}</span>
               <span className="text-muted-foreground/60">·</span>
-              <DestinationCell trigger={trigger} />
+              <DestinationCell wsId={wsId} trigger={trigger} />
             </span>
           }
           meta={t('cardEvents', { count: trigger.events_total })}
