@@ -146,6 +146,11 @@ async def create_trigger(
         target_ref={"prompt_template": body.prompt_template},
         payload_fields=body.payload_fields,
         conversation_policy=body.conversation_policy,
+        topic_id=body.topic_id,
+        im_account_id=body.im_account_id,
+        im_channel_id=body.im_channel_id,
+        im_scope_key=body.im_scope_key,
+        im_scope_kind=body.im_scope_kind,
         run_as_user_id=body.run_as_user_id,
         max_runs_per_minute=body.max_runs_per_minute,
         rate_limit_burst=body.rate_limit_burst,
@@ -167,9 +172,16 @@ async def list_triggers(
     workspace_id: str,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    topic_id: Annotated[str | None, Query()] = None,
+    im_account_id: Annotated[str | None, Query()] = None,
+    im_channel_id: Annotated[str | None, Query()] = None,
 ) -> TriggerListOut:
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
-    triggers = await trig_repo.list()
+    triggers = await trig_repo.list_filtered(
+        topic_id=topic_id,
+        im_account_id=im_account_id,
+        im_channel_id=im_channel_id,
+    )
     return TriggerListOut(triggers=[_trigger_out(t) for t in triggers])
 
 
@@ -197,6 +209,17 @@ async def get_trigger(
 # ---------------------------------------------------------------------------
 
 
+_PATCH_LOCKED_TRIGGER_FIELDS: frozenset[str] = frozenset(
+    {
+        "conversation_policy",
+        "im_account_id",
+        "im_channel_id",
+        "im_scope_key",
+        "im_scope_kind",
+    }
+)
+
+
 @router.patch("/{trigger_id}", response_model=TriggerOut)
 async def update_trigger(
     workspace_id: str,
@@ -205,10 +228,35 @@ async def update_trigger(
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> TriggerOut:
+    # Destination-policy fields are immutable after create. Gate on
+    # `model_fields_set` so explicit `null` is rejected too — the user's
+    # intent to change the destination shape is what matters; delete and
+    # recreate is the only supported path.
+    locked = _PATCH_LOCKED_TRIGGER_FIELDS & body.model_fields_set
+    if locked:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "conversation_policy / im_* cannot be changed via PATCH; "
+                "delete and recreate the trigger"
+            ),
+        )
+
     trig_repo = TriggerRepository(session, org_id=ctx.org_id, workspace_id=workspace_id)
     trigger = await trig_repo.get(trigger_id)
     if trigger is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="not found")
+
+    # topic_id is patchable only when the row is new_each_time;
+    # for im_channel a topic_id is structurally meaningless.
+    if "topic_id" in body.model_fields_set and trigger.conversation_policy != "new_each_time":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"topic_id can only be patched when conversation_policy='new_each_time' "
+                f"(current conversation_policy={trigger.conversation_policy!r})"
+            ),
+        )
 
     dumped = body.model_dump(exclude_unset=True)
     if "name" in dumped and dumped["name"] is not None:
@@ -239,6 +287,10 @@ async def update_trigger(
         trigger.rate_limit_burst = dumped["rate_limit_burst"]
     if "rate_limit_response" in dumped and dumped["rate_limit_response"] is not None:
         trigger.rate_limit_response = dumped["rate_limit_response"]
+    # topic_id can be cleared with explicit null (the only destination field
+    # safe to patch); use `in dumped` rather than `is not None`.
+    if "topic_id" in dumped:
+        trigger.topic_id = dumped["topic_id"]
 
     await session.commit()
     await session.refresh(trigger)
