@@ -666,3 +666,262 @@ async def test_member_cannot_mutate_triggers(
     r = await client.get(f"/api/v1/ws/{ws_id}/triggers")
     assert r.status_code == 200, r.text
     assert r.json()["triggers"] == []
+
+
+# ---------------------------------------------------------------------------
+# Destination fields — conversation_policy is locked post-create.
+# Mirrors the scheduled-task behavior: any attempt to change a destination
+# field via PATCH must return 422, including explicit `null` (gated through
+# `model_fields_set`).
+# ---------------------------------------------------------------------------
+
+
+async def _create_topic(client: httpx.AsyncClient, ws_id: str, title: str) -> str:
+    r = await client.post(f"/api/v1/ws/{ws_id}/topics", json={"title": title})
+    assert r.status_code in (200, 201), r.text
+    tid = r.json()["topic"]["id"]
+    assert isinstance(tid, str) and tid.startswith("top")
+    return tid
+
+
+async def _seed_im_account(
+    client: httpx.AsyncClient,
+    ws_id: str,
+    external_account_id: str | None = None,
+) -> str:
+    """Seed one IMConnectorAccount row directly via DB and return its id.
+
+    triggers.im_account_id is FK→im_connector_accounts.id with a NOT-NULL
+    credential FK, so we can't create accounts purely via the HTTP layer
+    without going through the full Feishu OAuth bootstrap. The tests in
+    this module only need the row to exist for the FK check; the IM
+    runtime is exercised separately. We stamp a credentials row directly
+    via SQL (mirroring `im_fixtures.im_seed_stub_credential`) — no decrypt
+    path is exercised here.
+
+    The (platform, external_account_id) constraint is global, not
+    org-scoped, so callers that don't supply an external_account_id get a
+    random suffix to keep tests rerunnable against a non-wiped DB.
+    """
+    import secrets
+
+    from sqlalchemy import select, text
+
+    import cubebox.db as _db
+    from cubebox.models import IMConnectorAccount, Workspace
+    from cubebox.models.public_id import generate_public_id
+
+    if external_account_id is None:
+        external_account_id = f"ext-{secrets.token_hex(8)}"
+    else:
+        external_account_id = f"{external_account_id}-{secrets.token_hex(4)}"
+
+    user_id = await _get_my_user_id(client)
+    cred_id = generate_public_id("cred")
+    async with _db.async_session_maker() as session:
+        ws = (await session.execute(select(Workspace).where(Workspace.id == ws_id))).scalar_one()
+        await session.execute(
+            text(
+                "INSERT INTO credentials (id, org_id, kind, name, value_encrypted,"
+                " cred_metadata, created_by_user_id, created_at, updated_at)"
+                " VALUES (:id, :org, 'im_bot', :name, '\\x00'::bytea,"
+                " '{}'::jsonb, :uid, NOW(), NOW())"
+            ),
+            {
+                "id": cred_id,
+                "org": ws.org_id,
+                "name": f"im-account:{external_account_id}:{cred_id}",
+                "uid": user_id,
+            },
+        )
+        account = IMConnectorAccount(
+            org_id=ws.org_id,
+            workspace_id=ws_id,
+            platform="feishu",
+            external_account_id=external_account_id,
+            acting_user_id=user_id,
+            credential_id=cred_id,
+        )
+        session.add(account)
+        await session.commit()
+        await session.refresh(account)
+        return account.id
+
+
+@pytest.mark.asyncio
+async def test_create_im_channel_trigger_round_trips(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+    im_id = await _seed_im_account(client, ws_id, "ext-rt-1")
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "im-trigger",
+            "webhook_secret": "s3cret",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+            "conversation_policy": "im_channel",
+            "im_account_id": im_id,
+            "im_channel_id": "C-abc",
+            "im_scope_key": "dm",
+            "im_scope_kind": "dm",
+        },
+    )
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["conversation_policy"] == "im_channel"
+    assert body["im_account_id"] == im_id
+    assert body["im_channel_id"] == "C-abc"
+
+
+@pytest.mark.asyncio
+async def test_create_im_channel_missing_field_422(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Spec validation runs before FK validation, so we don't need a real account."""
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "im-bad",
+            "webhook_secret": "s",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+            "conversation_policy": "im_channel",
+            "im_account_id": "ima_1",
+            # missing im_channel_id / im_scope_key / im_scope_kind
+        },
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_conversation_policy_change(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    created = await _create_trigger(client, ws_id, name="pcp")
+    trig_id = created["id"]
+    r = await client.patch(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}",
+        json={"conversation_policy": "im_channel"},
+    )
+    assert r.status_code == 422
+    assert "conversation_policy" in r.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_im_field_change(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    created = await _create_trigger(client, ws_id, name="pim")
+    trig_id = created["id"]
+    r = await client.patch(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}",
+        json={"im_account_id": "ima_x"},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_explicit_null_conversation_policy(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """`null` for a locked field must also 422 — model_fields_set tracks intent."""
+    client, ws_id = authenticated_client
+    created = await _create_trigger(client, ws_id, name="pnull")
+    trig_id = created["id"]
+    r = await client.patch(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}",
+        json={"conversation_policy": None},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_patch_topic_id_only_when_new_each_time(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+
+    # new_each_time → topic_id PATCH allowed.
+    topic = await _create_topic(client, ws_id, "pt-allowed")
+    created = await _create_trigger(client, ws_id, name="ptnew")
+    trig_id = created["id"]
+    r = await client.patch(
+        f"/api/v1/ws/{ws_id}/triggers/{trig_id}",
+        json={"topic_id": topic},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["topic_id"] == topic
+
+    # im_channel → topic_id PATCH refused.
+    user_id = await _get_my_user_id(client)
+    im_account = await _seed_im_account(client, ws_id, "ext-pt-1")
+    r2 = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "im-policy",
+            "webhook_secret": "s",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+            "conversation_policy": "im_channel",
+            "im_account_id": im_account,
+            "im_channel_id": "C-2",
+            "im_scope_key": "ch",
+            "im_scope_kind": "channel",
+        },
+    )
+    assert r2.status_code == 201, r2.text
+    im_id = r2.json()["id"]
+    r3 = await client.patch(
+        f"/api/v1/ws/{ws_id}/triggers/{im_id}",
+        json={"topic_id": topic},
+    )
+    assert r3.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_filters_by_im_channel_id(
+    authenticated_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    client, ws_id = authenticated_client
+    user_id = await _get_my_user_id(client)
+    im_account = await _seed_im_account(client, ws_id, "ext-filter-1")
+
+    async def _im(name: str, channel: str) -> str:
+        r = await client.post(
+            f"/api/v1/ws/{ws_id}/triggers",
+            json={
+                "name": name,
+                "webhook_secret": "s",
+                "prompt_template": "hi",
+                "payload_fields": [],
+                "run_as_user_id": user_id,
+                "conversation_policy": "im_channel",
+                "im_account_id": im_account,
+                "im_channel_id": channel,
+                "im_scope_key": "ch",
+                "im_scope_kind": "channel",
+            },
+        )
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    a = await _im("filt-a", "C-aaa")
+    b = await _im("filt-b", "C-bbb")
+    r = await client.get(
+        f"/api/v1/ws/{ws_id}/triggers",
+        params={"im_channel_id": "C-aaa"},
+    )
+    assert r.status_code == 200
+    ids = {t["id"] for t in r.json()["triggers"]}
+    assert a in ids
+    assert b not in ids

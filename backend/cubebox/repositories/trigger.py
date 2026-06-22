@@ -14,6 +14,29 @@ class TriggerRepository(ScopedRepository[Trigger]):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_filtered(
+        self,
+        *,
+        topic_id: str | None = None,
+        im_account_id: str | None = None,
+        im_channel_id: str | None = None,
+    ) -> list[Trigger]:
+        """List triggers with optional destination filters.
+
+        Used by the sidebar / detail views to show "which triggers route into
+        this topic / IM channel". Filters are AND-combined; unset filters are
+        ignored.
+        """
+        stmt = self._scoped_select()
+        if topic_id is not None:
+            stmt = stmt.where(Trigger.topic_id == topic_id)
+        if im_account_id is not None:
+            stmt = stmt.where(Trigger.im_account_id == im_account_id)
+        if im_channel_id is not None:
+            stmt = stmt.where(Trigger.im_channel_id == im_channel_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_for_ingest(self, trigger_id: str) -> Trigger | None:
         """Return the trigger only if it exists AND is enabled.
 
