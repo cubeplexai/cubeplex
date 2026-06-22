@@ -100,7 +100,17 @@ class TriggerPipeline:
             # queue item flushed by ``enqueue_im_channel_run`` together
             # with the event-row terminal state.
             if trigger.conversation_policy == "im_channel":
-                assert trigger.im_account_id is not None
+                # ``im_account_id`` may be NULL here: ON DELETE SET NULL on the
+                # FK clears the column when the operator deletes the bound
+                # IMConnectorAccount. Record a terminal failed event instead
+                # of asserting; the operator-facing reason explains why
+                # the trigger stopped firing.
+                if trigger.im_account_id is None:
+                    await events_repo.set_terminal(
+                        event_row_id, "failed", last_error="im_account_unlinked"
+                    )
+                    await _bump_counters(session, trigger.id, total=1, failed=1)
+                    return
                 assert trigger.im_channel_id is not None
                 assert trigger.im_scope_key is not None
                 assert trigger.im_scope_kind is not None
