@@ -1475,13 +1475,14 @@ async def _get_history_messages(raw_request: Request, conversation_id: str) -> d
     no cubebox-specific wire conversion layer.
     """
     from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.stream import unwrap_deferred_in_message_dicts
 
     del raw_request  # checkpointer factory override hook (unused; preserved for future use)
     async with init_checkpointer() as cp:
         data = await cp.load(conversation_id)
     if data is None:
         return {"messages": [], "total": 0}
-    messages = [m.model_dump(mode="json") for m in data.messages]
+    messages = unwrap_deferred_in_message_dicts([m.model_dump(mode="json") for m in data.messages])
     return {"messages": messages, "total": len(messages)}
 
 
