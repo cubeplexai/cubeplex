@@ -55,8 +55,20 @@ export const SubAgentCard = memo(function SubAgentCard({
     startedAt.current = Date.now()
   }, [])
 
+  // Capture the elapsed value at the moment `isRunning` transitions to false so
+  // the finished-but-still-mounted card keeps showing its final duration. The
+  // pre-tick-share version held this in the local elapsed useState; with the
+  // shared ticker we now freeze it explicitly on transition.
   const nowMs = useNowSeconds(isRunning)
-  const elapsed = isRunning ? Math.max(0, nowMs - startedAt.current) : 0
+  const wasRunningRef = useRef(isRunning)
+  const [frozenElapsed, setFrozenElapsed] = useState(0)
+  useEffect(() => {
+    if (wasRunningRef.current && !isRunning) {
+      setFrozenElapsed(Date.now() - startedAt.current)
+    }
+    wasRunningRef.current = isRunning
+  }, [isRunning])
+  const elapsed = isRunning ? Math.max(0, nowMs - startedAt.current) : frozenElapsed
 
   // Auto-scroll streaming content — track all content changes like ReasoningBlock
   const toolCallCount = stream?.toolCalls.length ?? 0
