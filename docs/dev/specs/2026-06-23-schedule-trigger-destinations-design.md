@@ -58,14 +58,24 @@ New nullable columns:
 | `im_account_id` | text | → `im_connector_accounts.id` ON DELETE SET NULL | `im_channel` |
 | `im_channel_id` | text | — (external platform id) | `im_channel` |
 | `im_scope_key` | text | — | `im_channel` |
+| `im_scope_kind` | text | — | `im_channel` |
+
+`im_scope_kind` is persisted alongside `im_scope_key` because the kind
+cannot be reliably derived from the key prefix — different connectors
+emit `scope_kind="dm" | "channel" | "thread" | "group" |
+"participant" | "thread_participant"` for the same `scope_key`
+shapes, and the agent tool already has the kind in hand (it reads
+both off `IMThreadLink`). Recording both removes any inference at
+dispatch time.
 
 ### `triggers`
 
 `conversation_policy` plays the same role as `target_mode` and gets the
-same value expansion: `"new_each_time" | "im_channel"`. The same four
-nullable columns are added with identical semantics. The existing
-`target_type` field (`inline | managed_agent`) is orthogonal and
-untouched.
+same value expansion: `"new_each_time" | "im_channel"`. The same five
+nullable columns (`topic_id`, `im_account_id`, `im_channel_id`,
+`im_scope_key`, `im_scope_kind`) are added with identical semantics.
+The existing `target_type` field (`inline | managed_agent`) is
+orthogonal and untouched.
 
 ### Constraints
 
@@ -204,31 +214,26 @@ Schedule dispatcher pseudo-flow:
 
 ```
 schedule dispatch (target_mode == 'im_channel'):
-    run_row = ScheduledTaskRun(
-        scheduled_task_id=task.id, scheduled_for=tick_at,
-        state='claimed', claimed_at=now,
-        conversation_id=None, run_id=None,
-    )
-    session.add(run_row); session.flush()  # gets run_row.id
+    # Phase 1 (existing poller code):
+    # ScheduledTaskRun(scheduled_task_id, scheduled_for, state='claimed',
+    #                  claimed_at=now) is already committed by the
+    # claim transaction. We're now in _dispatch_one with run_row in hand.
 
-    account = session.get(IMConnectorAccount, task.im_account_id)
+    account = await session.get(IMConnectorAccount, task.im_account_id)
     if account is None:
         run_row.state = 'failed'
         run_row.detail = 'im_account_unlinked'
-        session.commit(); return
+        await session.commit(); return
 
     resolved = await resolve_im_conversation(
         session, account,
         channel_id=task.im_channel_id,
         scope_key=task.im_scope_key,
-        scope_kind=derive_scope_kind(task.im_scope_key),
+        scope_kind=task.im_scope_kind,    # persisted column, no inference
         effective_user_id=task.owner_user_id,
         title_hint=task.prompt[:80],
         origin='schedule',
     )
-    run_row.conversation_id = resolved.conversation_id
-    run_row.state = 'enqueued'
-    # run_id stays NULL; the worker assigns it when it picks the item up.
 
     await enqueue_im_channel_run(
         session, account=account,
@@ -236,10 +241,18 @@ schedule dispatch (target_mode == 'im_channel'):
         content=task.prompt,
         channel_id=task.im_channel_id,
         scope_key=task.im_scope_key,
-        scope_kind=derive_scope_kind(task.im_scope_key),
+        scope_kind=task.im_scope_kind,
         owner_user_id=task.owner_user_id,
         platform_event_id=f"schedule:{run_row.id}",
     )
+
+    # Fire-and-forget: handoff to IM worker has succeeded.
+    # Actual run success/failure is observable in the IM channel; the
+    # IM worker has its own retry semantics; we do not duplicate them
+    # on the schedule side.
+    run_row.conversation_id = resolved.conversation_id
+    run_row.state = 'succeeded'
+    run_row.detail = 'im_channel_enqueued'
     await session.commit()
 ```
 
@@ -247,19 +260,60 @@ schedule dispatch (target_mode == 'im_channel'):
 they do today.
 
 Trigger pipeline mirrors the same logic — `TriggerEvent` row, then
-`enqueue_im_channel_run(platform_event_id=f"trigger:{event_row.id}")`.
+`enqueue_im_channel_run(platform_event_id=f"trigger:{event_row.id}")`,
+then `event_row.status = 'accepted'` and the existing `_bump_counters`
+helper is called with `events_success += 1`. No new `TriggerEvent.status`
+value is introduced.
 
-### Observability for `im_channel` ScheduledTaskRun rows
+### Observability and reliability for `im_channel` runs
 
-Because run execution is async via the worker, `ScheduledTaskRun.run_id`
-stays NULL after dispatch for `im_channel` mode. State transitions stop
-at `state='enqueued'`. End-of-run reconciliation (claiming, retries,
-success/failure) is owned by the IM worker on the queue item, not by
-the schedule poller. This is acceptable for v1 — the user observes the
-run by looking at the IM channel. A follow-up task can add a reconciler
-that ties IMRunQueueItem terminal state back to ScheduledTaskRun via
-the deterministic `platform_event_id` if richer observability is
-needed.
+The schedule's `ScheduledTaskRun.run_id` stays NULL for `im_channel`
+mode — by design. ScheduledTaskRun's role is "the schedule fired and
+the work was handed off"; it terminates in `state='succeeded'` once the
+queue item is committed. The actual IM run is owned by the IM worker
+(claim → start_run → on_run_started → tailer → on-success / on-failure
+inside `runtime.py:_on_run_started`). The user observes the run by
+looking at the IM channel; if the IM worker fails, the worker's
+existing retry / dead-letter behavior applies and the operator debugs
+through IM worker logs and `IMRunQueueItem` rows. The schedule poller
+does **not** re-fire on IM worker failure — that would post duplicate
+messages to the channel.
+
+A future reconciler could mirror IM worker terminal state back onto
+`ScheduledTaskRun` for richer schedule-side observability; this is
+listed in "Out of scope" and is not required for v1.
+
+### Idempotency and stale-claim interaction
+
+The schedule poller commits `ScheduledTaskRun(state='claimed')` in a
+short claim transaction (unique on `(scheduled_task_id, scheduled_for)`,
+plus `claim_count` and `claimed_at` for in-place stale-claim recovery
+— see `models/scheduled_task.py:78,97`). The dispatch phase
+(`_dispatch_one`) runs in a **second** transaction that bundles
+`resolve_im_conversation` + `enqueue_im_channel_run` + the
+state-to-`succeeded` update into one atomic write. The two flushes
+inside `enqueue_im_channel_run` (`IMWebhookReceipt` first, then
+`IMRunQueueItem`) and the final `ScheduledTaskRun` update either all
+land or all roll back — Postgres does not expose a state where the
+receipt is in the DB but the queue row is not.
+
+If `_dispatch_one`'s transaction crashes mid-flight, the
+`ScheduledTaskRun` stays in `state='claimed'` from phase 1. The
+poller's stale-claim recovery reclaims **the same row** (mutating
+`claimed_at` and bumping `claim_count`) — the row id is stable across
+retries. The next attempt computes the same
+`platform_event_id = f"schedule:{run_row.id}"`. If a prior attempt
+actually succeeded but crashed *during the post-commit notify* (i.e.
+both rows are committed and the worker is already processing), the
+receipt-exists short-circuit makes the retry a no-op — the worker
+finishes the run on its own and the schedule state stays
+`'succeeded'` after the next retry's brief revisit.
+
+For triggers the same logic applies with
+`platform_event_id = f"trigger:{event_row.id}"`. `TriggerEvent` does
+not have a phase-1/phase-2 split (its row is inserted at the start of
+`TriggerPipeline.fire`), but the same single-transaction property of
+phase 2 keeps the receipt + queue item atomic.
 
 ### Outbound routing
 
@@ -401,7 +455,8 @@ No new endpoints, no scope changes.
 |---|---|
 | Topic deleted | `topic_id` SET NULL; schedule keeps running, destination column shows "New conversation". |
 | IM account deleted | `im_account_id` SET NULL; next fire writes `ScheduledTaskRun(state='failed', detail='im_account_unlinked')` (or `TriggerEvent(status='failed', last_error='im_account_unlinked')` on the trigger side); schedule/trigger row preserved for cleanup. |
-| Schedule dispatcher commit fails mid-flight | Whole tick is one DB transaction (`ScheduledTaskRun` + `IMWebhookReceipt` + `IMRunQueueItem` written together). A crash before `commit()` leaves zero rows; the next poller tick re-attempts cleanly. A crash after `commit()` is identical to "row already exists" — the unique constraint on `(scheduled_task_id, scheduled_for)` blocks duplicate insertion. |
+| Schedule dispatcher commit fails mid-flight in phase 2 | Phase 2 is one atomic transaction (resolve + enqueue + state update). On crash everything rolls back; `ScheduledTaskRun.state` stays `'claimed'` from phase 1, and stale-claim recovery reclaims the same row id, replaying with the same idempotent `platform_event_id`. |
+| IM worker fails the synthetic run | `ScheduledTaskRun.state` is already `'succeeded'` (handoff success). Schedule does not retry; the IM worker's own dead-letter / retry path is the recovery mechanism. The user sees no message in the IM channel and operator debugs via IM worker logs + `IMRunQueueItem` row. |
 | User runs `/new` then schedule fires | `IMThreadLink` is gone; `resolve_im_conversation` mints a fresh conversation and link. New thread appears in the IM channel — consistent with "channel survives, conversation can rotate." |
 | Multiple schedules on same channel/scope | All resolve to the same conversation if the link exists; concurrent run handling is whatever `RunManager` already does. |
 | IM binding switches `isolated` ↔ `shared` | Live binding: next fire sees the new mode. If shared mode pins a new topic, future schedule firings land there. |
