@@ -15,7 +15,10 @@ class Trigger(CubeboxBase, OrgScopedMixin, table=True):
 
     _PREFIX: ClassVar[str] = PREFIX_TRIGGER
     __tablename__ = "triggers"
-    __table_args__ = (org_scope_index("triggers"),)
+    __table_args__ = (
+        org_scope_index("triggers"),
+        Index("ix_triggers_im_channel", "im_account_id", "im_channel_id"),
+    )
 
     name: str = Field(max_length=128)
     enabled: bool = Field(default=True, index=True)
@@ -34,8 +37,29 @@ class Trigger(CubeboxBase, OrgScopedMixin, table=True):
     # Payload whitelist
     payload_fields: list[str] = Field(default_factory=list, sa_column=Column(JSON))
 
-    # Conversation policy
+    # Conversation policy: new_each_time | im_channel
+    # — see ck_triggers_conversation_policy
     conversation_policy: str = Field(default="new_each_time", max_length=16)
+
+    # Destination columns (used when policy != new_each_time)
+    topic_id: str | None = Field(
+        default=None,
+        foreign_key="topics.id",
+        max_length=20,
+        nullable=True,
+        index=True,
+        ondelete="SET NULL",
+    )
+    im_account_id: str | None = Field(
+        default=None,
+        foreign_key="im_connector_accounts.id",
+        max_length=20,
+        nullable=True,
+        ondelete="SET NULL",
+    )
+    im_channel_id: str | None = Field(default=None, max_length=128, nullable=True)
+    im_scope_key: str | None = Field(default=None, max_length=255, nullable=True)
+    im_scope_kind: str | None = Field(default=None, max_length=32, nullable=True)
 
     # Run identity
     run_as_user_id: str = Field(foreign_key="users.id", max_length=20)

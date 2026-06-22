@@ -30,6 +30,7 @@ class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
             "deleted_at",
             postgresql_where=text("deleted_at IS NOT NULL"),
         ),
+        Index("ix_scheduled_tasks_im_channel", "im_account_id", "im_channel_id"),
     )
 
     owner_user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
