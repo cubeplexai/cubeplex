@@ -15,6 +15,7 @@ import {
   type RotateSecretBody,
   type RotateSecretResult,
   type ListTriggerEventsQuery,
+  type TriggerListFilters,
 } from '../api/triggers'
 
 export interface TriggerStore {
@@ -24,7 +25,7 @@ export interface TriggerStore {
   eventsByTrigger: Record<string, TriggerEvent[]>
   eventsLoading: boolean
 
-  load(client: ApiClient, wsId: string): Promise<void>
+  load(client: ApiClient, wsId: string, filters?: TriggerListFilters): Promise<void>
   create(client: ApiClient, wsId: string, body: CreateTriggerBody): Promise<Trigger>
   update(client: ApiClient, wsId: string, id: string, patch: UpdateTriggerBody): Promise<Trigger>
   remove(client: ApiClient, wsId: string, id: string): Promise<void>
@@ -51,10 +52,10 @@ export const useTriggerStore = create<TriggerStore>((set, get) => ({
   eventsByTrigger: {},
   eventsLoading: false,
 
-  async load(client, wsId) {
+  async load(client, wsId, filters) {
     set({ loading: true })
     try {
-      const triggers = await listTriggers(client, wsId)
+      const triggers = await listTriggers(client, wsId, filters)
       set({ triggers })
     } finally {
       set({ loading: false })
