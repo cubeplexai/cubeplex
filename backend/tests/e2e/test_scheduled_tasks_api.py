@@ -370,3 +370,87 @@ class TestScheduledTaskAuth:
             target_conversation_id=other_conv,
         )
         assert r.status_code == 422
+
+
+def _create_topic(client: TestClient, title: str = "tpc") -> str:
+    """Create a real Topic row and return its id.
+
+    scheduled_tasks.topic_id is FK→topics.id, so dummy ids fail the constraint.
+    Tests that exercise topic_id round-tripping or filtering need a real row.
+    """
+    r = client.post(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/topics",
+        json={"title": title},
+    )
+    assert r.status_code in (200, 201), r.text
+    tid = r.json()["topic"]["id"]
+    assert isinstance(tid, str) and tid.startswith("top")
+    return tid
+
+
+class TestScheduledTaskDestinations:
+    """target_mode is immutable after create — destination fields lock with it.
+
+    The PATCH route gates target_mode / target_conversation_id / im_* via
+    `body.model_fields_set` so an explicit `null` value is rejected just as
+    a non-null one would be. Sending any of these requires deleting and
+    recreating the schedule.
+    """
+
+    def test_patch_rejects_target_mode_change(self, client: TestClient) -> None:
+        tid = _make(client).json()["id"]  # new_each_run by default
+        r = client.patch(f"{BASE}/{tid}", json={"target_mode": "im_channel"})
+        assert r.status_code == 422
+        assert "target_mode" in r.text.lower()
+
+    def test_patch_rejects_target_conversation_id_change(self, client: TestClient) -> None:
+        tid = _make(client).json()["id"]
+        r = client.patch(f"{BASE}/{tid}", json={"target_conversation_id": "cv_x"})
+        assert r.status_code == 422
+
+    def test_patch_rejects_im_account_id_change(self, client: TestClient) -> None:
+        tid = _make(client).json()["id"]
+        r = client.patch(f"{BASE}/{tid}", json={"im_account_id": "ima_x"})
+        assert r.status_code == 422
+
+    def test_patch_rejects_explicit_null_target_mode(self, client: TestClient) -> None:
+        # `null` value must be rejected too — model_fields_set tracks the
+        # client's intent regardless of value.
+        tid = _make(client).json()["id"]
+        r = client.patch(f"{BASE}/{tid}", json={"target_mode": None})
+        assert r.status_code == 422
+
+    def test_patch_topic_id_only_allowed_when_new_each_run(self, client: TestClient) -> None:
+        # new_each_run → allowed.
+        topic = _create_topic(client, "patch-allowed")
+        tid_new = _make(client).json()["id"]
+        r = client.patch(f"{BASE}/{tid_new}", json={"topic_id": topic})
+        assert r.status_code == 200, r.text
+        assert r.json()["topic_id"] == topic
+
+        # Create a conversation owned by the admin caller, then fixed task
+        # whose patch should refuse topic_id.
+        conv = client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",
+            params={"title": "mine"},
+        ).json()["id"]
+        tid_fixed = _make(client, target_mode="fixed", target_conversation_id=conv).json()["id"]
+        r = client.patch(f"{BASE}/{tid_fixed}", json={"topic_id": topic})
+        assert r.status_code == 422
+
+    def test_create_with_topic_id_round_trips(self, client: TestClient) -> None:
+        topic = _create_topic(client, "rt-create")
+        r = _make(client, topic_id=topic)
+        assert r.status_code == 201, r.text
+        assert r.json()["topic_id"] == topic
+
+    def test_list_filters_by_topic_id(self, client: TestClient) -> None:
+        topic_a = _create_topic(client, "filter-a")
+        topic_b = _create_topic(client, "filter-b")
+        a = _make(client, topic_id=topic_a).json()["id"]
+        b = _make(client, topic_id=topic_b).json()["id"]
+        r = client.get(BASE, params={"topic_id": topic_a})
+        assert r.status_code == 200
+        ids = {t["id"] for t in r.json()["tasks"]}
+        assert a in ids
+        assert b not in ids

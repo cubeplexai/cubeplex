@@ -75,6 +75,10 @@ class ScheduledTaskService:
         self,
         ctx: ScopeContext,
         session: AsyncSession,
+        *,
+        topic_id: str | None = None,
+        im_account_id: str | None = None,
+        im_channel_id: str | None = None,
     ) -> list[ScheduledTask]:
         stmt = (
             select(ScheduledTask)
@@ -88,6 +92,12 @@ class ScheduledTaskService:
             )
             .limit(100)
         )
+        if topic_id is not None:
+            stmt = stmt.where(ScheduledTask.topic_id == topic_id)  # type: ignore[arg-type]
+        if im_account_id is not None:
+            stmt = stmt.where(ScheduledTask.im_account_id == im_account_id)  # type: ignore[arg-type]
+        if im_channel_id is not None:
+            stmt = stmt.where(ScheduledTask.im_channel_id == im_channel_id)  # type: ignore[arg-type]
         result = await session.execute(stmt)
         return list(result.scalars().all())
 
@@ -156,6 +166,11 @@ class ScheduledTaskService:
             timezone=data.get("timezone", "UTC"),
             target_mode=data["target_mode"],
             target_conversation_id=data.get("target_conversation_id"),
+            topic_id=data.get("topic_id"),
+            im_account_id=data.get("im_account_id"),
+            im_channel_id=data.get("im_channel_id"),
+            im_scope_key=data.get("im_scope_key"),
+            im_scope_kind=data.get("im_scope_kind"),
             status="active",
         )
         task.next_fire_at = _initial_next_fire(task)
@@ -173,6 +188,14 @@ class ScheduledTaskService:
     ) -> ScheduledTask:
         task = await self._load_for_mutation(ctx, session, task_id)
         self._validate_patch(data)
+
+        # topic_id is patchable only when the existing row is new_each_run;
+        # for fixed/im_channel a topic_id is structurally meaningless.
+        if "topic_id" in data and task.target_mode != "new_each_run":
+            raise ActionInvalidInput(
+                f"topic_id can only be patched when target_mode='new_each_run' "
+                f"(current target_mode={task.target_mode!r})"
+            )
 
         # Conversation ownership check when switching to / staying in fixed
         if data.get("target_mode") == "fixed" or (
@@ -208,6 +231,11 @@ class ScheduledTaskService:
             if field in _SCHEDULE_FIELDS and val != getattr(task, field):
                 touched_schedule = True
             setattr(task, field, val)
+
+        # topic_id is the only destination-related field a PATCH can touch.
+        # `None` is a valid (clearing) value, so use the `in data` check.
+        if "topic_id" in data:
+            task.topic_id = data["topic_id"]
 
         # end_at explicit null handling: must be handled separately because
         # the generic loop skips None values.
