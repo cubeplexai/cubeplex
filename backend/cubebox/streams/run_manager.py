@@ -2280,6 +2280,40 @@ class RunManager:
         except Exception as _exc:
             logger.warning("show_widget unavailable for cubepi run: {}", _exc)
 
+        # create_scheduled_task / create_trigger — per-run DI: org/workspace/user/
+        # conversation. Detect IM origin via IMThreadLink on the current
+        # conversation so "remind me every morning" inside an IM thread defaults
+        # to posting back to that IM channel.
+        try:
+            from cubebox.tools.builtin.create_scheduled_task import (
+                make_create_scheduled_task_tool,
+            )
+
+            _builtin_tools.append(
+                make_create_scheduled_task_tool(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    conversation_id=conversation_id,
+                )
+            )
+        except Exception as _exc:
+            logger.warning("create_scheduled_task unavailable for cubepi run: {}", _exc)
+
+        try:
+            from cubebox.tools.builtin.create_trigger import make_create_trigger_tool
+
+            _builtin_tools.append(
+                make_create_trigger_tool(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    conversation_id=conversation_id,
+                )
+            )
+        except Exception as _exc:
+            logger.warning("create_trigger unavailable for cubepi run: {}", _exc)
+
         # generate_image — sandbox-gated; enabled only when image_generation config is active.
         if sandbox is not None:
             try:
