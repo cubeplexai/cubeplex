@@ -479,6 +479,111 @@ def test_unwrap_preserves_malformed_wrapper_so_error_chain_stays() -> None:
     assert out == malformed
 
 
+def test_unwrap_coerces_none_arguments_to_empty_dict() -> None:
+    """`"arguments": null` is cubepi's explicit no-arg path — resolver
+    coerces None to {} and dispatches normally. The display unwrap must
+    mirror that or live and history will diverge from execution."""
+    msg = {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "tool_call",
+                "id": "tc1",
+                "name": "deferred_tool_call",
+                "arguments": {"tool_name": "ping", "arguments": None},
+            }
+        ],
+    }
+    out = unwrap_deferred_in_message_dicts([msg])
+    assert out[0]["content"][0]["name"] == "ping"
+    assert out[0]["content"][0]["arguments"] == {}
+
+
+def test_unwrap_coerces_missing_arguments_key_to_empty_dict() -> None:
+    """When the wrapper omits the `arguments` key entirely, treat it as the
+    same no-arg case cubepi handles via `wrapper.get('arguments')` → None →
+    {}."""
+    msg = {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "tool_call",
+                "id": "tc1",
+                "name": "deferred_tool_call",
+                "arguments": {"tool_name": "ping"},
+            }
+        ],
+    }
+    out = unwrap_deferred_in_message_dicts([msg])
+    assert out[0]["content"][0]["name"] == "ping"
+    assert out[0]["content"][0]["arguments"] == {}
+
+
+def test_unwrap_preserves_dispatcher_block_when_inner_args_is_list() -> None:
+    """Non-dict non-None inner arguments makes cubepi's resolver return None,
+    so the dispatcher's _execute runs and yields an error. The UI must show
+    the dispatcher block (name + raw wrapper) — coercing to {} would surface
+    a real-name card with empty args, hiding what actually broke."""
+    block = {
+        "type": "tool_call",
+        "id": "tc1",
+        "name": "deferred_tool_call",
+        "arguments": {"tool_name": "file_write", "arguments": ["bad"]},
+    }
+    out = unwrap_deferred_in_message_dicts([{"role": "assistant", "content": [block]}])
+    assert out[0]["content"][0] == block
+
+
+def test_unwrap_preserves_dispatcher_block_when_inner_args_is_scalar() -> None:
+    """Same as the list case but for a scalar (number / string) — anything
+    non-dict-non-None must keep the dispatcher form so cubepi's error
+    fallback chain stays visible."""
+    block = {
+        "type": "tool_call",
+        "id": "tc1",
+        "name": "deferred_tool_call",
+        "arguments": {"tool_name": "file_write", "arguments": 42},
+    }
+    out = unwrap_deferred_in_message_dicts([{"role": "assistant", "content": [block]}])
+    assert out[0]["content"][0] == block
+
+
+# ---------------------------------------------------------------------------
+# SSE toolcall_end must honor the same coercion rules as the dict unwrap
+
+
+def test_toolcall_end_with_none_inner_arguments_emits_real_name_empty_dict() -> None:
+    """Same coercion semantics as the history dict path: inner arguments None
+    means real-name call with {} args, matching cubepi's resolver."""
+    partial = _mk_assistant(
+        tool_calls=[
+            ToolCall(
+                id="tc1",
+                name="deferred_tool_call",
+                arguments={"tool_name": "ping", "arguments": None},
+            )
+        ]
+    )
+    evt = StreamEvent(type="toolcall_end", content_index=0, partial=partial)
+    out = StreamConverter().convert(evt)
+    assert out[0]["name"] == "ping"
+    assert out[0]["arguments"] == {}
+
+
+def test_toolcall_end_with_list_inner_arguments_keeps_dispatcher_form() -> None:
+    """If the model produced non-dict non-None inner args, cubepi will run
+    the dispatcher's _execute and emit an error result — keep the dispatcher
+    block in the live SSE so the user sees the call name match the result."""
+    wrapper = {"tool_name": "file_write", "arguments": ["bad"]}
+    partial = _mk_assistant(
+        tool_calls=[ToolCall(id="tc1", name="deferred_tool_call", arguments=wrapper)]
+    )
+    evt = StreamEvent(type="toolcall_end", content_index=0, partial=partial)
+    out = StreamConverter().convert(evt)
+    assert out[0]["name"] == "deferred_tool_call"
+    assert out[0]["arguments"] == wrapper
+
+
 def test_unwrap_does_not_mutate_input_messages() -> None:
     """The helper runs on the model_dump'd output and must not mutate the
     caller's list — callers may still hold references to the dicts."""

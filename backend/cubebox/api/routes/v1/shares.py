@@ -262,6 +262,8 @@ async def get_share(
     user: Annotated[User | None, Depends(optional_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
+    from cubebox.agents.stream import unwrap_deferred_in_message_dicts
+
     repo = ConversationShareRepository(session)
     share = await repo.get_active(share_id)
     if not share:
@@ -269,13 +271,19 @@ async def get_share(
 
     await _check_scope_access(share, user, session)
 
+    # Legacy snapshots (created before the build_snapshot fix) still hold the
+    # dispatcher form; unwrap on read so old share links don't render
+    # mismatched cards. Newer snapshots are already unwrapped — the helper
+    # is a no-op for them.
+    messages = unwrap_deferred_in_message_dicts(share.snapshot.get("messages", []))
+
     return {
         "id": share.id,
         "title": share.title,
         "creator_display_name": share.creator_display_name,
         "scope": share.scope.value,
         "created_at": utc_isoformat(share.created_at),
-        "messages": share.snapshot.get("messages", []),
+        "messages": messages,
         "artifacts": share.artifacts_snapshot,
     }
 
