@@ -7,6 +7,7 @@ import { CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
 import type { AgentStream, ContentBlock, ToolCallRef } from '@cubebox/core'
 import { ToolCallItem } from './ToolCallItem'
 import { AgentAvatar } from './AgentAvatar'
+import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { proseClasses } from '@/lib/utils'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
 
@@ -46,7 +47,6 @@ export const SubAgentCard = memo(function SubAgentCard({
 }: Props) {
   const t = useTranslations('chat')
   const [expanded, setExpanded] = useState(false)
-  const [elapsed, setElapsed] = useState(0)
   const startedAt = useRef(Date.now())
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -55,14 +55,8 @@ export const SubAgentCard = memo(function SubAgentCard({
     startedAt.current = Date.now()
   }, [])
 
-  // Live elapsed timer
-  useEffect(() => {
-    if (!isRunning) return
-    const tick = () => setElapsed(Date.now() - startedAt.current)
-    tick()
-    const interval = setInterval(tick, 1000)
-    return () => clearInterval(interval)
-  }, [isRunning])
+  const nowMs = useNowSeconds(isRunning)
+  const elapsed = isRunning ? Math.max(0, nowMs - startedAt.current) : 0
 
   // Auto-scroll streaming content — track all content changes like ReasoningBlock
   const toolCallCount = stream?.toolCalls.length ?? 0
