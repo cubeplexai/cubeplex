@@ -126,7 +126,17 @@ async def dispatch_scheduled_run(
         assert session is not None and run_row is not None, (
             "im_channel dispatch requires session + run_row from poller"
         )
-        assert task.im_account_id is not None, "im_channel task missing im_account_id"
+        # ``im_account_id`` may be NULL here: the FK uses ON DELETE SET NULL,
+        # so an operator who deleted the bound IMConnectorAccount leaves the
+        # schedule row alive with the destination field cleared. Treat the
+        # missing-account case symmetrically — record a terminal ``failed``
+        # state with ``im_account_unlinked`` so the run history explains why
+        # the schedule stopped firing without taking the poller down.
+        if task.im_account_id is None:
+            run_row.state = "failed"
+            run_row.detail = "im_account_unlinked"
+            await session.commit()
+            return None
         assert task.im_channel_id is not None, "im_channel task missing im_channel_id"
         assert task.im_scope_key is not None, "im_channel task missing im_scope_key"
         assert task.im_scope_kind is not None, "im_channel task missing im_scope_kind"
