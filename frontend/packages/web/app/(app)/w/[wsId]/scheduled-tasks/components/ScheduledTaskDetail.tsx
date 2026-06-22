@@ -1,12 +1,14 @@
 'use client'
 
 import { Pause, Pencil, Play, Trash2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import type { ScheduledTaskOut } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DetailPanel } from '@/components/shared/DetailPanel'
 import { ScheduledTaskRunsPanel } from './ScheduledTaskRunsPanel'
 import { formatNextFire, formatScheduleSummary } from '../lib/format'
+import { DestinationCell } from './DestinationCell'
 
 interface ScheduledTaskDetailProps {
   wsId: string
@@ -33,6 +35,7 @@ export function ScheduledTaskDetail({
   onEdit,
   onBack,
 }: ScheduledTaskDetailProps): React.ReactElement {
+  const t = useTranslations('scheduledTasks')
   return (
     <DetailPanel
       onBack={onBack}
@@ -94,11 +97,17 @@ export function ScheduledTaskDetail({
         <div className="rounded-xl border border-border/70 bg-card/40 p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
             <div className="flex flex-col gap-0.5">
-              <span className="text-xs text-muted-foreground">Schedule</span>
+              <span className="text-xs text-muted-foreground">{t('detailSchedule')}</span>
               <span className="text-sm font-medium">{formatScheduleSummary(task)}</span>
             </div>
             <div className="flex flex-col gap-0.5">
-              <span className="text-xs text-muted-foreground">Next run</span>
+              <span className="text-xs text-muted-foreground">{t('detailDestination')}</span>
+              <span className="text-sm font-medium">
+                <DestinationCell task={task} />
+              </span>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs text-muted-foreground">{t('detailNextRun')}</span>
               <span className="text-sm font-medium">{formatNextFire(task)}</span>
             </div>
           </div>
