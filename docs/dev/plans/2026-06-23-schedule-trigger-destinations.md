@@ -17,7 +17,7 @@
 ### Backend — created
 
 - `backend/cubebox/im/conversation_resolver.py` — shared `resolve_im_conversation` helper used by IM inbound + schedule/trigger dispatch.
-- `backend/cubebox/im/run_handoff.py` — `dispatch_im_channel_run` helper: writes synthetic `IMWebhookReceipt` + `IMRunQueueItem`, calls `RunManager.start_run`, invokes per-platform `on_run_started`.
+- `backend/cubebox/im/run_handoff.py` — `enqueue_im_channel_run` helper: writes a synthetic `IMWebhookReceipt` and an `IMRunQueueItem(status='pending')` so the existing `IMRunQueueWorker` picks them up. Does **not** call `RunManager.start_run` or the platform tailer hook — the worker owns those.
 - `backend/cubebox/services/schedule_target_spec.py` — `ScheduleTargetSpec.validate` pure function shared by Pydantic schemas + agent tools + service layer.
 - `backend/cubebox/tools/builtin/create_scheduled_task.py` — agent tool factory.
 - `backend/cubebox/tools/builtin/create_trigger.py` — agent tool factory.
@@ -106,11 +106,12 @@ cd backend && uv run alembic revision --autogenerate \
 
 - [ ] **Step 3: Hand-edit the migration**
 
-Autogen will produce `add_column` calls. Hand-add:
+Autogen will produce `add_column` calls. Hand-add the constraints +
+indexes. **Do not** emit `op.drop_constraint("ck_scheduled_tasks_target_mode", ...)`
+— no such constraint exists today; the drop would crash the migration.
 
 ```python
-# Drop existing CHECK on target_mode (if any) and add new one
-op.drop_constraint("ck_scheduled_tasks_target_mode", "scheduled_tasks", type_="check")
+# Value-space CHECK on the discriminator (created fresh, never dropped).
 op.create_check_constraint(
     "ck_scheduled_tasks_target_mode",
     "scheduled_tasks",
@@ -201,8 +202,10 @@ cd backend && uv run alembic revision --autogenerate \
 
 - [ ] **Step 3: Hand-edit the migration**
 
+No `drop_constraint` — `triggers` has no existing CHECK on
+`conversation_policy` today.
+
 ```python
-op.drop_constraint("ck_triggers_conversation_policy", "triggers", type_="check")
 op.create_check_constraint(
     "ck_triggers_conversation_policy",
     "triggers",
@@ -350,17 +353,35 @@ Two more tests: `test_creates_fresh_when_link_missing`, `test_mints_new_conv_whe
 cd backend && uv run pytest tests/unit/test_resolve_im_conversation.py --no-cov -x 2>&1 | tail -10
 ```
 
-- [ ] **Step 3: Implement the helper**
+- [ ] **Step 3: Implement the helper (full inbound side-effect set)**
+
+The helper must replicate everything `im/inbound.py:160-292` does for a
+real inbound message — lazy topic creation, TopicParticipant inserts
+(owner + member), ConversationParticipant insert during conv mint, and
+the post-link participant top-up. It also returns binding-derived
+fields (`topic_id`, `is_group_chat`, `sandbox_mode`) so callers can
+build a correct `RunContext`.
 
 ```python
 # backend/cubebox/im/conversation_resolver.py
+from dataclasses import dataclass
 from typing import Literal
+from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cubebox.models.conversation import Conversation
+from cubebox.models.conversation import Conversation, ConversationParticipant
 from cubebox.models.im_channel_binding import IMChannelBinding
 from cubebox.models.im_connector import IMConnectorAccount
+from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.repositories.im_connector import get_or_create_thread_link
+
+
+@dataclass(frozen=True)
+class ResolvedIMConversation:
+    conversation_id: str
+    topic_id: str | None
+    is_group_chat: bool
+    sandbox_mode: str | None
 
 
 async def resolve_im_conversation(
@@ -371,19 +392,67 @@ async def resolve_im_conversation(
     scope_key: str,
     scope_kind: str,
     effective_user_id: str,
+    title_hint: str,
     origin: Literal["inbound", "schedule", "trigger"],
-    title_hint: str = "IM conversation",
-) -> str:
-    binding = await session.exec(
+) -> ResolvedIMConversation:
+    # 1. Look up binding.
+    binding = (await session.execute(
         select(IMChannelBinding).where(
             IMChannelBinding.account_id == account.id,
             IMChannelBinding.channel_id == channel_id,
         )
-    ).first()
+    )).scalar_one_or_none()
 
-    topic_id = binding.topic_id if binding is not None else None
-    is_shared = (binding is not None and binding.mode == "shared")
+    is_shared = binding is not None and binding.mode == "shared"
+    topic_id: str | None = None
+    sandbox_mode = binding.sandbox_mode if binding is not None else None
 
+    # 2-3. Shared-mode topic and participant bookkeeping
+    #      (mirrors inbound.py:162-216 verbatim).
+    if is_shared:
+        assert binding is not None
+        if binding.topic_id is None:
+            topic = Topic(
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+                creator_user_id=account.acting_user_id,
+                title=binding.channel_name or channel_id,
+                sandbox_mode=binding.sandbox_mode or "dedicated",
+                max_participants=100,
+            )
+            session.add(topic)
+            await session.flush()
+            binding.topic_id = topic.id
+            session.add(binding)
+            session.add(TopicParticipant(
+                topic_id=topic.id,
+                user_id=account.acting_user_id,
+                role="owner",
+            ))
+            if effective_user_id != account.acting_user_id:
+                session.add(TopicParticipant(
+                    topic_id=topic.id,
+                    user_id=effective_user_id,
+                    role="member",
+                ))
+            await session.flush()
+        else:
+            existing_tp = (await session.execute(
+                select(TopicParticipant).where(
+                    TopicParticipant.topic_id == binding.topic_id,
+                    TopicParticipant.user_id == effective_user_id,
+                )
+            )).scalar_one_or_none()
+            if existing_tp is None:
+                session.add(TopicParticipant(
+                    topic_id=binding.topic_id,
+                    user_id=effective_user_id,
+                    role="member",
+                ))
+                await session.flush()
+        topic_id = binding.topic_id
+
+    # 4. Mint conversation via thread link.
     async def _mint_conversation_id() -> str:
         conv = Conversation(
             org_id=account.org_id,
@@ -395,10 +464,17 @@ async def resolve_im_conversation(
         )
         session.add(conv)
         await session.flush()
-        # ConversationParticipant for shared mode handled by caller if needed.
+        if is_shared:
+            session.add(ConversationParticipant(
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+                conversation_id=conv.id,
+                user_id=effective_user_id,
+            ))
+            await session.flush()
         return conv.id
 
-    link, _ = await get_or_create_thread_link(
+    link, created = await get_or_create_thread_link(
         session,
         org_id=account.org_id,
         workspace_id=account.workspace_id,
@@ -408,12 +484,54 @@ async def resolve_im_conversation(
         scope_kind=scope_kind,
         make_conversation_id=_mint_conversation_id,
     )
-    return link.conversation_id
+
+    # 5. Post-link participant top-up (mirrors inbound.py:252-292).
+    if not created and is_shared:
+        assert binding is not None
+        existing_cp = (await session.execute(
+            select(ConversationParticipant).where(
+                ConversationParticipant.conversation_id == link.conversation_id,
+                ConversationParticipant.user_id == effective_user_id,
+            )
+        )).scalar_one_or_none()
+        if existing_cp is None:
+            session.add(ConversationParticipant(
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+                conversation_id=link.conversation_id,
+                user_id=effective_user_id,
+            ))
+        if binding.topic_id is not None:
+            existing_tp = (await session.execute(
+                select(TopicParticipant).where(
+                    TopicParticipant.topic_id == binding.topic_id,
+                    TopicParticipant.user_id == effective_user_id,
+                )
+            )).scalar_one_or_none()
+            if existing_tp is None:
+                session.add(TopicParticipant(
+                    topic_id=binding.topic_id,
+                    user_id=effective_user_id,
+                    role="member",
+                ))
+        await session.flush()
+
+    return ResolvedIMConversation(
+        conversation_id=link.conversation_id,
+        topic_id=topic_id,
+        is_group_chat=is_shared,
+        sandbox_mode=sandbox_mode,
+    )
 ```
 
-- [ ] **Step 4: Refactor `_make_conversation_id` in `im/inbound.py`**
+- [ ] **Step 4: Refactor `im/inbound.py:160-292`**
 
-Replace `inbound.py:218-250` to call `resolve_im_conversation` rather than building its own closure. Preserve the `ConversationParticipant` insert for `is_shared` case (the helper doesn't own it).
+Replace the entire block (binding lookup → shared-mode bookkeeping →
+`_make_conversation_id` → `get_or_create_thread_link` → post-link
+top-up) with a single call to `resolve_im_conversation`. The
+`IMRunQueueItem` / `IMWebhookReceipt` writes immediately after stay
+exactly as they were (real inbound has a real `event.inbound_message_id`
+and webhook event id, which the helper does not invent).
 
 - [ ] **Step 5: Run unit + IM inbound tests**
 
@@ -660,15 +778,24 @@ cd backend && uv run pytest tests/e2e/test_scheduled_task_destinations.py::test_
 
 - [ ] **Step 3: Implement**
 
-In `routes/v1/ws_scheduled_tasks.py:patch_task`:
+In `routes/v1/ws_scheduled_tasks.py:patch_task`. Use
+`body.model_fields_set` (or check membership in the
+`exclude_unset=True` dump) — `is not None` would silently allow
+explicit `null` payloads through.
 
 ```python
-if body.target_mode is not None:
+if "target_mode" in body.model_fields_set:
     raise HTTPException(
         status_code=422,
         detail="target_mode cannot be changed via PATCH; delete and recreate",
     )
 ```
+
+Also reject any of `target_conversation_id`, `im_account_id`,
+`im_channel_id`, `im_scope_key` in `model_fields_set` — these are all
+mode-bound and cannot be changed independently. `topic_id` is the only
+destination-related field PATCH may alter, and only when the existing
+row has `target_mode='new_each_run'`.
 
 And add list filter params:
 
@@ -709,30 +836,33 @@ git commit -m "feat(api): triggers accept destination fields, lock conversation_
 
 ---
 
-## Task 10 — `dispatch_im_channel_run` helper
+## Task 10 — `enqueue_im_channel_run` helper
 
 **Files:**
 - Create: `backend/cubebox/im/run_handoff.py`
-- Test: covered by Task 14's e2e tests (helper has no unit-testable boundary without integration)
 
-This helper is the missing piece between "we have a conv and a prompt" and "the IM tailer streams responses back to the channel."
+The helper writes a synthetic `IMWebhookReceipt` and an
+`IMRunQueueItem(status='pending')` and returns. It **does not** call
+`RunManager.start_run` or `_on_run_started` — those run inside the
+existing `IMRunQueueWorker` closure constructed in `runtime.py:173`,
+which captures Redis state / gateway cache / secret cache / etc. that
+the schedule/trigger dispatcher cannot reconstruct. Letting the worker
+pick the row up means we reuse the entire correct outbound pipeline.
 
 - [ ] **Step 1: Implement**
 
 ```python
 # backend/cubebox/im/run_handoff.py
-from typing import Literal
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlmodel import select
 
 from cubebox.models.im_connector import (
     IMConnectorAccount, IMIdentityLink, IMRunQueueItem, IMWebhookReceipt,
 )
-from cubebox.streams.run_manager import RunManager
-from cubebox.streams.run_context import RunContext
 
 
-async def dispatch_im_channel_run(
+async def enqueue_im_channel_run(
     session: AsyncSession,
     *,
     account: IMConnectorAccount,
@@ -742,33 +872,45 @@ async def dispatch_im_channel_run(
     scope_key: str,
     scope_kind: str,
     owner_user_id: str,
-    origin: Literal["schedule", "trigger"],
-    origin_key: str,       # f"schedule:{task.id}:{run_row.id}" — unique per fire
-    run_manager: RunManager,
-    on_run_started,        # per-platform hook
-) -> str:
-    # 1. Look up owner's IM identity (may be None).
-    identity = (await session.exec(
+    platform_event_id: str,
+) -> None:
+    """Enqueue a synthetic inbound row that the IMRunQueueWorker will drain.
+
+    Idempotent on platform_event_id: callers should pass a deterministic
+    key (e.g. f"schedule:{scheduled_task_run.id}") so that retried
+    dispatcher ticks do not double-enqueue.
+    """
+    identity = (await session.execute(
         select(IMIdentityLink).where(
             IMIdentityLink.account_id == account.id,
             IMIdentityLink.user_id == owner_user_id,
         )
-    )).first()
+    )).scalar_one_or_none()
     sender_im_user_id = identity.im_user_id if identity is not None else None
 
-    # 2. Synthetic webhook receipt.
+    # Short-circuit if a prior tick already inserted the receipt.
+    existing = (await session.execute(
+        select(IMWebhookReceipt).where(
+            IMWebhookReceipt.account_id == account.id,
+            IMWebhookReceipt.platform_event_id == platform_event_id,
+        )
+    )).scalar_one_or_none()
+    if existing is not None:
+        # Receipt exists; the matching IMRunQueueItem is also already
+        # present (both writes happen in the same transaction).
+        return
+
     receipt = IMWebhookReceipt(
         org_id=account.org_id,
         workspace_id=account.workspace_id,
         account_id=account.id,
-        platform_event_id=origin_key,
+        platform_event_id=platform_event_id,
         status="completed",
     )
     session.add(receipt)
     await session.flush()
 
-    # 3. Outbox row.
-    item = IMRunQueueItem(
+    session.add(IMRunQueueItem(
         org_id=account.org_id,
         workspace_id=account.workspace_id,
         account_id=account.id,
@@ -781,43 +923,29 @@ async def dispatch_im_channel_run(
         reply_to_id=None,
         inbound_message_id=None,
         sender_im_user_id=sender_im_user_id,
-        status="started",          # we'll start the run inline
-    )
-    session.add(item)
+        sender_open_id=None,
+        status="pending",         # worker drains this
+    ))
     await session.flush()
-
-    # 4. Start the run.
-    ctx = RunContext(
-        user_id=owner_user_id,
-        org_id=account.org_id,
-        workspace_id=account.workspace_id,
-        conversation_id=conversation_id,
-        trigger=origin,
-    )
-    run_id = await run_manager.start_run(
-        conversation_id=conversation_id,
-        content=content,
-        ctx=ctx,
-    )
-
-    # 5. Fire the per-platform hook (worker would normally do this).
-    # The queue item is kept in memory; on_run_started gets both
-    # (run_id, item) verbatim — no IMRunQueueItem.run_id column needed.
-    await on_run_started(run_id, item)
-    return run_id
 ```
 
-Verified at plan-write time that `IMRunQueueItem` has no `run_id` column and the worker passes `(run_id, captured_item)` via in-memory args (`backend/cubebox/im/worker.py:242-254`). No `IMRunQueueItem` schema change in this feature.
+Verified facts:
+- `IMRunQueueItem.status` default is `'pending'`; worker filters on
+  `status='pending'` (`models/im_connector.py:181`, partial index
+  `ix_im_run_queue_pending`).
+- `_on_run_started` is a runtime-built closure
+  (`im/runtime.py:173-207`) and **cannot** be reconstructed safely
+  outside the lifespan startup path. The worker calls it after
+  `start_run` (`im/worker.py:242-254`).
+- The schedule/trigger dispatcher writes the queue item inside its own
+  DB transaction; on `commit()` the worker's `claim_pending_queue_item`
+  picks it up on the next poll tick (default 1 second).
 
-- [ ] **Step 2: Identify the on_run_started hook resolver**
-
-Look at how `im/worker.py:286` resolves the per-platform hook today (likely a dict keyed on `account.platform`). Expose the same resolver as a function `get_platform_on_run_started(platform: str)` for `dispatch_im_channel_run` to call. If the per-platform hook is constructed only at app startup (closure over runtime state), refactor minimally so the same closure is reachable from a schedule/trigger dispatcher path — preserve existing behavior for the worker.
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 2: Commit**
 
 ```bash
 git add backend/cubebox/im/run_handoff.py
-git commit -m "feat(im): add dispatch_im_channel_run for non-inbound IM runs"
+git commit -m "feat(im): add enqueue_im_channel_run for synthetic outbound enqueueing"
 ```
 
 ---
@@ -842,68 +970,72 @@ conv = await conv_repo.create(
 return conv
 ```
 
-- [ ] **Step 3: Add `im_channel` branch**
+- [ ] **Step 3: Add the `im_channel` branch in dispatch**
+
+The schedule poller writes `ScheduledTaskRun` first (existing logic),
+then enqueues a synthetic inbound row for the IM worker. The same DB
+transaction commits all three (`ScheduledTaskRun` + `IMWebhookReceipt`
++ `IMRunQueueItem`), so a mid-flight crash leaves zero rows; the next
+poll tick re-attempts cleanly. After enqueue the dispatcher returns
+without calling `start_run` — the worker drives the run.
 
 ```python
-# dispatch.py: in resolve_target() after the existing branches
-elif task.target_mode == "im_channel":
+# schedules/dispatch.py: inside dispatch_scheduled_run, before the
+# existing start_run call. ScheduledTaskRun row already exists at
+# this point (current code creates it via the claim path) — let it
+# be `run_row` below.
+if task.target_mode == "im_channel":
     account = await session.get(IMConnectorAccount, task.im_account_id)
     if account is None:
-        await _record_failed_run(
-            session, task,
-            reason="im_account_unlinked",
-        )
-        return None       # caller skips start_run
-    conv_id = await resolve_im_conversation(
+        run_row.state = "failed"
+        run_row.detail = "im_account_unlinked"
+        await session.commit()
+        return
+    resolved = await resolve_im_conversation(
         session, account,
         channel_id=task.im_channel_id,
         scope_key=task.im_scope_key,
         scope_kind=_derive_scope_kind(task.im_scope_key),
         effective_user_id=task.owner_user_id,
-        origin="schedule",
         title_hint=f"Scheduled: {task.prompt[:80]}",
+        origin="schedule",
     )
-    return ConvTarget(conv_id=conv_id, im_mode=True, account=account)
+    run_row.conversation_id = resolved.conversation_id
+    run_row.state = "enqueued"
+    # run_row.run_id stays NULL; the IM worker will assign one when it
+    # picks the queue item up.
+
+    await enqueue_im_channel_run(
+        session, account=account,
+        conversation_id=resolved.conversation_id,
+        content=task.prompt,
+        channel_id=task.im_channel_id,
+        scope_key=task.im_scope_key,
+        scope_kind=_derive_scope_kind(task.im_scope_key),
+        owner_user_id=task.owner_user_id,
+        platform_event_id=f"schedule:{run_row.id}",
+    )
+    await session.commit()
+    return
 ```
 
-- [ ] **Step 4: Branch the dispatch entry to call `dispatch_im_channel_run` when im_mode**
+`_derive_scope_kind(scope_key)` is a small helper that maps the
+existing scope_key prefixes (`"dm"`, `"u:..."`, `"u:...|t:..."`) back
+to `scope_kind` (`"dm"`, `"participant"`, `"thread_participant"`) — the
+inbound parser already does this per-platform; the schedule dispatcher
+needs the same mapping. Put it in `backend/cubebox/im/types.py` near
+the scope-key constants and reuse it everywhere.
 
-```python
-async def dispatch_scheduled_run(session, task):
-    target = await resolve_target(session, task)
-    if target is None:
-        return
-    if target.im_mode:
-        on_hook = get_platform_on_run_started(target.account.platform)
-        run_id = await dispatch_im_channel_run(
-            session, account=target.account,
-            conversation_id=target.conv_id,
-            content=task.prompt,
-            channel_id=task.im_channel_id,
-            scope_key=task.im_scope_key,
-            scope_kind=_derive_scope_kind(task.im_scope_key),
-            owner_user_id=task.owner_user_id,
-            origin="schedule",
-            origin_key=f"schedule:{task.id}:{run_row.id}",
-            run_manager=run_manager,
-            on_run_started=on_hook,
-        )
-    else:
-        # existing inline path
-        run_id = await run_manager.start_run(...)
-    # write ScheduledTaskRun row (existing logic)
-```
-
-- [ ] **Step 5: Run schedule tests (existing + new will be added in Task 14)**
+- [ ] **Step 4: Run schedule tests (existing + new in later tasks)**
 
 ```bash
 cd backend && uv run pytest tests/e2e/test_scheduled_tasks*.py --no-cov 2>&1 | tee ../tmp/sched-dispatch.log | tail -20
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/schedules/dispatch.py
+git add backend/cubebox/schedules/dispatch.py backend/cubebox/im/types.py
 git commit -m "feat(schedules): support topic_id and im_channel destinations in dispatcher"
 ```
 
@@ -914,11 +1046,68 @@ git commit -m "feat(schedules): support topic_id and im_channel destinations in 
 **Files:**
 - Modify: `backend/cubebox/triggers/pipeline.py:37-151`
 
-Mirror Task 11 on the trigger pipeline. The pipeline already always creates a new conv at `pipeline.py:102`; add `topic_id=trigger.topic_id` there. Then add the `im_channel` branch above the existing new-conv block.
+The pipeline already always creates a new conv at `pipeline.py:102`;
+add `topic_id=trigger.topic_id` there for the `new_each_time` path.
+Then add the `im_channel` branch above the new-conv block. Use
+`TriggerEvent.status` / `TriggerEvent.last_error` for failure (mirrors
+existing `TriggerEvent` columns at `models/trigger.py:98,101`); use
+`platform_event_id=f"trigger:{event_row.id}"` for idempotency.
 
-- [ ] **Steps 1-5: Same shape as Task 11.**
+- [ ] **Step 1: Wire `topic_id` into the new-conv path**
 
-- [ ] **Step 6: Commit**
+```python
+# pipeline.py around line 102:
+conv = await conv_repo.create(
+    title=f"Triggered: {trigger.name}",
+    draft=True,
+    topic_id=trigger.topic_id,
+)
+```
+
+- [ ] **Step 2: Add the `im_channel` branch**
+
+```python
+if trigger.conversation_policy == "im_channel":
+    account = await session.get(IMConnectorAccount, trigger.im_account_id)
+    if account is None:
+        event_row.status = "failed"
+        event_row.last_error = "im_account_unlinked"
+        await session.commit()
+        return
+    resolved = await resolve_im_conversation(
+        session, account,
+        channel_id=trigger.im_channel_id,
+        scope_key=trigger.im_scope_key,
+        scope_kind=_derive_scope_kind(trigger.im_scope_key),
+        effective_user_id=trigger.run_as_user_id,
+        title_hint=f"Triggered: {trigger.name}",
+        origin="trigger",
+    )
+    event_row.resulting_conversation_id = resolved.conversation_id
+    event_row.status = "enqueued"
+    # event_row.resulting_run_id stays NULL until the worker picks up.
+
+    await enqueue_im_channel_run(
+        session, account=account,
+        conversation_id=resolved.conversation_id,
+        content=rendered_prompt,
+        channel_id=trigger.im_channel_id,
+        scope_key=trigger.im_scope_key,
+        scope_kind=_derive_scope_kind(trigger.im_scope_key),
+        owner_user_id=trigger.run_as_user_id,
+        platform_event_id=f"trigger:{event_row.id}",
+    )
+    await session.commit()
+    return
+```
+
+- [ ] **Step 3: Run trigger tests**
+
+```bash
+cd backend && uv run pytest tests/e2e/test_trigger*.py --no-cov 2>&1 | tail -20
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
 git commit -m "feat(triggers): support topic_id and im_channel destinations in pipeline"
