@@ -93,7 +93,15 @@ class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
     )
     im_channel_id: str | None = Field(default=None, max_length=128, nullable=True)
     im_scope_key: str | None = Field(default=None, max_length=255, nullable=True)
+    im_scope_kind: str | None = Field(default=None, max_length=32, nullable=True)
 ```
+
+`im_scope_kind` is stored alongside `im_scope_key` because the kind
+cannot be recovered by parsing the key prefix (connectors emit
+`scope_kind ∈ {"dm", "channel", "thread", "group", "participant",
+"thread_participant"}` for overlapping key shapes). The agent tool
+that creates the schedule reads both fields off `IMThreadLink`, so the
+real value is always available at write time.
 
 Add ON DELETE behavior via `sa_column=Column(...)` if SQLModel's `Field(foreign_key=...)` shortcut doesn't expose it; cross-check with how `Conversation.topic_id` does it at `models/conversation.py:40`.
 
@@ -191,9 +199,16 @@ class Trigger(CubeboxBase, OrgScopedMixin, table=True):
     )
     im_channel_id: str | None = Field(default=None, max_length=128, nullable=True)
     im_scope_key: str | None = Field(default=None, max_length=255, nullable=True)
+    im_scope_kind: str | None = Field(default=None, max_length=32, nullable=True)
 ```
 
 - [ ] **Step 2: Generate the migration**
+
+Task 1's migration must already be applied (via Task 1 Step 4) before
+running this. Autogen will then chain `down_revision` to T1's
+revision, keeping a linear history. If you skip T1's `upgrade head`,
+both migrations end up rooted at the same prior head and you have to
+hand-edit `down_revision` to recover.
 
 ```bash
 cd backend && uv run alembic revision --autogenerate \
@@ -565,25 +580,26 @@ from cubebox.services.schedule_target_spec import (
     ScheduleTargetSpec, ScheduleTargetError,
 )
 
-# (target_mode, target_conv, topic, im_acct, im_ch, im_scope, should_pass)
+# (target_mode, target_conv, topic, im_acct, im_ch, im_scope, im_kind, should_pass)
 CASES = [
-    ("fixed", "conv_1", None, None, None, None, True),
-    ("fixed", None, None, None, None, None, False),                # missing conv
-    ("fixed", "conv_1", "top_1", None, None, None, False),         # topic forbidden
-    ("fixed", "conv_1", None, "imac_1", "C", "dm", False),         # im forbidden
-    ("new_each_run", None, None, None, None, None, True),
-    ("new_each_run", None, "top_1", None, None, None, True),
-    ("new_each_run", "conv_1", None, None, None, None, False),
-    ("new_each_run", None, None, "imac_1", "C", "dm", False),
-    ("im_channel", None, None, "imac_1", "C", "dm", True),
-    ("im_channel", "conv_1", None, "imac_1", "C", "dm", False),
-    ("im_channel", None, "top_1", "imac_1", "C", "dm", False),
-    ("im_channel", None, None, None, "C", "dm", False),            # missing acct
+    ("fixed", "conv_1", None, None, None, None, None, True),
+    ("fixed", None, None, None, None, None, None, False),                    # missing conv
+    ("fixed", "conv_1", "top_1", None, None, None, None, False),             # topic forbidden
+    ("fixed", "conv_1", None, "imac_1", "C", "dm", "dm", False),             # im forbidden
+    ("new_each_run", None, None, None, None, None, None, True),
+    ("new_each_run", None, "top_1", None, None, None, None, True),
+    ("new_each_run", "conv_1", None, None, None, None, None, False),
+    ("new_each_run", None, None, "imac_1", "C", "dm", "dm", False),
+    ("im_channel", None, None, "imac_1", "C", "dm", "dm", True),
+    ("im_channel", "conv_1", None, "imac_1", "C", "dm", "dm", False),
+    ("im_channel", None, "top_1", "imac_1", "C", "dm", "dm", False),
+    ("im_channel", None, None, None, "C", "dm", "dm", False),                # missing acct
+    ("im_channel", None, None, "imac_1", "C", "dm", None, False),            # missing kind
 ]
 
 @pytest.mark.parametrize("case", CASES)
 def test_schedule_target_spec_matrix(case):
-    target_mode, conv, topic, acct, ch, scope, ok = case
+    target_mode, conv, topic, acct, ch, scope, kind, ok = case
     spec = ScheduleTargetSpec(
         target_mode=target_mode,
         target_conversation_id=conv,
@@ -591,6 +607,7 @@ def test_schedule_target_spec_matrix(case):
         im_account_id=acct,
         im_channel_id=ch,
         im_scope_key=scope,
+        im_scope_kind=kind,
     )
     if ok:
         spec.validate()
@@ -626,29 +643,35 @@ class ScheduleTargetSpec:
     im_account_id: str | None = None
     im_channel_id: str | None = None
     im_scope_key: str | None = None
+    im_scope_kind: str | None = None
 
     def validate(self) -> None:
         m = self.target_mode
+        im_fields = (
+            self.im_account_id, self.im_channel_id,
+            self.im_scope_key, self.im_scope_kind,
+        )
         if m == "fixed":
             if not self.target_conversation_id:
                 raise ScheduleTargetError("target_conversation_id required for fixed")
             if self.topic_id:
                 raise ScheduleTargetError("topic_id not allowed for fixed")
-            if any((self.im_account_id, self.im_channel_id, self.im_scope_key)):
+            if any(im_fields):
                 raise ScheduleTargetError("im_* fields not allowed for fixed")
         elif m == "new_each_run":
             if self.target_conversation_id:
                 raise ScheduleTargetError("target_conversation_id not allowed for new_each_run")
-            if any((self.im_account_id, self.im_channel_id, self.im_scope_key)):
+            if any(im_fields):
                 raise ScheduleTargetError("im_* fields not allowed for new_each_run")
         elif m == "im_channel":
             if self.target_conversation_id:
                 raise ScheduleTargetError("target_conversation_id not allowed for im_channel")
             if self.topic_id:
                 raise ScheduleTargetError("topic_id not allowed for im_channel")
-            if not (self.im_account_id and self.im_channel_id and self.im_scope_key):
+            if not all(im_fields):
                 raise ScheduleTargetError(
-                    "im_account_id, im_channel_id, im_scope_key all required for im_channel"
+                    "im_account_id, im_channel_id, im_scope_key, im_scope_kind "
+                    "all required for im_channel"
                 )
         else:
             raise ScheduleTargetError(f"unknown target_mode: {m!r}")
@@ -690,6 +713,7 @@ class ScheduledTaskCreateRequest(BaseModel):
     im_account_id: str | None = None
     im_channel_id: str | None = None
     im_scope_key: str | None = None
+    im_scope_kind: str | None = None
 
     @model_validator(mode="after")
     def _validate_target(self):
@@ -700,6 +724,7 @@ class ScheduledTaskCreateRequest(BaseModel):
             im_account_id=self.im_account_id,
             im_channel_id=self.im_channel_id,
             im_scope_key=self.im_scope_key,
+            im_scope_kind=self.im_scope_kind,
         ).validate()
         return self
 
@@ -792,10 +817,10 @@ if "target_mode" in body.model_fields_set:
 ```
 
 Also reject any of `target_conversation_id`, `im_account_id`,
-`im_channel_id`, `im_scope_key` in `model_fields_set` — these are all
-mode-bound and cannot be changed independently. `topic_id` is the only
-destination-related field PATCH may alter, and only when the existing
-row has `target_mode='new_each_run'`.
+`im_channel_id`, `im_scope_key`, `im_scope_kind` in `model_fields_set`
+— these are all mode-bound and cannot be changed independently.
+`topic_id` is the only destination-related field PATCH may alter, and
+only when the existing row has `target_mode='new_each_run'`.
 
 And add list filter params:
 
@@ -970,20 +995,48 @@ conv = await conv_repo.create(
 return conv
 ```
 
-- [ ] **Step 3: Add the `im_channel` branch in dispatch**
+- [ ] **Step 3: Modify the schedule poller's `_dispatch_one` to short-circuit before pre-stamping for `im_channel`**
 
-The schedule poller writes `ScheduledTaskRun` first (existing logic),
-then enqueues a synthetic inbound row for the IM worker. The same DB
-transaction commits all three (`ScheduledTaskRun` + `IMWebhookReceipt`
-+ `IMRunQueueItem`), so a mid-flight crash leaves zero rows; the next
-poll tick re-attempts cleanly. After enqueue the dispatcher returns
-without calling `start_run` — the worker drives the run.
+The existing `_dispatch_one` (`schedules/poller.py:224-313`) pre-stamps
+a `run_id` on the `ScheduledTaskRun` row at line 247-249, commits, and
+relies on `dispatch_scheduled_run` returning a `DispatchResult` whose
+`conversation_id` is then back-filled. For `im_channel` mode, no real
+`run_id` exists at dispatch time (the IM worker assigns one later),
+and the agent run is not started inline. So `_dispatch_one` needs a
+small detection branch:
 
 ```python
-# schedules/dispatch.py: inside dispatch_scheduled_run, before the
-# existing start_run call. ScheduledTaskRun row already exists at
-# this point (current code creates it via the claim path) — let it
-# be `run_row` below.
+# poller.py:_dispatch_one, before line 247 (pre-stamp).
+task = await session.get(ScheduledTask, row.scheduled_task_id)
+# ... existing 'task gone' / 'task expired' checks ...
+
+if task.target_mode == "im_channel":
+    # IM-mode dispatch owns the row's terminal state itself.
+    await dispatch_scheduled_run(
+        task=task, run_manager=self._run_manager, run_row=row,
+        session=session,
+    )
+    return
+
+# Existing path (fixed / new_each_run):
+pre_run_id = str(uuid7())
+row.run_id = pre_run_id
+await session.commit()
+result = await dispatch_scheduled_run(...)
+# ...existing post-dispatch UPDATE...
+```
+
+The IM-mode branch passes `row` and `session` into
+`dispatch_scheduled_run` so the IM branch can mutate the row + commit
+in the same transaction as the receipt + queue inserts. The existing
+caller signature for `dispatch_scheduled_run` widens accordingly.
+
+- [ ] **Step 4: Implement the `im_channel` branch inside `dispatch_scheduled_run`**
+
+```python
+# schedules/dispatch.py: dispatch_scheduled_run grows an early branch
+# that uses the run_row + session passed in by the poller for the
+# im_channel case.
 if task.target_mode == "im_channel":
     account = await session.get(IMConnectorAccount, task.im_account_id)
     if account is None:
@@ -995,15 +1048,11 @@ if task.target_mode == "im_channel":
         session, account,
         channel_id=task.im_channel_id,
         scope_key=task.im_scope_key,
-        scope_kind=_derive_scope_kind(task.im_scope_key),
+        scope_kind=task.im_scope_kind,    # persisted column on the row
         effective_user_id=task.owner_user_id,
         title_hint=f"Scheduled: {task.prompt[:80]}",
         origin="schedule",
     )
-    run_row.conversation_id = resolved.conversation_id
-    run_row.state = "enqueued"
-    # run_row.run_id stays NULL; the IM worker will assign one when it
-    # picks the queue item up.
 
     await enqueue_im_channel_run(
         session, account=account,
@@ -1011,31 +1060,38 @@ if task.target_mode == "im_channel":
         content=task.prompt,
         channel_id=task.im_channel_id,
         scope_key=task.im_scope_key,
-        scope_kind=_derive_scope_kind(task.im_scope_key),
+        scope_kind=task.im_scope_kind,
         owner_user_id=task.owner_user_id,
         platform_event_id=f"schedule:{run_row.id}",
     )
+
+    # Fire-and-forget: handoff to IM worker has succeeded. The IM
+    # worker owns end-to-end run lifecycle from here. Schedule does
+    # not re-fire on worker failure (the user would see duplicate
+    # messages in the channel) — operators debug via IM worker logs
+    # and the IMRunQueueItem row.
+    run_row.conversation_id = resolved.conversation_id
+    run_row.state = "succeeded"
+    run_row.detail = "im_channel_enqueued"
     await session.commit()
     return
 ```
 
-`_derive_scope_kind(scope_key)` is a small helper that maps the
-existing scope_key prefixes (`"dm"`, `"u:..."`, `"u:...|t:..."`) back
-to `scope_kind` (`"dm"`, `"participant"`, `"thread_participant"`) — the
-inbound parser already does this per-platform; the schedule dispatcher
-needs the same mapping. Put it in `backend/cubebox/im/types.py` near
-the scope-key constants and reuse it everywhere.
+No `_derive_scope_kind` helper is needed — the kind is persisted
+alongside the key when the row is created (web UI cannot create
+`im_channel` rows from scratch, and the agent tool reads kind + key
+together off `IMThreadLink`).
 
-- [ ] **Step 4: Run schedule tests (existing + new in later tasks)**
+- [ ] **Step 5: Run schedule tests (existing + new in later tasks)**
 
 ```bash
 cd backend && uv run pytest tests/e2e/test_scheduled_tasks*.py --no-cov 2>&1 | tee ../tmp/sched-dispatch.log | tail -20
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/schedules/dispatch.py backend/cubebox/im/types.py
+git add backend/cubebox/schedules/dispatch.py backend/cubebox/schedules/poller.py
 git commit -m "feat(schedules): support topic_id and im_channel destinations in dispatcher"
 ```
 
@@ -1072,20 +1128,19 @@ if trigger.conversation_policy == "im_channel":
     if account is None:
         event_row.status = "failed"
         event_row.last_error = "im_account_unlinked"
+        # _bump_counters(trigger, events_failed=1) — call the existing helper.
         await session.commit()
         return
     resolved = await resolve_im_conversation(
         session, account,
         channel_id=trigger.im_channel_id,
         scope_key=trigger.im_scope_key,
-        scope_kind=_derive_scope_kind(trigger.im_scope_key),
+        scope_kind=trigger.im_scope_kind,        # persisted column
         effective_user_id=trigger.run_as_user_id,
         title_hint=f"Triggered: {trigger.name}",
         origin="trigger",
     )
     event_row.resulting_conversation_id = resolved.conversation_id
-    event_row.status = "enqueued"
-    # event_row.resulting_run_id stays NULL until the worker picks up.
 
     await enqueue_im_channel_run(
         session, account=account,
@@ -1093,13 +1148,23 @@ if trigger.conversation_policy == "im_channel":
         content=rendered_prompt,
         channel_id=trigger.im_channel_id,
         scope_key=trigger.im_scope_key,
-        scope_kind=_derive_scope_kind(trigger.im_scope_key),
+        scope_kind=trigger.im_scope_kind,
         owner_user_id=trigger.run_as_user_id,
         platform_event_id=f"trigger:{event_row.id}",
     )
+
+    # Fire-and-forget. Existing terminal status; bump events_success.
+    event_row.status = "accepted"
+    # _bump_counters(trigger, events_success=1) — call the existing
+    # helper at `triggers/pipeline.py` (search for `_bump_counters`
+    # and copy the call shape used by the `new_each_time` success
+    # path).
     await session.commit()
     return
 ```
+
+No new `TriggerEvent.status` value introduced — `'accepted'` is the
+existing terminal-success state.
 
 - [ ] **Step 3: Run trigger tests**
 
@@ -1165,17 +1230,20 @@ def make_create_scheduled_task_tool(
                 im_account_id = link.account_id
                 im_channel_id = link.channel_id
                 im_scope_key  = link.scope_key
+                im_scope_kind = link.scope_kind
             else:
                 target_mode = "fixed"
                 target_conversation_id = conversation_id
-                im_account_id = im_channel_id = im_scope_key = None
+                im_account_id = im_channel_id = im_scope_key = im_scope_kind = None
         elif target_mode == "im_channel":
-            assert link is not None, "im_channel target requires IM origin"
+            if link is None:
+                raise ValueError("im_channel target requires IM origin")
             im_account_id = link.account_id
             im_channel_id = link.channel_id
             im_scope_key  = link.scope_key
+            im_scope_kind = link.scope_kind
         else:
-            im_account_id = im_channel_id = im_scope_key = None
+            im_account_id = im_channel_id = im_scope_key = im_scope_kind = None
 
         # If new_each_run + no explicit topic, inherit the current conv's topic.
         if target_mode == "new_each_run" and topic_id is None:
@@ -1190,6 +1258,7 @@ def make_create_scheduled_task_tool(
             im_account_id=im_account_id,
             im_channel_id=im_channel_id,
             im_scope_key=im_scope_key,
+            im_scope_kind=im_scope_kind,
         ).validate()
 
         svc = ScheduledTaskService(session, org_id, workspace_id, user_id)
@@ -1204,6 +1273,7 @@ def make_create_scheduled_task_tool(
             im_account_id=im_account_id,
             im_channel_id=im_channel_id,
             im_scope_key=im_scope_key,
+            im_scope_kind=im_scope_kind,
         )
         return {"id": task.id, "target_mode": task.target_mode}
 
@@ -1363,6 +1433,7 @@ export interface ScheduledTask {
   im_account_id: string | null;
   im_channel_id: string | null;
   im_scope_key: string | null;
+  im_scope_kind: string | null;
 }
 
 export interface ScheduledTaskListFilters {
