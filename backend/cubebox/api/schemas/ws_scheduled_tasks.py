@@ -7,8 +7,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from croniter import croniter
 from pydantic import BaseModel, Field, model_validator
 
+from cubebox.services.schedule_target_spec import (
+    ScheduleTargetError,
+    ScheduleTargetSpec,
+)
+
 ScheduleKind = Literal["cron", "interval", "once"]
-TargetMode = Literal["fixed", "new_each_run"]
+TargetMode = Literal["fixed", "new_each_run", "im_channel"]
 
 
 def _validate_timezone(tz: str) -> None:
@@ -39,6 +44,12 @@ class ScheduledTaskCreate(BaseModel):
     timezone: str = "UTC"
     target_mode: TargetMode
     target_conversation_id: str | None = None
+    # Destination fields for new_each_run + im_channel target modes.
+    topic_id: str | None = None
+    im_account_id: str | None = None
+    im_channel_id: str | None = None
+    im_scope_key: str | None = None
+    im_scope_kind: str | None = None
     end_at: datetime | None = None
 
     @model_validator(mode="after")
@@ -57,8 +68,20 @@ class ScheduledTaskCreate(BaseModel):
                 raise ValueError("run_at must include a timezone offset")
         if self.end_at is not None and self.end_at.tzinfo is None:
             raise ValueError("end_at must include a timezone offset")
-        if self.target_mode == "fixed" and not self.target_conversation_id:
-            raise ValueError("target_conversation_id required when target_mode=fixed")
+        # Per-mode destination shape: single source of truth in
+        # ScheduleTargetSpec; pydantic surfaces the message as a 422.
+        try:
+            ScheduleTargetSpec(
+                target_mode=self.target_mode,
+                target_conversation_id=self.target_conversation_id,
+                topic_id=self.topic_id,
+                im_account_id=self.im_account_id,
+                im_channel_id=self.im_channel_id,
+                im_scope_key=self.im_scope_key,
+                im_scope_kind=self.im_scope_kind,
+            ).validate()
+        except ScheduleTargetError as exc:
+            raise ValueError(str(exc)) from exc
         return self
 
 
@@ -70,8 +93,19 @@ class ScheduledTaskPatch(BaseModel):
     interval_seconds: int | None = Field(default=None, ge=60)
     run_at: datetime | None = None
     timezone: str | None = None
+    # PATCH does NOT support changing the destination shape (target_mode,
+    # target_conversation_id, im_*). The fields are declared here so the
+    # route can detect any attempt and reject it with a 422 via
+    # model_fields_set membership — null payloads must also be rejected.
     target_mode: TargetMode | None = None
     target_conversation_id: str | None = None
+    im_account_id: str | None = None
+    im_channel_id: str | None = None
+    im_scope_key: str | None = None
+    im_scope_kind: str | None = None
+    # topic_id IS patchable, but only when the existing row uses
+    # target_mode="new_each_run" — the route enforces that check.
+    topic_id: str | None = None
     end_at: datetime | None = None
 
     @model_validator(mode="after")
@@ -109,6 +143,11 @@ class ScheduledTaskOut(BaseModel):
     prompt: str
     target_mode: str
     target_conversation_id: str | None
+    topic_id: str | None
+    im_account_id: str | None
+    im_channel_id: str | None
+    im_scope_key: str | None
+    im_scope_kind: str | None
     owner_user_id: str
     next_fire_at: str | None
     last_fired_at: str | None
