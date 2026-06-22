@@ -1,5 +1,7 @@
 import { toApiError, type ApiClient } from './client'
 
+export type ConversationPolicy = 'new_each_time' | 'im_channel'
+
 export interface Trigger {
   id: string
   name: string
@@ -10,7 +12,17 @@ export interface Trigger {
   target_ref: Record<string, unknown>
   payload_fields: string[]
   filter: Record<string, unknown> | null
-  conversation_policy: string
+  conversation_policy: ConversationPolicy
+  /**
+   * Topic to inherit when `conversation_policy === 'new_each_time'`.
+   * ``null`` means each ingested event creates a standalone conversation.
+   */
+  topic_id: string | null
+  /** IM destination fields (populated only when `conversation_policy === 'im_channel'`). */
+  im_account_id: string | null
+  im_channel_id: string | null
+  im_scope_key: string | null
+  im_scope_kind: string | null
   run_as_user_id: string
   max_runs_per_minute: number
   rate_limit_burst: number
@@ -53,12 +65,22 @@ export interface CreateTriggerBody {
   max_runs_per_minute?: number
   rate_limit_burst?: number
   rate_limit_response?: '429' | '202_drop'
-  conversation_policy?: 'new_each_time'
+  conversation_policy?: ConversationPolicy
+  /** Topic to pin runs into when `conversation_policy === 'new_each_time'`. */
+  topic_id?: string | null
   target_type?: 'inline'
   source_type?: 'webhook'
   enabled?: boolean
 }
 
+/**
+ * PATCH body for an existing trigger.
+ *
+ * The backend rejects mode-bound destination fields (`conversation_policy`,
+ * `im_account_id`, `im_channel_id`, `im_scope_key`, `im_scope_kind`) with HTTP
+ * 422 — destination is immutable after creation. Only `topic_id` is mutable
+ * (and only when the current `conversation_policy === 'new_each_time'`).
+ */
 export interface UpdateTriggerBody {
   name?: string
   enabled?: boolean
@@ -70,6 +92,14 @@ export interface UpdateTriggerBody {
   max_runs_per_minute?: number
   rate_limit_burst?: number
   rate_limit_response?: '429' | '202_drop'
+  topic_id?: string | null
+}
+
+/** Optional filters accepted by `GET /api/v1/ws/{wsId}/triggers`. */
+export interface TriggerListFilters {
+  topic_id?: string
+  im_account_id?: string
+  im_channel_id?: string
 }
 
 export interface RotateSecretBody {
@@ -88,8 +118,17 @@ export interface ListTriggerEventsQuery {
   offset?: number
 }
 
-export async function listTriggers(client: ApiClient, wsId: string): Promise<Trigger[]> {
-  const res = await client.get(`/api/v1/ws/${wsId}/triggers`)
+export async function listTriggers(
+  client: ApiClient,
+  wsId: string,
+  filters?: TriggerListFilters,
+): Promise<Trigger[]> {
+  const params = new URLSearchParams()
+  if (filters?.topic_id) params.set('topic_id', filters.topic_id)
+  if (filters?.im_account_id) params.set('im_account_id', filters.im_account_id)
+  if (filters?.im_channel_id) params.set('im_channel_id', filters.im_channel_id)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await client.get(`/api/v1/ws/${wsId}/triggers${qs}`)
   if (!res.ok) throw await toApiError(res)
   const data = (await res.json()) as { triggers: Trigger[] }
   return data.triggers

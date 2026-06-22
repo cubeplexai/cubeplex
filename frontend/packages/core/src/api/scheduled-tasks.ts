@@ -1,13 +1,22 @@
 import type {
   ScheduledTaskCreate,
+  ScheduledTaskListFilters,
   ScheduledTaskOut,
   ScheduledTaskPatch,
   ScheduledTaskRunOut,
 } from '../types/scheduled-task'
 import { toApiError, type ApiClient } from './client'
 
-export async function listScheduledTasks(client: ApiClient): Promise<ScheduledTaskOut[]> {
-  const res = await client.get('/api/v1/scheduled-tasks')
+export async function listScheduledTasks(
+  client: ApiClient,
+  filters?: ScheduledTaskListFilters,
+): Promise<ScheduledTaskOut[]> {
+  const params = new URLSearchParams()
+  if (filters?.topic_id) params.set('topic_id', filters.topic_id)
+  if (filters?.im_account_id) params.set('im_account_id', filters.im_account_id)
+  if (filters?.im_channel_id) params.set('im_channel_id', filters.im_channel_id)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  const res = await client.get(`/api/v1/scheduled-tasks${qs}`)
   if (!res.ok) throw await toApiError(res)
   const data = (await res.json()) as { tasks: ScheduledTaskOut[] }
   return data.tasks
