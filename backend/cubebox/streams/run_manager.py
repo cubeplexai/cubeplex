@@ -2309,6 +2309,7 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user_id,
                     conversation_id=conversation_id,
+                    encryption_backend=self._app.state.encryption_backend,
                 )
             )
         except Exception as _exc:
