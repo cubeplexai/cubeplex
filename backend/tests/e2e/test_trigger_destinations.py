@@ -976,3 +976,53 @@ async def test_trigger_create_rejects_im_account_from_other_workspace(
     )
     assert r.status_code == 422, r.text
     assert "im_account_id" in r.text
+
+
+@pytest.mark.asyncio
+async def test_create_trigger_tool_ingest_path_is_workspace_scoped(
+    cleanup_trigger_destinations: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Bug it catches: create_trigger agent tool returns an unscoped
+    ``/api/v1/triggers/{id}/ingest`` URL — copying that link to a webhook
+    publisher yields 404, the trigger silently never fires."""
+    import json
+
+    from cubebox.models.conversation import Conversation
+    from cubebox.tools.builtin.create_trigger import (
+        CreateTriggerArgs,
+        make_create_trigger_tool,
+    )
+
+    client, ws_id = cleanup_trigger_destinations
+    org_id = await _resolve_org_id(ws_id)
+    user_id = await _get_my_user_id(client)
+    async with _db.async_session_maker() as session:
+        conv = Conversation(
+            org_id=org_id,
+            workspace_id=ws_id,
+            creator_user_id=user_id,
+            title="ingest-path-test",
+            is_group_chat=False,
+        )
+        session.add(conv)
+        await session.commit()
+        await session.refresh(conv)
+        conv_id = conv.id
+
+    app = client._transport.app  # type: ignore[attr-defined]
+    backend = app.state.encryption_backend
+    tool = make_create_trigger_tool(
+        org_id=org_id,
+        workspace_id=ws_id,
+        user_id=user_id,
+        conversation_id=conv_id,
+        encryption_backend=backend,
+    )
+    result = await tool.execute(
+        "test-call",
+        CreateTriggerArgs(name="ingest-path", prompt_template="hi"),
+    )
+    assert not result.is_error, result.content[0].text  # type: ignore[union-attr]
+    payload = json.loads(result.content[0].text)  # type: ignore[union-attr]
+    assert payload["status"] == "created"
+    assert payload["ingest_path"] == f"/api/v1/ws/{ws_id}/triggers/{payload['id']}/ingest"

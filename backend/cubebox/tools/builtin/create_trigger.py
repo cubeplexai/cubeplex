@@ -235,7 +235,9 @@ def make_create_trigger_tool(
                 "id": saved.id,
                 "name": saved.name,
                 "conversation_policy": saved.conversation_policy,
-                "ingest_path": f"/api/v1/triggers/{saved.id}/ingest",
+                # Must mirror api/routes/v1/trigger_ingest.py — the ingest
+                # route is workspace-scoped (``/ws/{workspace_id}/triggers``).
+                "ingest_path": (f"/api/v1/ws/{workspace_id}/triggers/{saved.id}/ingest"),
                 "webhook_secret": webhook_secret,
             }
             return AgentToolResult(content=[TextContent(text=json.dumps(result))])
