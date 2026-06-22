@@ -352,6 +352,36 @@ async def cleanup_trigger_destinations(
             text("DELETE FROM im_connector_accounts WHERE workspace_id = :ws"),
             {"ws": ws_id},
         )
+        # Cross-workspace FK tests mint a sibling workspace in the same
+        # org (see _seed_trigger_topic_in_other_workspace below). Wipe
+        # those rows BEFORE the credentials sweep — IM accounts still
+        # hold FKs to the credential rows.
+        await session.execute(
+            text(
+                "DELETE FROM topics WHERE workspace_id IN "
+                "(SELECT id FROM workspaces WHERE org_id = "
+                "(SELECT org_id FROM workspaces WHERE id = :ws) "
+                "AND id != :ws)"
+            ),
+            {"ws": ws_id},
+        )
+        await session.execute(
+            text(
+                "DELETE FROM im_connector_accounts WHERE workspace_id IN "
+                "(SELECT id FROM workspaces WHERE org_id = "
+                "(SELECT org_id FROM workspaces WHERE id = :ws) "
+                "AND id != :ws)"
+            ),
+            {"ws": ws_id},
+        )
+        await session.execute(
+            text(
+                "DELETE FROM workspaces WHERE org_id = "
+                "(SELECT org_id FROM workspaces WHERE id = :ws) "
+                "AND id != :ws"
+            ),
+            {"ws": ws_id},
+        )
         await session.execute(
             text(
                 "DELETE FROM credentials WHERE org_id IN "
@@ -814,3 +844,135 @@ async def test_trigger_list_filter_by_im_account_and_channel(
     ids = {t["id"] for t in r.json()["triggers"]}
     assert trig_a.id in ids
     assert trig_b.id not in ids
+
+
+# ---------------------------------------------------------------------------
+# Cross-workspace FK isolation (R4 hardening)
+# ---------------------------------------------------------------------------
+
+
+async def _seed_trigger_topic_in_other_workspace(
+    *, org_id: str, creator_user_id: str
+) -> tuple[str, str]:
+    """Mint a sibling workspace and seed a topic there for cross-ws tests.
+
+    Returns ``(other_workspace_id, other_topic_id)``.
+    """
+    from cubebox.models import Workspace as WorkspaceModel
+    from cubebox.models.topic import Topic
+
+    async with _db.async_session_maker() as session:
+        other_ws = WorkspaceModel(org_id=org_id, name=f"other-{secrets.token_hex(4)}")
+        session.add(other_ws)
+        await session.flush()
+        topic = Topic(
+            org_id=org_id,
+            workspace_id=other_ws.id,
+            title="trig-other-ws-topic",
+            creator_user_id=creator_user_id,
+        )
+        session.add(topic)
+        await session.commit()
+        await session.refresh(other_ws)
+        await session.refresh(topic)
+        return other_ws.id, topic.id
+
+
+async def _seed_trigger_im_account_in_other_workspace(
+    *, org_id: str, owner_user_id: str
+) -> tuple[str, str]:
+    """Sibling-workspace IM account; returns ``(other_ws_id, im_account_id)``."""
+    from cubebox.models import Workspace as WorkspaceModel
+
+    cred_id = generate_public_id("cred")
+    async with _db.async_session_maker() as session:
+        other_ws = WorkspaceModel(org_id=org_id, name=f"other-{secrets.token_hex(4)}")
+        session.add(other_ws)
+        await session.flush()
+        await session.execute(
+            text(
+                "INSERT INTO credentials (id, org_id, kind, name, value_encrypted,"
+                " cred_metadata, created_by_user_id, created_at, updated_at)"
+                " VALUES (:id, :org, 'im_bot', :name, '\\x00'::bytea,"
+                " '{}'::jsonb, :uid, NOW(), NOW())"
+            ),
+            {
+                "id": cred_id,
+                "org": org_id,
+                "name": f"im-account:trigxws:{cred_id}",
+                "uid": owner_user_id,
+            },
+        )
+        account = IMConnectorAccount(
+            org_id=org_id,
+            workspace_id=other_ws.id,
+            platform="feishu",
+            external_account_id=f"trigxws-{secrets.token_hex(4)}",
+            acting_user_id=owner_user_id,
+            credential_id=cred_id,
+        )
+        session.add(account)
+        await session.commit()
+        await session.refresh(account)
+        return other_ws.id, account.id
+
+
+@pytest.mark.asyncio
+async def test_trigger_create_rejects_topic_from_other_workspace(
+    cleanup_trigger_destinations: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Bug it catches: trigger create accepts a topic_id from another
+    workspace; FK passes but fired conversations land under the foreign
+    workspace's topic."""
+    client, ws_id = cleanup_trigger_destinations
+    org_id = await _resolve_org_id(ws_id)
+    user_id = await _get_my_user_id(client)
+    _other_ws, foreign_topic = await _seed_trigger_topic_in_other_workspace(
+        org_id=org_id, creator_user_id=user_id
+    )
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "x-ws-topic",
+            "webhook_secret": "s",
+            "prompt_template": "hi {{ event.action }}",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+            "conversation_policy": "new_each_time",
+            "topic_id": foreign_topic,
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "topic_id" in r.text
+
+
+@pytest.mark.asyncio
+async def test_trigger_create_rejects_im_account_from_other_workspace(
+    cleanup_trigger_destinations: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Bug it catches: trigger create accepts a foreign workspace's
+    im_account_id; FK passes but every event posts back into the wrong
+    workspace's IM."""
+    client, ws_id = cleanup_trigger_destinations
+    org_id = await _resolve_org_id(ws_id)
+    user_id = await _get_my_user_id(client)
+    _other_ws, foreign_account = await _seed_trigger_im_account_in_other_workspace(
+        org_id=org_id, owner_user_id=user_id
+    )
+    r = await client.post(
+        f"/api/v1/ws/{ws_id}/triggers",
+        json={
+            "name": "x-ws-im",
+            "webhook_secret": "s",
+            "prompt_template": "hi",
+            "payload_fields": [],
+            "run_as_user_id": user_id,
+            "conversation_policy": "im_channel",
+            "im_account_id": foreign_account,
+            "im_channel_id": "C-x",
+            "im_scope_key": "dm",
+            "im_scope_kind": "dm",
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "im_account_id" in r.text

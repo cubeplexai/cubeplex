@@ -28,6 +28,10 @@ from cubebox.models import Trigger, TriggerEvent
 from cubebox.models.public_id import PREFIX_TRIGGER, generate_public_id
 from cubebox.repositories import MembershipRepository, TriggerEventRepository, TriggerRepository
 from cubebox.services.credential import CredentialService
+from cubebox.services.schedule_target_spec import (
+    ScheduleTargetError,
+    validate_destination_scope,
+)
 from cubebox.triggers.events import NormalizedEvent
 from cubebox.triggers.pipeline import TriggerPipeline
 from cubebox.utils.time import utc_isoformat
@@ -116,6 +120,21 @@ async def create_trigger(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="run_as_user_id is not a member of this workspace",
         )
+
+    # Cross-workspace FK guard: the FK constraints only check the row exists,
+    # not that it belongs to this workspace. A workspace A admin could
+    # otherwise pass workspace B's topic_id / im_account_id and route runs
+    # into B.
+    try:
+        await validate_destination_scope(
+            session,
+            org_id=ctx.org_id,
+            workspace_id=workspace_id,
+            topic_id=body.topic_id,
+            im_account_id=body.im_account_id,
+        )
+    except ScheduleTargetError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     # Pre-generate the trigger id so the vault credential name is unique and
     # bounded (~30 chars) regardless of the user-visible trigger name. Naming
@@ -257,6 +276,19 @@ async def update_trigger(
                 f"(current conversation_policy={trigger.conversation_policy!r})"
             ),
         )
+
+    # Cross-workspace FK guard for the one destination field PATCH can change.
+    if "topic_id" in body.model_fields_set and body.topic_id is not None:
+        try:
+            await validate_destination_scope(
+                session,
+                org_id=ctx.org_id,
+                workspace_id=workspace_id,
+                topic_id=body.topic_id,
+                im_account_id=None,
+            )
+        except ScheduleTargetError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     dumped = body.model_dump(exclude_unset=True)
     if "name" in dumped and dumped["name"] is not None:
