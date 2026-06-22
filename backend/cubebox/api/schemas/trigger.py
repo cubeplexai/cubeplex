@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from cubebox.services.schedule_target_spec import (
+    ScheduleTargetError,
+    TriggerTargetSpec,
+)
+
+ConversationPolicy = Literal["new_each_time", "im_channel"]
 
 
 class CreateTriggerIn(BaseModel):
@@ -18,10 +25,33 @@ class CreateTriggerIn(BaseModel):
     max_runs_per_minute: int = 10
     rate_limit_burst: int = 20
     rate_limit_response: Literal["429", "202_drop"] = "429"
-    conversation_policy: Literal["new_each_time"] = "new_each_time"
+    conversation_policy: ConversationPolicy = "new_each_time"
     target_type: Literal["inline"] = "inline"
     source_type: Literal["webhook"] = "webhook"
     enabled: bool = True
+    # Destination fields. topic_id is optional under new_each_time;
+    # the four im_* fields are required under im_channel — enforced by
+    # TriggerTargetSpec.validate().
+    topic_id: str | None = None
+    im_account_id: str | None = None
+    im_channel_id: str | None = None
+    im_scope_key: str | None = None
+    im_scope_kind: str | None = None
+
+    @model_validator(mode="after")
+    def _check_destination(self) -> CreateTriggerIn:
+        try:
+            TriggerTargetSpec(
+                conversation_policy=self.conversation_policy,
+                topic_id=self.topic_id,
+                im_account_id=self.im_account_id,
+                im_channel_id=self.im_channel_id,
+                im_scope_key=self.im_scope_key,
+                im_scope_kind=self.im_scope_kind,
+            ).validate()
+        except ScheduleTargetError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
 
 
 class UpdateTriggerIn(BaseModel):
@@ -35,7 +65,19 @@ class UpdateTriggerIn(BaseModel):
     max_runs_per_minute: int | None = None
     rate_limit_burst: int | None = None
     rate_limit_response: Literal["429", "202_drop"] | None = None
-    # conversation_policy, target_type, source_type intentionally omitted:
+    # PATCH does NOT support changing the destination shape
+    # (conversation_policy + im_*). These fields are declared so the route
+    # can detect any attempt and reject it via model_fields_set membership
+    # — null payloads must also be rejected.
+    conversation_policy: ConversationPolicy | None = None
+    im_account_id: str | None = None
+    im_channel_id: str | None = None
+    im_scope_key: str | None = None
+    im_scope_kind: str | None = None
+    # topic_id IS patchable, but only when the row uses
+    # conversation_policy="new_each_time" — the route enforces that.
+    topic_id: str | None = None
+    # target_type, source_type intentionally omitted:
     # v1 only allows the single Literal value; callers cannot change them.
 
 
@@ -55,6 +97,11 @@ class TriggerOut(BaseModel):
     payload_fields: list[str]
     filter: dict[str, Any] | None
     conversation_policy: str
+    topic_id: str | None
+    im_account_id: str | None
+    im_channel_id: str | None
+    im_scope_key: str | None
+    im_scope_kind: str | None
     run_as_user_id: str
     max_runs_per_minute: int
     rate_limit_burst: int
