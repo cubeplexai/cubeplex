@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { X } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { createApiClient, useMemberStore, type CreateTriggerBody } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -16,7 +17,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
+import { TriggerTopicPicker } from './TopicPicker'
 
 interface TriggerFormProps {
   wsId: string
@@ -37,6 +40,7 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
   const [payloadFields, setPayloadFields] = useState('')
   const [runAsUserId, setRunAsUserId] = useState('')
   const [rateLimitResponse, setRateLimitResponse] = useState<'429' | '202_drop'>('429')
+  const [topicId, setTopicId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -50,6 +54,7 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
       setPayloadFields('')
       setRunAsUserId('')
       setRateLimitResponse('429')
+      setTopicId(null)
       setError(null)
       setSaving(false)
       /* eslint-enable react-hooks/set-state-in-effect */
@@ -80,6 +85,7 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
         run_as_user_id: runAsUserId,
         rate_limit_response: rateLimitResponse,
         conversation_policy: 'new_each_time',
+        topic_id: topicId,
         target_type: 'inline',
         source_type: 'webhook',
       }
@@ -99,6 +105,7 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
     payloadFields,
     runAsUserId,
     rateLimitResponse,
+    topicId,
     onSubmit,
     onCreated,
     onOpenChange,
@@ -215,6 +222,58 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
               </Select>
             </div>
 
+            {/* Destination */}
+            <TooltipProvider>
+              <div className="flex flex-col gap-1.5">
+                <Label id="trigger-destination-label">{t('fieldDestination')}</Label>
+                <RadioGroup
+                  value="new_each_time"
+                  onValueChange={() => undefined}
+                  aria-labelledby="trigger-destination-label"
+                  className="gap-1.5"
+                >
+                  <DestinationOption
+                    value="new_each_time"
+                    checked
+                    title={t('destNewEachTime')}
+                    hint={t('destNewEachTimeHint')}
+                  />
+                  <Tooltip>
+                    <TooltipTrigger
+                      type="button"
+                      disabled
+                      aria-disabled
+                      className="block w-full text-left"
+                    >
+                      <DestinationOption
+                        value="im_channel"
+                        checked={false}
+                        title={t('destImChannel')}
+                        hint={t('destImChannelHint')}
+                        disabled
+                        trailing={<Info className="size-3 text-muted-foreground" />}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent>{t('destImChannelDisabledHint')}</TooltipContent>
+                  </Tooltip>
+                </RadioGroup>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <Label id="trigger-topic-label">{t('destTopic')}</Label>
+                <TriggerTopicPicker
+                  id="trigger-topic"
+                  aria-labelledby="trigger-topic-label"
+                  value={topicId}
+                  onChange={setTopicId}
+                  placeholder={t('destTopicEmpty')}
+                  clearable
+                  disabled={saving}
+                />
+                <p className="text-xs text-muted-foreground">{t('destTopicHint')}</p>
+              </div>
+            </TooltipProvider>
+
             <div className="flex flex-col gap-1.5">
               <Label>{t('fieldRateLimitResponse')}</Label>
               <div className="flex flex-col gap-2">
@@ -276,5 +335,43 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
         </DialogPrimitive.Popup>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>
+  )
+}
+
+interface DestinationOptionProps {
+  value: string
+  checked: boolean
+  title: string
+  hint: string
+  disabled?: boolean
+  trailing?: React.ReactNode
+}
+
+function DestinationOption({
+  value,
+  checked,
+  title,
+  hint,
+  disabled,
+  trailing,
+}: DestinationOptionProps) {
+  return (
+    <label
+      className={cn(
+        'flex items-start gap-2 rounded-md border px-3 py-2 transition-colors',
+        checked && !disabled ? 'border-primary/60 bg-primary/5' : 'border-border bg-transparent',
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-primary/40',
+      )}
+      data-testid={`trigger-destination-option-${value}`}
+    >
+      <RadioGroupItem value={value} disabled={disabled} className="mt-0.5" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+          {title}
+          {trailing}
+        </span>
+        <span className="text-[11px] text-muted-foreground">{hint}</span>
+      </span>
+    </label>
   )
 }

@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/table'
 import { CopyIngestUrl } from './CopyIngestUrl'
 import { SecretRevealAndRotate } from './SecretRevealAndRotate'
+import { DestinationCell } from './DestinationCell'
 
 interface TriggerDetailPanelProps {
   wsId: string
@@ -183,6 +184,16 @@ export function TriggerDetailPanel({ wsId, triggerId, onClose }: TriggerDetailPa
         {/* Actions */}
         <div className="rounded-xl border border-border/70 bg-card/40 p-4 flex flex-col gap-4 shadow-sm">
           <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">{t('destinationLabel')}</span>
+              <span className="text-xs text-muted-foreground">
+                {t('destinationLabelDetailHint')}
+              </span>
+            </div>
+            <DestinationCell trigger={trigger} />
+          </div>
+
+          <div className="border-t border-border/40 pt-4 flex items-center justify-between">
             <div className="flex flex-col gap-0.5">
               <span className="text-sm font-medium">{t('ingestUrl')}</span>
               <span className="text-xs text-muted-foreground">{t('ingestUrlHint')}</span>

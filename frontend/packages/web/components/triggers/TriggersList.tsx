@@ -14,6 +14,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { DestinationCell } from './DestinationCell'
 
 interface TriggersListProps {
   triggers: Trigger[]
@@ -80,7 +81,13 @@ export function TriggersList({
               </Badge>
             )
           }
-          secondary={trigger.source_type}
+          secondary={
+            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span>{trigger.source_type}</span>
+              <span className="text-muted-foreground/60">·</span>
+              <DestinationCell trigger={trigger} />
+            </span>
+          }
           meta={t('cardEvents', { count: trigger.events_total })}
           actions={
             <DropdownMenu>
