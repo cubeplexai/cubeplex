@@ -621,39 +621,42 @@ export function AssistantMessage({
       {(isStreaming && todos && todos.length > 0) ||
       (!isStreaming && historyTodos.length > 0) ||
       isStreaming ? (
-        <div className="pl-9 space-y-2">
-          {isStreaming && todos && todos.length > 0 && (
-            <TaskProgressCard todos={todos} isStreaming={true} />
-          )}
-          {!isStreaming && historyTodos.length > 0 && (
-            <TaskProgressCard todos={historyTodos} isStreaming={false} />
-          )}
-          {isStreaming && (
-            <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
-              {statusPhase === 'sandbox_creating' ? (
-                <span className="text-xs text-muted-foreground animate-pulse">
-                  {t('sandboxPreparing')}
-                </span>
-              ) : statusPhase === 'sandbox_failed' ? (
-                <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
-              ) : (
-                <>
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-primary
+        <div className="flex justify-start gap-2.5">
+          <div className="shrink-0 w-6" aria-hidden />
+          <div className="flex-1 max-w-[75%] space-y-2">
+            {isStreaming && todos && todos.length > 0 && (
+              <TaskProgressCard todos={todos} isStreaming={true} />
+            )}
+            {!isStreaming && historyTodos.length > 0 && (
+              <TaskProgressCard todos={historyTodos} isStreaming={false} />
+            )}
+            {isStreaming && (
+              <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
+                {statusPhase === 'sandbox_creating' ? (
+                  <span className="text-xs text-muted-foreground animate-pulse">
+                    {t('sandboxPreparing')}
+                  </span>
+                ) : statusPhase === 'sandbox_failed' ? (
+                  <span className="text-xs text-destructive">{t('sandboxFailed')}</span>
+                ) : (
+                  <>
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:0ms]"
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-primary
+                    />
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:150ms]"
-                  />
-                  <span
-                    className="w-1.5 h-1.5 rounded-full bg-primary
+                    />
+                    <span
+                      className="w-1.5 h-1.5 rounded-full bg-primary
                   animate-bounce [animation-delay:300ms]"
-                  />
-                </>
-              )}
-            </div>
-          )}
+                    />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </div>
