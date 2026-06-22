@@ -22,6 +22,7 @@ import { getWriteFileSummary } from '@/lib/writeFilePreview'
 import { extractWidgetCode, extractJsonStringPrefix } from '@/lib/partialJson'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
+import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { SkillSearchResults } from './tool-results/SkillSearchResults'
 
 interface ReasoningBlockProps {
@@ -43,7 +44,6 @@ function formatDuration(ms: number): string {
 function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: ReasoningBlockProps) {
   const t = useTranslations('chat')
   const [isExpanded, setIsExpanded] = useState(false)
-  const [elapsed, setElapsed] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const prevStreamingRef = useRef(isStreaming)
 
@@ -55,14 +55,9 @@ function ReasoningBlock({ thinking, isStreaming, startedAt, durationMs }: Reason
     prevStreamingRef.current = isStreaming
   }, [isStreaming])
 
-  // Live elapsed timer while streaming
-  useEffect(() => {
-    if (!isStreaming || !startedAt) return
-    const tick = () => setElapsed(Date.now() - startedAt)
-    tick()
-    const interval = setInterval(tick, 1000)
-    return () => clearInterval(interval)
-  }, [isStreaming, startedAt])
+  const tickerActive = isStreaming && startedAt != null
+  const nowMs = useNowSeconds(tickerActive)
+  const elapsed = tickerActive ? Math.max(0, nowMs - (startedAt ?? 0)) : 0
 
   // Auto-scroll to bottom during streaming
   useEffect(() => {

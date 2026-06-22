@@ -1,7 +1,7 @@
 'use client'
 
 import ReactMarkdown from 'react-markdown'
-import { memo, useMemo } from 'react'
+import { memo, useDeferredValue, useMemo } from 'react'
 import type { ComponentProps, MouseEvent } from 'react'
 import remarkGfm from 'remark-gfm'
 import remarkBreaks from 'remark-breaks'
@@ -70,11 +70,35 @@ function MarkdownWithCitationsImpl({
 }: MarkdownWithCitationsProps) {
   const activeId = useConversationStore((s) => s.activeId)
   const conversationId = conversationIdProp ?? activeId ?? ''
-  const md = fixCjkBoldQuotes(children)
-  const hasCitations = CITATION_RE.test(md)
+  // Defer the markdown render during heavy streaming: while React is busy,
+  // intermediate token-by-token children are dropped and only the latest
+  // value is parsed once the main thread is idle. Combined with the outer
+  // `memo`, an unchanged `children` short-circuits before this runs.
+  const deferredChildren = useDeferredValue(children)
+  const md = useMemo(() => fixCjkBoldQuotes(deferredChildren), [deferredChildren])
+  const hasCitations = useMemo(() => CITATION_RE.test(md), [md])
   const sandboxComponents = useMemo(
     () => (sandbox ? buildSandboxComponents(sandbox) : null),
     [sandbox],
+  )
+  const citationComponents = useMemo<MarkdownComponents>(
+    () => ({
+      ...(sandboxComponents ?? {}),
+      p: ({ children: c }) => <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>,
+      li: ({ children: c }) => <li>{renderWithCitations(c, conversationId, CitationMarker)}</li>,
+      td: ({ children: c }) => <td>{renderWithCitations(c, conversationId, CitationMarker)}</td>,
+      th: ({ children: c }) => <th>{renderWithCitations(c, conversationId, CitationMarker)}</th>,
+      blockquote: ({ children: c }) => (
+        <blockquote>{renderWithCitations(c, conversationId, CitationMarker)}</blockquote>
+      ),
+      h1: ({ children: c }) => <h1>{renderWithCitations(c, conversationId, CitationMarker)}</h1>,
+      h2: ({ children: c }) => <h2>{renderWithCitations(c, conversationId, CitationMarker)}</h2>,
+      h3: ({ children: c }) => <h3>{renderWithCitations(c, conversationId, CitationMarker)}</h3>,
+      h4: ({ children: c }) => <h4>{renderWithCitations(c, conversationId, CitationMarker)}</h4>,
+      h5: ({ children: c }) => <h5>{renderWithCitations(c, conversationId, CitationMarker)}</h5>,
+      h6: ({ children: c }) => <h6>{renderWithCitations(c, conversationId, CitationMarker)}</h6>,
+    }),
+    [sandboxComponents, conversationId],
   )
 
   if (!hasCitations) {
@@ -96,40 +120,7 @@ function MarkdownWithCitationsImpl({
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={REHYPE_PLUGINS}
-        components={{
-          ...(sandboxComponents ?? {}),
-          p: ({ children: c }) => <p>{renderWithCitations(c, conversationId, CitationMarker)}</p>,
-          li: ({ children: c }) => (
-            <li>{renderWithCitations(c, conversationId, CitationMarker)}</li>
-          ),
-          td: ({ children: c }) => (
-            <td>{renderWithCitations(c, conversationId, CitationMarker)}</td>
-          ),
-          th: ({ children: c }) => (
-            <th>{renderWithCitations(c, conversationId, CitationMarker)}</th>
-          ),
-          blockquote: ({ children: c }) => (
-            <blockquote>{renderWithCitations(c, conversationId, CitationMarker)}</blockquote>
-          ),
-          h1: ({ children: c }) => (
-            <h1>{renderWithCitations(c, conversationId, CitationMarker)}</h1>
-          ),
-          h2: ({ children: c }) => (
-            <h2>{renderWithCitations(c, conversationId, CitationMarker)}</h2>
-          ),
-          h3: ({ children: c }) => (
-            <h3>{renderWithCitations(c, conversationId, CitationMarker)}</h3>
-          ),
-          h4: ({ children: c }) => (
-            <h4>{renderWithCitations(c, conversationId, CitationMarker)}</h4>
-          ),
-          h5: ({ children: c }) => (
-            <h5>{renderWithCitations(c, conversationId, CitationMarker)}</h5>
-          ),
-          h6: ({ children: c }) => (
-            <h6>{renderWithCitations(c, conversationId, CitationMarker)}</h6>
-          ),
-        }}
+        components={citationComponents}
       >
         {md}
       </ReactMarkdown>

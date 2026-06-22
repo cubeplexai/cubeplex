@@ -2,7 +2,15 @@
 
 import { useRef } from 'react'
 import { useMessageStore } from '@cubebox/core'
-import type { AgentStream } from '@cubebox/core'
+import type { AgentStream, Message, MessageStore } from '@cubebox/core'
+
+// Stable empties returned by selectors when the asked-for slice is absent or
+// inactive. Without these, every selector with a `?? []` / `?? {}` fallback
+// hands back a fresh literal on each store update, marking the slice "changed"
+// under Zustand's `===` and forcing the host component (MessageList) to re-render.
+const EMPTY_MESSAGES: Message[] = []
+const EMPTY_TOOL_RESULTS: MessageStore['toolResultMap'] = {}
+const EMPTY_SUBAGENTS: Record<string, AgentStream> = {}
 
 /**
  * Shallow-compare two Record<string, T> by keys and reference-equal values.
@@ -24,7 +32,7 @@ function useStableRecord<T>(record: Record<string, T>): Record<string, T> {
 }
 
 export function useMessages(conversationId: string) {
-  const messages = useMessageStore((s) => s.messages[conversationId] ?? [])
+  const messages = useMessageStore((s) => s.messages[conversationId] ?? EMPTY_MESSAGES)
   // Only expose streaming state when this conversation is the one streaming
   const isStreamingThis = useMessageStore(
     (s) => s.isStreaming && s.streamingConversationId === conversationId,
@@ -38,7 +46,7 @@ export function useMessages(conversationId: string) {
   const todos = useMessageStore((s) => s.todos)
   const conversationError = useMessageStore((s) => s.errors[conversationId] ?? null)
   const toolResultMap = useMessageStore((s) =>
-    s.streamingConversationId === conversationId ? s.toolResultMap : {},
+    s.streamingConversationId === conversationId ? s.toolResultMap : EMPTY_TOOL_RESULTS,
   )
   const turnUsage = useMessageStore((s) => s.turnUsage[conversationId] ?? null)
   const sessionUsage = useMessageStore((s) => s.sessionUsage[conversationId] ?? null)
@@ -47,7 +55,7 @@ export function useMessages(conversationId: string) {
 
   // Derive subagent streams with stable reference — only for the streaming conversation
   const rawSubAgents = useMessageStore((s) => {
-    if (s.streamingConversationId !== conversationId) return {}
+    if (s.streamingConversationId !== conversationId) return EMPTY_SUBAGENTS
     const agents = s.streamAgents
     const sub: Record<string, AgentStream> = {}
     for (const key in agents) {

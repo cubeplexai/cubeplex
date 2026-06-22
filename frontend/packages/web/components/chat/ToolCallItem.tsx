@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef, memo } from 'react'
+import { useEffect, useRef, memo } from 'react'
 import type { MCPToolIcon, PendingConfirm, ToolCallRef } from '@cubebox/core'
 import { CheckCircle2, Circle, PanelRight, Plug } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
 import { useMcpToolRegistryStore, useToolDetailStore } from '@cubebox/core'
+import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { SandboxConfirmCard } from './SandboxConfirmCard'
 
 /** Pick the best icon variant: prefer per-tool over server icon; fall back
@@ -64,7 +65,6 @@ export const ToolCallItem = memo(function ToolCallItem({
   pendingConfirm,
   onSandboxConfirm,
 }: ToolCallItemProps) {
-  const [elapsed, setElapsed] = useState(0)
   const startedAt = useRef(timestamp ? new Date(timestamp).getTime() : Date.now())
   const openPanel = useToolDetailStore((s) => s.open)
 
@@ -74,14 +74,8 @@ export const ToolCallItem = memo(function ToolCallItem({
     }
   }, [timestamp])
 
-  // Live timer while pending
-  useEffect(() => {
-    if (!isPending) return
-    const tick = () => setElapsed(Date.now() - startedAt.current)
-    tick()
-    const interval = setInterval(tick, 1000)
-    return () => clearInterval(interval)
-  }, [isPending])
+  const nowMs = useNowSeconds(isPending)
+  const elapsed = isPending ? Math.max(0, nowMs - startedAt.current) : 0
 
   const duration = toolResult
     ? toolResult.receivedAt - (toolResult.startedAt ?? startedAt.current)
