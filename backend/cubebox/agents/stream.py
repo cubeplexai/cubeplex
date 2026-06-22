@@ -457,14 +457,13 @@ class StreamConverter:
         # rewrite the call to <real> + inner arguments before execute; we
         # surface the same shape to the frontend so the tool_call event lines
         # up with the eventual tool_result event (which uses the real name).
-        wrapper = block.arguments or {}
-        inner_name = wrapper.get("tool_name") if isinstance(wrapper, dict) else None
-        inner_args = wrapper.get("arguments") if isinstance(wrapper, dict) else None
+        resolved = _resolve_deferred_wrapper(block.arguments)
         self._deferred.pop(idx, None)
-        if not isinstance(inner_name, str):
-            # Malformed wrapper — emit the raw dispatcher call so cubepi's
-            # error fallback ("Unknown deferred tool: ...") still surfaces in
-            # the same card.
+        if resolved is None:
+            # Wrapper failed cubepi's resolver checks (missing/non-str
+            # tool_name, or non-dict non-None arguments) — emit the raw
+            # dispatcher call so cubepi's "Unknown deferred tool" / dispatcher
+            # error fallback still surfaces in the same card.
             return [
                 {
                     "type": "tool_call",
@@ -473,8 +472,7 @@ class StreamConverter:
                     "arguments": block.arguments,
                 }
             ]
-        if not isinstance(inner_args, dict):
-            inner_args = {}
+        inner_name, inner_args = resolved
         return [
             {
                 "type": "tool_call",
@@ -643,16 +641,36 @@ def _unwrap_deferred_block(block: Any) -> Any:
         or block.get("name") != _DEFERRED_DISPATCH_TOOL_NAME
     ):
         return block
-    wrapper = block.get("arguments")
-    if not isinstance(wrapper, dict):
+    resolved = _resolve_deferred_wrapper(block.get("arguments"))
+    if resolved is None:
         return block
-    inner_name = wrapper.get("tool_name")
-    if not isinstance(inner_name, str):
-        return block
-    inner_args = wrapper.get("arguments")
-    if not isinstance(inner_args, dict):
-        inner_args = {}
+    inner_name, inner_args = resolved
     new_block = dict(block)
     new_block["name"] = inner_name
     new_block["arguments"] = inner_args
     return new_block
+
+
+def _resolve_deferred_wrapper(wrapper: Any) -> tuple[str, dict[str, Any]] | None:
+    """Resolve the inner (real_name, args) target from a dispatcher wrapper.
+
+    Mirrors ``cubepi.deferred.middleware.DeferredToolsMiddleware.resolve_tool_call``:
+    ``tool_name`` must be a string; ``arguments`` must be a dict OR ``None``
+    (the latter is the explicit no-arg path cubepi coerces to ``{}``). Any
+    other non-dict ``arguments`` value makes cubepi's resolver return
+    ``None`` so the dispatcher's own ``_execute`` runs and produces an
+    is_error AgentToolResult — UI rewrites must defer to the same fate so
+    the user sees the dispatcher error against the dispatcher name, not a
+    real-name card with empty args masking the failure.
+    """
+    if not isinstance(wrapper, dict):
+        return None
+    name = wrapper.get("tool_name")
+    if not isinstance(name, str):
+        return None
+    args = wrapper.get("arguments")
+    if args is None:
+        args = {}
+    elif not isinstance(args, dict):
+        return None
+    return name, args
