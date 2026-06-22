@@ -95,13 +95,20 @@ class ConversationRepository(ScopedRepository[Conversation]):
         """
         return self._scoped_select().with_only_columns(cast(Any, Conversation.id))
 
-    async def create(self, title: str, *, draft: bool = False) -> Conversation:
+    async def create(
+        self,
+        title: str,
+        *,
+        draft: bool = False,
+        topic_id: str | None = None,
+    ) -> Conversation:
         conv = Conversation(
             title=title,
             org_id=self.org_id,
             workspace_id=self.workspace_id,
             creator_user_id=self.user_id,
             has_messages=not draft,
+            topic_id=topic_id,
         )
         return await self.add(conv)
 
