@@ -255,10 +255,31 @@ def build_event_handler(
             logger.warning("[Feishu LC] card.action handler raised: {}", exc)
             return P2CardActionTriggerResponse()
 
+    # If the bot's Feishu app subscribes to additional IM events (reactions,
+    # recall, read receipts, chat membership churn) the SDK raises
+    # ``EventException: processor not found`` for every push we haven't
+    # registered. Register silent no-ops for the common ones so the log
+    # stays clean — promote any of these to a real handler when we add
+    # the corresponding feature.
+    def _noop(_: Any) -> None:
+        return None
+
     return (
         lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(_on_message)
         .register_p2_card_action_trigger(_on_card_action)
+        .register_p2_im_message_reaction_created_v1(_noop)
+        .register_p2_im_message_reaction_deleted_v1(_noop)
+        .register_p2_im_message_recalled_v1(_noop)
+        .register_p2_im_message_message_read_v1(_noop)
+        .register_p2_im_chat_member_user_added_v1(_noop)
+        .register_p2_im_chat_member_user_deleted_v1(_noop)
+        .register_p2_im_chat_member_user_withdrawn_v1(_noop)
+        .register_p2_im_chat_member_bot_added_v1(_noop)
+        .register_p2_im_chat_member_bot_deleted_v1(_noop)
+        .register_p2_im_chat_updated_v1(_noop)
+        .register_p2_im_chat_disbanded_v1(_noop)
+        .register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(_noop)
         .build()
     )
 
