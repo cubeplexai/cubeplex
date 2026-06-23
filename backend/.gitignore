@@ -1,4 +1,5 @@
 .env
+.test.env
 .coverage
 coverage.xml
 scripts/dev

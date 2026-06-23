@@ -1,8 +1,19 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv as _load_dotenv
+
 # Set environment BEFORE any imports
 os.environ.setdefault("ENV_FOR_DYNACONF", "test")
+
+# Per-developer test-only overrides (gitignored). Use this for machine-specific
+# values that shouldn't bleed into the dev server's `.env` — e.g. when local
+# rustfs isn't on the default port:
+#   CUBEBOX_OBJECTSTORE__ENDPOINT=http://127.0.0.1:9010
+# override=False so explicit shell exports still win.
+_test_env_path = Path(__file__).resolve().parents[1] / ".test.env"
+if _test_env_path.exists():
+    _load_dotenv(dotenv_path=_test_env_path, override=False)
 os.environ.setdefault(
     "CUBEBOX_AUTH__VAULT_KEY",
     "Nmu-K8QhP_uhdjmwbaiNmgxVQHbGeCkMOCz8RKp1LMM=",
