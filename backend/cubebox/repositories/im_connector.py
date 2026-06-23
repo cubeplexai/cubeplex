@@ -140,13 +140,18 @@ async def get_or_create_thread_link(
     scope_key: str,
     scope_kind: str,
     make_conversation_id: Callable[[], Awaitable[str]],
-) -> tuple[IMThreadLink, bool]:
+) -> tuple[IMThreadLink, bool, Conversation | None]:
     """Look up an existing thread link or create one and a fresh Conversation.
 
     Looks up on ``(account_id, channel_id, scope_key)``. On create, both
     ``scope_key`` and ``scope_kind`` are written — the model enforces NOT
     NULL on both, and a verbatim copy of the Slack-plan helper that ignored
-    ``scope_kind`` would fail on first insert. Returns ``(link, created)``.
+    ``scope_kind`` would fail on first insert.
+
+    Returns ``(link, created, reused_conversation)``. ``reused_conversation``
+    is the live ``Conversation`` the link already pointed at (only when
+    ``created`` is False) so the caller can reconcile it without a second
+    query; it is ``None`` whenever a fresh conversation was minted.
     """
     stmt = (
         select(IMThreadLink, Conversation)
@@ -167,10 +172,10 @@ async def get_or_create_thread_link(
         # ``deleted_at IS NULL``. Mint a fresh conversation and repoint
         # the link.
         if conv.deleted_at is None:
-            return existing, False
+            return existing, False, conv
         existing.conversation_id = await make_conversation_id()
         session.add(existing)
-        return existing, True
+        return existing, True, None
     conversation_id = await make_conversation_id()
     link = IMThreadLink(
         org_id=org_id,
@@ -182,7 +187,7 @@ async def get_or_create_thread_link(
         conversation_id=conversation_id,
     )
     session.add(link)
-    return link, True
+    return link, True, None
 
 
 async def claim_pending_queue_item(
