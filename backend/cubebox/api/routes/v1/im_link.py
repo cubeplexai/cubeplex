@@ -6,6 +6,7 @@ token (not the URL path); the user comes from the auth cookie.
 
 from __future__ import annotations
 
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -16,6 +17,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.dependencies import current_active_user
+from cubebox.credentials.dependencies import (
+    build_credential_service,
+    get_encryption_backend,
+)
+from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
 from cubebox.im.link import LinkClaims, verify_link_token
 from cubebox.models.im_connector import IMConnectorAccount, IMIdentityLink
@@ -106,6 +112,7 @@ async def confirm_im_link(
     body: Annotated[_ConfirmBody, Body()],
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
 ) -> _ConfirmResult:
     secret = _get_jwt_secret()
     try:
@@ -136,4 +143,77 @@ async def confirm_im_link(
         user.id,
         claims.account_id,
     )
+
+    # Best-effort: send a confirmation back to the originating chat so the
+    # user sees feedback in IM too. Failure here must not flip the API
+    # response — the link is already persisted.
+    if claims.platform == "feishu" and claims.chat_id:
+        try:
+            await _send_feishu_link_success_notice(
+                session=session,
+                backend=backend,
+                claims=claims,
+                display_name=user.display_name or user.email,
+            )
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[IM link] post-confirm notice failed for account={}",
+                claims.account_id,
+            )
+
     return _ConfirmResult(ok=True, platform=claims.platform, account_id=claims.account_id)
+
+
+async def _send_feishu_link_success_notice(
+    *,
+    session: AsyncSession,
+    backend: EncryptionBackend,
+    claims: LinkClaims,
+    display_name: str,
+) -> None:
+    """Post '绑定成功' back to the Feishu chat that issued the /link command."""
+    account = (
+        await session.execute(
+            select(IMConnectorAccount).where(
+                IMConnectorAccount.id == claims.account_id,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if account is None:
+        return
+
+    cred_service = build_credential_service(
+        session,
+        backend,
+        org_id=account.org_id,
+        actor_user_id=None,
+    )
+    secret_json = await cred_service.get_decrypted(
+        credential_id=account.credential_id, requesting_kind="im_bot"
+    )
+    secrets = json.loads(secret_json)
+
+    try:
+        import lark_oapi as _lark
+        from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+    except ImportError:
+        logger.warning("[IM link] lark_oapi missing; skipping confirmation notice")
+        return
+
+    from cubebox.im.feishu.connector import FeishuConnector
+
+    domain = LARK_DOMAIN if str(secrets.get("domain", "feishu")) == "lark" else FEISHU_DOMAIN
+    client = (
+        _lark.Client.builder()
+        .app_id(str(secrets["app_id"]))
+        .app_secret(str(secrets["app_secret"]))
+        .domain(domain)
+        .log_level(_lark.LogLevel.WARNING)
+        .build()
+    )
+    connector = FeishuConnector(
+        bot_open_id=str(secrets.get("bot_open_id") or "") or None,
+        client=client,
+    )
+    text = f"✅ 绑定成功！已将此账号关联到 cubebox 用户 {display_name}。"
+    await connector.send_to_chat(claims.chat_id, None, text)
