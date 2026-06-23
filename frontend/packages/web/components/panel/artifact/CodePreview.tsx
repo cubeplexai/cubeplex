@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
 import { buildPreviewUrl } from './previewUtils'
+import { CodeHighlight } from '@/components/shared/previews'
 
 interface CodePreviewProps {
   artifact: Artifact
@@ -36,14 +37,5 @@ export function CodePreview({ artifact, version, workspaceId }: CodePreviewProps
     return <PreviewLoading />
   }
 
-  return (
-    <div className="h-full overflow-auto">
-      <pre
-        className="p-4 text-xs leading-relaxed font-mono text-foreground whitespace-pre-wrap
-        break-words"
-      >
-        {code}
-      </pre>
-    </div>
-  )
+  return <CodeHighlight code={code} filename={filename} />
 }

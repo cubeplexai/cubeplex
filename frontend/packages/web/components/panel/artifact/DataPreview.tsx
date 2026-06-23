@@ -4,21 +4,12 @@ import { useState, useEffect, useMemo } from 'react'
 import type { Artifact } from '@cubebox/core'
 import { PreviewLoading } from './PreviewLoading'
 import { buildPreviewUrl } from './previewUtils'
+import { CsvTable } from '@/components/shared/previews'
 
 interface DataPreviewProps {
   artifact: Artifact
   version: number | null
   workspaceId: string
-}
-
-function parseCsv(text: string): { headers: string[]; rows: string[][] } {
-  const lines = text.trim().split('\n')
-  if (lines.length === 0) return { headers: [], rows: [] }
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''))
-  const rows = lines
-    .slice(1)
-    .map((line) => line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, '')))
-  return { headers, rows }
 }
 
 function JsonTable({ data }: { data: unknown }) {
@@ -78,7 +69,7 @@ export function DataPreview({ artifact, version, workspaceId }: DataPreviewProps
 
   const parsed = useMemo(() => {
     if (!content) return null
-    if (isCsv) return { type: 'csv' as const, data: parseCsv(content) }
+    if (isCsv) return { type: 'csv' as const }
     try {
       return { type: 'json' as const, data: JSON.parse(content) }
     } catch {
@@ -90,38 +81,12 @@ export function DataPreview({ artifact, version, workspaceId }: DataPreviewProps
     return <div className="p-4 text-sm text-destructive">Failed to load data: {error}</div>
   }
 
-  if (!parsed) {
+  if (!parsed || !content) {
     return <PreviewLoading />
   }
 
   if (parsed.type === 'csv') {
-    const { headers, rows } = parsed.data
-    return (
-      <div className="overflow-auto h-full">
-        <table className="w-full text-xs border-collapse">
-          <thead>
-            <tr className="border-b border-border bg-muted/50 sticky top-0">
-              {headers.map((h) => (
-                <th key={h} className="text-left p-2 font-medium text-muted-foreground">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-border/50 hover:bg-muted/30">
-                {row.map((cell, j) => (
-                  <td key={j} className="p-2 text-foreground">
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )
+    return <CsvTable content={content} />
   }
 
   if (parsed.type === 'json') {
