@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { ProfileForm } from '@/components/profile/ProfileForm'
 import { ChangePasswordForm } from '@/components/profile/ChangePasswordForm'
+import { ApiKeysSection } from '@/components/profile/ApiKeysSection'
 import { DeleteAccountDialog } from '@/components/profile/DeleteAccountDialog'
 import { DangerZone } from '@/components/management/DangerZone'
 import { PageHeader } from '@/components/management/PageHeader'
@@ -21,6 +22,8 @@ export default function ProfilePage() {
           <ProfileForm />
           <hr className="border-border" />
           <ChangePasswordForm />
+          <hr className="border-border" />
+          <ApiKeysSection />
           <hr className="border-border" />
           <DangerZone title={t('dangerZone')}>
             <div className="flex items-center justify-between gap-4">
