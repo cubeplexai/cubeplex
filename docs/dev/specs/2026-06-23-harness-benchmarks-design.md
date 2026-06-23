@@ -480,6 +480,50 @@ pytest as a transitive dev dep — but not always. Add `pytest` to the
 preinstalled set, or accept the ~10-second `pip install pytest` per
 task on first use.
 
+### P3. Sandbox image needs a build toolchain (gcc/gfortran/...)
+
+Half the 12 SWE-bench repos have C/Cython/Fortran extensions
+(astropy, matplotlib, scikit-learn, sympy) that compile during
+`pip install -e .`. The stock `24.04-20260616c` image has no
+compiler, so those tasks die with the agent trying to `apt-get gcc`
+at runtime — and racing the sandbox's own background `apt` for the
+dpkg lock. Fixed by adding gcc/g++/gfortran/make/build-essential +
+the common -dev headers (libffi/libssl/libxml2/libxslt/zlib/jpeg/
+png/freetype/openblas/lapack) to the image — see
+`misc/sandbox-image/Dockerfile` and the new tag
+`24.04-20260623-build`. Production keeps the slim image; benchmark
+workspaces point their SandboxPolicy at the build variant.
+
+### P4. Cold image pull blows the opensandbox pod-ready timeout
+
+**This is a production-relevant cubebox finding, not just a benchmark
+nuisance.** cubebox does NOT pre-pull the sandbox image or run a warm
+pool — `SandboxManager.get_or_create` (`manager.py:610`) calls
+`opensandbox.Sandbox.create(policy.default_image, ...)` on demand and
+the image is pulled by containerd when the pod first starts on a node.
+The opensandbox server enforces its own pod-ready deadline; a cold pull
+of a multi-GB image (our build image is 4.88 GB) overruns it and the
+create returns `HTTP 504 KUBERNETES::POD_READY_TIMEOUT`. cubebox's own
+`sandbox.ready_timeout` (config.yaml = 300s) does not help — the
+timeout is server-side on the opensandbox cluster.
+
+Important nuance: containerd keeps pulling in the background across
+failed create attempts, so the image eventually lands on the node.
+The benchmark workaround is **retry-until-warm**: keep issuing trivial
+sandbox-creating requests every ~20s until one succeeds (image now
+cached on that node), then run the real tasks. First warm of a 4.88 GB
+image to a fresh node took several minutes.
+
+opensandbox ships a `Pool` CRD with a warm buffer, and cubebox does
+NOT instantiate it (no `kind: Pool` in the charts). Remediation,
+in increasing order of investment:
+- **Ops**: `crictl pull` the new image on sandbox nodes before
+  flipping the SandboxPolicy to it.
+- **Deploy**: a pre-pull DaemonSet, or enable the opensandbox Pool
+  CRD warm buffer.
+- **Product**: a cubebox-side image-warm step / sandbox warm pool so
+  the first user after an image bump doesn't eat a 504.
+
 ## Open questions / decisions to make
 
 1. **Which model preset for the headline run?** `flash` is the default
