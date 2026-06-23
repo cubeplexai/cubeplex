@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cubebox.im.bot_settings import IMBotSettings
 
 from loguru import logger
 from sqlalchemy import select
@@ -735,6 +738,29 @@ class IMConnectorService:
         if account is None:
             return None
         account.enabled = enabled
+        self._session.add(account)
+        await self._session.commit()
+        await self._session.refresh(account)
+        return account
+
+    async def update_bot_settings(
+        self,
+        *,
+        account_id: str,
+        settings: IMBotSettings,
+        workspace_id: str | None = None,
+    ) -> IMConnectorAccount | None:
+        """Merge account-level bot settings into ``config`` and persist.
+
+        Reassigns ``config`` (not in-place mutation) so SQLAlchemy detects the
+        JSON change. Returns None if the account is absent / out of scope.
+        """
+        from cubebox.im.bot_settings import store_bot_settings
+
+        account = await self.get(account_id=account_id, workspace_id=workspace_id)
+        if account is None:
+            return None
+        account.config = store_bot_settings(account.config, settings)
         self._session.add(account)
         await self._session.commit()
         await self._session.refresh(account)
