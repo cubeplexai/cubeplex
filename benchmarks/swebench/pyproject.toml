@@ -6,10 +6,12 @@ requires-python = ">=3.11"
 dependencies = [
     "datasets>=2.20.0",
     "requests>=2.31.0",
+    "swebench>=4.0.0",
 ]
 
 [project.scripts]
 swebench-run = "swebench_harness.cli:main"
+swebench-score = "swebench_harness.score_cli:main"
 
 [build-system]
 requires = ["hatchling"]
