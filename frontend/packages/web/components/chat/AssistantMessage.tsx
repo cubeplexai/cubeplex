@@ -13,6 +13,7 @@ import type { AgentStream } from '@cubebox/core'
 import { useArtifactStore } from '@cubebox/core'
 import { Bot, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
 import { ArtifactCard } from './ArtifactCard'
+import { ImageGenerationCard } from './ImageGenerationCard'
 import { SubAgentCard } from './SubAgentCard'
 import { SubAgentCluster } from './SubAgentCluster'
 import { TaskProgressCard } from './TaskProgressCard'
@@ -328,6 +329,20 @@ function ContentBlockRenderer({
       />
     )
   }
+  if (block.type === 'tool_call' && block.name === 'generate_image') {
+    const args = block.arguments as { prompt?: string }
+    const toolResult = toolResultMap[block.id]
+    let artifact = null
+    if (toolResult?.content) {
+      try {
+        const parsed = JSON.parse(toolResult.content)
+        if (parsed.artifact) artifact = parsed.artifact
+      } catch {
+        /* ignore */
+      }
+    }
+    return <ImageGenerationCard prompt={args.prompt ?? ''} artifact={artifact} />
+  }
   if (block.type === 'tool_call' && isSkillsFindCall(block)) {
     const toolResult = toolResultMap[block.id]
     if (!toolResult) return null
@@ -399,6 +414,10 @@ function ContentBlockRenderer({
     // is the canonical render.
     return null
   }
+  if (block.type === 'tool_call_streaming' && block.name === 'generate_image') {
+    const prompt = extractJsonStringPrefix(block.args_text, 'prompt')
+    return <ImageGenerationCard prompt={prompt} artifact={null} />
+  }
   if (block.type === 'tool_call_streaming') {
     const supportsPreview = block.name === 'write_file'
     return (
@@ -453,6 +472,7 @@ function groupBlocks(blocks: ContentBlock[]): (ContentBlock | ContentBlock[])[] 
       block.type === 'tool_call' &&
       block.name !== 'subagent' &&
       block.name !== 'save_artifact' &&
+      block.name !== 'generate_image' &&
       block.name !== 'write_todos' &&
       block.name !== 'show_widget' &&
       !isSkillsFindCall(block)

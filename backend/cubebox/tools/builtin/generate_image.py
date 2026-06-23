@@ -8,6 +8,7 @@ sandbox, registers it as an artifact, and returns a downscaled copy to the model
 from __future__ import annotations
 
 import base64
+import json
 import re
 import shlex
 from typing import Protocol
@@ -167,7 +168,7 @@ def make_generate_image_tool(
             target_path = args.edit_source_paths[0]
         else:
             slug = _slug_from_prompt(args.prompt)
-            target_path = f"/work/{slug}.png"
+            target_path = f"{sandbox.workdir}/{slug}.png"
 
         await sandbox.upload([(target_path, full_bytes)])
 
@@ -188,9 +189,8 @@ def make_generate_image_tool(
         return AgentToolResult(
             content=[
                 TextContent(
-                    text=(
-                        f"Generated image artifact id={artifact.id} v{artifact.version} "
-                        f"at {target_path}"
+                    text=json.dumps(
+                        {"action": "created", "artifact": artifact.to_dict()},
                     )
                 ),
                 ImageContent(source=small_b64, media_type="image/jpeg"),

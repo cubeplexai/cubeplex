@@ -1436,7 +1436,8 @@
     "addToWorkspace": "添加到工作空间",
     "addToWorkspaceFailed": "添加到工作空间失败",
     "addToWorkspaceVersionExists": "版本已存在，请先在 SKILL.md 中 bump version 后重试。",
-    "retry": "重试"
+    "retry": "重试",
+    "imageGenerating": "正在生成图片…"
   },
   "workspaceCreate": {
     "nameLabel": "新工作区名称",
@@ -1515,18 +1516,39 @@
     "errorLabelCollidesTier": "名称不能与层级名称相同。",
     "errorDefaultUnavailable": "请从已启用的层级或填写完整的自定义预设中选择默认项。",
     "modelTiers": {
-      "lite": { "name": "Lite", "description": "最快最省，适合简单、高频任务。" },
-      "flash": { "name": "Flash", "description": "速度快、质量稳，日常均衡之选。" },
-      "pro": { "name": "Pro", "description": "推荐。多数工作的强力默认。" },
-      "max": { "name": "Max", "description": "能力最强，适合最难、最重要的任务。" }
+      "lite": {
+        "name": "Lite",
+        "description": "最快最省，适合简单、高频任务。"
+      },
+      "flash": {
+        "name": "Flash",
+        "description": "速度快、质量稳，日常均衡之选。"
+      },
+      "pro": {
+        "name": "Pro",
+        "description": "推荐。多数工作的强力默认。"
+      },
+      "max": {
+        "name": "Max",
+        "description": "能力最强，适合最难、最重要的任务。"
+      }
     },
     "taskRouting": {
       "heading": "任务路由",
       "hint": "让特定内部任务走某个预设；保持默认则使用默认预设。",
       "useDefault": "默认 · {preset}",
-      "title": { "name": "标题", "hint": "为新会话起名。" },
-      "summarize": { "name": "总结", "hint": "总结长内容。" },
-      "compaction": { "name": "压缩", "hint": "会话变长时压缩上下文。" }
+      "title": {
+        "name": "标题",
+        "hint": "为新会话起名。"
+      },
+      "summarize": {
+        "name": "总结",
+        "hint": "总结长内容。"
+      },
+      "compaction": {
+        "name": "压缩",
+        "hint": "会话变长时压缩上下文。"
+      }
     },
     "tierEnabled": "启用",
     "primary": "主模型",

@@ -442,6 +442,15 @@
   animation: scale-in var(--transition-duration-fast) var(--ease-out-quart) both;
 }
 
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

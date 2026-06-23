@@ -84,17 +84,20 @@ def _stringify_tool_result(result: Any) -> tuple[str, Any]:
     return str(result), None
 
 
+_ARTIFACT_PRODUCING_TOOLS = frozenset({"save_artifact", "generate_image"})
+
+
 def _artifact_event_from_tool_result(
     tool_name: str, is_error: bool, result_text: str
 ) -> dict[str, Any] | None:
-    """Build an artifact SSE dict from a save_artifact tool result, or None.
+    """Build an artifact SSE dict from a tool result that produces artifacts.
 
-    save_artifact returns ``{"action": ..., "artifact": {...}}`` as its result
-    content. We surface that as a standalone ``artifact`` event so the frontend
-    store is updated during the live run; the same dict is persisted to the run
-    event stream so reconnect/replay stays consistent.
+    Both save_artifact and generate_image return
+    ``{"action": ..., "artifact": {...}}`` as their result content.
+    We surface that as a standalone ``artifact`` event so the frontend
+    store is updated during the live run.
     """
-    if tool_name != "save_artifact" or is_error:
+    if tool_name not in _ARTIFACT_PRODUCING_TOOLS or is_error:
         return None
     try:
         parsed = json.loads(result_text)

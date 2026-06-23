@@ -1436,7 +1436,8 @@
     "addToWorkspace": "Add to workspace",
     "addToWorkspaceFailed": "Add to workspace failed",
     "addToWorkspaceVersionExists": "Version already exists. Bump the version in SKILL.md and try again.",
-    "retry": "Retry"
+    "retry": "Retry",
+    "imageGenerating": "Generating image…"
   },
   "workspaceCreate": {
     "nameLabel": "New workspace name",
@@ -1523,7 +1524,10 @@
         "name": "Flash",
         "description": "Fast with solid quality. A balanced everyday choice."
       },
-      "pro": { "name": "Pro", "description": "Recommended. Strong reasoning for most work." },
+      "pro": {
+        "name": "Pro",
+        "description": "Recommended. Strong reasoning for most work."
+      },
       "max": {
         "name": "Max",
         "description": "Most capable. For the hardest, highest-stakes tasks."
@@ -1533,9 +1537,18 @@
       "heading": "Task routing",
       "hint": "Route specific internal tasks through a preset. Leave on default to use the default preset.",
       "useDefault": "Default · {preset}",
-      "title": { "name": "Title", "hint": "Names new conversations." },
-      "summarize": { "name": "Summarize", "hint": "Summarizes long content." },
-      "compaction": { "name": "Compaction", "hint": "Compresses context when the chat gets long." }
+      "title": {
+        "name": "Title",
+        "hint": "Names new conversations."
+      },
+      "summarize": {
+        "name": "Summarize",
+        "hint": "Summarizes long content."
+      },
+      "compaction": {
+        "name": "Compaction",
+        "hint": "Compresses context when the chat gets long."
+      }
     },
     "tierEnabled": "Enabled",
     "primary": "Primary model",
