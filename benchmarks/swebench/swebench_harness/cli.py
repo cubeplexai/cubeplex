@@ -77,6 +77,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Delete the conversation after each task. Off by default — useful for "
         "debugging via the UI.",
     )
+    parser.add_argument(
+        "--egress-proxy",
+        default=os.environ.get("CUBEBOX_BENCH_EGRESS_PROXY"),
+        help="HTTP(S) proxy URL (e.g. http://192.168.1.215:7892) the agent should "
+        "tell git/pip to use. Workaround for sandboxes whose direct outbound to "
+        "GitHub is unstable. Defaults to $CUBEBOX_BENCH_EGRESS_PROXY.",
+    )
     args = parser.parse_args(argv)
 
     if not args.instances and args.limit is None:
@@ -135,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             model_key=args.model_key,
             thinking=args.thinking,
             cleanup_conversation=args.cleanup_conversation,
+            egress_proxy=args.egress_proxy,
         )
         append_prediction(predictions_path, result, model_name)
         summary = result.to_summary()

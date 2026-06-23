@@ -84,13 +84,17 @@ class CubeboxClient:
         content: str,
         model_key: str | None = None,
         thinking: str = "off",
-        stream_timeout: float = 1800.0,
+        stream_idle_timeout: float = 600.0,
     ) -> Iterator[dict[str, Any]]:
         """POST a user message, yield parsed SSE events until `done` or `error`.
 
-        Stream timeout defaults to 30 minutes — a single SWE-bench task can
-        take that long. The caller is expected to break out of iteration
-        once it has seen the `done` (or `error`) event.
+        ``stream_idle_timeout`` is passed to requests as its ``timeout``
+        when streaming, which behaves as an idle/read-timeout: if no
+        bytes arrive on the socket for this many seconds, requests raises
+        ``ReadTimeout``. The caller (runner.py) catches that and records
+        the task as a failure, so a stalled model upstream can't wedge
+        a whole sweep. Default 10 minutes is well above the longest
+        legitimate quiet period (a `pip install` resolving deps).
         """
         url = f"/api/v1/ws/{self.cfg.workspace_id}/conversations/{conversation_id}/messages"
         body: dict[str, Any] = {"content": content, "thinking": thinking}
@@ -101,7 +105,7 @@ class CubeboxClient:
             json=body,
             headers={"Accept": "text/event-stream"},
             stream=True,
-            timeout=stream_timeout,
+            timeout=stream_idle_timeout,
         ) as r:
             if r.status_code >= 400:
                 # Drain body so we can surface a useful error.

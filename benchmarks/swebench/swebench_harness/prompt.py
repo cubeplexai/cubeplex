@@ -31,8 +31,9 @@ WORKING DIRECTORY (everything you do MUST live under this path):
 
 PROCEDURE — execute every step. Use the `execute` tool for shell commands.
 
-1. Initialise sandbox directories:
+1. Initialise sandbox directories and (optionally) configure outbound proxy:
      mkdir -p /workspace/swebench/.cache /workspace/swebench/runs /workspace/swebench/venvs
+{proxy_setup_block}
 
 2. Initialise (or reuse) a shallow bare cache for {repo}. The cache only
    stores SHAs we have fetched so far — far smaller than a full clone,
@@ -102,11 +103,34 @@ count of `patch.diff`. Stop after that — do not run further commands.
 """
 
 
-def render_prompt(instance: SWEBenchInstance, *, workdir: str | None = None) -> str:
-    """Render the per-task user message that drives the agent."""
+_PROXY_BLOCK_TEMPLATE = """\
+   Configure git + pip to route through the egress HTTPS proxy
+   (cubebox's SandboxPolicy.egress_proxy is not auto-injected into the
+   sandbox env yet; this prompt sets it explicitly). Idempotent:
+     git config --global http.proxy  {egress_proxy}
+     git config --global https.proxy {egress_proxy}
+"""
+
+
+def render_prompt(
+    instance: SWEBenchInstance,
+    *,
+    workdir: str | None = None,
+    egress_proxy: str | None = None,
+) -> str:
+    """Render the per-task user message that drives the agent.
+
+    ``egress_proxy``: if given, the prompt instructs the agent to set
+    git http(s).proxy to this URL before fetching. Use when the sandbox
+    cannot reach github.com directly but can reach a proxy host.
+    """
     work = workdir or f"/workspace/swebench/runs/{instance.instance_id}"
     repo_slug = instance.repo.replace("/", "_")
     failing = "\n".join(f"  - {name}" for name in instance.fail_to_pass) or "  (none listed)"
+    if egress_proxy:
+        proxy_block = _PROXY_BLOCK_TEMPLATE.format(egress_proxy=egress_proxy)
+    else:
+        proxy_block = ""
     return TASK_TEMPLATE.format(
         instance_id=instance.instance_id,
         repo=instance.repo,
@@ -115,4 +139,5 @@ def render_prompt(instance: SWEBenchInstance, *, workdir: str | None = None) -> 
         problem_statement=instance.problem_statement.strip(),
         failing_tests_block=failing,
         workdir=work,
+        proxy_setup_block=proxy_block,
     )

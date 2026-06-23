@@ -74,6 +74,7 @@ def run_instance(
     model_key: str | None = None,
     thinking: str = "off",
     cleanup_conversation: bool = False,
+    egress_proxy: str | None = None,
 ) -> TaskResult:
     """Drive a single instance end-to-end and write artifacts under
     ``out_dir/tasks/<instance_id>/``.
@@ -87,7 +88,7 @@ def run_instance(
     task_dir = out_dir / "tasks" / instance.instance_id
     task_dir.mkdir(parents=True, exist_ok=True)
 
-    prompt = render_prompt(instance)
+    prompt = render_prompt(instance, egress_proxy=egress_proxy)
     (task_dir / "prompt.txt").write_text(prompt, encoding="utf-8")
 
     started = time.time()
