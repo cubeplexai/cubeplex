@@ -189,6 +189,14 @@ def test_done_state_uses_green_header() -> None:
     assert card["header"]["template"] == "green"
 
 
+def test_header_does_not_carry_bot_name() -> None:
+    state = _empty_state()
+    state.bot_name = "cubebox"
+    card = render(state)
+    title = card["header"]["title"]["content"]
+    assert "cubebox" not in title.lower()
+
+
 def test_sub_agent_row_rendered_above_tool_steps() -> None:
     from cubebox.im.feishu.card_model import SubAgentRow
 

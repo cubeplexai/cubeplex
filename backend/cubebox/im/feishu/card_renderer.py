@@ -193,16 +193,15 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
 def _header(state: CardState) -> dict[str, Any]:
     if state.error:
         template = "red"
-        subtitle = "运行失败"
+        title = "运行失败"
     elif state.finalized:
         template = "green"
-        subtitle = f"已完成 · {state.elapsed_ms / 1000:.1f}s" if state.elapsed_ms else "已完成"
+        title = f"已完成 · {state.elapsed_ms / 1000:.1f}s" if state.elapsed_ms else "已完成"
     else:
         template = "blue"
-        subtitle = "运行中…"
+        title = "运行中…"
     return {
-        "title": {"tag": "plain_text", "content": state.bot_name},
-        "subtitle": {"tag": "plain_text", "content": subtitle},
+        "title": {"tag": "plain_text", "content": title},
         "template": template,
     }
 
