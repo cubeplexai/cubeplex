@@ -67,9 +67,7 @@ class DefaultAuthProvider:
 
     async def _authenticate_bearer(self, request: Request) -> User | None:
         """If a Bearer token resolves to a known API key, return its owner."""
-        auth_header = request.headers.get("authorization") or request.headers.get(
-            "Authorization"
-        )
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
         if not auth_header:
             return None
         scheme, _, token = auth_header.partition(" ")
