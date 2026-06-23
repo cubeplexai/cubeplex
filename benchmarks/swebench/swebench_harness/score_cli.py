@@ -36,6 +36,13 @@ def main(argv: list[str] | None = None) -> int:
         "drops the per-instance one).",
     )
     parser.add_argument(
+        "--namespace",
+        default="none",
+        help="SWE-bench image namespace. Default 'none' BUILDS eval images locally "
+        "instead of pulling docker.io/swebench/* (reliable on flaky-docker.io "
+        "networks). Pass 'swebench' to pull the prebuilt images.",
+    )
+    parser.add_argument(
         "--instance-ids",
         nargs="*",
         default=None,
@@ -56,6 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         instance_ids=args.instance_ids,
         timeout=args.timeout,
         cache_level=args.cache_level,
+        namespace=args.namespace,
     )
     print()
     print(

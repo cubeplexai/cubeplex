@@ -74,8 +74,18 @@ def score(
     instance_ids: list[str] | None = None,
     timeout: int = 1800,
     cache_level: str = "env",
+    namespace: str = "none",
 ) -> ScoreResult:
-    """Score a single run directory. Blocks for the full scorer pipeline."""
+    """Score a single run directory. Blocks for the full scorer pipeline.
+
+    ``namespace='none'`` (the default here) forces SWE-bench to BUILD the
+    per-instance evaluation images locally from the base image instead of
+    PULLING the prebuilt ``docker.io/swebench/sweb.eval.*`` images. On a
+    network with flaky docker.io access this is the difference between
+    reliable scoring and a wall of TLS-handshake-timeout errors. The base
+    image build pulls ubuntu via whatever mirror the Docker daemon is
+    configured with, which is far more reliable here.
+    """
     predictions = run_dir / "predictions.jsonl"
     if not predictions.exists():
         raise FileNotFoundError(f"missing predictions: {predictions}")
@@ -95,6 +105,7 @@ def score(
         "--max_workers", str(max_workers),
         "--timeout", str(timeout),
         "--cache_level", cache_level,
+        "--namespace", namespace,
     ]
     if instance_ids:
         cmd += ["--instance_ids", *instance_ids]
