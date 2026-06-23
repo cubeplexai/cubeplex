@@ -1,16 +1,15 @@
-"""E2E tests for the resolve_im_conversation helper (Phase 2 / Task 4).
+"""E2E tests for the resolve_im_conversation helper.
 
-The helper factors the shared-mode + thread-link conversation resolution
-out of ``im/inbound.py`` so schedule/trigger dispatchers can reuse it. The
-three tests below exercise the three branches of ``get_or_create_thread_link``
-that matter for callers:
+Routing/topic behavior is now driven by account-level ``IMBotSettings``
+(``account.config["bot_settings"]``) — the per-channel ``IMChannelBinding``
+is gone. These tests exercise:
 
-- Link exists and the underlying ``Conversation`` is alive → reuse it,
-  no new rows.
-- No link → mint a fresh ``Conversation`` and ``IMThreadLink``; in shared
-  mode also lazily create the ``Topic`` and seed participants.
-- Link exists but the ``Conversation`` has been soft-deleted (``deleted_at``
-  set) → mint a fresh conversation and repoint the existing link.
+- Shared routing → lazy ``Topic`` (owned by the bot's acting user) + link +
+  conversation, with ``attributes.im`` stamped.
+- Isolated + topic mode → a per-sender ``Topic`` owned by the sender.
+- Flat mode → link reuse and soft-delete repoint with no Topic.
+- ``/new`` (``reset_im_conversation``) rotates the conversation under the
+  same Topic while leaving the old one as history.
 """
 
 from collections.abc import AsyncIterator
@@ -26,13 +25,14 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+from cubebox.im.bot_settings import IMBotSettings, store_bot_settings
 from cubebox.im.conversation_resolver import (
     ResolvedIMConversation,
+    reset_im_conversation,
     resolve_im_conversation,
 )
 from cubebox.models.conversation import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_channel_binding import IMChannelBinding
 from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
 from cubebox.models.topic import Topic, TopicParticipant
 from tests.e2e.conftest import _build_database_url
@@ -53,6 +53,12 @@ _CRED = "cred-resolve-im-001"
 _ACCOUNT = "imac-resolve-im-001"
 _EXT_ACCT = "cli_resolve_im"
 _CHANNEL = "oc_resolve_ch1"
+
+
+def _with_settings(account: IMConnectorAccount, settings: IMBotSettings) -> IMConnectorAccount:
+    """Mutate the in-memory account's config; resolve reads it directly."""
+    account.config = store_bot_settings(account.config, settings)
+    return account
 
 
 @pytest_asyncio.fixture
@@ -101,6 +107,12 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
                     text("UPDATE conversations SET topic_id = NULL WHERE workspace_id = :ws"),
                     {"ws": _WS},
                 )
+                # im_thread_links.topic_id FKs topics — null it before deleting
+                # topics, otherwise the topic DELETE below trips the FK.
+                await session.execute(
+                    text("UPDATE im_thread_links SET topic_id = NULL WHERE account_id = ANY(:ids)"),
+                    {"ids": [_ACCOUNT]},
+                )
                 await session.execute(
                     text(
                         "DELETE FROM topic_participants WHERE topic_id IN "
@@ -109,19 +121,8 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
                     {"org": _ORG},
                 )
                 await session.execute(
-                    text(
-                        "UPDATE im_channel_bindings SET topic_id = NULL "
-                        "WHERE account_id = ANY(:ids)"
-                    ),
-                    {"ids": [_ACCOUNT]},
-                )
-                await session.execute(
                     text("DELETE FROM topics WHERE org_id = :org"),
                     {"org": _ORG},
-                )
-                await session.execute(
-                    text("DELETE FROM im_channel_bindings WHERE account_id = ANY(:ids)"),
-                    {"ids": [_ACCOUNT]},
                 )
                 await im_cleanup(
                     session,
@@ -137,26 +138,13 @@ async def _seeded() -> AsyncIterator[tuple[async_sessionmaker[AsyncSession], IMC
         await engine.dispose()
 
 
-async def test_creates_fresh_when_link_missing(
+async def test_shared_creates_topic_and_link(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
-    """No prior IMThreadLink: helper mints a new Conversation + link, and in
-    shared mode also lazily creates the Topic + participant rows."""
+    """Shared routing: mint a Conversation + link and lazily create the Topic
+    (owned by the bot's acting user) stamped with attributes.im."""
     maker, account = _seeded
-
-    async with maker() as session:
-        binding = IMChannelBinding(
-            org_id=_ORG,
-            workspace_id=_WS,
-            account_id=_ACCOUNT,
-            channel_id=_CHANNEL,
-            channel_name="Resolve Test Group",
-            mode="shared",
-            sandbox_mode=None,
-            topic_id=None,
-        )
-        session.add(binding)
-        await session.commit()
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
 
     async with maker() as session:
         resolved = await resolve_im_conversation(
@@ -181,18 +169,17 @@ async def test_creates_fresh_when_link_missing(
             await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
         ).scalar_one()
         assert link.conversation_id == resolved.conversation_id
-
-        binding_row = (
-            await session.execute(
-                select(IMChannelBinding).where(IMChannelBinding.account_id == _ACCOUNT)
-            )
-        ).scalar_one()
-        assert binding_row.topic_id == resolved.topic_id
+        # The Topic anchor now lives on the link itself (survives /new).
+        assert link.topic_id == resolved.topic_id
 
         topic = (
-            await session.execute(select(Topic).where(Topic.id == binding_row.topic_id))
+            await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
         ).scalar_one()
-        assert topic.title == "Resolve Test Group"
+        # Group title falls back to the channel id (no per-channel name yet).
+        assert topic.title == _CHANNEL
+        assert topic.creator_user_id == _USER  # acting user owns shared topics
+        assert topic.attributes.get("im", {}).get("account_id") == _ACCOUNT
+        assert topic.attributes["im"]["scope_kind"] == "channel"
 
         owner_tp = (
             await session.execute(
@@ -211,6 +198,7 @@ async def test_creates_fresh_when_link_missing(
         ).scalar_one()
         assert conv.topic_id == topic.id
         assert conv.is_group_chat is True
+        assert conv.attributes.get("im", {}).get("account_id") == _ACCOUNT
 
         cp = (
             await session.execute(
@@ -223,26 +211,58 @@ async def test_creates_fresh_when_link_missing(
         assert cp is not None
 
 
-async def test_reuses_link_when_present(
+async def test_isolated_topic_mode_creates_per_sender_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
-    """Second resolution with the same (account, channel, scope_key)
-    reuses the live IMThreadLink → same conversation_id, no extra links."""
+    """Isolated + topic mode (the default): per-sender Topic owned by the
+    sender, conversation stays personal (is_group_chat False)."""
     maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
 
     async with maker() as session:
-        binding = IMChannelBinding(
-            org_id=_ORG,
-            workspace_id=_WS,
-            account_id=_ACCOUNT,
+        resolved = await resolve_im_conversation(
+            session,
+            account,
             channel_id=_CHANNEL,
-            channel_name="Reuse Test",
-            mode="isolated",
-            sandbox_mode=None,
-            topic_id=None,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="hi",
+            origin="inbound",
         )
-        session.add(binding)
         await session.commit()
+
+    assert resolved.is_group_chat is False
+    assert resolved.topic_id is not None
+
+    async with maker() as session:
+        topic = (
+            await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
+        ).scalar_one()
+        assert topic.creator_user_id == _USER  # sender owns their own topic
+        # DM title is the bot's display name.
+        assert topic.title == "cubebox"
+        assert topic.attributes["im"]["scope_kind"] == "dm"
+        owner_tp = (
+            await session.execute(
+                select(TopicParticipant).where(TopicParticipant.topic_id == topic.id)
+            )
+        ).scalar_one()
+        assert owner_tp.user_id == _USER
+        assert owner_tp.role == "owner"
+
+        link = (
+            await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
+        ).scalar_one()
+        assert link.topic_id == resolved.topic_id
+
+
+async def test_flat_mode_reuses_link_no_topic(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Flat mode: no Topic; the live link is reused on the second resolve."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
 
     async with maker() as session:
         r1 = await resolve_im_conversation(
@@ -271,8 +291,7 @@ async def test_reuses_link_when_present(
         await session.commit()
 
     assert r1.conversation_id == r2.conversation_id
-    assert r1.is_group_chat is False
-    assert r2.is_group_chat is False
+    assert r1.topic_id is None and r2.topic_id is None
 
     async with maker() as session:
         link_count = (
@@ -293,26 +312,13 @@ async def test_reuses_link_when_present(
         assert conv_count == 1
 
 
-async def test_mints_new_conv_when_underlying_soft_deleted(
+async def test_flat_mode_mints_new_conv_when_soft_deleted(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
-    """Link exists but the bound Conversation is soft-deleted (deleted_at
-    set) → helper mints a fresh conv and repoints the link."""
+    """Flat mode: link exists but the bound Conversation is soft-deleted →
+    mint a fresh conv and repoint the link."""
     maker, account = _seeded
-
-    async with maker() as session:
-        binding = IMChannelBinding(
-            org_id=_ORG,
-            workspace_id=_WS,
-            account_id=_ACCOUNT,
-            channel_id=_CHANNEL,
-            channel_name="Soft-Delete Test",
-            mode="isolated",
-            sandbox_mode=None,
-            topic_id=None,
-        )
-        session.add(binding)
-        await session.commit()
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
 
     async with maker() as session:
         r1 = await resolve_im_conversation(
@@ -361,3 +367,62 @@ async def test_mints_new_conv_when_underlying_soft_deleted(
             )
         ).scalar_one()
         assert link.conversation_id == r2.conversation_id
+
+
+async def test_new_rotates_conversation_under_same_topic(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """/new in topic mode keeps the Topic and the old conversation, repointing
+    the link to a fresh conversation under that same Topic."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="before /new",
+            origin="inbound",
+        )
+        await session.commit()
+    first_conv, topic_id = r1.conversation_id, r1.topic_id
+    assert topic_id is not None
+
+    async with maker() as session:
+        outcome = await reset_im_conversation(
+            session, account_id=_ACCOUNT, channel_id=_CHANNEL, scope_key="dm"
+        )
+        await session.commit()
+    assert outcome == "rotated"
+
+    async with maker() as session:
+        link = (
+            await session.execute(
+                select(IMThreadLink).where(
+                    IMThreadLink.account_id == _ACCOUNT,
+                    IMThreadLink.channel_id == _CHANNEL,
+                    IMThreadLink.scope_key == "dm",
+                )
+            )
+        ).scalar_one()
+        # New conversation, same topic, link still anchored to the topic.
+        assert link.conversation_id != first_conv
+        assert link.topic_id == topic_id
+
+        new_conv = (
+            await session.execute(
+                select(Conversation).where(Conversation.id == link.conversation_id)
+            )
+        ).scalar_one()
+        assert new_conv.topic_id == topic_id
+
+        # The old conversation survives as history (not soft-deleted).
+        old_conv = (
+            await session.execute(select(Conversation).where(Conversation.id == first_conv))
+        ).scalar_one()
+        assert old_conv.deleted_at is None
+        assert old_conv.topic_id == topic_id

@@ -6,11 +6,13 @@ message to ``ingest_inbound_event`` — otherwise the message gets routed
 to the agent as ordinary text, which politely acknowledges the request
 without actually rotating the conversation.
 
-The reset is implemented by deleting the ``IMThreadLink`` row keyed on
-``(account_id, channel_id, scope_key)``. The next inbound message in the
-same scope will hit ``conversation_resolver`` with no link and create a
-fresh ``Conversation``. Mirrors the Discord ``/new`` handler at
-``cubebox/im/discord/commands.py``.
+The reset is mode-aware (see ``reset_im_conversation``):
+
+- ``flat`` mode (no Topic): delete the ``IMThreadLink``; the next message
+  hits ``conversation_resolver`` with no link and starts fresh. Mirrors the
+  Discord ``/new`` handler at ``cubebox/im/discord/commands.py``.
+- ``topic`` mode: repoint the link to a fresh ``Conversation`` under the
+  same Topic so the old conversation stays as history under the Topic.
 """
 
 from __future__ import annotations
@@ -20,9 +22,8 @@ from typing import Any
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlmodel import select
 
-from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
+from cubebox.models.im_connector import IMConnectorAccount
 
 _RESET_RE = _re.compile(r"^\s*(?:/new|/reset|新对话)\s*$", _re.IGNORECASE)
 
@@ -39,7 +40,9 @@ async def handle_reset_command(
     session_maker: async_sessionmaker[AsyncSession],
     connector: Any,
 ) -> None:
-    """Delete the IMThreadLink for the current scope and reply confirmation."""
+    """Reset the current scope's conversation and reply with confirmation."""
+    from cubebox.im.conversation_resolver import reset_im_conversation
+
     channel_id = event.channel_id or ""
     scope_key = event.scope_key or ""
     if not channel_id or not scope_key:
@@ -49,26 +52,22 @@ async def handle_reset_command(
             )
         return
 
-    deleted = False
     async with session_maker() as session:
-        stmt = select(IMThreadLink).where(
-            IMThreadLink.account_id == account.id,
-            IMThreadLink.channel_id == channel_id,
-            IMThreadLink.scope_key == scope_key,
+        outcome = await reset_im_conversation(
+            session,
+            account_id=account.id,
+            channel_id=channel_id,
+            scope_key=scope_key,
         )
-        link = (await session.execute(stmt)).scalar_one_or_none()
-        if link is not None:
-            await session.delete(link)
-            await session.commit()
-            deleted = True
+        await session.commit()
 
     if connector is None:
         logger.warning("[Feishu] no connector to confirm /new reset")
         return
 
     msg = (
-        "✅ 新对话已开始。下一条消息将创建新的会话。"
-        if deleted
-        else "ℹ️ 当前还没有进行中的会话，直接发送消息即可开始新对话。"
+        "ℹ️ 当前还没有进行中的会话，直接发送消息即可开始新对话。"
+        if outcome == "none"
+        else "✅ 新对话已开始。"
     )
     await connector.send_to_chat(channel_id, event.reply_to_id, msg)

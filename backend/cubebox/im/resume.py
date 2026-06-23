@@ -107,20 +107,9 @@ async def resume_paused_run(
             from sqlalchemy import select as _select
 
             from cubebox.db.engine import async_session_maker as _sm
-            from cubebox.models.im_channel_binding import IMChannelBinding
             from cubebox.models.topic import Topic
 
             async with _sm() as _sess:
-                binding_row = (
-                    await _sess.execute(
-                        _select(IMChannelBinding).where(
-                            IMChannelBinding.topic_id == topic_id,  # type: ignore[arg-type]
-                        )
-                    )
-                ).scalar_one_or_none()
-                im_bound = binding_row is not None
-                if binding_row is not None:
-                    sandbox_mode = binding_row.sandbox_mode
                 topic_row = (
                     await _sess.execute(
                         _select(Topic).where(
@@ -129,6 +118,9 @@ async def resume_paused_run(
                     )
                 ).scalar_one_or_none()
                 if topic_row is not None:
+                    # IM-origin marker is attributes["im"]; sandbox from the topic.
+                    im_bound = "im" in (topic_row.attributes or {})
+                    sandbox_mode = topic_row.sandbox_mode
                     topic_creator_user_id = topic_row.creator_user_id
 
         if not im_bound:

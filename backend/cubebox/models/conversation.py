@@ -1,9 +1,9 @@
 """Conversation model."""
 
 from datetime import datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index, text
+from sqlalchemy import JSON, Column, DateTime, Index, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
@@ -51,6 +51,9 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
     # the API/runtime layer).
     model_key: str | None = Field(default=None, max_length=64)
     thinking: str = Field(default="medium", max_length=16)
+    # Source metadata (e.g. IM-bot linkage under an "im" key). Mirrors
+    # Topic.attributes; see docs/dev/specs/2026-06-23-im-bot-settings-design.md.
+    attributes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     deleted_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

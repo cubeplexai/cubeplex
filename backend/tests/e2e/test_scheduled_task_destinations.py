@@ -21,7 +21,6 @@ import cubebox.db as _db
 from cubebox.models import IMConnectorAccount, Workspace
 from cubebox.models.conversation import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_channel_binding import IMChannelBinding
 from cubebox.models.im_connector import (
     IMRunQueueItem,
     IMThreadLink,
@@ -108,32 +107,18 @@ async def _seed_im_account(
         return account.id
 
 
-async def _seed_binding(
-    *,
-    org_id: str,
-    ws_id: str,
-    account_id: str,
-    channel_id: str,
-    mode: str = "isolated",
-    topic_id: str | None = None,
-    channel_name: str = "test-channel",
-    sandbox_mode: str | None = None,
-) -> str:
+async def _set_routing_mode(*, account_id: str, mode: str = "isolated") -> None:
+    """Set the bot's account-level routing mode (replaces per-channel binding)."""
+    from cubebox.im.bot_settings import IMBotSettings, store_bot_settings
+
     async with _db.async_session_maker() as session:
-        binding = IMChannelBinding(
-            org_id=org_id,
-            workspace_id=ws_id,
-            account_id=account_id,
-            channel_id=channel_id,
-            channel_name=channel_name,
-            mode=mode,
-            sandbox_mode=sandbox_mode,
-            topic_id=topic_id,
+        account = await session.get(IMConnectorAccount, account_id)
+        assert account is not None
+        account.config = store_bot_settings(
+            account.config, IMBotSettings(routing_mode=mode)  # type: ignore[arg-type]
         )
-        session.add(binding)
+        session.add(account)
         await session.commit()
-        await session.refresh(binding)
-        return binding.id
 
 
 async def _seed_existing_link(
@@ -308,11 +293,6 @@ async def cleanup_destinations(
         await session.execute(
             delete(IMThreadLink).where(
                 IMThreadLink.workspace_id == ws_id  # type: ignore[arg-type]
-            )
-        )
-        await session.execute(
-            delete(IMChannelBinding).where(
-                IMChannelBinding.workspace_id == ws_id  # type: ignore[arg-type]
             )
         )
         await session.execute(
@@ -635,18 +615,7 @@ async def test_im_channel_shared_mode_inherits_binding_topic(
     channel_id = "C-shared"
     scope_key = "ch"
     scope_kind = "channel"
-
-    # Pre-create the shared topic so we can assert binding.topic_id reuse.
-    topic_id = await _create_topic(client, ws_id, "shared-topic")
-    await _seed_binding(
-        org_id=org_id,
-        ws_id=ws_id,
-        account_id=account_id,
-        channel_id=channel_id,
-        mode="shared",
-        topic_id=topic_id,
-        channel_name="shared-binding",
-    )
+    await _set_routing_mode(account_id=account_id, mode="shared")
 
     task_id = await _create_schedule_row(
         org_id=org_id,
@@ -672,7 +641,7 @@ async def test_im_channel_shared_mode_inherits_binding_topic(
         assert run.state == "succeeded"
         conv = await session.get(Conversation, run.conversation_id)
         assert conv is not None
-        assert conv.topic_id == topic_id
+        assert conv.topic_id is not None  # landed under the channel's topic, not root
         assert conv.is_group_chat is True
 
         # Owner participant was inserted by the resolver.

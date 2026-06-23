@@ -24,7 +24,6 @@ from cubebox.models import IMConnectorAccount, Workspace
 from cubebox.models.conversation import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
 from cubebox.models.credential import Credential
-from cubebox.models.im_channel_binding import IMChannelBinding
 from cubebox.models.im_connector import (
     IMRunQueueItem,
     IMThreadLink,
@@ -110,28 +109,17 @@ async def _seed_im_account(
         return account.id
 
 
-async def _seed_binding(
-    *,
-    org_id: str,
-    ws_id: str,
-    account_id: str,
-    channel_id: str,
-    mode: str,
-    topic_id: str | None = None,
-    channel_name: str = "trig-binding",
-) -> None:
+async def _set_routing_mode(*, account_id: str, mode: str) -> None:
+    """Set the bot's account-level routing mode (replaces per-channel binding)."""
+    from cubebox.im.bot_settings import IMBotSettings, store_bot_settings
+
     async with _db.async_session_maker() as session:
-        session.add(
-            IMChannelBinding(
-                org_id=org_id,
-                workspace_id=ws_id,
-                account_id=account_id,
-                channel_id=channel_id,
-                channel_name=channel_name,
-                mode=mode,
-                topic_id=topic_id,
-            )
+        account = await session.get(IMConnectorAccount, account_id)
+        assert account is not None
+        account.config = store_bot_settings(
+            account.config, IMBotSettings(routing_mode=mode)  # type: ignore[arg-type]
         )
+        session.add(account)
         await session.commit()
 
 
@@ -291,11 +279,6 @@ async def cleanup_trigger_destinations(
         await session.execute(
             delete(IMThreadLink).where(
                 IMThreadLink.workspace_id == ws_id  # type: ignore[arg-type]
-            )
-        )
-        await session.execute(
-            delete(IMChannelBinding).where(
-                IMChannelBinding.workspace_id == ws_id  # type: ignore[arg-type]
             )
         )
         await session.execute(
@@ -587,12 +570,12 @@ async def test_trigger_im_channel_creates_fresh_after_new(
 
 
 @pytest.mark.asyncio
-async def test_trigger_im_channel_shared_mode_inherits_binding_topic(
+async def test_trigger_im_channel_shared_mode_lands_conv_in_topic(
     cleanup_trigger_destinations: tuple[httpx.AsyncClient, str],
 ) -> None:
     """Bug it catches: trigger pipeline drops shared-mode topic linkage
     on its im_channel path — the new conv lands at the workspace root
-    instead of under the channel's topic."""
+    instead of under the channel's (auto-created) topic."""
     client, ws_id = cleanup_trigger_destinations
     org_id = await _resolve_org_id(ws_id)
     user_id = await _get_my_user_id(client)
@@ -601,15 +584,7 @@ async def test_trigger_im_channel_shared_mode_inherits_binding_topic(
     channel_id = "C-trig-shared"
     scope_key = "ch"
     scope_kind = "channel"
-    topic_id = await _create_topic(client, ws_id, "trig-shared-topic")
-    await _seed_binding(
-        org_id=org_id,
-        ws_id=ws_id,
-        account_id=account_id,
-        channel_id=channel_id,
-        mode="shared",
-        topic_id=topic_id,
-    )
+    await _set_routing_mode(account_id=account_id, mode="shared")
 
     trigger = await _seed_trigger_row(
         org_id=org_id,
@@ -637,7 +612,7 @@ async def test_trigger_im_channel_shared_mode_inherits_binding_topic(
         assert updated.status == "accepted"
         conv = await session.get(Conversation, updated.resulting_conversation_id)
         assert conv is not None
-        assert conv.topic_id == topic_id
+        assert conv.topic_id is not None  # landed under the channel's topic, not root
         assert conv.is_group_chat is True
 
         cp = (

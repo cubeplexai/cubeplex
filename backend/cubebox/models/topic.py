@@ -1,9 +1,9 @@
 """Topic and TopicParticipant models."""
 
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from sqlalchemy import Column, DateTime, Index, UniqueConstraint, text
+from sqlalchemy import JSON, Column, DateTime, Index, UniqueConstraint, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin, org_scope_index
@@ -20,6 +20,11 @@ class Topic(CubeboxBase, OrgScopedMixin, table=True):
     creator_user_id: str = Field(foreign_key="users.id", max_length=20)
     title: str = Field(max_length=255)
     sandbox_mode: str | None = Field(default=None, max_length=20)
+    # Source metadata. IM-created topics carry an "im" sub-object (platform,
+    # account_id, bot_name, bot_avatar_url, channel_name, scope_kind); its
+    # presence is the IM-origin marker read by im/worker.py + im/resume.py.
+    # See docs/dev/specs/2026-06-23-im-bot-settings-design.md.
+    attributes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     max_participants: int = Field(default=20)
     is_archived: bool = Field(default=False)
     is_pinned: bool = Field(default=False)

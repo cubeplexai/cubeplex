@@ -49,8 +49,8 @@ async def session_maker() -> async_sessionmaker[AsyncSession]:
         await s.execute(
             text(
                 "INSERT INTO conversations (id, org_id, workspace_id, "
-                "creator_user_id, title, created_at, updated_at) VALUES "
-                "(:id, :org, :ws, :u, 'rta', NOW(), NOW()) "
+                "creator_user_id, title, is_group_chat, created_at, updated_at) VALUES "
+                "(:id, :org, :ws, :u, 'rta', false, NOW(), NOW()) "
                 "ON CONFLICT (id) DO NOTHING"
             ),
             {"id": _CONV_ID, "org": _ORG_ID, "ws": _WS_ID, "u": _USER_ID},

@@ -25,23 +25,27 @@ async def lookup_binding_mode(
     account_id: str,
     channel_id: str,
 ) -> BindingMode:
-    """Look up the binding mode for a (account, channel) pair.
+    """The bot's routing mode, read from account-level ``IMBotSettings``.
 
-    Returns ``'isolated'`` if no binding row exists.
+    Routing is uniform per bot (not per channel), so ``channel_id`` is
+    ignored — kept on the signature for caller compatibility. Returns
+    ``'isolated'`` if the account is missing.
     """
+    del channel_id  # routing is account-level, not per-channel
     from sqlmodel import col, select
 
-    from cubebox.models.im_channel_binding import IMChannelBinding
+    from cubebox.im.bot_settings import load_bot_settings
+    from cubebox.models.im_connector import IMConnectorAccount
 
-    stmt = select(IMChannelBinding).where(
-        col(IMChannelBinding.account_id) == account_id,
-        col(IMChannelBinding.channel_id) == channel_id,
-    )
     async with session_maker() as session:
-        binding = (await session.execute(stmt)).scalar_one_or_none()
-    if binding is not None and binding.mode == "shared":
-        return "shared"
-    return "isolated"
+        account = (
+            await session.execute(
+                select(IMConnectorAccount).where(col(IMConnectorAccount.id) == account_id)
+            )
+        ).scalar_one_or_none()
+    if account is None:
+        return "isolated"
+    return load_bot_settings(account.config).routing_mode
 
 
 async def is_shared_mode_for_tailer(
@@ -50,38 +54,13 @@ async def is_shared_mode_for_tailer(
     channel_id: str,
     conversation_id: str,
 ) -> bool:
-    """Determine shared mode for an outbound tailer.
+    """Whether the bot is in shared routing mode (account-level).
 
-    Primary: (account_id, channel_id) binding lookup.
-    Fallback: if the conversation has a topic_id, check binding by topic_id.
-    Handles Discord threads where channel_id is the thread ID, not the
-    parent channel that carries the binding.
+    ``channel_id`` / ``conversation_id`` are no longer load-bearing now that
+    routing is uniform per bot; kept for caller compatibility.
     """
-    bm = await lookup_binding_mode(session_maker, account_id, channel_id)
-    if bm == "shared":
-        return True
-
-    from sqlmodel import col, select
-
-    from cubebox.models.conversation import Conversation
-    from cubebox.models.im_channel_binding import IMChannelBinding
-
-    async with session_maker() as session:
-        conv = (
-            await session.execute(
-                select(Conversation).where(col(Conversation.id) == conversation_id)
-            )
-        ).scalar_one_or_none()
-        if conv is not None and conv.topic_id is not None:
-            binding = (
-                await session.execute(
-                    select(IMChannelBinding).where(
-                        col(IMChannelBinding.topic_id) == conv.topic_id,
-                    )
-                )
-            ).scalar_one_or_none()
-            return binding is not None and binding.mode == "shared"
-    return False
+    del conversation_id
+    return (await lookup_binding_mode(session_maker, account_id, channel_id)) == "shared"
 
 
 def make_participant_scope(sender_ref: str) -> str:

@@ -8,23 +8,21 @@ in?" — including the lazy ``Topic`` creation for shared bindings, the
 participant top-up for late joiners, and the soft-delete-driven repoint
 inside ``get_or_create_thread_link``.
 
-Side effects mirror inbound verbatim:
+Side effects:
 
-1. Look up ``IMChannelBinding(account_id, channel_id)`` to detect
-   shared-mode / sandbox-mode / topic linkage.
-2. Shared mode + no topic yet: create ``Topic``, set ``binding.topic_id``,
-   insert owner ``TopicParticipant`` for ``account.acting_user_id`` and a
-   member row for ``effective_user_id`` when different.
-3. Shared mode + existing topic: auto-join ``effective_user_id`` as a
-   ``TopicParticipant`` if missing.
-4. ``get_or_create_thread_link`` with a closure that mints a new
-   ``Conversation`` (carrying ``topic_id`` + ``is_group_chat=is_shared``)
-   and inserts a ``ConversationParticipant`` for ``effective_user_id`` when
-   shared.
-5. If the link was already present and we're in shared mode: idempotent
-   top-up of ``ConversationParticipant`` + ``TopicParticipant`` for the
-   sender — covers late joiners whose first message arrives after the
-   thread link was created by someone else.
+1. Read account-level ``IMBotSettings`` (``routing_mode`` isolated/shared,
+   ``topic_mode`` topic/flat, ``sandbox_mode``) off ``account.config``.
+   Routing is uniform per bot — no per-channel binding.
+2. The Topic anchor lives on ``IMThreadLink.topic_id`` and survives ``/new``.
+   Reuse an existing scope's topic; only mint a new ``Topic`` (stamped with
+   ``attributes.im`` source metadata) when the scope has none yet. Owner is
+   the bot (shared) or the sender (isolated, "各自名下").
+3. ``get_or_create_thread_link`` with a closure that mints a new
+   ``Conversation`` (carrying ``topic_id`` + ``attributes.im`` +
+   ``is_group_chat=is_shared``). Backfill ``link.topic_id`` afterwards.
+4. Shared mode: idempotent top-up of ``ConversationParticipant`` +
+   ``TopicParticipant`` for the sender — covers late joiners whose first
+   message arrives after the thread link was created by someone else.
 
 The caller owns the surrounding transaction — this helper only ``flush``es,
 never ``commit``s.
@@ -36,10 +34,16 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.im.bot_settings import (
+    bot_display_name,
+    build_im_attributes,
+    im_topic_title,
+    load_bot_settings,
+    wants_topic,
+)
 from cubebox.models.conversation import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.models.im_connector import IMConnectorAccount
+from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
 from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.repositories.im_connector import get_or_create_thread_link
 
@@ -75,69 +79,59 @@ async def resolve_im_conversation(
     """
     del origin  # currently unused; reserved for future observability.
 
-    binding = (
+    settings = load_bot_settings(account.config)
+    is_shared = settings.routing_mode == "shared"
+    should_topic = wants_topic(settings)
+    sandbox_mode: str | None = settings.sandbox_mode
+
+    # Source metadata stamped on both the Topic and the Conversation. Its
+    # presence under "im" is the IM-origin marker read by worker/resume.
+    bot_name = bot_display_name(account.config)
+    # PR1: channel_name is not yet fetched from the platform — group topics
+    # fall back to the channel id. Lazy fetch is a follow-up (see spec).
+    channel_name = None if scope_kind == "dm" else channel_id
+    im_attrs = build_im_attributes(
+        platform=account.platform,
+        account_id=account.id,
+        scope_kind=scope_kind,
+        bot_name=bot_name,
+        bot_avatar_url=None,
+        channel_id=channel_id,
+        channel_name=channel_name,
+    )
+
+    # The Topic anchor lives on the IMThreadLink and survives /new (which
+    # rotates conversation_id but keeps topic_id). Reuse it across rotation;
+    # only mint a new Topic when this scope has none yet.
+    existing_link = (
         await session.execute(
-            select(IMChannelBinding).where(
-                IMChannelBinding.account_id == account.id,  # type: ignore[arg-type]
-                IMChannelBinding.channel_id == channel_id,  # type: ignore[arg-type]
+            select(IMThreadLink).where(
+                IMThreadLink.account_id == account.id,  # type: ignore[arg-type]
+                IMThreadLink.channel_id == channel_id,  # type: ignore[arg-type]
+                IMThreadLink.scope_key == scope_key,  # type: ignore[arg-type]
             )
         )
     ).scalar_one_or_none()
+    topic_id: str | None = existing_link.topic_id if existing_link is not None else None
 
-    is_shared = binding is not None and binding.mode == "shared"
-    topic_id: str | None = None
-    sandbox_mode: str | None = binding.sandbox_mode if binding is not None else None
-
-    if is_shared:
-        assert binding is not None  # mypy narrowing
-        if binding.topic_id is None:
-            topic = Topic(
-                org_id=account.org_id,
-                workspace_id=account.workspace_id,
-                creator_user_id=account.acting_user_id,
-                title=binding.channel_name or channel_id,
-                sandbox_mode=binding.sandbox_mode or "dedicated",
-                max_participants=100,
-            )
-            session.add(topic)
-            await session.flush()
-            binding.topic_id = topic.id
-            session.add(binding)
-            session.add(
-                TopicParticipant(
-                    topic_id=topic.id,
-                    user_id=account.acting_user_id,
-                    role="owner",
-                )
-            )
-            if effective_user_id != account.acting_user_id:
-                session.add(
-                    TopicParticipant(
-                        topic_id=topic.id,
-                        user_id=effective_user_id,
-                        role="member",
-                    )
-                )
-            await session.flush()
-        else:
-            existing_tp = (
-                await session.execute(
-                    select(TopicParticipant).where(
-                        TopicParticipant.topic_id == binding.topic_id,  # type: ignore[arg-type]
-                        TopicParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing_tp is None:
-                session.add(
-                    TopicParticipant(
-                        topic_id=binding.topic_id,
-                        user_id=effective_user_id,
-                        role="member",
-                    )
-                )
-                await session.flush()
-        topic_id = binding.topic_id
+    if should_topic and topic_id is None:
+        topic = Topic(
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+            creator_user_id=account.acting_user_id if is_shared else effective_user_id,
+            title=im_topic_title(
+                scope_kind=scope_kind, bot_name=bot_name, channel_name=channel_name
+            ),
+            sandbox_mode=sandbox_mode or "dedicated",
+            attributes=dict(im_attrs),
+            max_participants=100 if is_shared else 20,
+        )
+        session.add(topic)
+        await session.flush()
+        topic_id = topic.id
+        owner_uid = account.acting_user_id if is_shared else effective_user_id
+        session.add(TopicParticipant(topic_id=topic_id, user_id=owner_uid, role="owner"))
+        await session.flush()
 
     async def _make_conversation_id() -> str:
         conv = Conversation(
@@ -147,6 +141,7 @@ async def resolve_im_conversation(
             title=(title_hint[:80] or "IM conversation"),
             topic_id=topic_id,
             is_group_chat=is_shared,
+            attributes=dict(im_attrs),
         )
         session.add(conv)
         await session.flush()
@@ -162,7 +157,7 @@ async def resolve_im_conversation(
             await session.flush()
         return conv.id
 
-    link, created = await get_or_create_thread_link(
+    link, _created = await get_or_create_thread_link(
         session,
         org_id=account.org_id,
         workspace_id=account.workspace_id,
@@ -173,43 +168,21 @@ async def resolve_im_conversation(
         make_conversation_id=_make_conversation_id,
     )
 
-    if not created and is_shared:
-        assert binding is not None
-        existing_cp = (
-            await session.execute(
-                select(ConversationParticipant).where(
-                    ConversationParticipant.conversation_id == link.conversation_id,  # type: ignore[arg-type]
-                    ConversationParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
-                )
-            )
-        ).scalar_one_or_none()
-        if existing_cp is None:
-            session.add(
-                ConversationParticipant(
-                    org_id=account.org_id,
-                    workspace_id=account.workspace_id,
-                    conversation_id=link.conversation_id,
-                    user_id=effective_user_id,
-                )
-            )
-        if binding.topic_id is not None:
-            existing_tp = (
-                await session.execute(
-                    select(TopicParticipant).where(
-                        TopicParticipant.topic_id == binding.topic_id,  # type: ignore[arg-type]
-                        TopicParticipant.user_id == effective_user_id,  # type: ignore[arg-type]
-                    )
-                )
-            ).scalar_one_or_none()
-            if existing_tp is None:
-                session.add(
-                    TopicParticipant(
-                        topic_id=binding.topic_id,
-                        user_id=effective_user_id,
-                        role="member",
-                    )
-                )
-        await session.flush()
+    # Backfill the anchor onto the link (new links, or links that predate
+    # topic_mode being enabled).
+    if topic_id is not None and link.topic_id != topic_id:
+        link.topic_id = topic_id
+        session.add(link)
+
+    # Shared channels: auto-join the sender to the topic + conversation so a
+    # late joiner whose first message arrives after the link was created is
+    # still a participant. Idempotent.
+    if is_shared:
+        if topic_id is not None:
+            await _ensure_topic_participant(session, topic_id, effective_user_id)
+        await _ensure_conversation_participant(
+            session, account, link.conversation_id, effective_user_id
+        )
 
     return ResolvedIMConversation(
         conversation_id=link.conversation_id,
@@ -217,3 +190,102 @@ async def resolve_im_conversation(
         is_group_chat=is_shared,
         sandbox_mode=sandbox_mode,
     )
+
+
+async def _ensure_topic_participant(
+    session: AsyncSession, topic_id: str, user_id: str
+) -> None:
+    """Idempotently add ``user_id`` to a Topic as a member."""
+    existing = (
+        await session.execute(
+            select(TopicParticipant).where(
+                TopicParticipant.topic_id == topic_id,  # type: ignore[arg-type]
+                TopicParticipant.user_id == user_id,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        session.add(TopicParticipant(topic_id=topic_id, user_id=user_id, role="member"))
+        await session.flush()
+
+
+async def _ensure_conversation_participant(
+    session: AsyncSession,
+    account: IMConnectorAccount,
+    conversation_id: str,
+    user_id: str,
+) -> None:
+    """Idempotently add ``user_id`` to a Conversation."""
+    existing = (
+        await session.execute(
+            select(ConversationParticipant).where(
+                ConversationParticipant.conversation_id == conversation_id,  # type: ignore[arg-type]
+                ConversationParticipant.user_id == user_id,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        session.add(
+            ConversationParticipant(
+                org_id=account.org_id,
+                workspace_id=account.workspace_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+            )
+        )
+        await session.flush()
+
+
+async def reset_im_conversation(
+    session: AsyncSession,
+    *,
+    account_id: str,
+    channel_id: str,
+    scope_key: str,
+) -> Literal["none", "flat", "rotated"]:
+    """Apply ``/new`` to an IM scope. Caller owns the commit.
+
+    - ``none``: no active link — nothing to reset.
+    - ``flat``: flat mode (link has no Topic) — delete the link; the next
+      message starts a brand-new conversation, as before.
+    - ``rotated``: topic mode — repoint the link to a fresh ``Conversation``
+      under the SAME Topic. The old conversation is left intact so it stays
+      as history under the Topic (this is why we don't soft-delete it).
+    """
+    link = (
+        await session.execute(
+            select(IMThreadLink).where(
+                IMThreadLink.account_id == account_id,  # type: ignore[arg-type]
+                IMThreadLink.channel_id == channel_id,  # type: ignore[arg-type]
+                IMThreadLink.scope_key == scope_key,  # type: ignore[arg-type]
+            )
+        )
+    ).scalar_one_or_none()
+    if link is None:
+        return "none"
+    if link.topic_id is None:
+        await session.delete(link)
+        return "flat"
+    old = (
+        await session.execute(
+            select(Conversation).where(Conversation.id == link.conversation_id)  # type: ignore[arg-type]
+        )
+    ).scalar_one_or_none()
+    if old is None:
+        # Defensive: link points at a missing conversation — treat as flat.
+        await session.delete(link)
+        return "flat"
+    new_conv = Conversation(
+        org_id=old.org_id,
+        workspace_id=old.workspace_id,
+        creator_user_id=old.creator_user_id,
+        title=old.title,
+        topic_id=old.topic_id,
+        is_group_chat=old.is_group_chat,
+        attributes=dict(old.attributes or {}),
+    )
+    session.add(new_conv)
+    await session.flush()
+    link.conversation_id = new_conv.id
+    session.add(link)
+    return "rotated"
