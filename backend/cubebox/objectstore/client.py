@@ -31,10 +31,16 @@ class ObjectStoreClient:
         self._access_secret: str = config.get("objectstore.access_secret", "")
         self._session: aioboto3.Session = aioboto3.Session()
 
-        # OSS does not support aws-chunked transfer encoding.
+        # OSS does not support aws-chunked transfer encoding, and only accepts
+        # virtual-hosted style addressing (bucket as subdomain). With a custom
+        # endpoint_url botocore defaults to path style, which OSS rejects with
+        # SecondLevelDomainForbidden.
         if provider == "oss":
             self._boto_config = BotoConfig(
-                s3={"payload_signing_enabled": True},
+                s3={
+                    "addressing_style": "virtual",
+                    "payload_signing_enabled": True,
+                },
                 request_checksum_calculation="when_required",
             )
         else:
