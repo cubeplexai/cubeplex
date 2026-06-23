@@ -157,7 +157,7 @@ async def resolve_im_conversation(
             await session.flush()
         return conv.id
 
-    link, created = await get_or_create_thread_link(
+    link, created, reused = await get_or_create_thread_link(
         session,
         org_id=account.org_id,
         workspace_id=account.workspace_id,
@@ -174,23 +174,16 @@ async def resolve_im_conversation(
         link.topic_id = topic_id
         session.add(link)
 
-    # When we reused an EXISTING conversation (created is False —
-    # ``_make_conversation_id`` never ran), it still carries whatever
-    # topic/group/attributes it had before. This happens on a flat→topic
-    # settings change or a link that predates topic mode. Adopt it into the
-    # resolved Topic so the link, the conversation, and the Topic agree —
-    # otherwise the just-created Topic is orphaned and the conversation stays
-    # ungrouped (and, in shared mode, the worker would reject it for lacking
-    # attributes.im).
-    if should_topic and topic_id is not None and not created:
-        reused = (
-            await session.execute(
-                select(Conversation).where(Conversation.id == link.conversation_id)  # type: ignore[arg-type]
-            )
-        ).scalar_one_or_none()
-        if reused is not None and (
-            reused.topic_id != topic_id or reused.is_group_chat != is_shared
-        ):
+    # When we reused an EXISTING conversation (``_make_conversation_id`` never
+    # ran), it still carries whatever topic/group/attributes it had before —
+    # e.g. after a flat→topic settings change, or a link that predates topic
+    # mode. Adopt it into the resolved Topic so the link, the conversation,
+    # and the Topic agree; otherwise the just-created Topic is orphaned, the
+    # conversation stays ungrouped, and (in shared mode) the worker rejects it
+    # for lacking attributes.im. We reconcile whenever the row actually lags,
+    # which also repairs any row left split by an earlier resolve.
+    if should_topic and topic_id is not None and reused is not None:
+        if reused.topic_id != topic_id or reused.is_group_chat != is_shared:
             reused.topic_id = topic_id
             reused.is_group_chat = is_shared
             merged = dict(reused.attributes or {})
