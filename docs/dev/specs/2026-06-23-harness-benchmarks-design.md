@@ -437,6 +437,49 @@ Each lever is one PR + one re-run of Phase 2 + a one-line entry in
 - Latency / cost / score deltas tracked in Grafana.
 - Block release on >2 point regression.
 
+## Phase 1 prerequisites — what needs to be true before the harness can score anything
+
+These are gating items discovered during the 2026-06-23 smoke test on
+`psf__requests-1142` with the `flash` preset. The harness drove cubebox
+end-to-end (19 tool calls, 19 tool results, real SSE) — but the agent
+never reached a patch because of the items below.
+
+### P1. Sandbox egress to GitHub + PyPI
+
+`SandboxPolicy.network_default_action` defaults to **`"deny"`**
+(`models/sandbox_policy.py:64`), so the sandbox's first action — `git
+clone https://github.com/psf/requests` — fails with
+`Could not resolve host: github.com`. Every SWE-bench instance starts
+with `git clone` and most need `pip install`, so without an open (or
+SWE-bench-allowlisted) policy the bench is 0% before the model is even
+involved.
+
+Options, in order of bluntness:
+
+- **(a)** Create a benchmark-scoped `SandboxPolicy` with
+  `network_default_action: "allow"` and bind it to the benchmark
+  workspace via `scope_workspace_id`. Per-workspace overrides are
+  already designed-in (see `sandbox_policy.py` docstring).
+- **(b)** Keep `deny` default but add allow rules for the 12 SWE-bench
+  repo hosts (all under `github.com`) and the Python package indexes
+  (`pypi.org`, `files.pythonhosted.org`, internal mirrors).
+- **(c)** Pre-stage bare mirrors inside the sandbox image so the agent
+  never needs egress for `git clone`. Heavy — image grows by ~5 GB and
+  every repo SHA needs to be there. Probably the wrong trade.
+
+(a) is the recommended starting point: simplest, scoped to a single
+benchmark workspace, no risk of bleeding into product traffic. Tighten
+later if compliance asks.
+
+### P2. Sandbox image must have `pytest` available at exec time
+
+`misc/sandbox-image/Dockerfile` ships Python + git + gh, but no
+`pytest` (per the audit during the API verification step). Every
+SWE-bench task starts with `pip install -e .`, which usually pulls
+pytest as a transitive dev dep — but not always. Add `pytest` to the
+preinstalled set, or accept the ~10-second `pip install pytest` per
+task on first use.
+
 ## Open questions / decisions to make
 
 1. **Which model preset for the headline run?** `flash` is the default
@@ -472,6 +515,103 @@ Each lever is one PR + one re-run of Phase 2 + a one-line entry in
   expensive only on fail). Useful but a Phase 6 conversation.
 - A web UI for benchmark results.
 
+## Tool surface — what the agent actually needs
+
+Verified against the published trajectory layout (see next section). Every
+SWE-bench submission ships a checklist; the relevant entries are universal:
+
+> ☑ Is a pass@1 submission (no retries on a single instance unless declared)
+> ☑ Does not use SWE-bench test knowledge (`PASS_TO_PASS`, `FAIL_TO_PASS`)
+> ☑ Does not use the `hints` field
+> ☑ Does not have web-browsing OR has taken steps to prevent lookup of
+>   SWE-bench solutions via web-browsing
+
+The web-browsing line is the load-bearing one for tool selection. Of 134
+`evaluation/verified/` submissions, 83 explicitly note in their README
+that they disabled the browsing capability — including OpenHands, which
+otherwise ships a browser. The reason: tasks come from real GitHub
+issues with publicly-known fixes; a browsing agent can look up the
+answer instead of solving it.
+
+So the agent's tool set for SWE-bench is fully covered by cubebox today:
+
+| Tool | Purpose | cubebox |
+|---|---|---|
+| Shell exec | `git clone`, `pytest`, `pip install`, `grep -rn`, anything else | ✅ `execute` |
+| Write file | new files (test scaffolds, patch staging) | ✅ `write_file` |
+| Targeted edit | string-replace style edits to existing source | ✅ `edit_file` |
+| Read file (with line numbers) | locate code | ✅ `file_read` |
+
+OpenHands' `str_replace_editor` and SWE-agent's `open` / `edit` /
+`scroll` are these same four capabilities wrapped to be more
+token-efficient — not new tool categories. **Phase 1 does not need a
+new tool**. Phase 3 may benchmark `edit_file`'s token cost against
+competitors; if it loses, that's an optimization PR.
+
+**Explicitly NOT allowed for SWE-bench**: web search, web fetch,
+browser, calling the GitHub API to inspect issue history or commit
+backports. Phase 1 harness should disable / not expose these by
+default. If cubebox ever installs an MCP web tool into a benchmark
+workspace, the benchmark CI run must scrub it.
+
+## Reference: competitor harness trajectories
+
+Cloned `https://github.com/SWE-bench/experiments` to
+`~/swe-bench-experiments/` (336 MB, 134 submissions on the Verified
+split as of 2026-06-23). Submission folder schema:
+
+```
+evaluation/verified/<YYYYMMDD>_<author>_<model>/
+  README.md                ← system description + per-repo score breakdown
+  metadata.yaml            ← assets.{logs, trajs}, info.{name, site, report},
+                             tags.{model, org, os_model, os_system,
+                             system.attempts, checked}
+  all_preds.jsonl          ← submitted patches: one {instance_id,
+                             model_name_or_path, model_patch} per line
+                             (this is the file format Phase 1 emits)
+  results/
+    results.json           ← {resolved: [instance_id], total_instances: 500, ...}
+    resolved_by_repo.json  ← per-repo breakdown
+    resolved_by_time.json  ← time-of-issue resolution rate
+    patch_stats.json       ← average patch size, file count, etc.
+    file_f1.json           ← localization metric
+  trajs/                   ← agent thinking + tool calls, one file per
+                             instance. Hosted on S3, NOT in the git repo:
+                             see `assets.trajs` in metadata.yaml.
+  logs/<instance_id>/      ← evaluation logs (also S3 in recent
+                             submissions; only older ones inline)
+    patch.diff
+    report.json
+    test_output.txt
+```
+
+### Top 4 OSS harnesses worth mining for Phase 3
+
+(Score as of 2026-06-23, all with `tags.os_system: true`.)
+
+| Submission folder | Harness | Score | Model | Why study it |
+|---|---|---|---|---|
+| `20251215_livesweagent_claude-opus-4-5/` | live-SWE-agent (UIUC) | 79.2% | Claude Opus 4.5 | OSS #1; runtime self-evolving harness — novel approach |
+| `20251127_openhands_claude-opus-4-5/` | OpenHands | 77.6% | Claude Opus 4.5 | Most-cited baseline; SWE-bench tool-set template |
+| `20250524_openhands_claude_4_sonnet/` | OpenHands | 70.4% | Claude Sonnet 4 (20250514) | **Direct same-model target** if Phase 2 picks Sonnet 4 |
+| `20250928_trae_doubao_seed_code/` | TRAE | 78.8% | Doubao-Seed-Code | Cross-model orchestration; ByteDance's stack |
+
+Reading order for Phase 3 trajectory analysis:
+
+1. Open `metadata.yaml` to see model + parameters + harness version.
+2. Pull a trajectory from `assets.trajs` (S3 — `aws s3 cp` or
+   `https://swe-bench-submissions.s3.amazonaws.com/verified/<folder>/trajs/<instance_id>.json`)
+   for a couple of representative instances (django + sympy are dense
+   enough to expose harness behavior).
+3. Look at: total tool-call count, ratio of file-read vs edit vs run,
+   how the harness handles a failed test (retry/replan vs give up),
+   context size at each turn.
+4. Compare against our own SSE / message dump from the same
+   `instance_id`.
+
+The S3 trajectory bucket is public — no AWS credentials needed for
+fetches.
+
 ## References
 
 - Hello-world verification trace: this branch, `.test.env`-driven port
@@ -480,4 +620,6 @@ Each lever is one PR + one re-run of Phase 2 + a one-line entry in
 - Cubebox API surface audit: see commit log on `feat/2026-06-23-api-key`
   (PR #270) and the API key e2e tests for the Bearer-auth contract.
 - SWE-bench Verified: <https://www.swebench.com/>
+- SWE-bench experiments repo (submission artifacts):
+  <https://github.com/SWE-bench/experiments>
 - τ-bench: Sierra Research repo, MIT licensed.
