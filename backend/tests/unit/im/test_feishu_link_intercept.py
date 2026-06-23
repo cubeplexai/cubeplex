@@ -26,3 +26,12 @@ class TestParseLinkCommand:
 
     def test_invalid_email_rejected(self) -> None:
         assert parse_link_command("/link notanemail") is None
+
+    def test_feishu_mailto_autolink_unwrapped(self) -> None:
+        # Feishu client auto-renders bare emails as markdown autolinks.
+        result = parse_link_command("/link [gxf.beta@gmail.com](mailto:gxf.beta@gmail.com)")
+        assert result == "gxf.beta@gmail.com"
+
+    def test_angle_bracketed_email_unwrapped(self) -> None:
+        result = parse_link_command("/link <chris@example.com>")
+        assert result == "chris@example.com"
