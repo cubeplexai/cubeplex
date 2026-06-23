@@ -124,6 +124,38 @@ export async function wsEnableImAccount(
   return (await res.json()) as ImAccount
 }
 
+// ── Bot settings (account-level routing + topic mode) ────────────────────────
+
+export type ImRoutingMode = 'isolated' | 'shared'
+export type ImTopicMode = 'topic' | 'flat'
+
+export interface ImBotSettings {
+  routing_mode: ImRoutingMode
+  topic_mode: ImTopicMode
+  sandbox_mode: string | null
+}
+
+export async function wsGetImBotSettings(
+  client: ApiClient,
+  wsId: string,
+  accountId: string,
+): Promise<ImBotSettings> {
+  const res = await client.get(`/api/v1/ws/${wsId}/im/accounts/${accountId}/settings`)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ImBotSettings
+}
+
+export async function wsUpdateImBotSettings(
+  client: ApiClient,
+  wsId: string,
+  accountId: string,
+  body: ImBotSettings,
+): Promise<ImBotSettings> {
+  const res = await client.put(`/api/v1/ws/${wsId}/im/accounts/${accountId}/settings`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as ImBotSettings
+}
+
 // ── Admin scope ──────────────────────────────────────────────────────────────
 
 export async function adminListImAccounts(client: ApiClient): Promise<ImAccountListOut> {
