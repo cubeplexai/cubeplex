@@ -37,8 +37,12 @@ class ApiKeyRepository:
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def count_by_user(self, user_id: str) -> int:
-        stmt = select(func.count()).select_from(ApiKey).where(
-            ApiKey.user_id == user_id  # type: ignore[arg-type]
+        stmt = (
+            select(func.count())
+            .select_from(ApiKey)
+            .where(
+                ApiKey.user_id == user_id  # type: ignore[arg-type]
+            )
         )
         return int((await self.session.execute(stmt)).scalar_one())
 
