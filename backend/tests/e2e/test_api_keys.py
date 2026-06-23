@@ -55,7 +55,7 @@ async def test_create_then_list_hides_token(async_client):
     r = await async_client.post("/api/v1/me/api-keys", json={"label": "harness"})
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["token"].startswith("cbx_")
+    assert body["token"].startswith("sk-")
     assert len(body["token"]) > len(body["prefix"])
     assert body["prefix"] == body["token"][:12]
     key_id = body["id"]

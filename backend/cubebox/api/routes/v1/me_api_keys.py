@@ -24,8 +24,10 @@ router = APIRouter(prefix="/me/api-keys", tags=["api-keys"])
 # Quota: prevent runaway scripts; users delete to make room.
 MAX_KEYS_PER_USER = 10
 
-# Token layout: `cbx_` + 22 url-safe base62 chars. ~132 bits of entropy.
-_TOKEN_PREFIX = "cbx_"
+# Token layout: `sk-` + 22 url-safe base62 chars. ~132 bits of entropy.
+# Matches the OpenAI-style convention many users already recognise as
+# "secret key" and that secret-scanning tools (gh, gitleaks) flag by default.
+_TOKEN_PREFIX = "sk-"
 _TOKEN_BODY_LEN = 22
 # What we show in list views — enough to disambiguate, not enough to brute.
 _DISPLAY_PREFIX_LEN = 12
