@@ -170,6 +170,32 @@ def build_event_handler(
             if event is None:
                 return
             event.account_external_id = account.external_account_id
+
+            # Intercept /link or 绑定 commands before normal ingest — otherwise
+            # the identity gate replies "I don't know who you are" instead of
+            # issuing the link URL. The webhook path does the same in
+            # cubebox/api/routes/v1/im_ingress.py.
+            from cubebox.im.feishu.link_command import (
+                handle_link_command,
+                parse_link_command,
+            )
+
+            link_email = parse_link_command(event.text)
+            if link_email is not None:
+                try:
+                    await handle_link_command(
+                        email=link_email,
+                        event=event,
+                        account=account,
+                        connector=gate_connector,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[Feishu LC] /link handler failed for {}",
+                        event.platform_event_id,
+                    )
+                return
+
             try:
                 kwargs: dict[str, Any] = {}
                 if gate_connector is not None:
