@@ -146,6 +146,8 @@ async def test_shared_creates_topic_and_link(
     (owned by the bot's acting user) stamped with attributes.im."""
     maker, account = _seeded
     _with_settings(account, IMBotSettings(routing_mode="shared"))
+    # Avatar is hydrated into config at connect time → surfaces on the topic.
+    account.config = {**account.config, "bot_avatar_url": "https://x/avatar.png"}
 
     async with maker() as session:
         resolved = await resolve_im_conversation(
@@ -181,6 +183,7 @@ async def test_shared_creates_topic_and_link(
         assert topic.creator_user_id == _USER  # acting user owns shared topics
         assert topic.attributes.get("im", {}).get("account_id") == _ACCOUNT
         assert topic.attributes["im"]["scope_kind"] == "channel"
+        assert topic.attributes["im"]["bot_avatar_url"] == "https://x/avatar.png"
 
         owner_tp = (
             await session.execute(

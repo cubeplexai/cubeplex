@@ -91,15 +91,18 @@ async def resolve_im_conversation(
     # Source metadata stamped on both the Topic and the Conversation. Its
     # presence under "im" is the IM-origin marker read by worker/resume.
     bot_name = bot_display_name(account.config)
-    # PR1: channel_name is not yet fetched from the platform — group topics
-    # fall back to the channel id. Lazy fetch is a follow-up (see spec).
+    # The bot avatar is hydrated into account.config at connect time; the
+    # sidebar renders it as the Topic avatar via attributes.im.
+    bot_avatar_url = (account.config or {}).get("bot_avatar_url")
+    # channel_name is not yet fetched from the platform — group topics fall
+    # back to the channel id. Lazy fetch is a follow-up (see spec).
     channel_name = None if scope_kind == "dm" else channel_id
     im_attrs = build_im_attributes(
         platform=account.platform,
         account_id=account.id,
         scope_kind=scope_kind,
         bot_name=bot_name,
-        bot_avatar_url=None,
+        bot_avatar_url=bot_avatar_url,
         channel_id=channel_id,
         channel_name=channel_name,
     )
