@@ -148,7 +148,20 @@ export async function* streamMessages(
   content: string,
   attachmentIds?: string[],
   signal?: AbortSignal,
-  options?: { model_key?: string | null; thinking?: ThinkingLevel },
+  options?: {
+    model_key?: string | null
+    thinking?: ThinkingLevel
+    /**
+     * Fires as soon as the POST returns a run id, BEFORE any event is
+     * yielded — only on the JSON-then-tail path (the production path
+     * through the Next.js SSE proxy). The direct-SSE path keeps it
+     * unset; callers fall back to `currentRunId` derived from later
+     * events. This is the only seam where the store can learn the run
+     * id for an in-flight send so optimistic messages can be stamped
+     * (e.g. for "fork from this message" to work without reload).
+     */
+    onRunId?: (runId: string) => void
+  },
 ): AsyncGenerator<AgentEvent> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -208,6 +221,7 @@ export async function* streamMessages(
     }
 
     const body = (await res.json()) as { run_id: string }
+    options?.onRunId?.(body.run_id)
     for await (const event of streamRun(client, conversationId, body.run_id, undefined, signal)) {
       yield event
     }

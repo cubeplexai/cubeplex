@@ -312,7 +312,15 @@
     "modelSectionLabel": "Model",
     "effortLabel": "Effort",
     "effortFaster": "Faster",
-    "effortSmarter": "Smarter"
+    "effortSmarter": "Smarter",
+    "forkConversation": "Fork conversation",
+    "forkSuccess": "Forked to a new conversation",
+    "forkError": "Couldn't fork this conversation",
+    "forkDisabled": {
+      "noRun": "Cannot fork from this message",
+      "runStreaming": "Wait for the response to finish",
+      "groupChat": "Fork is not available in group chats"
+    }
   },
   "subagent": {
     "cluster": "Agent cluster",

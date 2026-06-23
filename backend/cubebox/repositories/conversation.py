@@ -9,13 +9,37 @@ columns are still persisted via ``OrgScopedMixin``.
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from cubepi.checkpointer.exceptions import (
+    RunNotCompletedError,
+    ThreadAlreadyExistsError,
+    ThreadNotFoundError,
+)
 from sqlalchemy import and_, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.agents.checkpointer import init_checkpointer
 from cubebox.models import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
+from cubebox.models.public_id import generate_public_id
 from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.repositories.base import ScopedRepository
+from cubebox.utils.time import utc_isoformat
+
+
+class ForkGroupChatError(Exception):
+    """Source conversation is a group chat; fork is not supported."""
+
+
+class ForkRunNotCompletedError(Exception):
+    """The ``after_run_id`` is unknown or has not completed on the source."""
+
+
+class ForkNewThreadExistsError(Exception):
+    """The freshly-allocated destination id already exists in cubepi."""
+
+
+class ForkSourceMissingError(Exception):
+    """Source thread is absent from cubepi (drafted but never sent)."""
 
 
 class ConversationRepository(ScopedRepository[Conversation]):
@@ -263,6 +287,82 @@ class ConversationRepository(ScopedRepository[Conversation]):
         await self.session.commit()
         await self.session.refresh(conv)
         return conv
+
+    async def fork(
+        self,
+        src: Conversation,
+        *,
+        after_run_id: str,
+    ) -> Conversation:
+        """Fork a conversation after a completed run.
+
+        Delegates the message-history copy to cubepi's checkpointer
+        (``cp.fork`` handles the advisory lock, parent linkage, and the
+        bulk INSERT … SELECT). Then inserts a fresh ``conversations`` row
+        owned by ``self.user_id``, carrying over ``topic_id``, ``model_key``,
+        and ``thinking`` from the source.
+
+        Order matters: cubepi.fork() runs first so the destination
+        ``cubepi_threads`` row (and its messages) exists before we publish
+        a conversations row that points at it. If the row insert then
+        fails the orphan cubepi thread is bounded by request failure rate
+        and reapable by a future GC job — far better than the inverse
+        (a visible conversation pointing at zero messages).
+        """
+        if src.is_group_chat:
+            raise ForkGroupChatError(src.id)
+
+        new_id = generate_public_id("conv")
+        metadata: dict[str, Any] = {
+            "source_conversation_id": src.id,
+            "forked_by_user_id": self.user_id,
+            "forked_at": utc_isoformat(datetime.now(UTC)),
+        }
+        try:
+            async with init_checkpointer() as cp:
+                await cp.fork(
+                    src.id,
+                    new_id,
+                    after_run_id=after_run_id,
+                    metadata=metadata,
+                )
+        except RunNotCompletedError as exc:
+            raise ForkRunNotCompletedError(after_run_id) from exc
+        except ThreadNotFoundError as exc:
+            raise ForkSourceMissingError(src.id) from exc
+        except ThreadAlreadyExistsError as exc:
+            raise ForkNewThreadExistsError(new_id) from exc
+
+        # Title fits within the 255-char column; the suffix is 7 chars so we
+        # truncate the source title accordingly when needed.
+        suffix = " — fork"
+        max_title = 255 - len(suffix)
+        forked_title = f"{src.title[:max_title]}{suffix}"
+
+        # Fork is always a *personal* conversation owned by the caller. We do
+        # not inherit `topic_id` because:
+        #   (a) the caller may see the source only via B4 (conv-level invite,
+        #       not topic membership); copying topic_id would publish the
+        #       fork to every topic participant — a visibility leak, AND the
+        #       caller's own redirect would 404 (no B-rule covers them on
+        #       the new conv).
+        #   (b) "explore an alternate continuation" is the primary use case;
+        #       sharing the fork can come later via the existing
+        #       upgrade-to-topic / invite flow.
+        conv = Conversation(
+            id=new_id,
+            title=forked_title,
+            org_id=self.org_id,
+            workspace_id=self.workspace_id,
+            creator_user_id=self.user_id,
+            topic_id=None,
+            has_messages=True,
+            is_pinned=False,
+            is_group_chat=False,
+            model_key=src.model_key,
+            thinking=src.thinking,
+        )
+        return await self.add(conv)
 
     async def delete_conversation(self, conversation_id: str) -> bool:
         """Soft-delete: stamp ``deleted_at`` so the row stays as a FK target.

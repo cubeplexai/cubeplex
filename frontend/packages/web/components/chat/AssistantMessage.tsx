@@ -19,6 +19,7 @@ import { SubAgentCluster } from './SubAgentCluster'
 import { TaskProgressCard } from './TaskProgressCard'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
+import { MessageActions } from './MessageActions'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
 import { extractWidgetCode, extractJsonStringPrefix } from '@/lib/partialJson'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
@@ -145,6 +146,8 @@ interface HistoryProps {
   subagentDataMap?: Record<string, SubagentSummary>
   toolResultMap: Record<string, { content: string; receivedAt: number }>
   conversationId?: string
+  workspaceId?: string | null
+  isGroupChat?: boolean
   stream?: never
   isStreaming?: never
   statusPhase?: never
@@ -159,6 +162,8 @@ interface StreamingProps {
   subagentDataMap?: never
   toolResultMap: Record<string, { content: string; receivedAt: number }>
   conversationId?: string
+  workspaceId?: string | null
+  isGroupChat?: boolean
   stream: AgentStream
   isStreaming: boolean
   statusPhase?: string | null
@@ -525,6 +530,8 @@ export function AssistantMessage({
   toolResultMap,
   todos,
   conversationId,
+  workspaceId,
+  isGroupChat,
   pendingConfirmMap,
   onSandboxConfirm,
 }: AssistantMessageProps) {
@@ -600,7 +607,7 @@ export function AssistantMessage({
   }
 
   return (
-    <div data-role="assistant" className="space-y-2">
+    <div data-role="assistant" className="group space-y-2">
       {(grouped.length > 0 || totalSubagents >= 2 || showErrorBubble) && (
         <div className="flex justify-start gap-2.5">
           <div
@@ -633,6 +640,19 @@ export function AssistantMessage({
                     {errorMessage}
                   </pre>
                 </div>
+              </div>
+            )}
+            {message && conversationId && (
+              <div
+                className="opacity-0 transition-opacity group-hover:opacity-100
+                  focus-within:opacity-100"
+              >
+                <MessageActions
+                  conversationId={conversationId}
+                  workspaceId={workspaceId ?? null}
+                  runId={message.run_id}
+                  isGroupChat={isGroupChat ?? false}
+                />
               </div>
             )}
           </div>
