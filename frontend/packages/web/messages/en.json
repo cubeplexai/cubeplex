@@ -2043,6 +2043,9 @@
       },
       "teams": {
         "label": "Teams"
+      },
+      "dingtalk": {
+        "label": "DingTalk"
       }
     },
     "status": {
@@ -2134,6 +2137,19 @@
           "appSecret": "Client Secret",
           "tenantId": "Tenant ID"
         }
+      },
+      "dingtalk": {
+        "prereq": {
+          "app": "Create an internal app on open.dingtalk.com (Developer Backend → Apps)",
+          "stream": "Enable Stream Mode (no public callback URL required)",
+          "permissions": "Grant these permissions in the app's Permissions panel",
+          "credentials": "Copy AppKey and AppSecret from the app's Credentials page"
+        },
+        "field": {
+          "appKey": "AppKey",
+          "appSecret": "AppSecret"
+        },
+        "openConsole": "Open DingTalk developer console"
       }
     },
     "error": {

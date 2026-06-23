@@ -2043,6 +2043,9 @@
       },
       "teams": {
         "label": "Teams"
+      },
+      "dingtalk": {
+        "label": "钉钉"
       }
     },
     "status": {
@@ -2134,6 +2137,19 @@
           "appSecret": "客户端密码",
           "tenantId": "租户 ID"
         }
+      },
+      "dingtalk": {
+        "prereq": {
+          "app": "在 open.dingtalk.com 开发者后台创建企业内部应用",
+          "stream": "开启 Stream 模式（无需公网回调地址）",
+          "permissions": "在应用「权限管理」中开通以下权限",
+          "credentials": "在应用「凭据与基础信息」中复制 AppKey 与 AppSecret"
+        },
+        "field": {
+          "appKey": "AppKey",
+          "appSecret": "AppSecret"
+        },
+        "openConsole": "打开钉钉开放平台"
       }
     },
     "error": {
