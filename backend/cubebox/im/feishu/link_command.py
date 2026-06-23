@@ -20,10 +20,20 @@ _LINK_RE = _re.compile(
     _re.IGNORECASE,
 )
 
+# Feishu auto-renders email-like input as `[user@host](mailto:user@host)`.
+# Unwrap before regex so the user-typed bare email and the auto-linked
+# form both match. Also covers angle-bracketed RFC 5322 form `<email>`.
+_MAILTO_AUTOLINK_RE = _re.compile(r"\[[^\]]+\]\(mailto:([^)]+)\)", _re.IGNORECASE)
+
+
+def _unwrap_email_autolinks(text: str) -> str:
+    text = _MAILTO_AUTOLINK_RE.sub(r"\1", text)
+    return text.replace("<", "").replace(">", "")
+
 
 def parse_link_command(text: str) -> str | None:
     """Extract email from a /link or 绑定 command. Returns None if not a match."""
-    m = _LINK_RE.match(text)
+    m = _LINK_RE.match(_unwrap_email_autolinks(text))
     return m.group(1).strip().lower() if m else None
 
 
