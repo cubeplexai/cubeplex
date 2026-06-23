@@ -63,6 +63,7 @@ async def handle_link_command(
             workspace_id=account.workspace_id,
             platform="feishu",
             secret=secret,
+            chat_id=event.channel_id or "",
         )
     except Exception:
         logger.opt(exception=True).warning("[Feishu] sign_link_token failed")

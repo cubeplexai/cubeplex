@@ -23,6 +23,7 @@ class LinkClaims:
     account_id: str
     workspace_id: str
     platform: str
+    chat_id: str = ""
 
 
 def sign_link_token(
@@ -33,6 +34,7 @@ def sign_link_token(
     workspace_id: str,
     platform: str,
     secret: str,
+    chat_id: str = "",
 ) -> str:
     now = datetime.now(UTC)
     claims = {
@@ -41,6 +43,7 @@ def sign_link_token(
         "act": account_id,
         "ws": workspace_id,
         "plt": platform,
+        "cid": chat_id,
         "exp": int((now + _TTL).timestamp()),
         "iat": int(now.timestamp()),
         "iss": _ISS,
@@ -76,4 +79,5 @@ def verify_link_token(token: str, *, secret: str) -> LinkClaims:
         account_id=payload["act"],
         workspace_id=payload["ws"],
         platform=payload["plt"],
+        chat_id=str(payload.get("cid") or ""),
     )

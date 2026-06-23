@@ -28,6 +28,14 @@ def _make_app(user: User | None = None) -> FastAPI:
 
         app.dependency_overrides[current_active_user] = lambda: user
 
+    # The confirm endpoint depends on EncryptionBackend so it can build a
+    # Feishu client for the post-confirm IM notice. These unit tests never
+    # exercise that path (platform="discord", chat_id=""), but FastAPI
+    # still resolves the dependency on every request — stub it.
+    from cubebox.credentials.dependencies import get_encryption_backend
+
+    app.dependency_overrides[get_encryption_backend] = lambda: None  # type: ignore[return-value]
+
     return app
 
 
