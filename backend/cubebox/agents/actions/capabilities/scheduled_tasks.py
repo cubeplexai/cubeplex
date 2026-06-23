@@ -285,6 +285,10 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
         "prompt on a cron, interval, or one-shot schedule. Only mutate tasks "
         "when the user has explicitly asked you to."
     ),
+    # Mutating ops stay available on non-interactive triggers (IM, schedule
+    # fires) so an IM "remind me at 9pm" works and a scheduled task can
+    # reschedule / cancel itself. See AgentCapability docstring.
+    always_mutable=True,
     operations=[
         AgentOperation(
             name="list",

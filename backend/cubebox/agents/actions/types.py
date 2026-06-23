@@ -39,8 +39,17 @@ class AgentOperation:
 
 @dataclass(frozen=True)
 class AgentCapability:
-    """A named group of operations exposed as a single agent tool."""
+    """A named group of operations exposed as a single agent tool.
+
+    ``always_mutable`` opts a capability out of the global ``allow_mutations``
+    gate so its mutating ops survive even on automated runs (schedule fires,
+    IM ingress). Use sparingly — the gate exists to defang prompt injection
+    on non-interactive triggers. Scheduled tasks intentionally opt in: a
+    schedule that fires must be able to reschedule or cancel itself, and IM
+    users expect ``remind me at …`` to work the same as on the web.
+    """
 
     name: str
     description: str
     operations: list[AgentOperation] = field(default_factory=list)
+    always_mutable: bool = False

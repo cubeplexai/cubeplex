@@ -89,7 +89,9 @@ def build_capability_tools(
     """One AgentTool per operation that survives the mutation gate.
 
     Returns an empty list when no operations survive — callers should skip
-    building a DeferredToolGroup in that case.
+    building a DeferredToolGroup in that case. A capability flagged
+    ``always_mutable`` bypasses the gate (see ``AgentCapability`` docstring).
     """
-    surviving = [op for op in cap.operations if allow_mutations or not op.mutates]
+    effective_allow = allow_mutations or cap.always_mutable
+    surviving = [op for op in cap.operations if effective_allow or not op.mutates]
     return [_make_op_tool(cap.name, op, context_factory) for op in surviving]
