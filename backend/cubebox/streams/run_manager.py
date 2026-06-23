@@ -2356,31 +2356,34 @@ class RunManager:
         except Exception as _exc:
             logger.warning("show_widget unavailable for cubepi run: {}", _exc)
 
-        # create_scheduled_task / create_trigger — per-run DI: org/workspace/user/
-        # conversation. Detect IM origin via IMThreadLink on the current
-        # conversation so "remind me every morning" inside an IM thread defaults
-        # to posting back to that IM channel.
-        # Gated behind the same mutation lock as platform actions below
-        # (allow_mutations=(trigger == "interactive")): when a schedule fires
-        # or a trigger ingests, a prompt-injected "create another scheduled
-        # task" must NOT be able to spawn persistent state.
+        # create_scheduled_task — per-run DI: org/workspace/user/conversation.
+        # Detect IM origin via IMThreadLink on the current conversation so
+        # "remind me every morning" inside an IM thread defaults to posting
+        # back to that IM channel. Always registered (no trigger gate): IM
+        # users expect the same scheduling powers as the web, and a schedule
+        # that fires must be able to reschedule or cancel itself. The same
+        # always-on policy is mirrored on the `scheduled_tasks` capability via
+        # `always_mutable=True`.
+        try:
+            from cubebox.tools.builtin.create_scheduled_task import (
+                make_create_scheduled_task_tool,
+            )
+
+            _builtin_tools.append(
+                make_create_scheduled_task_tool(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    conversation_id=conversation_id,
+                )
+            )
+        except Exception as _exc:
+            logger.warning("create_scheduled_task unavailable for cubepi run: {}", _exc)
+
+        # create_trigger — still gated to interactive. Triggers expose a
+        # public webhook URL with a secret; a prompt-injected scheduled fire
+        # or IM ingest must NOT be able to mint one.
         if trigger == "interactive":
-            try:
-                from cubebox.tools.builtin.create_scheduled_task import (
-                    make_create_scheduled_task_tool,
-                )
-
-                _builtin_tools.append(
-                    make_create_scheduled_task_tool(
-                        org_id=ctx.org_id,
-                        workspace_id=ctx.workspace_id,
-                        user_id=ctx.user_id,
-                        conversation_id=conversation_id,
-                    )
-                )
-            except Exception as _exc:
-                logger.warning("create_scheduled_task unavailable for cubepi run: {}", _exc)
-
             try:
                 from cubebox.tools.builtin.create_trigger import make_create_trigger_tool
 

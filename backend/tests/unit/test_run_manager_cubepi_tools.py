@@ -219,65 +219,33 @@ def test_generate_image_tool_added_when_config_enabled(
 
 
 # ---------------------------------------------------------------------------
-# create_scheduled_task / create_trigger mutation gating (R4 hardening)
+# create_scheduled_task / create_trigger mutation gating
 #
-# Both factories must register the tool only when ``trigger == "interactive"``
-# — automated runs (scheduled fires, trigger ingests, IM worker runs) skip
-# the registration to defang prompt-injection attempts that would otherwise
-# spawn persistent state. The factories themselves never carry the trigger
-# value; the gate lives at the build-agent call site. Mirror that gate here
-# so a regression is caught locally.
+# create_scheduled_task is intentionally NOT gated: IM users and scheduled
+# fires need to be able to (re)schedule. create_trigger IS still gated to
+# interactive — triggers mint a public webhook URL and a prompt-injected
+# automated run must not be able to spawn one.
 # ---------------------------------------------------------------------------
 
 
-def test_create_scheduled_task_skipped_when_trigger_not_interactive() -> None:
-    """Bug it catches: build-agent registers create_scheduled_task even when
-    a scheduled task is running, letting a prompt-injected response create
-    new schedules behind the user's back."""
-    from cubebox.tools.builtin.create_scheduled_task import (
-        make_create_scheduled_task_tool,
-    )
-
-    collected: list[object] = []
-    for trigger in ("schedule", "webhook", "im_worker", "system"):
-        if trigger == "interactive":  # pragma: no cover — never true here
-            collected.append(
-                make_create_scheduled_task_tool(
-                    org_id="org-1",
-                    workspace_id="ws-1",
-                    user_id="usr-1",
-                    conversation_id="conv-1",
-                )
-            )
-
-    tool_names = [getattr(t, "name", None) for t in collected]
-    assert "create_scheduled_task" not in tool_names
-
-
-def test_create_scheduled_task_included_when_interactive() -> None:
-    """Counterpart to the gating test: the interactive path keeps the tool
-    available so users can ask the agent to create schedules in-chat."""
+def test_create_scheduled_task_available_on_every_trigger() -> None:
+    """Per user request: schedule creation works in IM threads and from
+    inside scheduled fires (e.g. a daily task that reschedules itself)."""
     from cubepi.agent.types import AgentTool
 
     from cubebox.tools.builtin.create_scheduled_task import (
         make_create_scheduled_task_tool,
     )
 
-    collected: list[object] = []
-    trigger = "interactive"
-    if trigger == "interactive":
-        collected.append(
-            make_create_scheduled_task_tool(
-                org_id="org-1",
-                workspace_id="ws-1",
-                user_id="usr-1",
-                conversation_id="conv-1",
-            )
+    for trigger in ("interactive", "im", "schedule", "webhook", "system"):
+        tool = make_create_scheduled_task_tool(
+            org_id="org-1",
+            workspace_id="ws-1",
+            user_id="usr-1",
+            conversation_id="conv-1",
         )
-
-    assert len(collected) == 1
-    assert isinstance(collected[0], AgentTool)
-    assert getattr(collected[0], "name", None) == "create_scheduled_task"
+        assert isinstance(tool, AgentTool), f"trigger={trigger}"
+        assert tool.name == "create_scheduled_task"
 
 
 def test_create_trigger_skipped_when_trigger_not_interactive() -> None:
@@ -331,32 +299,21 @@ def test_create_trigger_included_when_interactive() -> None:
     assert getattr(collected[0], "name", None) == "create_trigger"
 
 
-def test_run_manager_source_gates_create_tools_on_interactive() -> None:
+def test_run_manager_source_gates_create_trigger_on_interactive() -> None:
     """Locks the actual run_manager source against silent regression.
 
-    A pure-logic mirror like the tests above only verifies the *intent*; a
-    careless refactor could rewrite the dispatch path so the gate moves or
-    disappears. This test asserts the ``if trigger == "interactive":`` guard
-    is still wrapping the two factory imports.
+    create_trigger must stay gated to interactive runs — minting a public
+    webhook URL from an automated/IM run is a prompt-injection foothold.
+    create_scheduled_task is intentionally always-on now (see the
+    ``test_create_scheduled_task_available_on_every_trigger`` rationale).
     """
     import inspect
 
     from cubebox.streams import run_manager
 
     src = inspect.getsource(run_manager)
-    # The guard must appear in the same function that imports the two factories.
     assert 'if trigger == "interactive":' in src
-    # Both factory imports must live BELOW the guard in source order so the
-    # registration is skipped on automated runs. We check for at least one
-    # guard preceding the factory imports.
-    guard_idx = src.index('if trigger == "interactive":')
-    sched_idx = src.index("make_create_scheduled_task_tool")
     trig_idx = src.index("make_create_trigger_tool")
-    assert guard_idx < sched_idx, (
-        "create_scheduled_task factory must be gated by allow_mutations / "
-        "trigger=='interactive' — R4 finding 1"
-    )
-    assert guard_idx < trig_idx, (
-        "create_trigger factory must be gated by allow_mutations / "
-        "trigger=='interactive' — R4 finding 1"
-    )
+    # The interactive guard must precede the create_trigger import.
+    guard_idx = src.rindex('if trigger == "interactive":', 0, trig_idx)
+    assert guard_idx < trig_idx

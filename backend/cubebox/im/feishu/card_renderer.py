@@ -190,19 +190,30 @@ TOOL_DISPLAY: dict[str, ToolDisplay] = {
 }
 
 
-def _header(state: CardState) -> dict[str, Any]:
+def _status_element(state: CardState) -> dict[str, Any]:
+    """Status line at the top of the card body.
+
+    Feishu's native card ``header`` always renders large + bold, which
+    overpowers the actual message. Emitting status as a normal body
+    element keeps the visual hierarchy on the answer itself; color is
+    retained via ``lark_md`` ``<font>`` as a low-key cue.
+    """
     if state.error:
-        template = "red"
-        title = "运行失败"
+        color = "red"
+        text = "运行失败"
     elif state.finalized:
-        template = "green"
-        title = f"已完成 · {state.elapsed_ms / 1000:.1f}s" if state.elapsed_ms else "已完成"
+        color = "green"
+        text = f"已完成 · {state.elapsed_ms / 1000:.1f}s" if state.elapsed_ms else "已完成"
     else:
-        template = "blue"
-        title = "运行中…"
+        color = "blue"
+        text = "运行中…"
     return {
-        "title": {"tag": "plain_text", "content": title},
-        "template": template,
+        "tag": "div",
+        "element_id": "status",
+        "text": {
+            "tag": "lark_md",
+            "content": f"<font color='{color}'>{text}</font>",
+        },
     }
 
 
@@ -221,18 +232,29 @@ def _markdown_element(state: CardState) -> dict[str, Any]:
 
 
 def _tool_panel_header_title(state: CardState) -> str:
+    """Describes the tool group itself — not the overall run status.
+
+    The status of the whole run lives in the top-of-body status element
+    (see ``_status_element``). Repeating "运行中 / 已完成" here just produced
+    two identical badges. Per-step failures are still surfaced inline by
+    ``_render_tool_step`` with a red ❌ badge.
+    """
     step_count = len(state.tool_steps)
     if step_count == 0:
         return "工具调用"
-    any_failed = any(s.status == "failed" for s in state.tool_steps)
-    any_running = any(s.status == "running" for s in state.tool_steps)
     total_ms = sum(s.elapsed_ms for s in state.tool_steps)
     duration = f" · {total_ms / 1000:.1f}s" if total_ms > 0 else ""
-    if any_running:
-        return f"运行中 · {step_count} step{duration}"
-    if any_failed:
-        return f"失败 · {step_count} step{duration}"
-    return f"已完成 · {step_count} step{duration}"
+    return f"工具调用 · {step_count} step{duration}"
+
+
+def _tool_row_element(content_md: str) -> dict[str, Any]:
+    """Smaller, muted text for tool-panel rows so they visually recede from
+    the model's natural-language answer in ``streaming_content``."""
+    return {
+        "tag": "markdown",
+        "content": f"<font color='grey'>{content_md}</font>",
+        "text_size": "notation_caption",
+    }
 
 
 def _render_tool_step(step: ToolStep) -> list[dict[str, Any]]:
@@ -256,17 +278,13 @@ def _render_tool_step(step: ToolStep) -> list[dict[str, Any]]:
         # streaming_content.
         err = (step.error or "(no error message)").strip().splitlines()[0][:120]
         title_md += f"  ❌ {err}"
-    return [{"tag": "div", "text": {"tag": "lark_md", "content": title_md}}]
+    return [_tool_row_element(title_md)]
 
 
 def _render_sub_agent_row(row: SubAgentRow) -> dict[str, Any]:
-    return {
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
-            "content": f"🤖 sub-agent **{row.name}** · 已调用 {row.tool_count} 个工具",
-        },
-    }
+    return _tool_row_element(
+        f"🤖 sub-agent **{row.name}** · 已调用 {row.tool_count} 个工具"
+    )
 
 
 def _tool_panel(state: CardState) -> dict[str, Any]:
@@ -284,7 +302,10 @@ def _tool_panel(state: CardState) -> dict[str, Any]:
                 "content": _tool_panel_header_title(state),
             },
         },
-        "expanded": True,
+        # Collapsed by default: the model's natural-language answer in
+        # ``streaming_content`` is the primary signal; the tool list is for
+        # users who want to drill in.
+        "expanded": False,
         "elements": elements,
     }
 
@@ -413,7 +434,7 @@ def render(state: CardState) -> dict[str, Any]:
     avoids the visual oddity of the model's final answer appearing before
     the tool calls it ran to produce that answer.
     """
-    elements: list[dict[str, Any]] = []
+    elements: list[dict[str, Any]] = [_status_element(state)]
     if state.tool_steps or state.sub_agents:
         elements.append(_tool_panel(state))
     elements.append(_markdown_element(state))
@@ -423,7 +444,6 @@ def render(state: CardState) -> dict[str, Any]:
         elements.append(_render_pending_input(state.pending_input))
     return {
         "schema": "2.0",
-        "header": _header(state),
         "config": {
             "streaming_mode": not state.finalized,
             "update_multi": True,
