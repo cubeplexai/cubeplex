@@ -41,7 +41,10 @@ export function ImLinkPage() {
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 401) {
           const returnUrl = `/im-link?token=${encodeURIComponent(token)}`
-          router.replace(`/login?redirect=${encodeURIComponent(returnUrl)}`)
+          // LoginForm reads ``next``, not ``redirect`` — using the wrong param
+          // silently drops the return URL and the user lands on home with no
+          // binding feedback.
+          router.replace(`/login?next=${encodeURIComponent(returnUrl)}`)
           return
         }
         setStatus('error')
@@ -69,6 +72,9 @@ export function ImLinkPage() {
   return (
     <div className="text-center space-y-3">
       <p className="text-sm text-destructive">{errorMsg}</p>
+      <Link href="/" className="text-sm text-primary underline">
+        {t('goToApp')}
+      </Link>
     </div>
   )
 }
