@@ -369,6 +369,72 @@ async def test_flat_mode_mints_new_conv_when_soft_deleted(
         assert link.conversation_id == r2.conversation_id
 
 
+async def test_mode_change_adopts_existing_conversation_into_topic(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """flat→topic settings change: the next message must adopt the existing
+    (flat, topicless) conversation into the new Topic instead of orphaning the
+    Topic and leaving the conversation ungrouped."""
+    maker, account = _seeded
+
+    # 1) First message in flat mode → topicless conversation + link.
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="flat first",
+            origin="inbound",
+        )
+        await session.commit()
+    assert r1.topic_id is None
+
+    # 2) Admin flips to topic mode; next message reuses the live conversation.
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
+    async with maker() as session:
+        r2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="topic now",
+            origin="inbound",
+        )
+        await session.commit()
+
+    # Same conversation, now grouped under the new Topic — no orphan, no split.
+    assert r2.conversation_id == r1.conversation_id
+    assert r2.topic_id is not None
+
+    async with maker() as session:
+        conv = (
+            await session.execute(
+                select(Conversation).where(Conversation.id == r2.conversation_id)
+            )
+        ).scalar_one()
+        assert conv.topic_id == r2.topic_id  # conversation adopted into the topic
+        assert "im" in conv.attributes
+
+        link = (
+            await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
+        ).scalar_one()
+        assert link.topic_id == r2.topic_id  # link, conv, topic all agree
+
+        # Exactly one topic — no orphan was created.
+        topic_count = (
+            await session.execute(
+                select(func.count()).select_from(Topic).where(Topic.workspace_id == _WS)
+            )
+        ).scalar()
+        assert topic_count == 1
+
+
 async def test_new_rotates_conversation_under_same_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
