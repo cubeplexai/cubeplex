@@ -157,7 +157,7 @@ async def resolve_im_conversation(
             await session.flush()
         return conv.id
 
-    link, _created = await get_or_create_thread_link(
+    link, created = await get_or_create_thread_link(
         session,
         org_id=account.org_id,
         workspace_id=account.workspace_id,
@@ -173,6 +173,31 @@ async def resolve_im_conversation(
     if topic_id is not None and link.topic_id != topic_id:
         link.topic_id = topic_id
         session.add(link)
+
+    # When we reused an EXISTING conversation (created is False —
+    # ``_make_conversation_id`` never ran), it still carries whatever
+    # topic/group/attributes it had before. This happens on a flat→topic
+    # settings change or a link that predates topic mode. Adopt it into the
+    # resolved Topic so the link, the conversation, and the Topic agree —
+    # otherwise the just-created Topic is orphaned and the conversation stays
+    # ungrouped (and, in shared mode, the worker would reject it for lacking
+    # attributes.im).
+    if should_topic and topic_id is not None and not created:
+        reused = (
+            await session.execute(
+                select(Conversation).where(Conversation.id == link.conversation_id)  # type: ignore[arg-type]
+            )
+        ).scalar_one_or_none()
+        if reused is not None and (
+            reused.topic_id != topic_id or reused.is_group_chat != is_shared
+        ):
+            reused.topic_id = topic_id
+            reused.is_group_chat = is_shared
+            merged = dict(reused.attributes or {})
+            merged.update(im_attrs)
+            reused.attributes = merged
+            session.add(reused)
+            await session.flush()
 
     # Shared channels: auto-join the sender to the topic + conversation so a
     # late joiner whose first message arrives after the link was created is
@@ -280,7 +305,9 @@ async def reset_im_conversation(
         workspace_id=old.workspace_id,
         creator_user_id=old.creator_user_id,
         title=old.title,
-        topic_id=old.topic_id,
+        # The link is the authoritative Topic anchor — old.topic_id can lag it
+        # (e.g. a conversation adopted into a topic after a mode change).
+        topic_id=link.topic_id,
         is_group_chat=old.is_group_chat,
         attributes=dict(old.attributes or {}),
     )
