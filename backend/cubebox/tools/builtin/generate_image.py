@@ -200,9 +200,11 @@ def make_generate_image_tool(
     return AgentTool(
         name="generate_image",
         description=(
-            "Generate an image from a text prompt, or edit existing image(s) by passing "
-            "their sandbox paths in edit_source_paths. The image is saved as an artifact "
-            "the user can preview and is returned for further editing."
+            "Generate a new image from a text prompt, or **edit an existing image** by "
+            "passing its sandbox path in edit_source_paths. When the user asks to modify, "
+            "refine, or transform an existing image, always use edit_source_paths with the "
+            "path of the original. The result overwrites the source and is saved as an "
+            "artifact the user can preview."
         ),
         parameters=GenerateImageInput,
         execute=_execute,

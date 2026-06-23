@@ -2251,12 +2251,17 @@ class RunManager:
             from cubebox.tools.builtin.view_images import make_view_images_tool
 
             # LLMCapabilities reads providers + default/fallback refs off LLMConfig.
-            # Build a thin adapter from the snapshot so view_images sees the same
-            # input modalities the resolved primary model supports.
+            # Build a thin adapter from the snapshot so view_images sees the
+            # input modalities the full model chain (primary + fallbacks) supports.
+            _fallback_refs: list[str] = []
+            if isinstance(this_run_model, FallbackBoundModel):
+                _fallback_refs = [
+                    f"{bm.spec.provider_id}/{bm.spec.id}" for bm in this_run_model.chain[1:]
+                ]
             _caps_cfg = LLMConfig.model_validate(
                 {
                     "default_model": f"{provider_name}/{model_id}",
-                    "fallback_models": [],
+                    "fallback_models": _fallback_refs,
                     "providers": {slug: cfg.model_dump() for slug, cfg in snap.providers.items()},
                 }
             )
