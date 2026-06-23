@@ -17,17 +17,25 @@ cd benchmarks/swebench
 uv venv && source .venv/bin/activate
 uv pip install -e .
 
-# 1. Get a cubebox API key from settings/profile (PR #270).
-export CUBEBOX_BASE_URL=http://127.0.0.1:8012
-export CUBEBOX_TOKEN=sk-…
-export CUBEBOX_WS=ws-…
+# 1. One-shot bootstrap: registers a benchmark-only user, mints an API
+#    key, sets the org SandboxPolicy to network_default_action=allow,
+#    writes the resulting env vars to .env.benchmark.
+python scripts/bootstrap.py --base-url http://127.0.0.1:8000
 
-# 2. Smoke-test on a single instance.
+# 2. Load credentials.
+set -a && source .env.benchmark && set +a
+
+# 3. Smoke-test on a single instance.
 swebench-run --instances psf__requests-1142 --model-key flash
 
-# 3. Or sample the first N instances from the dataset.
+# 4. Or sample the first N instances from the dataset.
 swebench-run --limit 5 --model-key flash
 ```
+
+If you already have an API key + workspace (e.g. you minted one in the
+cubebox settings UI), skip bootstrap and just `export CUBEBOX_TOKEN=…`
+yourself. But the SandboxPolicy must allow outbound HTTPS — see the
+spec's "Phase 1 prerequisites" section.
 
 Artifacts land under `runs/<YYYYMMDDTHHMMSSZ>-mini/`:
 
