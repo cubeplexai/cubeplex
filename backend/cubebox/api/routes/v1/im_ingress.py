@@ -9,7 +9,6 @@ prove endpoint control by getting their supplied challenge bounced back.
 from __future__ import annotations
 
 import json
-import re as _re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -32,6 +31,7 @@ from cubebox.im.feishu.card_action_router import (
     dispatch as dispatch_card_action,
 )
 from cubebox.im.feishu.connector import FeishuConnector
+from cubebox.im.feishu.link_command import handle_link_command, parse_link_command
 from cubebox.im.feishu.signature import (
     FeishuSignatureError,
     decrypt_feishu_payload,
@@ -48,17 +48,6 @@ from cubebox.models.im_connector import IMConnectorAccount
 from cubebox.repositories.im_connector import get_account_by_external_id_unscoped
 
 router = APIRouter(prefix="/im", tags=["im-ingress"])
-
-_LINK_RE = _re.compile(
-    r"^\s*(?:/link|绑定)\s+(\S+@\S+\.\S+)\s*$",
-    _re.IGNORECASE,
-)
-
-
-def _parse_link_command(text: str) -> str | None:
-    """Extract email from a /link or 绑定 command. Returns None if not a match."""
-    m = _LINK_RE.match(text)
-    return m.group(1).strip().lower() if m else None
 
 
 async def _try_decrypt_against_enabled_accounts(
@@ -291,9 +280,9 @@ async def feishu_events(
     gate_connector = _build_gate_connector(account, secrets, bot_open_id)
 
     # Intercept /link or 绑定 commands before normal ingest.
-    link_email = _parse_link_command(event.text)
+    link_email = parse_link_command(event.text)
     if link_email is not None:
-        await _handle_feishu_link_command(
+        await handle_link_command(
             email=link_email,
             event=event,
             account=account,
@@ -314,48 +303,6 @@ async def feishu_events(
     )
     logger.info("[Feishu ingress] {} {}: {}", account.id, event.platform_event_id, result.outcome)
     return Response(status_code=status.HTTP_200_OK)
-
-
-async def _handle_feishu_link_command(
-    *,
-    email: str,
-    event: Any,
-    account: IMConnectorAccount,
-    connector: Any,
-) -> None:
-    """Generate an identity-link token and reply to the Feishu chat."""
-    from cubebox.config import config
-    from cubebox.im.link import sign_link_token
-
-    secret = str(config.get("auth.jwt_secret", "CHANGE_ME"))
-    sender_ref = event.sender_ref or event.sender_open_id or ""
-    if not sender_ref:
-        if connector is not None:
-            await connector.send_to_chat(event.channel_id, event.reply_to_id, "无法识别发送者。")
-        return
-
-    try:
-        token = sign_link_token(
-            im_user_id=sender_ref,
-            email=email,
-            account_id=account.id,
-            workspace_id=account.workspace_id,
-            platform="feishu",
-            secret=secret,
-        )
-    except Exception:
-        logger.opt(exception=True).warning("[Feishu] sign_link_token failed")
-        if connector is not None:
-            await connector.send_to_chat(event.channel_id, event.reply_to_id, "生成绑定链接失败。")
-        return
-
-    base = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
-    url = f"{base}/im-link?token={token}"
-    text = f"点击链接完成绑定：\n{url}"
-    if connector is not None:
-        await connector.send_to_chat(event.channel_id, event.reply_to_id, text)
-    else:
-        logger.warning("[Feishu] no connector to reply with link URL")
 
 
 def _build_gate_connector(
