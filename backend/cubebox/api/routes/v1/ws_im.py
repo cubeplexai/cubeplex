@@ -31,6 +31,7 @@ from cubebox.credentials.dependencies import (
 )
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.session import get_session
+from cubebox.im.bot_settings import IMBotSettings, load_bot_settings
 from cubebox.models.im_connector import IMConnectorAccount, IMIdentityLink
 from cubebox.models.membership import Role
 from cubebox.models.user import User
@@ -423,6 +424,63 @@ async def enable_workspace_account(
                     account_id,
                 )
     return _to_out(updated)
+
+
+# ---------------------------------------------------------------------------
+# Account-level bot settings (routing + topic mode)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/accounts/{account_id}/settings", response_model=IMBotSettings)
+async def get_bot_settings(
+    workspace_id: str,
+    account_id: str,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> IMBotSettings:
+    """Read the bot's account-level routing/topic settings (defaults if unset)."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    svc = _service(session, backend, ctx)
+    account = await svc.get(account_id=account_id, workspace_id=ctx.workspace_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    return load_bot_settings(account.config)
+
+
+@router.put("/accounts/{account_id}/settings", response_model=IMBotSettings)
+async def update_bot_settings(
+    workspace_id: str,
+    account_id: str,
+    body: IMBotSettings,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
+) -> IMBotSettings:
+    """Update the bot's routing/topic settings. Admin-only (mutates behavior)."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    role = await MembershipRepository(session).get_role(
+        user_id=ctx.user.id, workspace_id=ctx.workspace_id
+    )
+    if role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="workspace admin required",
+        )
+    if body.routing_mode == "shared" and body.sandbox_mode is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="sandbox_mode is required when routing_mode is shared",
+        )
+    svc = _service(session, backend, ctx)
+    updated = await svc.update_bot_settings(
+        account_id=account_id, settings=body, workspace_id=ctx.workspace_id
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    return load_bot_settings(updated.config)
 
 
 @router.get(
