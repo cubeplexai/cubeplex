@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -49,8 +50,14 @@ class AttachmentHydrator:
             if row is None:
                 raise AttachmentHydrationError(file_id=fid, cause="row not found")
 
+            # shlex.quote prevents shell metacharacters in the user-supplied
+            # filename (e.g. ``$(whoami).xlsx``, backticks, ``;``) from being
+            # evaluated by the sandbox shell. _safe_basename allows these
+            # characters through, so the only safe form is single-quoting via
+            # shlex — bash double-quotes still expand $() and backticks.
+            quoted_path = shlex.quote(row.sandbox_path)
             check = await self.sandbox.execute(
-                f'test -f "{row.sandbox_path}" && echo EXISTS || echo MISSING'
+                f"test -f {quoted_path} && echo EXISTS || echo MISSING"
             )
             if (check.output or "").strip() == "EXISTS":
                 result[fid] = row.sandbox_path

@@ -335,13 +335,47 @@ def _make_file_read_tool(
     ) -> AgentToolResult:
         import json
 
+        from cubebox.parsers.schema import ErrorOutput
+        from cubebox.sandbox.base import SandboxError
+
         del tool_call_id, signal, on_update
 
-        result = await sandbox.file_read(
-            args.path,
-            options=ParseOptions(page_range=args.page_range, line_range=args.line_range),
-            conversation_id=conversation_id,
-        )
+        # Surface FileNotFoundError / SandboxError as a structured ErrorOutput
+        # instead of letting them bubble into cubepi's generic tool-error
+        # wrapper — that wrapper writes ``str(exc)`` into the tool result, and
+        # ``str(FileNotFoundError(path))`` is literally the path, which the
+        # model reads as "the file content is its own path".
+        try:
+            result: Any = await sandbox.file_read(
+                args.path,
+                options=ParseOptions(page_range=args.page_range, line_range=args.line_range),
+                conversation_id=conversation_id,
+            )
+        except FileNotFoundError:
+            result = ErrorOutput(
+                path=args.path,
+                error=f"file not found: {args.path}",
+                retryable=False,
+            )
+        except SandboxError as exc:
+            result = ErrorOutput(
+                path=args.path,
+                error=f"sandbox error reading {args.path}: {exc}",
+                retryable=False,
+            )
+        except Exception as exc:  # noqa: BLE001 — last-resort wrapper
+            # Catch-all for transport errors (httpx.TransportError, timeouts)
+            # and anything else the download / sniff / dedup layers can raise
+            # outside the parser-registry's own try/except. Without this,
+            # cubepi's generic tool-error wrapper writes str(exc) into the
+            # ToolResult content — the same trap that FileNotFoundError fell
+            # into. asyncio.CancelledError is BaseException, not Exception,
+            # so user-cancel still propagates.
+            result = ErrorOutput(
+                path=args.path,
+                error=f"failed to read {args.path}: {exc}",
+                retryable=True,
+            )
         return AgentToolResult(content=[TextContent(text=json.dumps(result.model_dump()))])
 
     return AgentTool(

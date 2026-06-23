@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -327,6 +328,78 @@ async def test_file_read_delegates_to_sandbox() -> None:
     payload = json.loads(_text(result))
     assert payload["kind"] == "text"
     assert payload["content"] == "file contents here"
+
+
+@pytest.mark.asyncio
+async def test_file_read_returns_error_kind_when_file_missing() -> None:
+    """FileNotFoundError must surface as ErrorOutput, not cubepi's generic
+    str(exc) wrapper (which would leak the bare path as 'file contents').
+    """
+    sandbox = _make_sandbox()
+    sandbox.file_read = AsyncMock(side_effect=FileNotFoundError("/work/missing.xlsx"))
+
+    tool = _make_file_read_tool(sandbox, conversation_id="conv-1")
+    args = _FileReadArgs(path="/work/missing.xlsx")
+    result = await tool.execute("tc-1", args)
+
+    payload = json.loads(_text(result))
+    assert payload["kind"] == "error"
+    assert payload["path"] == "/work/missing.xlsx"
+    assert "file not found" in payload["error"]
+    assert payload["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_file_read_returns_error_kind_on_sandbox_error() -> None:
+    """SandboxError (provider down etc.) also surfaces as ErrorOutput."""
+    from cubebox.sandbox.base import SandboxError
+
+    sandbox = _make_sandbox()
+    sandbox.file_read = AsyncMock(side_effect=SandboxError("provider unreachable"))
+
+    tool = _make_file_read_tool(sandbox, conversation_id="conv-1")
+    args = _FileReadArgs(path="/work/data.csv")
+    result = await tool.execute("tc-1", args)
+
+    payload = json.loads(_text(result))
+    assert payload["kind"] == "error"
+    assert payload["path"] == "/work/data.csv"
+    assert "sandbox error" in payload["error"]
+    assert "provider unreachable" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_file_read_returns_error_kind_on_transport_error() -> None:
+    """Transient transport errors (httpx etc.) must also surface as ErrorOutput
+    with retryable=True — otherwise cubepi's str(exc) wrapper leaks raw error
+    text as tool content, the same trap as the bare FileNotFoundError case.
+    """
+    sandbox = _make_sandbox()
+    sandbox.file_read = AsyncMock(side_effect=ConnectionError("rustfs timed out"))
+
+    tool = _make_file_read_tool(sandbox, conversation_id="conv-1")
+    args = _FileReadArgs(path="/work/large.pdf")
+    result = await tool.execute("tc-1", args)
+
+    payload = json.loads(_text(result))
+    assert payload["kind"] == "error"
+    assert payload["retryable"] is True
+    assert "rustfs timed out" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_file_read_does_not_swallow_cancelled() -> None:
+    """The catch-all must let asyncio.CancelledError propagate so user steer /
+    abort works. CancelledError is BaseException, not Exception, so the
+    ``except Exception`` does not catch it — pin that contract.
+    """
+    sandbox = _make_sandbox()
+    sandbox.file_read = AsyncMock(side_effect=asyncio.CancelledError())
+
+    tool = _make_file_read_tool(sandbox, conversation_id="conv-1")
+    args = _FileReadArgs(path="/work/data.csv")
+    with pytest.raises(asyncio.CancelledError):
+        await tool.execute("tc-1", args)
 
 
 @pytest.mark.asyncio

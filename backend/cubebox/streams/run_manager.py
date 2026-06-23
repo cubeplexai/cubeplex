@@ -459,18 +459,72 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
     return None
 
 
+async def _hydrate_attachments_into_sandbox(
+    *,
+    org_id: str,
+    workspace_id: str,
+    conversation_id: str,
+    attachment_ids: list[str],
+    sandbox: Any,
+) -> None:
+    """Materialize attachment objects from ObjectStore onto the sandbox FS.
+
+    AttachmentService stamps every row with a promised path
+    (``/workspace/uploads/<conv>/<atch>/<filename>``) and the system prompt
+    tells the LLM to ``file_read`` that path — but the bytes live in
+    ObjectStore until something stages them in. This function is the
+    something. Idempotent (the hydrator checks for an existing file first).
+    Failures are logged and swallowed: the agent will see "file not found"
+    and surface it to the user, which is better than aborting the run.
+    """
+    if not attachment_ids or sandbox is None:
+        return
+
+    from cubebox.agents.hydrator import AttachmentHydrator
+    from cubebox.db.engine import async_session_maker
+    from cubebox.objectstore import get_objectstore_client
+    from cubebox.repositories import AttachmentRepository
+
+    try:
+        async with async_session_maker() as session:
+            repo = AttachmentRepository(
+                session,
+                org_id=org_id,
+                workspace_id=workspace_id,
+            )
+            hydrator = AttachmentHydrator(
+                repo=repo,
+                sandbox=sandbox,
+                objectstore=get_objectstore_client(),
+            )
+            await hydrator.hydrate(
+                conversation_id=conversation_id,
+                file_ids=attachment_ids,
+            )
+    except Exception as exc:  # noqa: BLE001 — non-fatal by design
+        logger.warning("Failed to hydrate attachments into sandbox: {}", exc)
+
+
 async def _build_attachment_content_blocks(
     *,
     org_id: str,
     workspace_id: str,
     conversation_id: str,
     attachment_ids: list[str],
+    sandbox_available: bool = True,
 ) -> list[dict[str, Any]]:
     """Return file_attachment content blocks for the given file_ids.
 
     Reads metadata via a short-lived session. Rows are expected to exist
     (validated at the API layer); missing rows are silently skipped here
     since hydration would have already failed for them.
+
+    When ``sandbox_available`` is False, document/other attachments are
+    dropped: their hint tells the model to ``file_read`` a sandbox path,
+    but ``file_read`` is only registered when SandboxMiddleware loads, and
+    hydration could not have placed bytes there either. Image attachments
+    are kept because ``view_images`` reads bytes from ObjectStore directly
+    and is registered regardless of sandbox availability.
     """
     if not attachment_ids:
         return []
@@ -491,6 +545,14 @@ async def _build_attachment_content_blocks(
                 attachment_id=fid,
             )
             if row is None:
+                continue
+            if not sandbox_available and row.kind != "image":
+                logger.warning(
+                    "Skipping non-image attachment {} ({}) — sandbox unavailable, "
+                    "file_read tool is not registered",
+                    row.id,
+                    row.kind,
+                )
                 continue
             blocks.append(
                 {
@@ -1567,12 +1629,21 @@ class RunManager:
             # Build attachment metadata blocks and inject into user message so
             # AttachmentHintMiddleware can render the [Attachments] hint.
             if attachments:
+                await _hydrate_attachments_into_sandbox(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    conversation_id=conversation_id,
+                    attachment_ids=attachments,
+                    sandbox=sandbox,
+                )
+
                 try:
                     _att_blocks = await _build_attachment_content_blocks(
                         org_id=ctx.org_id,
                         workspace_id=ctx.workspace_id,
                         conversation_id=conversation_id,
                         attachment_ids=attachments,
+                        sandbox_available=sandbox is not None,
                     )
                     if _att_blocks:
                         _user_msg_metadata["attachments"] = _att_blocks
