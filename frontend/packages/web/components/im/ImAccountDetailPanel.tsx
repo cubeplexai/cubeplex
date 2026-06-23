@@ -3,9 +3,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
-import type { ImAccount, ImIdentityLink } from '@cubebox/core'
-import { createApiClient, wsListIdentityLinks } from '@cubebox/core'
+import type { ImAccount, ImBotSettings, ImIdentityLink } from '@cubebox/core'
+import {
+  createApiClient,
+  wsGetImBotSettings,
+  wsListIdentityLinks,
+  wsUpdateImBotSettings,
+} from '@cubebox/core'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { DetailPanel } from '@/components/shared/DetailPanel'
 
@@ -34,6 +48,10 @@ export function ImAccountDetailPanel({
   const t = useTranslations('im')
   const client = useMemo(() => createApiClient(''), [])
   const [links, setLinks] = useState<ImIdentityLink[]>([])
+  const [settings, setSettings] = useState<ImBotSettings | null>(null)
+  const [savedSettings, setSavedSettings] = useState<ImBotSettings | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [settingsError, setSettingsError] = useState<string | null>(null)
 
   const loadLinks = useCallback(async () => {
     try {
@@ -44,10 +62,65 @@ export function ImAccountDetailPanel({
     }
   }, [client, account.workspace_id, account.id])
 
+  const loadSettings = useCallback(async () => {
+    try {
+      const res = await wsGetImBotSettings(client, account.workspace_id, account.id)
+      setSettings(res)
+      setSavedSettings(res)
+    } catch {
+      // non-critical; the section just stays in its loading state
+    }
+  }, [client, account.workspace_id, account.id])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load-on-mount
     void loadLinks()
-  }, [loadLinks])
+    void loadSettings()
+  }, [loadLinks, loadSettings])
+
+  const botName = account.bot_app_name || 'cubebox'
+  const settingsDirty =
+    settings !== null &&
+    savedSettings !== null &&
+    (settings.routing_mode !== savedSettings.routing_mode ||
+      settings.topic_mode !== savedSettings.topic_mode ||
+      (settings.sandbox_mode ?? '') !== (savedSettings.sandbox_mode ?? ''))
+
+  const saveSettings = useCallback(async () => {
+    if (settings === null) return
+    setSaving(true)
+    setSettingsError(null)
+    try {
+      const payload: ImBotSettings = {
+        ...settings,
+        // Backend requires a sandbox_mode for shared routing; default it.
+        sandbox_mode:
+          settings.routing_mode === 'shared'
+            ? settings.sandbox_mode || 'dedicated'
+            : settings.sandbox_mode,
+      }
+      const res = await wsUpdateImBotSettings(client, account.workspace_id, account.id, payload)
+      setSettings(res)
+      setSavedSettings(res)
+    } catch (err) {
+      setSettingsError(err instanceof Error ? err.message : 'Failed to save settings')
+    } finally {
+      setSaving(false)
+    }
+  }, [client, account.workspace_id, account.id, settings])
+
+  const behaviorSummary = useMemo(() => {
+    if (settings === null) return ''
+    const routing =
+      settings.routing_mode === 'shared'
+        ? 'Everyone in a channel shares one conversation.'
+        : 'Each person gets their own conversation.'
+    const topic =
+      settings.topic_mode === 'topic' || settings.routing_mode === 'shared'
+        ? `Grouped under a topic — DM topics are titled “${botName}”, group topics use the chat name.`
+        : 'Standalone conversations, no topic grouping.'
+    return `${routing} ${topic}`
+  }, [settings, botName])
 
   return (
     <DetailPanel
@@ -103,6 +176,72 @@ export function ImAccountDetailPanel({
             <dt className="text-muted-foreground">Mode</dt>
             <dd>{account.delivery_mode}</dd>
           </dl>
+        </section>
+
+        <Separator />
+
+        <section>
+          <h3 className="mb-2 text-xs uppercase text-muted-foreground">Behavior</h3>
+          {settings === null ? (
+            <p className="text-xs text-muted-foreground">Loading…</p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="grid grid-cols-[7rem_1fr] items-center gap-x-4 gap-y-3">
+                <Label htmlFor="im-routing-mode">Routing</Label>
+                <Select
+                  value={settings.routing_mode}
+                  onValueChange={(v) =>
+                    setSettings({ ...settings, routing_mode: v as ImBotSettings['routing_mode'] })
+                  }
+                >
+                  <SelectTrigger id="im-routing-mode" size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="isolated">Isolated (per person)</SelectItem>
+                    <SelectItem value="shared">Shared (per channel)</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Label htmlFor="im-topic-mode">Topic grouping</Label>
+                <Select
+                  value={settings.topic_mode}
+                  onValueChange={(v) =>
+                    setSettings({ ...settings, topic_mode: v as ImBotSettings['topic_mode'] })
+                  }
+                >
+                  <SelectTrigger id="im-topic-mode" size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="topic">Group under a topic</SelectItem>
+                    <SelectItem value="flat">Standalone conversations</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {settings.routing_mode === 'shared' && (
+                  <>
+                    <Label htmlFor="im-sandbox-mode">Sandbox</Label>
+                    <Input
+                      id="im-sandbox-mode"
+                      value={settings.sandbox_mode ?? ''}
+                      placeholder="dedicated"
+                      onChange={(e) => setSettings({ ...settings, sandbox_mode: e.target.value })}
+                    />
+                  </>
+                )}
+              </div>
+
+              <p className="text-xs text-muted-foreground">{behaviorSummary}</p>
+              {settingsError && <p className="text-xs text-destructive">{settingsError}</p>}
+
+              <div>
+                <Button size="sm" disabled={!settingsDirty || saving} onClick={saveSettings}>
+                  {saving ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+            </div>
+          )}
         </section>
 
         <Separator />
