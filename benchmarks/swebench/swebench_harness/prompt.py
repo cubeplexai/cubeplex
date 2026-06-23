@@ -15,8 +15,7 @@ from __future__ import annotations
 
 from swebench_harness.dataset import SWEBenchInstance
 
-TASK_TEMPLATE = """\
-You are an autonomous software engineer fixing a single SWE-bench Verified task.
+TASK_TEMPLATE = r"""You are an autonomous software engineer fixing a single SWE-bench Verified task.
 
 INSTANCE_ID:   {instance_id}
 REPO:          {repo}
@@ -33,47 +32,58 @@ WORKING DIRECTORY (everything you do MUST live under this path):
 PROCEDURE — execute every step. Use the `execute` tool for shell commands.
 
 1. Initialise sandbox directories:
-     mkdir -p /workspace/swebench/.cache /workspace/swebench/runs
+     mkdir -p /workspace/swebench/.cache /workspace/swebench/runs /workspace/swebench/venvs
 
-2. Create or reuse the bare repo mirror:
+2. Initialise (or reuse) a shallow bare cache for {repo}. The cache only
+   stores SHAs we have fetched so far — far smaller than a full clone,
+   typically <50 MB total even for django/astropy:
      CACHE=/workspace/swebench/.cache/{repo_slug}.git
-     if [ ! -d "$CACHE" ]; then
-         git clone --bare https://github.com/{repo} "$CACHE"
+     if [ ! -f "$CACHE/HEAD" ]; then
+         rm -rf "$CACHE"
+         git init --bare "$CACHE"
+         git -C "$CACHE" remote add origin https://github.com/{repo}
      fi
 
-3. Create a fresh worktree at the target commit:
+3. Fetch the target commit into the bare cache. Shallow + idempotent —
+   if the SHA is already present, this is effectively a no-op. GitHub
+   accepts fetches of any reachable SHA on a public repo:
+     git -C "$CACHE" fetch --depth 1 --no-tags origin \
+         {base_commit}:refs/swebench/{instance_id}
+
+4. Create a fresh worktree at the target commit. Use --force in case
+   a prior attempt left a partial worktree:
      rm -rf {workdir}
      git --git-dir="$CACHE" worktree add --force {workdir} {base_commit}
      cd {workdir}
 
-4. Set up an isolated Python environment for this task:
-     python3 -m venv .venv
-     . .venv/bin/activate
+5. Set up an isolated Python venv OUTSIDE the worktree so it never
+   ends up in `git diff`:
+     VENV=/workspace/swebench/venvs/{instance_id}
+     python3 -m venv "$VENV"
+     . "$VENV/bin/activate"
      pip install --quiet --upgrade pip
-     # Install the project in editable mode if it has a build config.
      if [ -f setup.py ] || [ -f pyproject.toml ]; then
          pip install --quiet -e . || true
      fi
 
-5. Run the targeted failing tests to confirm they currently fail.
-6. Read the source, write a fix, re-run the targeted tests until they pass.
+6. Run the targeted failing tests to confirm they currently fail.
+7. Read the source, write a fix, re-run the targeted tests until they pass.
    Inspect related tests to avoid regressions. Edit only PRODUCT code
    inside {workdir}; do NOT edit any test file under tests/, test/, or
    *_test.py.
-7. Stage the diff, EXCLUDING the venv and other build artefacts (they would
-   otherwise blow up the patch to MB-scale and the SWE-bench scorer would
-   refuse to apply it):
+8. Stage the diff. Belt-and-suspenders exclusion — even though the venv
+   lives outside {workdir}, exclude __pycache__/*.pyc/build/dist in case
+   the project's install drops other artefacts:
      cd {workdir}
-     git add -A -- . ':(exclude).venv' ':(exclude)__pycache__' \
-                   ':(exclude)*.pyc' ':(exclude)*.egg-info' \
-                   ':(exclude).pytest_cache' ':(exclude).tox' ':(exclude)build' ':(exclude)dist'
-     git diff --cached -- . ':(exclude).venv' ':(exclude)__pycache__' \
-                          ':(exclude)*.pyc' ':(exclude)*.egg-info' \
-                          ':(exclude).pytest_cache' ':(exclude).tox' \
-                          ':(exclude)build' ':(exclude)dist' > patch.diff
-     # Sanity: confirm patch.diff is non-empty and does not contain venv files.
+     git add -A -- . ':(exclude)__pycache__' ':(exclude)*.pyc' \
+                   ':(exclude)*.egg-info' ':(exclude).pytest_cache' \
+                   ':(exclude).tox' ':(exclude)build' ':(exclude)dist'
+     git diff --cached -- . ':(exclude)__pycache__' ':(exclude)*.pyc' \
+                          ':(exclude)*.egg-info' ':(exclude).pytest_cache' \
+                          ':(exclude).tox' ':(exclude)build' ':(exclude)dist' \
+                          > patch.diff
      wc -c patch.diff
-     ! grep -q "^diff --git a/\.venv/" patch.diff || (echo "ERROR: venv leaked into patch" && exit 1)
+     ! grep -q '^diff --git a/\.venv/' patch.diff || (echo "ERROR: venv leaked into patch" && exit 1)
 
 CONSTRAINTS:
 - Do NOT modify files outside {workdir}.
