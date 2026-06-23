@@ -60,12 +60,20 @@ PROCEDURE — execute every step. Use the `execute` tool for shell commands.
    Inspect related tests to avoid regressions. Edit only PRODUCT code
    inside {workdir}; do NOT edit any test file under tests/, test/, or
    *_test.py.
-7. Stage the diff:
+7. Stage the diff, EXCLUDING the venv and other build artefacts (they would
+   otherwise blow up the patch to MB-scale and the SWE-bench scorer would
+   refuse to apply it):
      cd {workdir}
-     git add -A
-     git diff --cached > patch.diff
-     # Sanity: confirm patch.diff is non-empty.
+     git add -A -- . ':(exclude).venv' ':(exclude)__pycache__' \
+                   ':(exclude)*.pyc' ':(exclude)*.egg-info' \
+                   ':(exclude).pytest_cache' ':(exclude).tox' ':(exclude)build' ':(exclude)dist'
+     git diff --cached -- . ':(exclude).venv' ':(exclude)__pycache__' \
+                          ':(exclude)*.pyc' ':(exclude)*.egg-info' \
+                          ':(exclude).pytest_cache' ':(exclude).tox' \
+                          ':(exclude)build' ':(exclude)dist' > patch.diff
+     # Sanity: confirm patch.diff is non-empty and does not contain venv files.
      wc -c patch.diff
+     ! grep -q "^diff --git a/\.venv/" patch.diff || (echo "ERROR: venv leaked into patch" && exit 1)
 
 CONSTRAINTS:
 - Do NOT modify files outside {workdir}.
