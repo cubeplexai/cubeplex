@@ -116,23 +116,25 @@ async def process_one_queue_item(
                 )
             )
         ).scalar_one_or_none()
-        binding_row: Any = None
+        # An IM-origin Topic carries source metadata under attributes["im"];
+        # its presence is what makes a topic / group-chat conversation
+        # dispatchable. Non-IM topics are still out of scope for IM runs.
+        topic_row: Any = None
+        if conv_row is not None and conv_row.topic_id is not None:
+            from cubebox.models.topic import Topic
+
+            topic_row = (
+                await session.execute(
+                    select(Topic).where(Topic.id == conv_row.topic_id)
+                )
+            ).scalar_one_or_none()
+
         if conv_row is not None and (conv_row.topic_id is not None or conv_row.is_group_chat):
-            from cubebox.models.im_channel_binding import IMChannelBinding
-
-            if conv_row.topic_id is not None:
-                binding_row = (
-                    await session.execute(
-                        select(IMChannelBinding).where(
-                            IMChannelBinding.topic_id == conv_row.topic_id,
-                        )
-                    )
-                ).scalar_one_or_none()
-
-            if binding_row is None:
+            im_bound = topic_row is not None and "im" in (topic_row.attributes or {})
+            if not im_bound:
                 logger.warning(
                     "[IM worker] refusing to dispatch run for queue item {} — "
-                    "conversation {} is a topic / group chat (v1 scope)",
+                    "conversation {} is a non-IM topic / group chat (v1 scope)",
                     item.id,
                     item.conversation_id,
                 )
@@ -140,19 +142,11 @@ async def process_one_queue_item(
                 await mark_receipt_failed(session, receipt_id=item.receipt_id)
                 await session.commit()
                 return True
-        topic_creator_user_id: str | None = None
-        if conv_row is not None and conv_row.topic_id is not None:
-            from cubebox.models.topic import Topic
 
-            topic_row = (
-                await session.execute(
-                    select(Topic).where(
-                        Topic.id == conv_row.topic_id,
-                    )
-                )
-            ).scalar_one_or_none()
-            if topic_row is not None:
-                topic_creator_user_id = topic_row.creator_user_id
+        topic_creator_user_id: str | None = (
+            topic_row.creator_user_id if topic_row is not None else None
+        )
+        sandbox_mode: str | None = topic_row.sandbox_mode if topic_row is not None else None
         await session.commit()
         captured = {
             "conversation_id": item.conversation_id,
@@ -163,7 +157,7 @@ async def process_one_queue_item(
             "acting_user_id": effective_user_id,
             "topic_id": (conv_row.topic_id if conv_row is not None else None),
             "is_group_chat": (conv_row.is_group_chat if conv_row is not None else False),
-            "sandbox_mode": (binding_row.sandbox_mode if binding_row is not None else None),
+            "sandbox_mode": sandbox_mode,
             "topic_creator_user_id": topic_creator_user_id,
         }
         captured_item = item

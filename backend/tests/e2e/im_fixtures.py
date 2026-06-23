@@ -150,11 +150,51 @@ async def im_cleanup(
             {"ids": credential_ids},
         )
     if ws_ids and cleanup_conversations_in_ws:
+        # Children of conversations first (real-run tests bill; topic-mode IM
+        # ingest also seeds conversation_participants).
+        await session.execute(
+            text(
+                "DELETE FROM billing_events WHERE conversation_id IN "
+                "(SELECT id FROM conversations WHERE workspace_id = ANY(:ids))"
+            ),
+            {"ids": ws_ids},
+        )
+        await session.execute(
+            text(
+                "DELETE FROM conversation_participants WHERE conversation_id IN "
+                "(SELECT id FROM conversations WHERE workspace_id = ANY(:ids))"
+            ),
+            {"ids": ws_ids},
+        )
         await session.execute(
             text("DELETE FROM conversations WHERE workspace_id = ANY(:ids)"),
             {"ids": ws_ids},
         )
     if ws_ids:
+        # Topics are created by topic-mode IM ingest (the default). They
+        # reference the workspace + creator user, so they must go before
+        # workspaces/users. Null any lingering conversation/link anchors first
+        # (when conversations weren't cleaned) so the topic delete won't trip
+        # a FK.
+        await session.execute(
+            text("UPDATE conversations SET topic_id = NULL WHERE workspace_id = ANY(:ids)"),
+            {"ids": ws_ids},
+        )
+        await session.execute(
+            text("UPDATE im_thread_links SET topic_id = NULL WHERE workspace_id = ANY(:ids)"),
+            {"ids": ws_ids},
+        )
+        await session.execute(
+            text(
+                "DELETE FROM topic_participants WHERE topic_id IN "
+                "(SELECT id FROM topics WHERE workspace_id = ANY(:ids))"
+            ),
+            {"ids": ws_ids},
+        )
+        await session.execute(
+            text("DELETE FROM topics WHERE workspace_id = ANY(:ids)"),
+            {"ids": ws_ids},
+        )
         await session.execute(
             text("DELETE FROM workspaces WHERE id = ANY(:ids)"),
             {"ids": ws_ids},

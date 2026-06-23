@@ -83,6 +83,12 @@ class IMThreadLink(CubeboxBase, OrgScopedMixin, table=True):
     scope_key: str = Field(max_length=255)
     scope_kind: str = Field(max_length=32)
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20, index=True)
+    # The durable Topic this scope rolls up under (topic_mode="topic"). Unlike
+    # conversation_id — which /new rotates — this survives /new so a sender's
+    # whole history stays grouped. NULL in flat mode.
+    topic_id: str | None = Field(
+        default=None, foreign_key="topics.id", max_length=20, nullable=True
+    )
 
 
 class IMIdentityLink(CubeboxBase, OrgScopedMixin, table=True):
