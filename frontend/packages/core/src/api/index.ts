@@ -1,6 +1,7 @@
 export { createApiClient, toApiError, ApiError, type ApiClient } from './client'
 export { parseTestStream, startTestStream, type TestStreamEvent } from './providerTestStream'
 export { AUTH_COOKIE_NAME, CSRF_COOKIE_NAME } from './cookieNames'
+export * from './apiKeys'
 export * from './attachments'
 export * from './auth'
 export * from './conversations'

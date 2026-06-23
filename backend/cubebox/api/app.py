@@ -511,6 +511,7 @@ def create_app(
         conversation_search_router,
         conversations_router,
         mcp_oauth,
+        me_api_keys_router,
         memory_router,
         model_presets,
         public_artifacts,
@@ -561,6 +562,7 @@ def create_app(
     app.include_router(im_link.router, prefix="/api/v1")
     app.include_router(attachments_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
+    app.include_router(me_api_keys_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_members.router, prefix="/api/v1")

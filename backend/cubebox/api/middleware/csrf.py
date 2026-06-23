@@ -36,8 +36,12 @@ class CSRFMiddleware:
         cookies = _parse_cookies(scope["headers"])
         has_auth = self.auth_cookie in cookies
         csrf_cookie = cookies.get(self.csrf_cookie)
+        # Bearer-authed requests (API keys) bypass CSRF: there is no cookie to
+        # replay so the attack the double-submit cookie defends against does
+        # not apply. The Bearer token is the authentication.
+        has_bearer = _has_bearer_auth(scope["headers"])
 
-        if method not in SAFE_METHODS and has_auth:
+        if method not in SAFE_METHODS and has_auth and not has_bearer:
             csrf_header = _get_header(scope["headers"], CSRF_HEADER.encode())
             if not csrf_cookie or not csrf_header or csrf_cookie != csrf_header:
                 await _send_403(send, "CSRF token missing or mismatched")
@@ -82,6 +86,14 @@ def _get_header(headers: list[tuple[bytes, bytes]], name: bytes) -> str | None:
         if k == name:
             return v.decode("latin-1")
     return None
+
+
+def _has_bearer_auth(headers: list[tuple[bytes, bytes]]) -> bool:
+    raw = _get_header(headers, b"authorization")
+    if not raw:
+        return False
+    scheme, _, token = raw.partition(" ")
+    return scheme.lower() == "bearer" and bool(token.strip())
 
 
 async def _send_403(send: Send, message: str) -> None:

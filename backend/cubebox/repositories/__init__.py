@@ -1,5 +1,6 @@
 """Repository layer."""
 
+from cubebox.repositories.api_key import ApiKeyRepository
 from cubebox.repositories.artifact import ArtifactRepository, ArtifactVersionRepository
 from cubebox.repositories.attachment import AttachmentRepository
 from cubebox.repositories.billing import BillingRepository
@@ -34,6 +35,7 @@ from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.repositories.workspace import WorkspaceRepository
 
 __all__ = [
+    "ApiKeyRepository",
     "AttachmentRepository",
     "ArtifactRepository",
     "ArtifactVersionRepository",

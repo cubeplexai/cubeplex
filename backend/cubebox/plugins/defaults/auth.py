@@ -8,21 +8,28 @@ may not need a session at all and should not be forced to accept one.
 
 from __future__ import annotations
 
+import hashlib
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from fastapi import APIRouter, Request
+from sqlalchemy import select
 
 import cubebox.db as _db
-from cubebox.models import User
+from cubebox.models import ApiKey, User
+
+# Debounce: avoid a DB write on every Bearer-authed request. Writes are
+# skipped if the stored ``last_used_at`` is within this window.
+_LAST_USED_DEBOUNCE = timedelta(seconds=60)
 
 
 class DefaultAuthProvider:
-    """CE default: cookie-based JWT via fastapi-users + custom route layer."""
+    """CE default: Bearer API key OR cookie-based JWT via fastapi-users."""
 
     async def authenticate(self, request: Request) -> User | None:
-        """Extract JWT from cookie and resolve it to an active User.
+        """Resolve the active user via Bearer API key first, then cookie JWT.
 
-        Opens a short-lived DB session for the user lookup. This is the
+        Opens a short-lived DB session for the lookup. This is the
         auth-time session; the route's own Depends(get_session) still
         opens a separate session for the business logic.
 
@@ -32,6 +39,10 @@ class DefaultAuthProvider:
         running DB, so module-level imports of fastapi-users internals would
         fail there).
         """
+        bearer_user = await self._authenticate_bearer(request)
+        if bearer_user is not None:
+            return bearer_user
+
         from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
 
         from cubebox.auth.jwt import auth_backend
@@ -53,6 +64,39 @@ class DefaultAuthProvider:
                     return user
                 return None
         return None
+
+    async def _authenticate_bearer(self, request: Request) -> User | None:
+        """If a Bearer token resolves to a known API key, return its owner."""
+        auth_header = request.headers.get("authorization") or request.headers.get(
+            "Authorization"
+        )
+        if not auth_header:
+            return None
+        scheme, _, token = auth_header.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return None
+
+        hashed = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+        async with _db.async_session_maker() as session:
+            stmt = select(ApiKey).where(ApiKey.hashed_key == hashed)  # type: ignore[arg-type]
+            api_key = (await session.execute(stmt)).scalar_one_or_none()
+            if api_key is None:
+                return None
+            user_stmt = select(User).where(User.id == api_key.user_id)  # type: ignore[arg-type]
+            user = (await session.execute(user_stmt)).scalar_one_or_none()
+            if user is None or not user.is_active:
+                return None
+            await self._maybe_touch_last_used(session, api_key)
+            return user
+
+    @staticmethod
+    async def _maybe_touch_last_used(session: Any, api_key: ApiKey) -> None:
+        now = datetime.now(UTC)
+        previous = api_key.last_used_at
+        if previous is not None and now - previous < _LAST_USED_DEBOUNCE:
+            return
+        api_key.last_used_at = now
+        await session.commit()
 
     def get_auth_routers(self) -> list[APIRouter]:
         from cubebox.api.routes.v1.auth import router as auth_router
