@@ -179,6 +179,10 @@ def build_event_handler(
                 handle_link_command,
                 parse_link_command,
             )
+            from cubebox.im.feishu.reset_command import (
+                handle_reset_command,
+                parse_reset_command,
+            )
 
             link_email = parse_link_command(event.text)
             if link_email is not None:
@@ -192,6 +196,21 @@ def build_event_handler(
                 except Exception:
                     logger.exception(
                         "[Feishu LC] /link handler failed for {}",
+                        event.platform_event_id,
+                    )
+                return
+
+            if parse_reset_command(event.text):
+                try:
+                    await handle_reset_command(
+                        event=event,
+                        account=account,
+                        session_maker=session_maker,
+                        connector=gate_connector,
+                    )
+                except Exception:
+                    logger.exception(
+                        "[Feishu LC] /new handler failed for {}",
                         event.platform_event_id,
                     )
                 return

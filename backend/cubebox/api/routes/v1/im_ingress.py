@@ -32,6 +32,7 @@ from cubebox.im.feishu.card_action_router import (
 )
 from cubebox.im.feishu.connector import FeishuConnector
 from cubebox.im.feishu.link_command import handle_link_command, parse_link_command
+from cubebox.im.feishu.reset_command import handle_reset_command, parse_reset_command
 from cubebox.im.feishu.signature import (
     FeishuSignatureError,
     decrypt_feishu_payload,
@@ -286,6 +287,15 @@ async def feishu_events(
             email=link_email,
             event=event,
             account=account,
+            connector=gate_connector,
+        )
+        return Response(status_code=status.HTTP_200_OK)
+
+    if parse_reset_command(event.text):
+        await handle_reset_command(
+            event=event,
+            account=account,
+            session_maker=async_session_maker,
             connector=gate_connector,
         )
         return Response(status_code=status.HTTP_200_OK)
