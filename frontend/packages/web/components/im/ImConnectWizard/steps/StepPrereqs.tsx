@@ -123,11 +123,11 @@ export function StepPrereqs({ descriptor, form, onChange }: WizardStepProps): Re
               id={`prereq-${p.key}`}
               checked={form[`prereq_${p.key}`] === '1'}
               onCheckedChange={(c) => onChange({ [`prereq_${p.key}`]: c === true ? '1' : '' })}
-              className="mt-0.5"
+              className="mt-0.5 border-foreground/30"
             />
             <div className="flex-1 space-y-1.5">
               <div className="flex items-center gap-2">
-                <label htmlFor={`prereq-${p.key}`} className="cursor-pointer leading-none">
+                <label htmlFor={`prereq-${p.key}`} className="cursor-pointer">
                   {t(typeof p.labelKey === 'function' ? p.labelKey(form) : p.labelKey)}
                 </label>
                 {p.helpUrl && (

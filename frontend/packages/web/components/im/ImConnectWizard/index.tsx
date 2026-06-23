@@ -44,9 +44,10 @@ export function ImConnectWizard({
   const mut = useConnectMutation(client, wsId)
 
   function handleClose(): void {
-    setPlatform(null)
-    setStepIdx(0)
-    setForm({})
+    // Don't reset platform/stepIdx/form here — the wizard is unmounted by the parent
+    // (`{wizardOpen && <ImConnectWizard ...>}`), so state resets naturally on next open.
+    // Resetting in-place causes the dialog content to flash back to the platform picker
+    // during the close animation.
     onClose()
   }
 
@@ -58,7 +59,6 @@ export function ImConnectWizard({
       if (out) {
         toast.success(t('im.success.toast.connected'))
         onSuccess()
-        handleClose()
       }
     } else {
       setStepIdx(stepIdx + 1)
@@ -67,7 +67,11 @@ export function ImConnectWizard({
 
   return (
     <Dialog open={open} disablePointerDismissal onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent role="dialog" aria-labelledby="wizard-title">
+      <DialogContent
+        role="dialog"
+        aria-labelledby="wizard-title"
+        className={platform ? 'sm:max-w-lg' : 'sm:max-w-md'}
+      >
         <DialogHeader>
           <DialogTitle id="wizard-title">{t('im.wizard.title')}</DialogTitle>
         </DialogHeader>

@@ -21,7 +21,7 @@ function comingLabel(_t: DynamicT, _id: string): string {
 export function StepPlatform({ onPick }: Props): React.ReactElement {
   const t = useTranslations() as unknown as DynamicT
   return (
-    <div className="grid grid-cols-3 gap-3">
+    <div className="flex flex-wrap justify-center gap-3">
       {ALL_PLATFORMS.map((p) => (
         <button
           key={p.id}
@@ -30,15 +30,17 @@ export function StepPlatform({ onPick }: Props): React.ReactElement {
           disabled={!p.live}
           onClick={() => p.live && onPick(p)}
           className={cn(
-            'flex flex-col items-center gap-2 rounded border p-4 text-sm transition-colors',
+            'flex w-28 flex-col items-center gap-2 rounded-xl border px-5 py-4 transition-all',
             p.live
-              ? 'hover:border-primary hover:bg-accent/40 cursor-pointer'
-              : 'opacity-40 cursor-not-allowed',
+              ? 'cursor-pointer border-border/70 bg-card/60 shadow-sm hover:border-primary/40 hover:bg-accent hover:shadow-md active:scale-[0.98]'
+              : 'cursor-not-allowed border-border/40 bg-muted/20 opacity-60',
           )}
         >
-          <PlatformLogo platform={p.id} className="h-10 w-10" />
-          <span className="font-medium">{t(p.labelKey)}</span>
-          {!p.live && <span className="text-xs text-muted-foreground">{comingLabel(t, p.id)}</span>}
+          <PlatformLogo platform={p.id} className="size-8" />
+          <span className="text-xs font-medium text-foreground">{t(p.labelKey)}</span>
+          {!p.live && (
+            <span className="text-[10px] text-muted-foreground/60">{comingLabel(t, p.id)}</span>
+          )}
         </button>
       ))}
     </div>
