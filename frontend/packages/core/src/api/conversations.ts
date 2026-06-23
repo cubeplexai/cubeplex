@@ -69,6 +69,18 @@ export async function setPinConversation(
   return res.json() as Promise<Conversation>
 }
 
+export async function forkConversation(
+  client: ApiClient,
+  id: string,
+  afterRunId: string,
+): Promise<Conversation> {
+  const res = await client.post(`/api/v1/conversations/${id}/fork`, {
+    after_run_id: afterRunId,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<Conversation>
+}
+
 export async function generateConversationTitle(
   client: ApiClient,
   id: string,

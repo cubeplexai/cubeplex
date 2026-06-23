@@ -8,6 +8,7 @@ import {
   renameConversation,
   setPinConversation,
   generateConversationTitle,
+  forkConversation,
   inviteToGroup,
   listConversationParticipants,
 } from '../api'
@@ -31,6 +32,7 @@ export interface ConversationStore {
   conversationParticipants: Record<string, ConversationParticipant[]>
   fetchList(client: ApiClient): Promise<void>
   create(client: ApiClient, title?: string, opts?: { draft?: boolean }): Promise<Conversation>
+  fork(client: ApiClient, sourceId: string, afterRunId: string): Promise<Conversation>
   remove(client: ApiClient, id: string): Promise<void>
   rename(client: ApiClient, id: string, title: string): Promise<void>
   setPin(client: ApiClient, id: string, isPinned: boolean): Promise<void>
@@ -74,6 +76,17 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
     } finally {
       set({ isLoading: false })
     }
+  },
+
+  async fork(client: ApiClient, sourceId: string, afterRunId: string) {
+    // Mirrors `create`: hit the API, prepend the new conv into local
+    // state, return it. Without the prepend the sidebar / header /
+    // upgrade-to-topic controls render stale until the next list
+    // fetch — the user lands on a conv that exists on the server but
+    // not in the store. Errors propagate (MessageActions toasts them).
+    const convo = await forkConversation(client, sourceId, afterRunId)
+    set((s) => ({ conversations: sortPinnedFirst([convo, ...s.conversations]) }))
+    return convo
   },
 
   async remove(client: ApiClient, id: string) {

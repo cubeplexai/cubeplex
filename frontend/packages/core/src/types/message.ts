@@ -57,6 +57,12 @@ interface MessageBase {
   // Synthesized client-side for React keys; never sent to the backend.
   id: string
   timestamp?: number | null // epoch seconds (cubepi convention)
+  // Identifies the agent run this message belongs to. User + assistant
+  // messages produced within the same turn share a run_id. Null on
+  // very-old rows (pre-cubepi v3) and on framework-injected synthetic
+  // messages that never enter a run. The forkConversation API uses this
+  // as ``after_run_id``.
+  run_id?: string | null
   metadata?: Record<string, unknown> & {
     attachments?: MessageAttachment[]
     memory_snapshot?: unknown

@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   useMessageStore,
+  useConversationStore,
   createApiClient,
   getTextContent,
   getToolResultPreviewContent,
@@ -211,6 +212,14 @@ export function MessageList({ conversationId }: MessageListProps) {
       (s.failoverEvents[conversationId] as FailoverEvent[] | undefined) ?? EMPTY_FAILOVER_EVENTS,
   )
   const { workspaceId } = useWorkspaceContext()
+  // Fork action needs to know whether this is a group chat (the backend
+  // rejects forks on group chats, and we render the disabled-state UI for
+  // it). Conversation row is loaded by the parent page; if it's not in the
+  // store yet (rare race), assume false — a fork attempt will still get a
+  // graceful 400 toast.
+  const isGroupChat = useConversationStore(
+    (s) => s.conversations.find((c) => c.id === conversationId)?.is_group_chat ?? false,
+  )
   // Hoisted: also drives status-row visibility below so an empty chip doesn't
   // leave a stray gutter-only line.
   const memoryCount = useMemoryCount(workspaceId, conversationId)
@@ -418,7 +427,13 @@ export function MessageList({ conversationId }: MessageListProps) {
                     conversationId={conversationId}
                   />
                 )}
-                <UserMessage content={getTextContent(msg)} />
+                <UserMessage
+                  content={getTextContent(msg)}
+                  conversationId={conversationId}
+                  workspaceId={workspaceId}
+                  runId={msg.run_id}
+                  isGroupChat={isGroupChat}
+                />
               </>
             )}
             {msg.role === 'assistant' && msg.id !== lastAssistantId && (
@@ -427,6 +442,8 @@ export function MessageList({ conversationId }: MessageListProps) {
                 subagentDataMap={subagentDataMap}
                 toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
                 conversationId={conversationId}
+                workspaceId={workspaceId}
+                isGroupChat={isGroupChat}
                 pendingConfirmMap={pendingConfirmMap}
                 onSandboxConfirm={handleSandboxConfirm}
               />

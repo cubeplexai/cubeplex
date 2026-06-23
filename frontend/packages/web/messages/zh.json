@@ -312,7 +312,15 @@
     "modelSectionLabel": "模型",
     "effortLabel": "思考深度",
     "effortFaster": "更快",
-    "effortSmarter": "更聪明"
+    "effortSmarter": "更聪明",
+    "forkConversation": "复刻对话",
+    "forkSuccess": "已复刻到新对话",
+    "forkError": "无法复刻该对话",
+    "forkDisabled": {
+      "noRun": "此消息无法作为复刻起点",
+      "runStreaming": "请等待回复完成",
+      "groupChat": "群聊不支持复刻"
+    }
   },
   "subagent": {
     "cluster": "Agent 集群",

@@ -36,6 +36,12 @@ from cubebox.repositories import (
     MembershipRepository,
     UserSandboxRepository,
 )
+from cubebox.repositories.conversation import (
+    ForkGroupChatError,
+    ForkNewThreadExistsError,
+    ForkRunNotCompletedError,
+    ForkSourceMissingError,
+)
 from cubebox.skills.cache import SkillCache
 from cubebox.streams.replay_coalescer import ReplayCoalescer
 from cubebox.streams.run_events import (
@@ -465,6 +471,70 @@ async def set_pin(
             detail=f"Conversation {conversation_id} not found",
         )
     return _serialize_conversation(conversation)
+
+
+class ForkConversationRequest(BaseModel):
+    """Request body for forking a conversation."""
+
+    after_run_id: str
+
+
+@router.post("/{conversation_id}/fork", status_code=status.HTTP_201_CREATED)
+async def fork_conversation(
+    conversation_id: str,
+    body: ForkConversationRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> dict[str, object]:
+    """Fork a conversation after the given completed run.
+
+    Copies all messages through the end of ``after_run_id`` into a new
+    conversation owned by the caller, in the same workspace and topic as
+    the source. Group-chat sources are rejected.
+    """
+    if not body.after_run_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid_after_run_id"},
+        )
+    repo = ConversationRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
+    src = await repo.get_by_id(conversation_id)
+    if not src:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation {conversation_id} not found",
+        )
+    try:
+        new_conv = await repo.fork(src, after_run_id=body.after_run_id)
+    except ForkGroupChatError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "group_chat_not_supported"},
+        ) from exc
+    except ForkRunNotCompletedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "run_not_completed"},
+        ) from exc
+    except ForkSourceMissingError as exc:
+        # Source conversation exists in cubebox but has no cubepi thread —
+        # nothing to fork. Treat as a client error against the fork-point
+        # contract (you can't fork a conversation that has no messages).
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "source_has_no_messages"},
+        ) from exc
+    except ForkNewThreadExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "new_thread_exists"},
+        ) from exc
+    return _serialize_conversation(new_conv)
 
 
 @router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)

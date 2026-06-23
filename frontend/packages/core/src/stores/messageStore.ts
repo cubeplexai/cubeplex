@@ -318,6 +318,7 @@ function buildPendingUserMessage(runId: string, content: string): UserMessageTyp
     role: 'user',
     content: [{ type: 'text', text: content }],
     timestamp: Date.now() / 1000,
+    run_id: runId,
     metadata: {},
   }
 }
@@ -715,6 +716,7 @@ function buildTurnMessages(
   toolResultMap: MessageStore['toolResultMap'],
   turnUsage: import('../types').TurnUsage | null,
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
+  runId: string | null = null,
 ): { assistantMessage: AssistantMessageType | null; toolMessages: ToolResultMessageType[] } {
   const mainStream = agents[MAIN_AGENT_KEY]
   if (!mainStream) return { assistantMessage: null, toolMessages: [] }
@@ -738,6 +740,7 @@ function buildTurnMessages(
         }
       : null,
     timestamp: Date.now() / 1000,
+    run_id: runId,
     metadata: {},
   }
 
@@ -768,6 +771,7 @@ function buildTurnMessages(
       tool_call_id: tcId,
       tool_name: tr.data.tool_name ?? '',
       timestamp: receivedAtMs / 1000,
+      run_id: runId,
       metadata: {},
     })
   }
@@ -783,6 +787,7 @@ function buildTurnMessages(
       tool_call_id: toolCallId,
       tool_name: 'subagent',
       timestamp: Date.now() / 1000,
+      run_id: runId,
       metadata: {
         subagent_events: {
           text: agentStream.text,
@@ -827,6 +832,7 @@ async function finalizeCompletedStream(
     get().toolResultMap,
     get().turnUsage[conversationId] ?? null,
     stopReason,
+    get().currentRunId,
   )
 
   if (!assistantMessage) {
@@ -896,6 +902,7 @@ async function finalizePausedStream(
     state0.toolResultMap,
     state0.turnUsage[conversationId] ?? null,
     'stop',
+    state0.currentRunId,
   )
 
   if (!assistantMessage) {
@@ -1373,6 +1380,28 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     const controller = new AbortController()
     activeStreamController = controller
 
+    // onRunId is fired by streamMessages the moment the POST returns a
+    // run id (the JSON-then-tail path, which is the production path
+    // through the Next.js SSE proxy). We use it to:
+    //   - set `currentRunId` so `finalizeCompletedStream` can stamp
+    //     `run_id` onto the optimistic assistant / tool messages — without
+    //     this, "fork from this message" is disabled for a just-finished
+    //     turn until the next bootstrap/reload.
+    //   - backfill `run_id` on the optimistic user message we appended
+    //     above, so the user message is forkable too.
+    const handleRunId = (runId: string) => {
+      set((s) => ({
+        currentRunId: runId,
+        messages: {
+          ...s.messages,
+          [conversationId]: (s.messages[conversationId] ?? []).map((m) =>
+            m.id === userMessage.id ? { ...m, run_id: runId } : m,
+          ),
+        },
+      }))
+    }
+    const streamOptions = { ...(options ?? {}), onRunId: handleRunId }
+
     let retried = false
     let streamSource = streamMessages(
       client,
@@ -1380,7 +1409,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       content,
       attachmentIds,
       controller.signal,
-      options,
+      streamOptions,
     )
 
     let processed = 0
@@ -1417,7 +1446,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
                 content,
                 attachmentIds,
                 controller.signal,
-                options,
+                streamOptions,
               )
               continue outer
             }
