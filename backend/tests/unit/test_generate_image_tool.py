@@ -79,7 +79,9 @@ class FakeSandbox:
 
 
 def _make_artifact(*, art_id: str = "art_1", version: int = 1) -> SimpleNamespace:
-    return SimpleNamespace(id=art_id, version=version, name="image.png")
+    ns = SimpleNamespace(id=art_id, version=version, name="image.png")
+    ns.to_dict = lambda: {"id": art_id, "version": version, "name": "image.png"}  # type: ignore[attr-defined]
+    return ns
 
 
 def _make_faux_provider(png_b64: str = _FAKE_PNG_B64) -> Any:
@@ -152,10 +154,13 @@ async def test_generate_image_success_path(monkeypatch: pytest.MonkeyPatch) -> N
     assert artifact_kwargs_captured["org_id"] == "org-1"
     assert artifact_kwargs_captured["workspace_id"] == "ws-1"
 
-    # Returned text mentions artifact id + version
-    combined_text = " ".join(c.text for c in text_blocks)
-    assert "art_1" in combined_text
-    assert "v1" in combined_text
+    # Returned text is JSON with artifact dict
+    import json
+
+    parsed = json.loads(text_blocks[0].text)
+    assert parsed["action"] == "created"
+    assert parsed["artifact"]["id"] == "art_1"
+    assert parsed["artifact"]["version"] == 1
 
 
 # ---------------------------------------------------------------------------
