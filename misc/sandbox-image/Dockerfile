@@ -25,6 +25,23 @@ RUN sed -i -r 's/(archive|security|ports).ubuntu.com/mirrors.cloud.aliyuncs.com/
         python3 \
         python3-pip \
         python3-venv \
+        python3-dev \
+        gcc \
+        g++ \
+        gfortran \
+        make \
+        build-essential \
+        pkg-config \
+        libffi-dev \
+        libssl-dev \
+        libxml2-dev \
+        libxslt1-dev \
+        zlib1g-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libfreetype6-dev \
+        libopenblas-dev \
+        liblapack-dev \
         vim \
         telnet \
         iputils-ping \
