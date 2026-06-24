@@ -1,4 +1,4 @@
-import type { Artifact, ArtifactVersion, Conversation, Message } from '../types'
+import type { Artifact, ArtifactVersion, Conversation } from '../types'
 import { toApiError, type ApiClient } from './client'
 
 export async function createConversation(
@@ -89,19 +89,6 @@ export async function generateConversationTitle(
   const res = await client.post(`/api/v1/conversations/${id}/generate-title`, { content })
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<Conversation>
-}
-
-export async function listMessages(
-  client: ApiClient,
-  conversationId: string,
-  limit = 50,
-  offset = 0,
-): Promise<Message[]> {
-  const url = `/api/v1/conversations/${conversationId}/messages?limit=${limit}&offset=${offset}`
-  const res = await client.get(url)
-  if (!res.ok) throw await toApiError(res)
-  const data = (await res.json()) as { messages?: Message[] }
-  return data.messages || []
 }
 
 export async function listArtifacts(

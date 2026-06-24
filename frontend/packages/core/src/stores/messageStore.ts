@@ -27,6 +27,7 @@ import type {
 import { getTextContent } from '../types'
 import type { ApiClient } from '../api'
 import {
+  ApiError,
   cancelActiveRun,
   cancelSteer,
   getConversationBootstrap,
@@ -128,6 +129,11 @@ export interface MessageStore {
    *  cursor and prepend it to ``messages[conversationId]``. Noop when already
    *  in flight, when ``hasMore`` is false, or when no cursor is set yet. */
   loadOlderMessages(client: ApiClient, conversationId: string): Promise<void>
+  /** Repeatedly fetch older windows until ``oldestSeqByConv[conversationId]``
+   *  reaches ``targetSeq`` or there is no more history. Used by the search
+   *  deep-link path to make ``#msg-<seq>`` anchors reachable even when the
+   *  requested message lives below the bootstrap tail. */
+  loadOlderUntilSeq(client: ApiClient, conversationId: string, targetSeq: number): Promise<void>
   send(
     client: ApiClient,
     conversationId: string,
@@ -1147,7 +1153,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           )
         }
 
-        const restoredTodos = restoreTodosFromHistory(messages)
+        // Prefer the backend-precomputed todos (walks the full history, so
+        // the panel hydrates correctly even when the last ``write_todos`` lives
+        // below the bootstrap tail). Fall back to the in-tail scan only if the
+        // server didn't send the field (older deployments).
+        const restoredTodos = bootstrap.todos ?? restoreTodosFromHistory(messages)
         hydrateCitationsFromHistory(conversationId, messages)
         const usageSummary = bootstrap.usage_summary
         const newTurnUsage = {
@@ -1343,6 +1353,12 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           })
         }
       } catch (err) {
+        // 404/403 just mean the conversation was deleted or the user lost
+        // access — the page-level effect renders ErrorState for those, so we
+        // don't want to *also* seed an internal_error bubble that flashes on
+        // the next navigation. Surface anything else (network, 5xx, …) as
+        // before so the user sees the failure.
+        if (err instanceof ApiError && (err.status === 404 || err.status === 403)) return
         set((s) => ({
           errors: {
             ...s.errors,
@@ -1387,10 +1403,41 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
         },
         hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: page.has_more },
       }))
+    } catch (err) {
+      // Surface the failure through the same per-conversation errors slice
+      // ``loadMessages`` uses, so a failed backscroll renders the existing
+      // RunErrorBubble instead of silently re-enabling the button.
+      set((s) => ({
+        errors: {
+          ...s.errors,
+          [conversationId]: {
+            runId: s.currentRunId ?? '',
+            data: { error_code: 'internal_error', message: (err as Error).message },
+          },
+        },
+      }))
     } finally {
       set((s) => ({
         loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: false },
       }))
+    }
+  },
+
+  async loadOlderUntilSeq(client: ApiClient, conversationId: string, targetSeq: number) {
+    // Bounded by the dataset (each iteration either advances ``oldestSeq``
+    // toward ``targetSeq`` or trips ``hasMore=false``); ``loadOlderMessages``
+    // self-dedups so concurrent triggers don't double-fire.
+    while (true) {
+      const s = get()
+      const oldest = s.oldestSeqByConv[conversationId]
+      if (oldest != null && oldest <= targetSeq) return
+      if (!s.hasMoreByConv[conversationId]) return
+      const before = s.messages[conversationId]?.length ?? 0
+      await get().loadOlderMessages(client, conversationId)
+      const after = get().messages[conversationId]?.length ?? 0
+      // Stall guard: if a fetch returned no new rows (or failed into the
+      // errors slice), abandon rather than loop forever.
+      if (after === before) return
     }
   },
 

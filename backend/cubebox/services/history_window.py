@@ -70,7 +70,7 @@ async def load_history_window(
 
     decoded: list[dict[str, Any]] = []
     for row in reversed(rows):  # DB returned newest-first; flip to chronological
-        _seq, _role, raw_meta, payload = row
+        seq, _role, raw_meta, payload = row
         data = msgpack.unpackb(bytes(payload), raw=False)
         if isinstance(raw_meta, str):
             data["metadata"] = json.loads(raw_meta)
@@ -78,8 +78,68 @@ async def load_history_window(
             data["metadata"] = raw_meta
         else:
             data["metadata"] = {}
+        # seq is the stable per-message cursor the frontend uses for the
+        # ``#msg-<seq>`` anchor (search deep-links rely on this), and the
+        # caller uses ``oldest_seq`` to drive backscroll pagination.
+        data["seq"] = int(seq)
         decoded.append(data)
 
     messages = unwrap_deferred_in_message_dicts(decoded)
     oldest_seq = int(rows[-1][0]) if rows else None
     return HistoryWindow(messages=messages, oldest_seq=oldest_seq, has_more=has_more)
+
+
+# Walk this many recent assistant messages when looking up todo state. Agents
+# typically rewrite the todo list every few turns; the bound caps decode work
+# on long conversations and matches the practical depth where todos go stale.
+_TODOS_LOOKBACK_ASSISTANTS = 100
+
+
+async def find_latest_todos(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    limit: int = _TODOS_LOOKBACK_ASSISTANTS,
+) -> list[dict[str, Any]] | None:
+    """Return the parsed todo list from the most recent ``write_todos`` call.
+
+    The conversation bootstrap returns only a tail of the history, so a
+    naive client-side walk over the tail can miss a still-current todo
+    list whose ``write_todos`` call lives further back. We scan the
+    newest ``limit`` assistant rows directly; ``None`` means no todos
+    were ever written (or none within the bound).
+    """
+    sql = (
+        "SELECT payload FROM cubepi_messages "
+        "WHERE thread_id = :tid AND role = 'assistant' "
+        "ORDER BY seq DESC LIMIT :limit"
+    )
+    rows = (await session.execute(text(sql), {"tid": thread_id, "limit": limit})).all()
+    for (payload,) in rows:
+        msg = msgpack.unpackb(bytes(payload), raw=False)
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_call"
+                and block.get("name") == "write_todos"
+            ):
+                args = block.get("arguments") or {}
+                raw_todos = args.get("todos") if isinstance(args, dict) else None
+                if not isinstance(raw_todos, list):
+                    return []
+                out: list[dict[str, Any]] = []
+                for t in raw_todos:
+                    if not isinstance(t, dict):
+                        continue
+                    description = t.get("content")
+                    if not isinstance(description, str) or not description.strip():
+                        continue
+                    status = t.get("status")
+                    if status not in ("in_progress", "completed"):
+                        status = "pending"
+                    out.append({"id": None, "description": description.strip(), "status": status})
+                return out
+    return None

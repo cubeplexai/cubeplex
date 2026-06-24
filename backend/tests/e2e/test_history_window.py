@@ -14,11 +14,16 @@ from __future__ import annotations
 
 import asyncpg
 import pytest
-from cubepi.providers.base import TextContent, UserMessage
+from cubepi.providers.base import (
+    AssistantMessage,
+    TextContent,
+    ToolCall,
+    UserMessage,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.agents.checkpointer import _build_dsn, init_checkpointer
-from cubebox.services.history_window import load_history_window
+from cubebox.services.history_window import find_latest_todos, load_history_window
 
 pytestmark = pytest.mark.e2e
 
@@ -111,5 +116,62 @@ async def test_zero_limit_short_circuits(db_session: AsyncSession) -> None:
         window = await load_history_window(db_session, thread_id, limit=0)
         assert window.messages == []
         assert window.has_more is False
+    finally:
+        await _delete_thread(thread_id)
+
+
+async def _seed_with_todos(thread_id: str, padding_before: int, todos: list[dict]) -> None:
+    """Seed ``padding_before`` filler user messages, then an assistant message
+    that calls ``write_todos`` with the given todo list."""
+    async with init_checkpointer() as cp:
+        await cp.append(
+            thread_id,
+            [UserMessage(content=[TextContent(text=f"pad-{i}")]) for i in range(padding_before)],
+        )
+        await cp.append(
+            thread_id,
+            [
+                AssistantMessage(
+                    content=[
+                        ToolCall(id="tc-todo", name="write_todos", arguments={"todos": todos})
+                    ],
+                    stop_reason="tool_use",
+                ),
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_find_latest_todos_returns_most_recent(db_session: AsyncSession) -> None:
+    """``find_latest_todos`` should pick the latest ``write_todos`` call and
+    normalize unknown statuses to ``pending`` (matches the frontend parser)."""
+    thread_id = "t-hwin-todos"
+    await _seed_with_todos(
+        thread_id,
+        padding_before=2,
+        todos=[
+            {"content": "first task", "status": "in_progress"},
+            {"content": "second task", "status": "weird-status"},
+            {"content": "  ", "status": "pending"},  # blank — dropped
+            {"content": "third task"},  # missing status — defaults to pending
+        ],
+    )
+    try:
+        result = await find_latest_todos(db_session, thread_id)
+        assert result == [
+            {"id": None, "description": "first task", "status": "in_progress"},
+            {"id": None, "description": "second task", "status": "pending"},
+            {"id": None, "description": "third task", "status": "pending"},
+        ]
+    finally:
+        await _delete_thread(thread_id)
+
+
+@pytest.mark.asyncio
+async def test_find_latest_todos_no_write_returns_none(db_session: AsyncSession) -> None:
+    thread_id = "t-hwin-no-todos"
+    await _seed(thread_id, 3)
+    try:
+        assert await find_latest_todos(db_session, thread_id) is None
     finally:
         await _delete_thread(thread_id)

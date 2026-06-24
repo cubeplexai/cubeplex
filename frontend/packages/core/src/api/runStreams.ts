@@ -1,4 +1,4 @@
-import type { AgentEvent, Message, PendingHitl } from '../types'
+import type { AgentEvent, Message, PendingHitl, TodoItem } from '../types'
 import { toApiError, type ApiClient } from './client'
 import { CSRF_COOKIE_NAME } from './cookieNames'
 
@@ -34,6 +34,10 @@ export interface HistoryWindowPage {
 }
 
 export interface ConversationBootstrap extends HistoryWindowPage {
+  /** Latest write_todos state, precomputed from the full history (not just
+   *  the tail) so the panel hydrates correctly on long conversations.
+   *  ``null`` when no write_todos has ever been observed for this thread. */
+  todos: TodoItem[] | null
   active_run: ActiveRunBootstrap | null
   last_run_status: 'stale' | null
   last_run_error?: LastRunError | null
