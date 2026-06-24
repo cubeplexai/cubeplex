@@ -118,9 +118,18 @@ async def resolve_im_conversation(
     # Reuse an existing scope's Topic only while topic mode is on. In flat
     # mode we deliberately ignore (and below, clear) any prior anchor so a
     # topic→flat settings change actually takes effect for active scopes.
-    topic_id: str | None = (
-        existing_link.topic_id if (existing_link is not None and should_topic) else None
-    )
+    topic_id: str | None = None
+    if existing_link is not None and should_topic and existing_link.topic_id is not None:
+        anchored = await session.get(Topic, existing_link.topic_id)
+        if anchored is not None and not anchored.is_archived:
+            topic_id = anchored.id
+        else:
+            # The linked Topic was archived/deleted in the UI. Don't keep
+            # appending under a Topic the user removed (topic + conversation
+            # reads filter archived) — drop the stale anchor and mint a
+            # fresh, visible one below.
+            existing_link.topic_id = None
+            session.add(existing_link)
 
     if should_topic and topic_id is None:
         topic = Topic(
@@ -213,12 +222,15 @@ async def resolve_im_conversation(
             session.add(reused)
             await session.flush()
 
-    # Shared channels: auto-join the sender to the topic + conversation so a
-    # late joiner whose first message arrives after the link was created is
-    # still a participant. Idempotent.
+    # Topic visibility is gated on TopicParticipant (a topic conversation is
+    # NOT visible to its creator unless they're also a participant). So ensure
+    # the sender is a participant of ANY topic they're routed into — shared
+    # late joiners AND isolated senders whose own participant row went missing
+    # (otherwise ConversationRepository would hide their replies). Idempotent.
+    if topic_id is not None:
+        await _ensure_topic_participant(session, topic_id, effective_user_id)
+    # Shared channels also carry per-conversation participants.
     if is_shared:
-        if topic_id is not None:
-            await _ensure_topic_participant(session, topic_id, effective_user_id)
         await _ensure_conversation_participant(
             session, account, link.conversation_id, effective_user_id
         )
@@ -302,7 +314,15 @@ async def reset_im_conversation(
     ).scalar_one_or_none()
     if link is None:
         return "none"
-    if link.topic_id is None:
+
+    # Honor the bot's CURRENT topic mode, not just the link's anchor. After a
+    # topic→flat switch the link can still carry a topic_id that no normal
+    # message has cleared yet; in flat mode /new must delete (start a fresh
+    # standalone conversation), not rotate under the stale Topic.
+    account = await session.get(IMConnectorAccount, account_id)
+    flat = account is None or not wants_topic(load_bot_settings(account.config))
+
+    if flat or link.topic_id is None:
         await session.delete(link)
         return "flat"
     old = (
