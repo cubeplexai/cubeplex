@@ -35,7 +35,7 @@ export function StepCredentials({
                 onValueChange={(v) => onChange({ [f.key]: v ?? '' })}
               >
                 <SelectTrigger id={`cred-${f.key}`}>
-                  <SelectValue placeholder="Select…" />
+                  <SelectValue placeholder={t('im.wizard.credentials.placeholderSelect')} />
                 </SelectTrigger>
                 <SelectContent>
                   {f.options.map((o) => (

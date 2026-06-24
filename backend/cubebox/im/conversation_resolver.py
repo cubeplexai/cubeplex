@@ -226,22 +226,30 @@ async def resolve_im_conversation(
         # Flat mode: drop any prior Topic anchor so existing scopes become
         # standalone — clear it off the link (so /new deletes rather than
         # rotates) and detach the reused conversation from its old Topic.
+        # shared+flat keeps is_group_chat=True (still a multi-person convo,
+        # just ungrouped); only true isolated+flat flips it back to personal
+        # and drops participant rows.
         if link.topic_id is not None:
             link.topic_id = None
             session.add(link)
-        if reused is not None and (reused.topic_id is not None or reused.is_group_chat):
-            reused.topic_id = None
-            reused.is_group_chat = False
-            session.add(reused)
-            # A topicless conversation is visible via ConversationParticipant
-            # rows, so a flattened ex-shared conversation would still be
-            # readable by every former channel member. Drop those rows.
-            await session.execute(
-                delete(ConversationParticipant).where(
-                    ConversationParticipant.conversation_id == reused.id  # type: ignore[arg-type]
-                )
-            )
-            await session.flush()
+        if reused is not None:
+            wants_group = is_shared
+            leaving_group = reused.is_group_chat and not wants_group
+            dirty = reused.topic_id is not None or reused.is_group_chat != wants_group
+            if dirty:
+                reused.topic_id = None
+                reused.is_group_chat = wants_group
+                session.add(reused)
+                if leaving_group:
+                    # A topicless personal conversation is visible via
+                    # ConversationParticipant rows; without this delete, former
+                    # channel members would still see the now-personal chat.
+                    await session.execute(
+                        delete(ConversationParticipant).where(
+                            ConversationParticipant.conversation_id == reused.id  # type: ignore[arg-type]
+                        )
+                    )
+                await session.flush()
 
     # Topic visibility is gated on TopicParticipant (a topic conversation is
     # NOT visible to its creator unless they're also a participant). So ensure

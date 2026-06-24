@@ -2197,7 +2197,16 @@
           "appSecret": "AppSecret"
         },
         "openConsole": "打开钉钉开放平台"
-      }
+      },
+      "credentials": {
+        "placeholderSelect": "请选择…"
+      },
+      "verifyBody": {
+        "verifying": "正在验证 <code>{appId}</code> 的凭据…",
+        "ready": "准备连接 <strong>{platform}</strong> bot <code>{appId}</code>。",
+        "pressConnect": "点击 <strong>连接</strong> 注入 bot 身份并建立长连接。"
+      },
+      "openExternalConsole": "在外部控制台打开"
     },
     "error": {
       "field": {
@@ -2230,6 +2239,87 @@
         "matched": "{count} 命中",
         "rejected": "{count} 拒绝"
       }
+    },
+    "botSettings": {
+      "section": {
+        "identity": "身份",
+        "behavior": "行为",
+        "identityGate": "身份网关 (24h)"
+      },
+      "field": {
+        "actingAs": "代理用户",
+        "botOpenId": "Bot open_id",
+        "mode": "投递模式",
+        "routing": "群聊路由",
+        "topicMode": "话题分组",
+        "sandbox": "沙盒"
+      },
+      "routing": {
+        "isolated": "独立（每人一段对话）",
+        "shared": "共享（整个群一段对话）",
+        "sharedNotSupportedSuffix": " — 不支持",
+        "platformOnlyPerPerson": "该平台仅支持按人路由。"
+      },
+      "topic": {
+        "topic": "归到一个话题下",
+        "flat": "不归话题（平铺）"
+      },
+      "sandboxMode": {
+        "dedicated": "专属沙盒",
+        "creator": "Bot 所属用户的沙盒"
+      },
+      "help": {
+        "infoAria": "查看说明",
+        "routing": {
+          "body": "只影响群聊——DM 永远是一对一。决定在群里 bot 是把每个人当独立对话处理，还是把整个群当作一段大家共享的对话。",
+          "isolated": "群里每个人跟 bot 是各自独立的对话。在 cubebox web 端你只能看到自己跟 bot 的来往，群里其他人看不到。",
+          "shared": "整个频道共用一段 cubebox 会话，群里所有人都能在 web 端看到别人问 bot 的内容，并能在彼此提问的基础上继续。"
+        },
+        "sandbox": {
+          "body": "只对共享（群）会话生效——选 bot 在哪个沙盒里跑代码、改文件、保存状态。DM（私信）里 bot 永远使用与之对话用户自己的沙盒。",
+          "dedicated": "这段群会话拿到一个全新的沙盒，跟其他任何工作都互相隔离。",
+          "creator": "复用「在 cubebox 里配置了这个 IM bot 的那位用户」的个人沙盒（不是 IM 群的创建人），适合让这段群聊跟那位用户在 cubebox 里的其他会话共享文件和状态。"
+        },
+        "topic": {
+          "body": "话题（topic）是 cubebox 里把多个会话归到一起的容器，可以理解成聊天侧边栏里的一个文件夹。这个选项决定你在 IM 里跟 bot 发 /new 时会发生什么。",
+          "topic": "每次 /new 都开一个新会话，但都会折叠在 cubebox 侧边栏的同一个话题下。",
+          "flat": "每个 /new 在聊天历史里都是一个独立条目，直接平铺显示，不归到话题里。"
+        }
+      },
+      "summary": {
+        "heading": "用户的实际体验",
+        "group": {
+          "label": "群聊里",
+          "routing": {
+            "isolated": "每个 IM 用户单独跟 bot 对话——群里每人只能在 cubebox 里看到自己跟 bot 的来往，看不到其他人的。",
+            "shared": "群里所有人共享同一段对话——所有人都能在 cubebox 里看到彼此问 bot 的内容，并能接续提问。"
+          },
+          "topic": {
+            "isolatedTopic": "在 cubebox 里，每个 IM 用户跟 bot 的会话都收纳在他自己的话题文件夹下——这个话题只对该用户可见。",
+            "sharedTopic": "在 cubebox 里，这个群的会话都收纳在同一个话题文件夹下——群里所有成员都能看到。",
+            "flat": "在 cubebox 的聊天历史里，会话直接平铺、不收纳到任何话题文件夹。"
+          },
+          "sandbox": {
+            "isolated": "Bot 在每个 IM 用户对应的 cubebox 沙盒里跑代码、改文件——不同用户之间互相隔离。",
+            "dedicated": "Bot 在这段群会话的专属沙盒里跑代码、改文件，跟其他工作完全隔离。",
+            "creator": "Bot 在 bot 所属用户的个人沙盒里跑代码、改文件，跟该用户在 cubebox 里其他工作共享文件和状态。"
+          }
+        },
+        "dm": {
+          "label": "私信里（一对一）",
+          "base": "Bot 跟每位 IM 用户一对一对话，在该用户的个人沙盒里跑代码、改文件。",
+          "topic": {
+            "topic": "在 cubebox 里，每位 IM 用户跟 bot 的私信会话都收纳在他自己的「{botName}」话题文件夹下——这个话题只对该用户可见。",
+            "flat": "在 cubebox 的聊天历史里，私信会话直接平铺、不收纳到话题文件夹。"
+          }
+        }
+      },
+      "action": {
+        "save": "保存",
+        "saving": "保存中…"
+      },
+      "loading": "加载中…",
+      "saveError": "保存设置失败"
     },
     "identityLinks": {
       "title": "已关联用户",

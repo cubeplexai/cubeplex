@@ -2197,7 +2197,16 @@
           "appSecret": "AppSecret"
         },
         "openConsole": "Open DingTalk developer console"
-      }
+      },
+      "credentials": {
+        "placeholderSelect": "Select…"
+      },
+      "verifyBody": {
+        "verifying": "Verifying credentials for <code>{appId}</code>…",
+        "ready": "Ready to connect <strong>{platform}</strong> bot <code>{appId}</code>.",
+        "pressConnect": "Press <strong>Connect</strong> to hydrate the bot identity and open the connection."
+      },
+      "openExternalConsole": "Open external console"
     },
     "error": {
       "field": {
@@ -2230,6 +2239,87 @@
         "matched": "{count} matched",
         "rejected": "{count} rejected"
       }
+    },
+    "botSettings": {
+      "section": {
+        "identity": "Identity",
+        "behavior": "Behavior",
+        "identityGate": "Identity gate (24h)"
+      },
+      "field": {
+        "actingAs": "Acting as",
+        "botOpenId": "Bot open_id",
+        "mode": "Mode",
+        "routing": "Group chat routing",
+        "topicMode": "Topic grouping",
+        "sandbox": "Sandbox"
+      },
+      "routing": {
+        "isolated": "Isolated (per person)",
+        "shared": "Shared (whole group)",
+        "sharedNotSupportedSuffix": " — not supported",
+        "platformOnlyPerPerson": "This platform only supports per-person routing."
+      },
+      "topic": {
+        "topic": "Group under a topic",
+        "flat": "Don't group (flat)"
+      },
+      "sandboxMode": {
+        "dedicated": "Dedicated sandbox",
+        "creator": "Bot owner's sandbox"
+      },
+      "help": {
+        "infoAria": "More info",
+        "routing": {
+          "body": "Only affects group chats — DMs are always one-on-one. In a group, should the bot keep each person's chat separate, or treat the whole group as one shared conversation?",
+          "isolated": "Each member talks to the bot privately. In the cubebox web UI, you only see your own thread; nobody else in the channel can see what you asked.",
+          "shared": "The whole channel shares one cubebox conversation. Everyone in the group can see what others ask the bot and build on each other's questions."
+        },
+        "sandbox": {
+          "body": "Only matters for shared (group) conversations — choose whose sandbox the bot uses to run code, edit files, and keep state. In DMs the bot always uses the DM user's own sandbox.",
+          "dedicated": "This group conversation gets a brand-new sandbox of its own, isolated from any other work.",
+          "creator": "Reuses the personal sandbox of the cubebox user who set up this IM bot (not the IM channel's creator). Useful when you want this group chat to share files and state with that user's other cubebox work."
+        },
+        "topic": {
+          "body": "A topic is a cubebox container that groups multiple conversations together — think of it as a folder in the chat sidebar. This setting decides what happens when you /new with the bot in IM.",
+          "topic": "Every /new opens a new conversation, but they all stay folded under one topic in the sidebar.",
+          "flat": "Each /new becomes its own standalone item in the chat history, listed flat."
+        }
+      },
+      "summary": {
+        "heading": "What people will see",
+        "group": {
+          "label": "In group chats",
+          "routing": {
+            "isolated": "Each IM user talks to the bot privately — in cubebox, each member sees only their own exchanges with the bot, not other members'.",
+            "shared": "Everyone in the channel shares one conversation — anyone in the group can see what others ask the bot and build on it."
+          },
+          "topic": {
+            "isolatedTopic": "In cubebox, each IM user's conversations are folded under their own topic folder — visible only to that user.",
+            "sharedTopic": "In cubebox, the channel's conversations are folded under one shared topic folder — visible to everyone in the group.",
+            "flat": "In cubebox's chat history, conversations appear flat — no topic folder."
+          },
+          "sandbox": {
+            "isolated": "The bot runs code and edits files in each IM user's own cubebox sandbox — sandboxes are isolated between users.",
+            "dedicated": "The bot runs code and edits files in a dedicated sandbox owned by this group conversation, isolated from any other work.",
+            "creator": "The bot runs code and edits files in the bot owner's personal sandbox, shared with that user's other cubebox work."
+          }
+        },
+        "dm": {
+          "label": "In DMs (one-on-one)",
+          "base": "The bot talks to each IM user privately and runs code in that user's own personal sandbox.",
+          "topic": {
+            "topic": "In cubebox, each user's DM conversations are folded under their own topic folder named “{botName}” — visible only to that user.",
+            "flat": "In cubebox's chat history, DM conversations appear flat — no topic folder."
+          }
+        }
+      },
+      "action": {
+        "save": "Save",
+        "saving": "Saving…"
+      },
+      "loading": "Loading…",
+      "saveError": "Failed to save settings"
     },
     "identityLinks": {
       "title": "Linked users",

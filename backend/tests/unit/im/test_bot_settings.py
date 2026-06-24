@@ -41,9 +41,13 @@ class TestWantsTopic:
     def test_flat_isolated_off(self) -> None:
         assert wants_topic(IMBotSettings(routing_mode="isolated", topic_mode="flat")) is False
 
-    def test_shared_always_topic(self) -> None:
-        # Shared is inherently topic-shaped even with topic_mode flat.
-        assert wants_topic(IMBotSettings(routing_mode="shared", topic_mode="flat")) is True
+    def test_shared_topic_on(self) -> None:
+        assert wants_topic(IMBotSettings(routing_mode="shared", topic_mode="topic")) is True
+
+    def test_shared_flat_off(self) -> None:
+        # topic_mode is now orthogonal to routing_mode — shared+flat is valid
+        # (one group conversation, ungrouped in the sidebar).
+        assert wants_topic(IMBotSettings(routing_mode="shared", topic_mode="flat")) is False
 
 
 class TestTitleAndAttributes:

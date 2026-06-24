@@ -26,8 +26,9 @@ class IMBotSettings(BaseModel):
     - ``routing_mode``: ``isolated`` (one conversation per sender) vs
       ``shared`` (one conversation for the whole channel).
     - ``topic_mode``: ``topic`` (roll each conversation up under a cubebox
-      Topic) vs ``flat`` (standalone personal conversations, no Topic).
-      ``shared`` always implies a Topic regardless of this knob.
+      Topic) vs ``flat`` (no Topic — conversations are listed flat in the
+      sidebar). Orthogonal to ``routing_mode``: ``shared`` + ``flat`` is a
+      valid combo (one group conversation, ungrouped in the sidebar).
     - ``sandbox_mode``: sandbox the bot's runs use (``dedicated`` | ``creator``,
       matching the native Topic schema); defaulted to ``dedicated`` for
       shared/topic runs at Topic-creation time. An invalid stored value makes
@@ -60,10 +61,11 @@ def store_bot_settings(config: dict[str, Any] | None, settings: IMBotSettings) -
 def wants_topic(settings: IMBotSettings) -> bool:
     """True if conversations should roll up under a Topic.
 
-    Shared mode is inherently topic-shaped, so it always gets a Topic even
-    when ``topic_mode`` is ``flat``.
+    Independent of ``routing_mode``: a shared (group) conversation can still
+    be flat (no Topic), and an isolated (per-person) conversation can still
+    be grouped under a Topic.
     """
-    return settings.topic_mode == "topic" or settings.routing_mode == "shared"
+    return settings.topic_mode == "topic"
 
 
 def bot_display_name(config: dict[str, Any] | None) -> str:
