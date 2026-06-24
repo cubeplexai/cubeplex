@@ -368,6 +368,10 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     await start_search_subsystem(_app)
 
+    from cubebox.streams.recovery import recover_stranded_runs
+
+    await recover_stranded_runs(redis_client, prefix=_app.state.redis_key_prefix)
+
     yield
 
     # ==================== Shutdown ====================
