@@ -1547,33 +1547,41 @@ async def send_message(
     return SendMessageResponse(run_id=run_id)
 
 
-async def _get_history_messages(raw_request: Request, conversation_id: str) -> dict[str, object]:
-    """Read cubepi-runtime conversation history.
+_DEFAULT_HISTORY_TAIL = 300
+_MAX_HISTORY_WINDOW = 500
 
-    Messages are returned in cubepi's native shape (UserMessage / AssistantMessage /
-    ToolResultMessage as pydantic dumps). The frontend consumes this shape directly;
-    no cubebox-specific wire conversion layer.
-    """
+
+def _history_tail_limit() -> int:
+    """Default tail size for bootstrap. Configurable via lifecycle config."""
+    return int(_config.get("lifecycle.bootstrap_history_tail", _DEFAULT_HISTORY_TAIL))
+
+
+async def _load_pending_hitl(
+    conversation_id: str,
+) -> tuple[Any, str | None]:
+    """Read cubepi-persisted pending_request + persisted run_id in one checkpointer open."""
     from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.agents.stream import unwrap_deferred_in_message_dicts
 
-    del raw_request  # checkpointer factory override hook (unused; preserved for future use)
     async with init_checkpointer() as cp:
-        data = await cp.load(conversation_id)
-    if data is None:
-        return {"messages": [], "total": 0}
-    messages = unwrap_deferred_in_message_dicts([m.model_dump(mode="json") for m in data.messages])
-    return {"messages": messages, "total": len(messages)}
+        pending_req = await cp.load_pending_request(conversation_id)
+        persisted_run_id = await cp.load_pending_run_id(conversation_id)
+    return pending_req, persisted_run_id
 
 
 @router.get("/{conversation_id}/messages")
 async def list_messages(
     conversation_id: str,
-    raw_request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
+    before_seq: int | None = None,
+    limit: int | None = None,
 ) -> dict[str, object]:
-    """List messages in a conversation, read from cubepi PostgresCheckpointer state."""
+    """Return a paginated slice of a conversation's history (newest tail by default).
+
+    ``before_seq`` is an exclusive cursor (use the previous slice's ``oldest_seq``);
+    ``limit`` is clamped to ``_MAX_HISTORY_WINDOW`` so a client cannot ask for the
+    whole history in one shot.
+    """
     conv_repo = ConversationRepository(
         session,
         org_id=ctx.org_id,
@@ -1587,7 +1595,17 @@ async def list_messages(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    return await _get_history_messages(raw_request, conversation_id)
+    from cubebox.services.history_window import load_history_window
+
+    effective_limit = min(limit or _history_tail_limit(), _MAX_HISTORY_WINDOW)
+    window = await load_history_window(
+        session, conversation_id, before_seq=before_seq, limit=effective_limit
+    )
+    return {
+        "messages": window.messages,
+        "oldest_seq": window.oldest_seq,
+        "has_more": window.has_more,
+    }
 
 
 @router.get("/{conversation_id}/bootstrap")
@@ -1598,7 +1616,17 @@ async def get_conversation_bootstrap(
     ctx: Annotated[RequestContext, Depends(require_member)],
     rds: Annotated[RedisHandle, Depends(redis_dep)],
 ) -> dict[str, object]:
-    """Return history baseline plus active run metadata."""
+    """Return history tail + active-run metadata + usage panel data in one round trip.
+
+    History is the most recent ``lifecycle.bootstrap_history_tail`` messages
+    (default 300). The frontend uses ``oldest_seq`` + ``has_more`` to lazy-load
+    older windows via ``/{conversation_id}/messages?before_seq=...``.
+    """
+    import asyncio
+
+    from cubebox.services.history_window import load_history_window
+    from cubebox.streams.hitl_resume import serialize_pending_hitl
+
     conv_repo = ConversationRepository(
         session,
         org_id=ctx.org_id,
@@ -1612,16 +1640,21 @@ async def get_conversation_bootstrap(
             detail=f"Conversation {conversation_id} not found",
         )
 
-    from cubebox.config import config as _cfg
-
-    history = await _get_history_messages(raw_request, conversation_id)
-    active_run = await get_active_run(
-        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+    # Stage A: the session-bound history read runs concurrently with the
+    # Redis + cubepi-pool work — those do not touch ``session``, so there is
+    # no SQLAlchemy concurrency conflict.
+    history, active_run, pending_pair, last_run_error_raw = await asyncio.gather(
+        load_history_window(session, conversation_id, limit=_history_tail_limit()),
+        get_active_run(rds.client, prefix=rds.key_prefix, conversation_id=conversation_id),
+        _load_pending_hitl(conversation_id),
+        get_conversation_last_error(
+            rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+        ),
     )
 
     last_run_status: str | None = None
     if active_run is not None:
-        threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
+        threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
         if is_stale_meta(active_run, threshold_seconds=threshold):
             await mark_run_stale(
                 rds.client,
@@ -1648,10 +1681,35 @@ async def get_conversation_bootstrap(
             "error_message": active_run.error_message,
         }
 
-    # --- Token usage for the usage panel ---
-    msgs: list[dict[str, Any]] = history["messages"]  # type: ignore[assignment]
+    pending_req, persisted_run_id = pending_pair
+    pending_hitl: dict[str, Any] | None = None
+    if pending_req is not None:
+        # Run_id resolution order: Redis active-run (already fetched above) first,
+        # DB-persisted fallback for long-pause TTL recovery.
+        run_id_for_pending = active_run.run_id if active_run is not None else persisted_run_id
+        if run_id_for_pending is None:
+            # Legacy row (pre-cubepi-v3) — log + degrade to null so the user
+            # can at least see other conversation state.
+            logger.warning(
+                "pending_request for %s has no recoverable run_id; pending_hitl set to null",
+                conversation_id,
+            )
+        else:
+            pending_hitl = serialize_pending_hitl(pending_req, run_id=run_id_for_pending)
+
+    last_run_error_payload: dict[str, Any] | None = None
+    if last_run_error_raw is not None:
+        last_run_error_payload = {
+            "run_id": last_run_error_raw.get("run_id"),
+            "error_code": last_run_error_raw.get("error_code"),
+            "error_params": _parse_error_params(last_run_error_raw.get("error_params")),
+            "error_message": last_run_error_raw.get("error_message"),
+        }
+
+    # Stage B: usage summary depends on (a) the session being free and (b)
+    # the last user message timestamp from history.
     last_user_ts: str | None = None
-    for msg in reversed(msgs):
+    for msg in reversed(history.messages):
         if isinstance(msg, dict) and msg.get("role") == "user":
             ts = msg.get("timestamp")
             if isinstance(ts, (int, float)):
@@ -1668,49 +1726,10 @@ async def get_conversation_bootstrap(
         last_user_message_ts=last_user_ts,
     )
 
-    # --- pending_hitl: cold-start fallback when Redis event log has aged out ---
-    from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.streams.hitl_resume import serialize_pending_hitl
-
-    async with init_checkpointer() as cp:
-        pending_req = await cp.load_pending_request(conversation_id)
-        persisted_run_id = await cp.load_pending_run_id(conversation_id)
-
-    pending_hitl: dict[str, Any] | None = None
-    if pending_req is not None:
-        # Run_id resolution order: Redis active-run first (cheapest, hot
-        # path), DB-persisted fallback (long-pause TTL recovery).
-        active_for_pending = await get_active_run(
-            rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
-        )
-        run_id_for_pending = (
-            active_for_pending.run_id if active_for_pending is not None else persisted_run_id
-        )
-        if run_id_for_pending is None:
-            # Legacy row (pre-cubepi-v3) — log + degrade to null so the user
-            # can at least see other conversation state.
-            logger.warning(
-                "pending_request for %s has no recoverable run_id; pending_hitl set to null",
-                conversation_id,
-            )
-        else:
-            pending_hitl = serialize_pending_hitl(pending_req, run_id=run_id_for_pending)
-
-    last_run_error_raw = await get_conversation_last_error(
-        rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
-    )
-    last_run_error_payload: dict[str, Any] | None = None
-    if last_run_error_raw is not None:
-        last_run_error_payload = {
-            "run_id": last_run_error_raw.get("run_id"),
-            "error_code": last_run_error_raw.get("error_code"),
-            "error_params": _parse_error_params(last_run_error_raw.get("error_params")),
-            "error_message": last_run_error_raw.get("error_message"),
-        }
-
     return {
-        "messages": history["messages"],
-        "total": history["total"],
+        "messages": history.messages,
+        "oldest_seq": history.oldest_seq,
+        "has_more": history.has_more,
         "active_run": active_run_payload,
         "last_run_status": last_run_status,
         "last_run_error": last_run_error_payload,
