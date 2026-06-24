@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import type { ImAccount, ImBotSettings, ImIdentityLink } from '@cubebox/core'
@@ -72,6 +72,13 @@ export function ImAccountDetailPanel({
   // section in workspace scope. On account switch, clear state and ignore a
   // late response so account B never shows / saves account A's form.
   const settingsScoped = scope === 'workspace'
+  // The latest account this panel instance is showing. Both the load effect
+  // and the save handler check it so a response for account A never lands on
+  // account B after the panel is reused.
+  const currentAccountId = useRef(account.id)
+  useEffect(() => {
+    currentAccountId.current = account.id
+  }, [account.id])
   useEffect(() => {
     if (!settingsScoped) return
     let active = true
@@ -96,6 +103,10 @@ export function ImAccountDetailPanel({
   }, [client, account.workspace_id, account.id, settingsScoped])
 
   const botName = account.bot_app_name || 'cubebox'
+  // Shared routing needs a channel-wide scope. The Teams connector only emits
+  // per-sender scopes, so shared would silently produce one group conversation
+  // per sender — disable it there.
+  const sharedSupported = account.platform !== 'teams'
   const settingsDirty =
     settings !== null &&
     savedSettings !== null &&
@@ -105,6 +116,7 @@ export function ImAccountDetailPanel({
 
   const saveSettings = useCallback(async () => {
     if (settings === null) return
+    const savingAccountId = account.id
     setSaving(true)
     setSettingsError(null)
     try {
@@ -117,25 +129,34 @@ export function ImAccountDetailPanel({
           settings.routing_mode === 'shared' ? settings.sandbox_mode || 'dedicated' : null,
       }
       const res = await wsUpdateImBotSettings(client, account.workspace_id, account.id, payload)
+      // Drop the response if the panel has since switched accounts.
+      if (currentAccountId.current !== savingAccountId) return
       setSettings(res)
       setSavedSettings(res)
     } catch (err) {
+      if (currentAccountId.current !== savingAccountId) return
       setSettingsError(err instanceof Error ? err.message : 'Failed to save settings')
     } finally {
-      setSaving(false)
+      if (currentAccountId.current === savingAccountId) setSaving(false)
     }
   }, [client, account.workspace_id, account.id, settings])
 
   const behaviorSummary = useMemo(() => {
     if (settings === null) return ''
-    const routing =
-      settings.routing_mode === 'shared'
-        ? 'Everyone in a channel shares one conversation.'
-        : 'Each person gets their own conversation.'
-    const topic =
-      settings.topic_mode === 'topic' || settings.routing_mode === 'shared'
-        ? `Grouped under a topic — DM topics are titled “${botName}”; group chats get one topic per channel.`
-        : 'Standalone conversations, no topic grouping.'
+    const shared = settings.routing_mode === 'shared'
+    const routing = shared
+      ? 'Everyone in a channel shares one conversation.'
+      : 'Each person gets their own conversation.'
+    let topic: string
+    if (!shared && settings.topic_mode === 'flat') {
+      topic = 'Standalone conversations, no topic grouping.'
+    } else if (shared) {
+      // Shared groups the whole channel under one topic; DMs stay per-sender.
+      topic = `Grouped under a topic — one per channel; DMs are titled “${botName}”.`
+    } else {
+      // Isolated keeps the sender scope, so topics are per person, not per channel.
+      topic = `Grouped under a topic — one per person (DMs titled “${botName}”).`
+    }
     return `${routing} ${topic}`
   }, [settings, botName])
 
@@ -226,9 +247,20 @@ export function ImAccountDetailPanel({
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="isolated">Isolated (per person)</SelectItem>
-                        <SelectItem value="shared">Shared (per channel)</SelectItem>
+                        <SelectItem value="shared" disabled={!sharedSupported}>
+                          Shared (per channel)
+                          {!sharedSupported && ' — not supported'}
+                        </SelectItem>
                       </SelectContent>
                     </Select>
+                    {!sharedSupported && (
+                      <>
+                        <span />
+                        <p className="text-xs text-muted-foreground">
+                          This platform only supports per-person routing.
+                        </p>
+                      </>
+                    )}
 
                     <Label htmlFor="im-topic-mode">Topic grouping</Label>
                     <Select

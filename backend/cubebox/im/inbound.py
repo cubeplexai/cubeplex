@@ -148,14 +148,14 @@ async def ingest_inbound_event(
         # a settings change. Reload it at this boundary — every transport
         # funnels through here — so saved routing/topic settings take effect
         # without a reconnect. (The webhook path already loads fresh; this is
-        # a cheap PK re-read.)
-        fresh_account = await session.get(IMConnectorAccount, account.id)
-        if fresh_account is not None:
-            account = fresh_account
-
+        # a cheap PK re-read.) Use the fresh copy ONLY for resolve — don't
+        # reassign ``account``: the thread-link retry below rolls back this
+        # session, which would expire a session-bound instance, and the
+        # recursive retry must read the caller's stable scalars (id/org/ws).
+        resolve_account = await session.get(IMConnectorAccount, account.id) or account
         resolved = await resolve_im_conversation(
             session,
-            account,
+            resolve_account,
             channel_id=event.channel_id,
             scope_key=event.scope_key,
             scope_kind=event.scope_kind,
