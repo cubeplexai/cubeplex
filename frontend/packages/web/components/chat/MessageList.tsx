@@ -14,7 +14,7 @@ import {
   cancelActiveRun,
   ApiError,
 } from '@cubebox/core'
-import type { Message, SubagentSummary } from '@cubebox/core'
+import type { Message, SubagentSummary, TurnUsage } from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
@@ -23,11 +23,8 @@ import { AssistantMessage, HistoryAssistantMessage } from './AssistantMessage'
 import { AskUserCard } from './AskUserCard'
 import { FailoverBanner } from './FailoverBanner'
 import { MessageAttachments } from './MessageAttachments'
-import { TokenUsageBar } from './TokenUsageBar'
-import { MemoryUpdateChip } from './MemoryUpdateChip'
 import type { FailoverEvent } from '@/lib/types/events'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useMemoryCount } from '@/hooks/useMemoryCount'
 import { useMessages } from '@/hooks/useMessages'
 import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
@@ -192,7 +189,6 @@ export function MessageList({ conversationId }: MessageListProps) {
     todos,
     conversationError,
     toolResultMap,
-    turnUsage,
     sessionUsage,
     contextWindow,
     contextTokens,
@@ -225,9 +221,6 @@ export function MessageList({ conversationId }: MessageListProps) {
   const isGroupChat = useConversationStore(
     (s) => s.conversations.find((c) => c.id === conversationId)?.is_group_chat ?? false,
   )
-  // Hoisted: also drives status-row visibility below so an empty chip doesn't
-  // leave a stray gutter-only line.
-  const memoryCount = useMemoryCount(workspaceId, conversationId)
 
   useEffect(() => {
     const client = createApiClient('')
@@ -364,19 +357,47 @@ export function MessageList({ conversationId }: MessageListProps) {
   // skipping it briefly hid the Thinking + Q/A card. Always render history.
   const lastAssistantId: string | null = null
 
-  // Fork anchors: per cubepi semantics fork is run-granular (``cp.fork``
-  // takes ``after_run_id``, copies the whole run). A run may produce
-  // multiple assistant bubbles (thinking → tool_use → final text) all
-  // sharing one ``run_id`` — clicking fork on any of them would produce
-  // the same result. Collapse the action to the *last* assistant bubble
-  // of each run so the button placement matches the fork point 1:1.
-  const forkAnchorIds = useMemo(() => {
-    const anchors = new Map<string, string>()
+  // Per-run action row anchors: per cubepi semantics fork is run-granular
+  // (``cp.fork`` takes ``after_run_id``, copies the whole run). A run may
+  // produce multiple assistant bubbles (thinking → tool_use → final text)
+  // all sharing one ``run_id`` — clicking fork on any of them would
+  // produce the same result. Pin the per-turn action row (token chip,
+  // fork button, and — for the latest run — the memory chip) to the
+  // *last* assistant bubble of each run so the affordances match the
+  // fork point 1:1.
+  const { anchorByMessageId, lastAnchorMessageId } = useMemo(() => {
+    const lastIdByRun = new Map<string, string>()
+    const usageByRun = new Map<string, TurnUsage>()
+    let tailRunId: string | null = null
     for (const msg of messages ?? []) {
       if (msg.role !== 'assistant' || !msg.run_id) continue
-      anchors.set(msg.run_id, msg.id)
+      lastIdByRun.set(msg.run_id, msg.id)
+      tailRunId = msg.run_id
+      // Sum the run's LLM-call-level usage carried on each assistant
+      // message. Messages without ``usage`` (legacy / framework-injected)
+      // contribute zero, matching the backend's UsageSummary.turn value.
+      const u = msg.usage
+      if (!u) continue
+      const acc = usageByRun.get(msg.run_id) ?? {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      }
+      acc.input_tokens += u.input_tokens
+      acc.output_tokens += u.output_tokens
+      acc.cache_read_tokens += u.cache_read_tokens ?? 0
+      acc.cache_write_tokens += u.cache_write_tokens ?? 0
+      usageByRun.set(msg.run_id, acc)
     }
-    return new Set(anchors.values())
+    const byMessageId = new Map<string, { runId: string; turnUsage: TurnUsage | null }>()
+    for (const [runId, msgId] of lastIdByRun) {
+      byMessageId.set(msgId, { runId, turnUsage: usageByRun.get(runId) ?? null })
+    }
+    return {
+      anchorByMessageId: byMessageId,
+      lastAnchorMessageId: tailRunId ? (lastIdByRun.get(tailRunId) ?? null) : null,
+    }
   }, [messages])
 
   // --- Auto-scroll: keep chat pinned to bottom during streaming ---
@@ -450,21 +471,33 @@ export function MessageList({ conversationId }: MessageListProps) {
                 <UserMessage content={getTextContent(msg)} />
               </>
             )}
-            {msg.role === 'assistant' && msg.id !== lastAssistantId && (
-              <HistoryAssistantMessage
-                message={msg}
-                subagentDataMap={subagentDataMap}
-                toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
-                conversationId={conversationId}
-                workspaceId={workspaceId}
-                isGroupChat={isGroupChat}
-                activeRunId={activeRunId}
-                isStreamingTurn={isStreaming}
-                showForkAction={forkAnchorIds.has(msg.id)}
-                pendingConfirmMap={pendingConfirmMap}
-                onSandboxConfirm={handleSandboxConfirm}
-              />
-            )}
+            {msg.role === 'assistant' &&
+              msg.id !== lastAssistantId &&
+              (() => {
+                const anchor = anchorByMessageId.get(msg.id)
+                const isAnchor = anchor !== undefined
+                const isLastRun = isAnchor && msg.id === lastAnchorMessageId
+                return (
+                  <HistoryAssistantMessage
+                    message={msg}
+                    subagentDataMap={subagentDataMap}
+                    toolResultMap={messageScopedToolResults[msg.id] ?? historicalToolResults}
+                    conversationId={conversationId}
+                    workspaceId={workspaceId}
+                    isGroupChat={isGroupChat}
+                    activeRunId={activeRunId}
+                    isStreamingTurn={isStreaming}
+                    showForkAction={isAnchor}
+                    turnUsage={anchor?.turnUsage ?? null}
+                    isLastRun={isLastRun}
+                    sessionUsage={isLastRun ? sessionUsage : null}
+                    contextWindow={isLastRun ? contextWindow : null}
+                    contextTokens={isLastRun ? contextTokens : null}
+                    pendingConfirmMap={pendingConfirmMap}
+                    onSandboxConfirm={handleSandboxConfirm}
+                  />
+                )
+              })()}
           </div>
         ))}
 
@@ -499,38 +532,6 @@ export function MessageList({ conversationId }: MessageListProps) {
             </div>
           </div>
         )}
-
-        {(() => {
-          // Status row: token usage + memory chip share one indent-aligned
-          // line. Both items self-hide when empty; we check both up-front so
-          // the wrapper (and its avatar-gutter placeholder) only renders when
-          // at least one will show content.
-          const tokenVisible =
-            !isStreaming &&
-            (turnUsage !== null || sessionUsage !== null) &&
-            (messages ?? []).some((m) => m.role === 'assistant')
-          const chipCount = memoryCount
-          const chipVisible = workspaceId !== null && chipCount !== null && chipCount > 0
-          if (!tokenVisible && !chipVisible) return null
-          return (
-            <div className="flex justify-start gap-2.5">
-              <div className="shrink-0 w-6 h-6" />
-              <div className="flex-1 max-w-[75%] flex flex-wrap items-center gap-3">
-                {tokenVisible && (
-                  <TokenUsageBar
-                    turnUsage={turnUsage}
-                    sessionUsage={sessionUsage}
-                    contextWindow={contextWindow}
-                    contextTokens={contextTokens}
-                  />
-                )}
-                {chipVisible && workspaceId && (
-                  <MemoryUpdateChip conversationId={conversationId} workspaceId={workspaceId} />
-                )}
-              </div>
-            </div>
-          )
-        })()}
 
         {conversationError && <RunErrorBubble data={conversationError.data} />}
 
