@@ -175,11 +175,19 @@ class IMArtifactDispatcher:
     async def _deliver_one(self, artifact_id: str, artifact: dict[str, Any]) -> None:
         if not await self._claim_send(artifact_id):
             return
-        delivered = await self._try_deliver(artifact_id, artifact)
+        delivered = False
+        try:
+            delivered = await self._try_deliver(artifact_id, artifact)
+        except Exception:
+            # Catch EVERYTHING (e.g. a Redis blip in share-link minting) so the
+            # claim is always released on failure — otherwise a burned claim
+            # silently loses the artifact with no replay.
+            logger.opt(exception=True).warning(
+                "[IM artifacts] terminal delivery raised for {}", artifact_id
+            )
         if not delivered:
-            # Nothing reached the user (native send AND share-link both failed).
-            # Release the claim so a replay (tailer restart) can retry, instead
-            # of the burned claim silently losing the artifact forever.
+            # Nothing reached the user. Release the claim so a replay (tailer
+            # restart) can retry rather than skipping at the claim check.
             await self._release_claim(artifact_id)
 
     async def _try_deliver(self, artifact_id: str, artifact: dict[str, Any]) -> bool:

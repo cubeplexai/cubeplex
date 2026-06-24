@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -52,6 +53,33 @@ def _lark_type(kind: str) -> str:
     return "image" if kind == "image" else "file"
 
 
+# (ext, mime) keyed by leading magic bytes. Feishu image messages carry no
+# filename/mime; sniffing the bytes avoids storing a JPEG/GIF/WebP as image/png.
+def _sniff_image(data: bytes) -> tuple[str, str] | None:
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png", "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg", "image/jpeg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif", "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp", "image/webp"
+    return None
+
+
+def _effective_name_mime(ref: InboundAttachmentRef, data: bytes) -> tuple[str, str | None]:
+    """Resolve the filename + mime to store. For image refs, prefer the format
+    sniffed from the actual bytes over a placeholder/declared type."""
+    if ref.kind != "image":
+        return ref.filename, ref.mime
+    sniffed = _sniff_image(data)
+    if sniffed is None:
+        return ref.filename, ref.mime
+    ext, mime = sniffed
+    stem = Path(ref.filename).stem or "image"
+    return f"{stem}{ext}", mime
+
+
 async def _download_feishu(client: Any, ref: InboundAttachmentRef, message_id: str | None) -> bytes:
     if not message_id:
         raise DownloadError("feishu download needs a non-empty message_id")
@@ -79,18 +107,41 @@ async def _download_feishu(client: Any, ref: InboundAttachmentRef, message_id: s
 
 
 async def _download_url(
-    url: str, headers: dict[str, str] | None = None, *, reject_html: bool = False
+    url: str,
+    headers: dict[str, str] | None = None,
+    *,
+    expected_mime: str | None = None,
+    reject_unexpected_html: bool = False,
 ) -> bytes:
+    """Stream a URL to bytes with a hard size cap.
+
+    The cap (``attachments.max_file_bytes``) bounds memory so an unbounded
+    Slack/Discord file (no reliable ``size_hint``) can't OOM the worker. When
+    ``reject_unexpected_html`` is set and the response is ``text/html`` but the
+    file's declared mime is NOT html, treat it as a failure (Slack serves a 200
+    sign-in page when the token can't read the file) — but a genuine ``.html``
+    upload (declared ``text/html``) is allowed through.
+    """
+    max_bytes = int(config.get("attachments.max_file_bytes", 52428800))
     async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT) as http:
-        resp = await http.get(url, headers=headers, follow_redirects=True)
-    if resp.status_code != 200:
-        raise DownloadError(f"download {url[:64]} → HTTP {resp.status_code}")
-    if reject_html and resp.headers.get("content-type", "").lower().startswith("text/html"):
-        # Slack serves a 200 HTML sign-in page when the bot token can't read the
-        # file. Treat it as a failure rather than storing the login page as the
-        # user's document.
-        raise DownloadError(f"download {url[:64]} returned an HTML page (auth/scope?)")
-    return resp.content
+        async with http.stream("GET", url, headers=headers, follow_redirects=True) as resp:
+            if resp.status_code != 200:
+                raise DownloadError(f"download {url[:64]} → HTTP {resp.status_code}")
+            ctype = resp.headers.get("content-type", "").lower()
+            if (
+                reject_unexpected_html
+                and ctype.startswith("text/html")
+                and not (expected_mime or "").lower().startswith("text/html")
+            ):
+                raise DownloadError(f"download {url[:64]} returned an HTML page (auth/scope?)")
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in resp.aiter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise DownloadError(f"download {url[:64]} exceeds {max_bytes} bytes")
+                chunks.append(chunk)
+    return b"".join(chunks)
 
 
 async def download_for(
@@ -104,7 +155,10 @@ async def download_for(
         if not token:
             raise DownloadError("slack download needs a bot token")
         return await _download_url(
-            ref.handle, {"Authorization": f"Bearer {token}"}, reject_html=True
+            ref.handle,
+            {"Authorization": f"Bearer {token}"},
+            expected_mime=ref.mime,
+            reject_unexpected_html=True,
         )
     if platform == "discord":
         # Discord CDN URLs are pre-signed; no auth header.
@@ -158,26 +212,41 @@ def make_resolver(
                     data = await download_for(
                         account.platform, client, ref, message_id=item.inbound_message_id
                     )
+                    filename, mime = _effective_name_mime(ref, data)
                     att = await service.upload(
                         conversation_id=item.conversation_id,
                         uploader_user_id=uploader_user_id,
-                        filename=ref.filename,
+                        filename=filename,
                         content=data,
-                        mime_type=ref.mime,
+                        mime_type=mime,
                     )
                     ids.append(att.id)
-                except (
-                    AttachmentTooLargeError,
-                    AttachmentMimeRejectedError,
-                    AttachmentQuotaExceededError,
-                    DownloadError,
-                ) as exc:
-                    logger.warning(
-                        "[IM inbound] dropping attachment {} ({}): {}",
-                        ref.filename,
-                        account.platform,
+                except Exception as exc:
+                    # Broad on purpose: an unexpected error on ONE ref must not
+                    # abort resolve() and leave attachment_ids unpersisted — that
+                    # would re-upload the already-stored refs on the next
+                    # re-claim. Note-and-skip; surface via the logged traceback.
+                    if not isinstance(
                         exc,
-                    )
+                        (
+                            AttachmentTooLargeError,
+                            AttachmentMimeRejectedError,
+                            AttachmentQuotaExceededError,
+                            DownloadError,
+                        ),
+                    ):
+                        logger.opt(exception=True).warning(
+                            "[IM inbound] unexpected error on attachment {} ({})",
+                            ref.filename,
+                            account.platform,
+                        )
+                    else:
+                        logger.warning(
+                            "[IM inbound] dropping attachment {} ({}): {}",
+                            ref.filename,
+                            account.platform,
+                            exc,
+                        )
                     notes.append(f"[附件 {ref.filename} 已忽略]")
         return ids, notes
 
