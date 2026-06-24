@@ -280,6 +280,8 @@
   },
   "chat": {
     "incompletePreviousAnswer": "上次回答未完成（服务异常退出），请重试。",
+    "loadEarlier": "加载更早的消息",
+    "loadingEarlier": "正在加载更早的消息…",
     "thinking": "思考中...",
     "thinkingProcess": "思考过程",
     "sandboxPreparing": "正在准备沙箱环境...",

@@ -7,6 +7,7 @@ import {
   type Conversation,
   useArtifactStore,
   useConversationStore,
+  useMessageStore,
   usePanelStore,
 } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
@@ -57,6 +58,12 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     let cancelled = false
     const opened = getPresetSelectionStore(wsId).getState()
     const before = { modelKey: opened.modelKey, thinking: opened.thinking }
+    // Kick off all three initial loads in parallel — the conversation
+    // metadata fetch, the artifacts list, and the messages bootstrap.
+    // Previously the bootstrap (the largest payload by far) didn't start
+    // until <MessageList> mounted in its own useEffect.
+    void useMessageStore.getState().loadMessages(client, conversationId)
+    loadArtifacts(client, conversationId)
     ;(async () => {
       const res = await client.get(`/api/v1/conversations/${conversationId}`)
       if (cancelled) return
@@ -86,7 +93,6 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
         }
       } else setStatus('notfound')
     })()
-    loadArtifacts(client, conversationId)
     return () => {
       cancelled = true
     }

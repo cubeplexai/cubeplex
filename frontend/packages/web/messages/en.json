@@ -280,6 +280,8 @@
   },
   "chat": {
     "incompletePreviousAnswer": "Previous response was incomplete (service exit). Please retry.",
+    "loadEarlier": "Load earlier messages",
+    "loadingEarlier": "Loading earlier messages…",
     "thinking": "Thinking...",
     "thinkingProcess": "Thinking",
     "sandboxPreparing": "Preparing sandbox environment...",

@@ -30,6 +30,7 @@ import {
   cancelActiveRun,
   cancelSteer,
   getConversationBootstrap,
+  getHistoryWindow,
   steerRun,
   streamMessages,
   streamRun,
@@ -113,8 +114,20 @@ export interface MessageStore {
    * cleared with the rest of the in-flight stream state on send / cancel.
    */
   failoverEvents: Record<string, FailoverEvent[]>
+  /** Per-conversation cursor into ``cubepi_messages.seq`` of the oldest message
+   *  currently held in ``messages[conversationId]``. Pass as ``before_seq`` when
+   *  the user scrolls up. ``null`` means the conversation is empty. */
+  oldestSeqByConv: Record<string, number | null>
+  /** Per-conversation flag: is there anything older than ``oldestSeqByConv``? */
+  hasMoreByConv: Record<string, boolean>
+  /** Backscroll-in-flight guard so a click-spam on "Load earlier" only fires once. */
+  loadingOlderByConv: Record<string, boolean>
 
   loadMessages(client: ApiClient, conversationId: string): Promise<void>
+  /** Fetch one older window using ``oldestSeqByConv[conversationId]`` as the
+   *  cursor and prepend it to ``messages[conversationId]``. Noop when already
+   *  in flight, when ``hasMore`` is false, or when no cursor is set yet. */
+  loadOlderMessages(client: ApiClient, conversationId: string): Promise<void>
   send(
     client: ApiClient,
     conversationId: string,
@@ -140,6 +153,10 @@ export interface MessageStore {
 }
 
 let activeStreamController: AbortController | null = null
+
+/** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
+ *  effect both fire on mount, but we only want one bootstrap fetch per open. */
+const loadMessagesInFlight = new Map<string, Promise<void>>()
 
 const MAIN_AGENT_KEY = 'main'
 
@@ -1095,6 +1112,9 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   sessionUsage: {},
   contextWindow: {},
   contextTokens: {},
+  oldestSeqByConv: {},
+  hasMoreByConv: {},
+  loadingOlderByConv: {},
 
   appendFailoverEvent(conversationId, event) {
     set((s) => ({
@@ -1108,222 +1128,268 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
   async loadMessages(client: ApiClient, conversationId: string) {
     const state = get()
     if (state.isStreaming && state.streamingConversationId === conversationId) return
+    // The page-level effect and <MessageList>'s own effect both fire on mount
+    // — dedupe so the (heavy) bootstrap fetch runs once per conversation open.
+    if (loadMessagesInFlight.has(conversationId)) return loadMessagesInFlight.get(conversationId)
+    const promise = (async () => {
+      try {
+        const bootstrap = await getConversationBootstrap(client, conversationId)
+        const current = get()
+        if (current.isStreaming && current.streamingConversationId === conversationId) return
 
-    try {
-      const bootstrap = await getConversationBootstrap(client, conversationId)
-      const current = get()
-      if (current.isStreaming && current.streamingConversationId === conversationId) return
-
-      let messages = normalizeMessages(bootstrap.messages ?? [])
-      if (bootstrap.active_run?.user_message) {
-        messages = trimHistoryForActiveRun(
-          messages,
-          bootstrap.active_run.run_id,
-          bootstrap.active_run.user_message,
-          bootstrap.active_run.started_at ?? null,
-        )
-      }
-
-      const restoredTodos = restoreTodosFromHistory(messages)
-      hydrateCitationsFromHistory(conversationId, messages)
-      const usageSummary = bootstrap.usage_summary
-      const newTurnUsage = {
-        ...get().turnUsage,
-        [conversationId]: (usageSummary?.turn ?? null) as import('../types').TurnUsage | null,
-      }
-      const newSessionUsage = {
-        ...get().sessionUsage,
-        [conversationId]: (usageSummary?.session ?? null) as import('../types').SessionUsage | null,
-      }
-      const newContextWindow = {
-        ...get().contextWindow,
-        [conversationId]: usageSummary?.context_window ?? null,
-      }
-      const newContextTokens = {
-        ...get().contextTokens,
-        [conversationId]: usageSummary?.context_tokens ?? null,
-      }
-      const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
-        ? { [MAIN_AGENT_KEY]: emptyStream() }
-        : {}
-
-      // Cold-start fallback: when the Redis event log has aged out, the
-      // backend returns the unresolved HITL request inline. Seed the same
-      // pendingAsk / pendingConfirmMap slots the live SSE path populates so
-      // the card re-renders on refresh without replaying events.
-      //
-      // Post-answer race: when the user just submitted an answer, the
-      // optimistic clear set pendingAsk = null, but the bootstrap that
-      // follows can race the backend's `save_pending_request(None)` —
-      // the DB pending row is still there, so this code would re-seed
-      // the form for the same run_id and the user would see a momentary
-      // re-flash of the question they already answered. Skip the seed
-      // when the store is already tracking this exact run; the SSE
-      // reattach (which starts strictly after the paused-done event)
-      // will land the ask_user_resolved any moment now anyway.
-      const pending = bootstrap.pending_hitl ?? null
-      const currentState = get()
-      // If the user just answered this exact question, the backend's
-      // `save_pending_request(None)` may not have committed yet when
-      // bootstrap fetched — DB pending_hitl is stale. Skip the re-seed
-      // so the form doesn't flash back. SSE delivers
-      // `ask_user_resolved` shortly after either way.
-      const alreadyAnsweredThisQuestion =
-        pending !== null && pending.question_id === currentState.lastAnsweredAskQuestionId
-      const alreadyResolvedThisConfirm =
-        pending !== null &&
-        pending.kind === 'sandbox_confirm' &&
-        pending.question_id === currentState.lastResolvedSandboxQuestionId
-      const skipSeed = alreadyAnsweredThisQuestion || alreadyResolvedThisConfirm
-      let seedPendingAsk: PendingAsk | null = null
-      let seedPendingConfirmMap: Record<string, PendingConfirm> = {}
-      if (pending && pending.kind === 'ask_user' && !skipSeed) {
-        const requestedAt = Date.parse(pending.requested_at)
-        seedPendingAsk = {
-          question_id: pending.question_id,
-          questions: pending.questions,
-          timeout_seconds: null,
-          requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
-          run_id: pending.run_id,
+        let messages = normalizeMessages(bootstrap.messages ?? [])
+        if (bootstrap.active_run?.user_message) {
+          messages = trimHistoryForActiveRun(
+            messages,
+            bootstrap.active_run.run_id,
+            bootstrap.active_run.user_message,
+            bootstrap.active_run.started_at ?? null,
+          )
         }
-      } else if (pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
-        const requestedAt = Date.parse(pending.requested_at)
-        seedPendingConfirmMap = {
-          [pending.tool_call_id]: {
+
+        const restoredTodos = restoreTodosFromHistory(messages)
+        hydrateCitationsFromHistory(conversationId, messages)
+        const usageSummary = bootstrap.usage_summary
+        const newTurnUsage = {
+          ...get().turnUsage,
+          [conversationId]: (usageSummary?.turn ?? null) as import('../types').TurnUsage | null,
+        }
+        const newSessionUsage = {
+          ...get().sessionUsage,
+          [conversationId]: (usageSummary?.session ?? null) as
+            | import('../types').SessionUsage
+            | null,
+        }
+        const newContextWindow = {
+          ...get().contextWindow,
+          [conversationId]: usageSummary?.context_window ?? null,
+        }
+        const newContextTokens = {
+          ...get().contextTokens,
+          [conversationId]: usageSummary?.context_tokens ?? null,
+        }
+        const nextStreamAgents: Record<string, AgentStream> = bootstrap.active_run
+          ? { [MAIN_AGENT_KEY]: emptyStream() }
+          : {}
+
+        // Cold-start fallback: when the Redis event log has aged out, the
+        // backend returns the unresolved HITL request inline. Seed the same
+        // pendingAsk / pendingConfirmMap slots the live SSE path populates so
+        // the card re-renders on refresh without replaying events.
+        //
+        // Post-answer race: when the user just submitted an answer, the
+        // optimistic clear set pendingAsk = null, but the bootstrap that
+        // follows can race the backend's `save_pending_request(None)` —
+        // the DB pending row is still there, so this code would re-seed
+        // the form for the same run_id and the user would see a momentary
+        // re-flash of the question they already answered. Skip the seed
+        // when the store is already tracking this exact run; the SSE
+        // reattach (which starts strictly after the paused-done event)
+        // will land the ask_user_resolved any moment now anyway.
+        const pending = bootstrap.pending_hitl ?? null
+        const currentState = get()
+        // If the user just answered this exact question, the backend's
+        // `save_pending_request(None)` may not have committed yet when
+        // bootstrap fetched — DB pending_hitl is stale. Skip the re-seed
+        // so the form doesn't flash back. SSE delivers
+        // `ask_user_resolved` shortly after either way.
+        const alreadyAnsweredThisQuestion =
+          pending !== null && pending.question_id === currentState.lastAnsweredAskQuestionId
+        const alreadyResolvedThisConfirm =
+          pending !== null &&
+          pending.kind === 'sandbox_confirm' &&
+          pending.question_id === currentState.lastResolvedSandboxQuestionId
+        const skipSeed = alreadyAnsweredThisQuestion || alreadyResolvedThisConfirm
+        let seedPendingAsk: PendingAsk | null = null
+        let seedPendingConfirmMap: Record<string, PendingConfirm> = {}
+        if (pending && pending.kind === 'ask_user' && !skipSeed) {
+          const requestedAt = Date.parse(pending.requested_at)
+          seedPendingAsk = {
             question_id: pending.question_id,
-            command: pending.command,
-            matched_pattern: pending.matched_pattern,
+            questions: pending.questions,
             timeout_seconds: null,
             requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
             run_id: pending.run_id,
-          },
+          }
+        } else if (pending && pending.kind === 'sandbox_confirm' && !skipSeed) {
+          const requestedAt = Date.parse(pending.requested_at)
+          seedPendingConfirmMap = {
+            [pending.tool_call_id]: {
+              question_id: pending.question_id,
+              command: pending.command,
+              matched_pattern: pending.matched_pattern,
+              timeout_seconds: null,
+              requestedAt: Number.isNaN(requestedAt) ? Date.now() : requestedAt,
+              run_id: pending.run_id,
+            },
+          }
         }
-      }
 
-      // pending_hitl fallback: when the Redis active-run key has aged out
-      // during a long pause, bootstrap.active_run is null but the DB
-      // pending + run_id ARE still recoverable (via pending_hitl). Treat
-      // the pending_hitl payload as "this conversation is paused on
-      // run_id, the card must render, and we should tail the run stream
-      // so a resume turn from any worker reaches this tab".
-      //
-      // MessageList gates AskUserCard on `streamingConversationId ===
-      // conversationId`; without this, an ask_user paused beyond Redis
-      // TTL has its pendingAsk seeded but the card stays hidden.
-      const pendingHitlRunId = bootstrap.pending_hitl?.run_id ?? null
-      const hasPendingHitl = pendingHitlRunId !== null
-      const streamRunId = bootstrap.active_run?.run_id ?? pendingHitlRunId
-      const streamingActive = !!bootstrap.active_run || hasPendingHitl
-      // Paused HITL: SSE is attached but the worker has detached. Don't
-      // light up "is streaming" indicators (typing dots etc.); the
-      // <AskUserCard> / composer lock already convey state. `pendingAsk`
-      // and `pendingConfirmMap` are the truth signals here. We keep
-      // `streamingConversationId` set so MessageList's `pendingAsk &&
-      // streamingConversationId === conversationId` gate still fires.
-      const isPaused = bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl
-      const isStreamingActive = streamingActive && !isPaused
-      // `bootstrap.messages` already includes everything up to the latest
-      // event in the Redis stream at fetch time. The SSE reattach should
-      // pick up STRICTLY-NEW events from here; without this cursor the
-      // post-answer reattach replays the paused turn (doubling the
-      // assistant message into streamAgents) and hits the paused `done`
-      // event mid-replay, breaking out of consumeRunStream before any
-      // resume-turn events can be read. Seed both the XREAD cursor and
-      // the in-store dedupe guard from `active_run.last_event_id`.
-      const streamCursor = bootstrap.active_run?.last_event_id ?? null
+        // pending_hitl fallback: when the Redis active-run key has aged out
+        // during a long pause, bootstrap.active_run is null but the DB
+        // pending + run_id ARE still recoverable (via pending_hitl). Treat
+        // the pending_hitl payload as "this conversation is paused on
+        // run_id, the card must render, and we should tail the run stream
+        // so a resume turn from any worker reaches this tab".
+        //
+        // MessageList gates AskUserCard on `streamingConversationId ===
+        // conversationId`; without this, an ask_user paused beyond Redis
+        // TTL has its pendingAsk seeded but the card stays hidden.
+        const pendingHitlRunId = bootstrap.pending_hitl?.run_id ?? null
+        const hasPendingHitl = pendingHitlRunId !== null
+        const streamRunId = bootstrap.active_run?.run_id ?? pendingHitlRunId
+        const streamingActive = !!bootstrap.active_run || hasPendingHitl
+        // Paused HITL: SSE is attached but the worker has detached. Don't
+        // light up "is streaming" indicators (typing dots etc.); the
+        // <AskUserCard> / composer lock already convey state. `pendingAsk`
+        // and `pendingConfirmMap` are the truth signals here. We keep
+        // `streamingConversationId` set so MessageList's `pendingAsk &&
+        // streamingConversationId === conversationId` gate still fires.
+        const isPaused = bootstrap.active_run?.status === 'paused_hitl' || hasPendingHitl
+        const isStreamingActive = streamingActive && !isPaused
+        // `bootstrap.messages` already includes everything up to the latest
+        // event in the Redis stream at fetch time. The SSE reattach should
+        // pick up STRICTLY-NEW events from here; without this cursor the
+        // post-answer reattach replays the paused turn (doubling the
+        // assistant message into streamAgents) and hits the paused `done`
+        // event mid-replay, breaking out of consumeRunStream before any
+        // resume-turn events can be read. Seed both the XREAD cursor and
+        // the in-store dedupe guard from `active_run.last_event_id`.
+        const streamCursor = bootstrap.active_run?.last_event_id ?? null
 
-      // Hydrate per-conversation error from bootstrap if the last run ended
-      // with a classified error (e.g. context_length_exceeded). This lets the
-      // bubble reappear on page reload without waiting for an SSE event.
-      //
-      // Priority: active_run.error_code > last_run_error > leave existing state.
-      // The active-run pointer is cleared when the run reaches a terminal status,
-      // so after a failed run completes the active slot is gone but last_run_error
-      // persists independently (separate Redis key, same TTL).
-      let seedError: { runId: string; data: ErrorEventData } | null | undefined
-      if (bootstrap.active_run?.error_code) {
-        seedError = {
-          runId: bootstrap.active_run.run_id,
-          data: {
-            error_code: bootstrap.active_run.error_code,
-            params: bootstrap.active_run.error_params ?? undefined,
-            message: bootstrap.active_run.error_message ?? bootstrap.active_run.error_code,
-          },
+        // Hydrate per-conversation error from bootstrap if the last run ended
+        // with a classified error (e.g. context_length_exceeded). This lets the
+        // bubble reappear on page reload without waiting for an SSE event.
+        //
+        // Priority: active_run.error_code > last_run_error > leave existing state.
+        // The active-run pointer is cleared when the run reaches a terminal status,
+        // so after a failed run completes the active slot is gone but last_run_error
+        // persists independently (separate Redis key, same TTL).
+        let seedError: { runId: string; data: ErrorEventData } | null | undefined
+        if (bootstrap.active_run?.error_code) {
+          seedError = {
+            runId: bootstrap.active_run.run_id,
+            data: {
+              error_code: bootstrap.active_run.error_code,
+              params: bootstrap.active_run.error_params ?? undefined,
+              message: bootstrap.active_run.error_message ?? bootstrap.active_run.error_code,
+            },
+          }
+        } else if (bootstrap.last_run_error) {
+          seedError = {
+            runId: bootstrap.last_run_error.run_id,
+            data: {
+              error_code: bootstrap.last_run_error.error_code,
+              params: (bootstrap.last_run_error.error_params ?? undefined) as
+                | Record<string, unknown>
+                | undefined,
+              message: bootstrap.last_run_error.error_message,
+            },
+          }
         }
-      } else if (bootstrap.last_run_error) {
-        seedError = {
-          runId: bootstrap.last_run_error.run_id,
-          data: {
-            error_code: bootstrap.last_run_error.error_code,
-            params: (bootstrap.last_run_error.error_params ?? undefined) as
-              | Record<string, unknown>
-              | undefined,
-            message: bootstrap.last_run_error.error_message,
-          },
-        }
-      }
-      set((s) => ({
-        messages: { ...s.messages, [conversationId]: messages },
-        todos: restoredTodos,
-        // When neither active_run nor last_run_error carries error info, clear the
-        // conversation's stale error so a successful retry does not keep showing the
-        // previous failure bubble. seedError is null means server reports no error.
-        errors: { ...s.errors, [conversationId]: seedError ?? null },
-        lastRunStatus: bootstrap.last_run_status ?? null,
-        streamAgents: nextStreamAgents,
-        pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
-        toolStartedMap: {},
-        toolResultMap: {},
-        // When `skipSeed` fired (we just answered/cancelled this exact
-        // question), preserve the current pendingAsk / pendingConfirmMap
-        // instead of clearing them. The form stays mounted in its
-        // submitting/cancelling state until the SSE `ask_user_resolved`
-        // event arrives, which avoids the visible blank gap that
-        // optimistic-clear used to produce.
-        pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
-        pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
-        isStreaming: isStreamingActive,
-        streamingConversationId: streamingActive ? conversationId : null,
-        currentRunId: streamRunId,
-        lastAppliedEventId: streamCursor,
-        statusPhase: null,
-        turnUsage: newTurnUsage,
-        sessionUsage: newSessionUsage,
-        contextWindow: newContextWindow,
-        contextTokens: newContextTokens,
-      }))
+        set((s) => ({
+          messages: { ...s.messages, [conversationId]: messages },
+          oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
+          hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: bootstrap.has_more },
+          todos: restoredTodos,
+          // When neither active_run nor last_run_error carries error info, clear the
+          // conversation's stale error so a successful retry does not keep showing the
+          // previous failure bubble. seedError is null means server reports no error.
+          errors: { ...s.errors, [conversationId]: seedError ?? null },
+          lastRunStatus: bootstrap.last_run_status ?? null,
+          streamAgents: nextStreamAgents,
+          pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
+          toolStartedMap: {},
+          toolResultMap: {},
+          // When `skipSeed` fired (we just answered/cancelled this exact
+          // question), preserve the current pendingAsk / pendingConfirmMap
+          // instead of clearing them. The form stays mounted in its
+          // submitting/cancelling state until the SSE `ask_user_resolved`
+          // event arrives, which avoids the visible blank gap that
+          // optimistic-clear used to produce.
+          pendingConfirmMap: skipSeed ? s.pendingConfirmMap : seedPendingConfirmMap,
+          pendingAsk: skipSeed ? s.pendingAsk : seedPendingAsk,
+          isStreaming: isStreamingActive,
+          streamingConversationId: streamingActive ? conversationId : null,
+          currentRunId: streamRunId,
+          lastAppliedEventId: streamCursor,
+          statusPhase: null,
+          turnUsage: newTurnUsage,
+          sessionUsage: newSessionUsage,
+          contextWindow: newContextWindow,
+          contextTokens: newContextTokens,
+        }))
 
-      if (streamRunId !== null) {
-        activeStreamController?.abort()
-        const controller = new AbortController()
-        activeStreamController = controller
-        const runId = streamRunId
-        const lastEventId = streamCursor ?? undefined
-        queueMicrotask(() => {
-          void consumeRunStream(
-            client,
-            conversationId,
-            runId,
-            lastEventId,
-            set,
-            get,
-            controller.signal,
-          ).finally(() => {
-            if (activeStreamController === controller) {
-              activeStreamController = null
-            }
+        if (streamRunId !== null) {
+          activeStreamController?.abort()
+          const controller = new AbortController()
+          activeStreamController = controller
+          const runId = streamRunId
+          const lastEventId = streamCursor ?? undefined
+          queueMicrotask(() => {
+            void consumeRunStream(
+              client,
+              conversationId,
+              runId,
+              lastEventId,
+              set,
+              get,
+              controller.signal,
+            ).finally(() => {
+              if (activeStreamController === controller) {
+                activeStreamController = null
+              }
+            })
           })
-        })
-      }
-    } catch (err) {
-      set((s) => ({
-        errors: {
-          ...s.errors,
-          [conversationId]: {
-            runId: s.currentRunId ?? '',
-            data: { error_code: 'internal_error', message: (err as Error).message },
+        }
+      } catch (err) {
+        set((s) => ({
+          errors: {
+            ...s.errors,
+            [conversationId]: {
+              runId: s.currentRunId ?? '',
+              data: { error_code: 'internal_error', message: (err as Error).message },
+            },
           },
+        }))
+      }
+    })()
+    loadMessagesInFlight.set(conversationId, promise)
+    try {
+      await promise
+    } finally {
+      loadMessagesInFlight.delete(conversationId)
+    }
+  },
+
+  async loadOlderMessages(client: ApiClient, conversationId: string) {
+    const state = get()
+    if (state.loadingOlderByConv[conversationId]) return
+    if (!state.hasMoreByConv[conversationId]) return
+    const cursor = state.oldestSeqByConv[conversationId]
+    if (cursor == null) return
+
+    set((s) => ({
+      loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: true },
+    }))
+    try {
+      const page = await getHistoryWindow(client, conversationId, { beforeSeq: cursor })
+      const older = normalizeMessages(page.messages)
+      hydrateCitationsFromHistory(conversationId, older)
+      set((s) => ({
+        messages: {
+          ...s.messages,
+          [conversationId]: [...older, ...(s.messages[conversationId] ?? [])],
         },
+        oldestSeqByConv: {
+          ...s.oldestSeqByConv,
+          [conversationId]: page.oldest_seq ?? s.oldestSeqByConv[conversationId],
+        },
+        hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: page.has_more },
+      }))
+    } finally {
+      set((s) => ({
+        loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: false },
       }))
     }
   },
