@@ -14,7 +14,12 @@ import {
   cancelActiveRun,
   ApiError,
 } from '@cubebox/core'
-import type { Message, SubagentSummary, TurnUsage } from '@cubebox/core'
+import type {
+  AssistantMessage as AssistantMessageType,
+  Message,
+  SubagentSummary,
+  TurnUsage,
+} from '@cubebox/core'
 import { AlertCircle } from 'lucide-react'
 import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
@@ -40,6 +45,19 @@ const EMPTY_FAILOVER_EVENTS: FailoverEvent[] = []
 
 function msgTimestampMs(msg: Message): number {
   return msg.timestamp != null ? msg.timestamp * 1000 : 0
+}
+
+// Assemble a clean copy-text snapshot of one assistant message. Models often
+// emit text blocks around tool_use boundaries with trailing newlines, and
+// ``getTextContent``'s zero-separator join would pile them up — yielding
+// stretches of blank lines that show up in the user's clipboard. Trim each
+// text block individually, then rejoin with a single paragraph break.
+function assistantMessageCopyText(msg: AssistantMessageType): string {
+  return msg.content
+    .filter((b): b is Extract<typeof b, { type: 'text' }> => b.type === 'text')
+    .map((b) => b.text.trim())
+    .filter((s) => s.length > 0)
+    .join('\n\n')
 }
 
 /**
@@ -368,14 +386,23 @@ export function MessageList({ conversationId }: MessageListProps) {
   const { anchorByMessageId, lastAnchorMessageId } = useMemo(() => {
     const lastIdByRun = new Map<string, string>()
     const usageByRun = new Map<string, TurnUsage>()
+    // Aggregate the run's user-visible text across every assistant message
+    // sharing the run_id (a multi-step turn can emit text mid-run as well
+    // as the final answer). Copy = "this turn's reply", not just the tail
+    // bubble's text. Thinking and tool_use blocks are skipped by
+    // ``assistantMessageCopyText``, which also trims each text block so
+    // tool-call boundaries don't pile up blank lines.
+    const textByRun = new Map<string, string>()
     let tailRunId: string | null = null
     for (const msg of messages ?? []) {
       if (msg.role !== 'assistant' || !msg.run_id) continue
       lastIdByRun.set(msg.run_id, msg.id)
       tailRunId = msg.run_id
-      // Sum the run's LLM-call-level usage carried on each assistant
-      // message. Messages without ``usage`` (legacy / framework-injected)
-      // contribute zero, matching the backend's UsageSummary.turn value.
+      const text = assistantMessageCopyText(msg)
+      if (text) {
+        const prev = textByRun.get(msg.run_id)
+        textByRun.set(msg.run_id, prev ? `${prev}\n\n${text}` : text)
+      }
       const u = msg.usage
       if (!u) continue
       const acc = usageByRun.get(msg.run_id) ?? {
@@ -390,9 +417,16 @@ export function MessageList({ conversationId }: MessageListProps) {
       acc.cache_write_tokens += u.cache_write_tokens ?? 0
       usageByRun.set(msg.run_id, acc)
     }
-    const byMessageId = new Map<string, { runId: string; turnUsage: TurnUsage | null }>()
+    const byMessageId = new Map<
+      string,
+      { runId: string; turnUsage: TurnUsage | null; copyText: string }
+    >()
     for (const [runId, msgId] of lastIdByRun) {
-      byMessageId.set(msgId, { runId, turnUsage: usageByRun.get(runId) ?? null })
+      byMessageId.set(msgId, {
+        runId,
+        turnUsage: usageByRun.get(runId) ?? null,
+        copyText: textByRun.get(runId) ?? '',
+      })
     }
     return {
       anchorByMessageId: byMessageId,
@@ -468,7 +502,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                     conversationId={conversationId}
                   />
                 )}
-                <UserMessage content={getTextContent(msg)} />
+                <UserMessage content={getTextContent(msg)} timestamp={msg.timestamp} />
               </>
             )}
             {msg.role === 'assistant' &&
@@ -489,6 +523,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                     isStreamingTurn={isStreaming}
                     showForkAction={isAnchor}
                     turnUsage={anchor?.turnUsage ?? null}
+                    turnCopyText={anchor?.copyText ?? ''}
                     isLastRun={isLastRun}
                     sessionUsage={isLastRun ? sessionUsage : null}
                     contextWindow={isLastRun ? contextWindow : null}

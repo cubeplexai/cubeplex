@@ -320,6 +320,14 @@
       "noRun": "Cannot fork from this message",
       "runStreaming": "Wait for the response to finish",
       "groupChat": "Fork is not available in group chats"
+    },
+    "copy": "Copy",
+    "copied": "Copied",
+    "time": {
+      "justNow": "just now",
+      "minutesAgo": "{n}m ago",
+      "hoursAgo": "{n}h ago",
+      "daysAgo": "{n}d ago"
     }
   },
   "subagent": {

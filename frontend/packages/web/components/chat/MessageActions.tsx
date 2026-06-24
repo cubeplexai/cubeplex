@@ -87,7 +87,7 @@ export function MessageActions({
   }
 
   const buttonClass = cn(
-    'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs',
+    'group/chip inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs',
     'text-muted-foreground hover:text-foreground hover:bg-muted/60',
     'disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent',
     'disabled:hover:text-muted-foreground transition-colors',
@@ -103,7 +103,7 @@ export function MessageActions({
         className={buttonClass}
       >
         <GitBranch className="size-3.5" />
-        <span>{t('forkConversation')}</span>
+        <span className="hidden group-hover/chip:inline">{t('forkConversation')}</span>
       </button>
     )
   }
@@ -125,7 +125,7 @@ export function MessageActions({
         className={cn(buttonClass, 'cursor-not-allowed opacity-60')}
       >
         <GitBranch className="size-3.5" />
-        <span>{t('forkConversation')}</span>
+        <span className="hidden group-hover/chip:inline">{t('forkConversation')}</span>
       </TooltipTrigger>
       <TooltipContent>
         <span id={reasonId}>{disabledReason}</span>

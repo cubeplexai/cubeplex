@@ -67,14 +67,15 @@ export function MemoryUpdateChip({ conversationId, workspaceId }: Props) {
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs',
+          'group/chip inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs',
           'text-muted-foreground hover:text-foreground hover:bg-muted/60',
           'transition-colors',
         )}
         aria-label={`${count} 条记忆`}
       >
         <Sparkle aria-hidden className="size-3.5" />
-        <span>{count} 条记忆</span>
+        <span className="font-mono tabular-nums">{count}</span>
+        <span className="hidden group-hover/chip:inline">条记忆</span>
       </PopoverTrigger>
 
       <PopoverContent align="start" sideOffset={6} className="w-80 p-0">

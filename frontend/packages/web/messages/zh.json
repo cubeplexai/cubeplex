@@ -320,6 +320,14 @@
       "noRun": "此消息无法作为复刻起点",
       "runStreaming": "请等待回复完成",
       "groupChat": "群聊不支持复刻"
+    },
+    "copy": "复制",
+    "copied": "已复制",
+    "time": {
+      "justNow": "刚刚",
+      "minutesAgo": "{n} 分钟前",
+      "hoursAgo": "{n} 小时前",
+      "daysAgo": "{n} 天前"
     }
   },
   "subagent": {

@@ -22,6 +22,7 @@ import { TaskProgressCard } from './TaskProgressCard'
 import { ToolCallGroup } from './ToolCallGroup'
 import { ToolCallItem } from './ToolCallItem'
 import { MessageActions } from './MessageActions'
+import { CopyButton, TimeChip } from './MessageMeta'
 import { TokenUsageBar } from './TokenUsageBar'
 import { MemoryUpdateChip } from './MemoryUpdateChip'
 import { getWriteFileSummary } from '@/lib/writeFilePreview'
@@ -168,6 +169,10 @@ interface HistoryProps {
   // Per-run token usage summed from this run's assistant messages. Drives
   // the per-turn TokenUsageBar; null hides the chip.
   turnUsage?: TurnUsage | null
+  // The run's text output joined across every assistant message sharing
+  // its run_id (thinking + tool_call blocks filtered out). Powers the
+  // copy button so a multi-step turn copies as one block.
+  turnCopyText?: string
   // True when this anchor is the latest completed run in the conversation.
   // Gates the session/context view inside TokenUsageBar and the
   // MemoryUpdateChip — both are conversation-level signals that only make
@@ -196,6 +201,7 @@ interface StreamingProps {
   isStreamingTurn?: boolean
   showForkAction?: never
   turnUsage?: never
+  turnCopyText?: never
   isLastRun?: never
   sessionUsage?: never
   contextWindow?: never
@@ -572,6 +578,7 @@ export function AssistantMessage({
   isStreamingTurn,
   showForkAction,
   turnUsage,
+  turnCopyText,
   isLastRun,
   sessionUsage,
   contextWindow,
@@ -691,6 +698,7 @@ export function AssistantMessage({
                 className="flex flex-wrap items-center gap-1 opacity-0
                   transition-opacity group-hover:opacity-100 focus-within:opacity-100"
               >
+                <CopyButton content={turnCopyText ?? ''} />
                 {turnUsage && (
                   <TokenUsageBar
                     turnUsage={turnUsage}
@@ -711,6 +719,7 @@ export function AssistantMessage({
                   activeRunId={activeRunId ?? null}
                   isStreaming={isStreamingTurn ?? false}
                 />
+                <TimeChip timestamp={message.timestamp ?? null} />
               </div>
             )}
           </div>

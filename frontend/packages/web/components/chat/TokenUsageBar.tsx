@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { ChevronDown, ChevronRight, BarChart3 } from 'lucide-react'
+import { BarChart3 } from 'lucide-react'
 import type { TurnUsage, SessionUsage } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
@@ -74,17 +74,13 @@ export function TokenUsageBar({
         render={
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs
-              text-muted-foreground hover:text-foreground hover:bg-muted/60
+            aria-label={t('tokenUsage')}
+            className="group/chip inline-flex items-center gap-1.5 rounded-md px-2 py-1
+              text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60
               transition-colors"
           >
             <BarChart3 aria-hidden className="size-3.5" />
-            <span>{t('tokenUsage')}</span>
-            {isExpanded ? (
-              <ChevronDown className="size-3 opacity-60" />
-            ) : (
-              <ChevronRight className="size-3 opacity-60" />
-            )}
+            <span className="hidden group-hover/chip:inline">{t('tokenUsage')}</span>
           </button>
         }
       />
