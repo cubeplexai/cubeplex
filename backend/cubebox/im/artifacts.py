@@ -50,11 +50,18 @@ async def download_artifact_to_tempfile(
     entry = str(artifact.get("entry_file") or "")
     path = str(artifact.get("path") or "")
     filename = entry or path.rsplit("/", 1)[-1]
+    if not filename:
+        logger.warning(
+            "[IM artifacts] artifact {} has no entry_file/path; cannot build key", artifact_id
+        )
+        return None
+    # Build the key OUTSIDE the try so a key-construction bug propagates rather
+    # than masquerading as a benign 'object missing → share-link' fallback.
     key = f"artifacts/{conversation_id}/{artifact_id}/v{version}/{filename}"
     try:
         store = get_objectstore_client()
         data, _ctype = await store.download_file(key)
-    except (ClientError, Exception):
+    except (ClientError, OSError, ValueError):
         logger.opt(exception=True).warning(
             "[IM artifacts] objectstore download failed for {}", artifact_id
         )
@@ -168,19 +175,34 @@ class IMArtifactDispatcher:
     async def _deliver_one(self, artifact_id: str, artifact: dict[str, Any]) -> None:
         if not await self._claim_send(artifact_id):
             return
+        delivered = await self._try_deliver(artifact_id, artifact)
+        if not delivered:
+            # Nothing reached the user (native send AND share-link both failed).
+            # Release the claim so a replay (tailer restart) can retry, instead
+            # of the burned claim silently losing the artifact forever.
+            await self._release_claim(artifact_id)
+
+    async def _try_deliver(self, artifact_id: str, artifact: dict[str, Any]) -> bool:
+        # fold_event normally appends the row; reconstruct from the payload if a
+        # terminal replay rebuilt card_state without it, so the share-link path
+        # always has a name to mint against.
         item = next((a for a in self.card_state.artifacts if a.id == artifact_id), None)
+        if item is None:
+            item = ArtifactItem(
+                id=artifact_id,
+                artifact_type=str(artifact.get("artifact_type") or ""),
+                name=str(artifact.get("name") or "file"),
+            )
         tmp_path = await download_artifact_to_tempfile(self.conversation_id, artifact)
         if tmp_path is None:
-            await self._fallback_link(item, artifact)
-            return
+            return await self._fallback_link(item, artifact)
         ok = False
         try:
             if tmp_path.stat().st_size <= outbound_size_cap(self.platform):
-                filename = item.name if item is not None else "file"
                 ok = bool(
                     await asyncio.wait_for(
                         self.connector.send_file(
-                            local_path=str(tmp_path), filename=filename, mime=None
+                            local_path=str(tmp_path), filename=item.name, mime=None
                         ),
                         timeout=_SEND_TIMEOUT,
                     )
@@ -192,27 +214,41 @@ class IMArtifactDispatcher:
             ok = False
         finally:
             tmp_path.unlink(missing_ok=True)
-        if not ok:
-            await self._fallback_link(item, artifact)
+        if ok:
+            return True
+        return await self._fallback_link(item, artifact)
 
     async def _claim_send(self, artifact_id: str) -> bool:
         """Atomic per-(run, artifact) send claim. True iff we won the right to send."""
         if self.redis is None or not self.run_id:
             return True
         ttl = int(config.get("streaming.run_event_ttl_seconds", 43200))
-        key = f"{self.redis_key_prefix}:im:artifact_sent:{self.run_id}:{artifact_id}"
-        return bool(await self.redis.set(key, "1", nx=True, ex=ttl))
+        return bool(await self.redis.set(self._claim_key(artifact_id), "1", nx=True, ex=ttl))
 
-    async def _fallback_link(self, item: ArtifactItem | None, artifact: dict[str, Any]) -> None:
-        if item is None:
+    async def _release_claim(self, artifact_id: str) -> None:
+        if self.redis is None or not self.run_id:
             return
+        try:
+            await self.redis.delete(self._claim_key(artifact_id))
+        except Exception:
+            logger.opt(exception=True).warning("[IM artifacts] claim release failed")
+
+    def _claim_key(self, artifact_id: str) -> str:
+        return f"{self.redis_key_prefix}:im:artifact_sent:{self.run_id}:{artifact_id}"
+
+    async def _fallback_link(self, item: ArtifactItem, artifact: dict[str, Any]) -> bool:
+        """Send the artifact's share-link as a standalone message. Returns True
+        iff the message was delivered. The card is already finalized, so we do
+        NOT mutate ``item.share_url`` (dead write) — the message is the delivery.
+        """
         url = await self._mint_share_url(item, artifact)
         if not url:
-            return
-        item.share_url = url
+            return False
         try:
-            await self.connector.send_to_chat(
+            sent = await self.connector.send_to_chat(
                 self.chat_id, self.reply_to_id, f"📎 {item.name}: {url}"
             )
+            return sent is not None
         except Exception:
             logger.opt(exception=True).warning("[IM artifacts] fallback send_to_chat failed")
+            return False

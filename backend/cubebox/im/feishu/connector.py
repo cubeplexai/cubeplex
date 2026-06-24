@@ -71,7 +71,17 @@ def _parse_feishu_attachments(
         return []
     kind = {"audio": "audio", "media": "video"}.get(message_type, "file")
     name = str(content_obj.get("file_name") or message_type)
-    return [InboundAttachmentRef(kind=kind, filename=name, mime=None, handle=str(key))]
+    raw_size = content_obj.get("file_size")
+    size_hint: int | None = None
+    if isinstance(raw_size, int):
+        size_hint = raw_size
+    elif isinstance(raw_size, str) and raw_size.isdigit():
+        size_hint = int(raw_size)
+    return [
+        InboundAttachmentRef(
+            kind=kind, filename=name, mime=None, handle=str(key), size_hint=size_hint
+        )
+    ]
 
 
 # Feishu reaction_type literals (no enum in the SDK). Names are UPPERCASE
