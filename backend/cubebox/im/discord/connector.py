@@ -225,6 +225,26 @@ class DiscordConnector:
             logger.opt(exception=True).warning("[Discord] send_message failed")
             return None
 
+    async def upload_image(self, local_path: str) -> str | None:
+        """Discord has no inline-image key; image artifacts fall back to share-link."""
+        del local_path
+        return None
+
+    async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
+        """Send a native file attachment to the bound channel."""
+        del mime  # Discord infers type from the file.
+        if self._bot is None or not self._channel_id:
+            return False
+        try:
+            channel = self._bot.get_channel(int(self._channel_id))
+            if channel is None:
+                channel = await self._bot.fetch_channel(int(self._channel_id))
+            await channel.send(file=discord.File(local_path, filename=filename))
+            return True
+        except Exception:
+            logger.opt(exception=True).warning("[Discord] send_file failed")
+            return False
+
     async def edit_message(self, message_id: str, text: str) -> bool:
         """Edit an existing message. Returns True on success."""
         if self._bot is None or not self._channel_id:

@@ -569,6 +569,92 @@ class FeishuConnector:
         image_key = getattr(data, "image_key", None) if data is not None else None
         return str(image_key) if image_key else None
 
+    async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
+        """Upload a local file and send it as a native ``file`` message.
+
+        Two-step: ``im.v1.file.create`` (file_type=stream) → ``file_key``, then a
+        ``msg_type="file"`` message to the bound chat (reply when bound).
+        Returns False on any failure so the caller falls back to a share-link.
+        """
+        del mime  # Feishu derives the type from the bytes; msg_type is "file".
+        if self._client is None or not self._channel_id:
+            return False
+        from pathlib import Path
+
+        from lark_oapi.api.im.v1 import (
+            CreateFileRequest,
+            CreateFileRequestBody,
+            CreateMessageRequest,
+            CreateMessageRequestBody,
+            ReplyMessageRequest,
+            ReplyMessageRequestBody,
+        )
+
+        def _do_upload() -> Any:
+            with Path(local_path).open("rb") as fh:
+                body = (
+                    CreateFileRequestBody.builder()
+                    .file_type("stream")
+                    .file_name(filename)
+                    .file(fh)
+                    .build()
+                )
+                req = CreateFileRequest.builder().request_body(body).build()
+                return self._client.im.v1.file.create(req)
+
+        up = await asyncio.to_thread(_do_upload)
+        if not getattr(up, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] send_file upload failed: code={} msg={}",
+                getattr(up, "code", None),
+                getattr(up, "msg", None),
+            )
+            return False
+        up_data = getattr(up, "data", None)
+        file_key = getattr(up_data, "file_key", None) if up_data is not None else None
+        if not file_key:
+            return False
+
+        payload = json.dumps({"file_key": file_key}, ensure_ascii=False)
+        if self._reply_to_id:
+            rbody = (
+                ReplyMessageRequestBody.builder()
+                .content(payload)
+                .msg_type("file")
+                .reply_in_thread(False)
+                .build()
+            )
+            rreq = (
+                ReplyMessageRequest.builder()
+                .message_id(self._reply_to_id)
+                .request_body(rbody)
+                .build()
+            )
+            resp = await asyncio.to_thread(self._client.im.v1.message.reply, rreq)
+        else:
+            cbody = (
+                CreateMessageRequestBody.builder()
+                .receive_id(self._channel_id)
+                .msg_type("file")
+                .content(payload)
+                .build()
+            )
+            creq = (
+                CreateMessageRequest.builder()
+                .receive_id_type("chat_id")
+                .request_body(cbody)
+                .build()
+            )
+            resp = await asyncio.to_thread(self._client.im.v1.message.create, creq)
+        ok = bool(getattr(resp, "success", lambda: False)())
+        if not ok:
+            logger.warning(
+                "[Feishu] send_file message failed: code={} msg={}",
+                getattr(resp, "code", None),
+                getattr(resp, "msg", None),
+            )
+        return ok
+
     # ------------------------------------------------------------------
     # Reactions (Task 10)
     # ------------------------------------------------------------------

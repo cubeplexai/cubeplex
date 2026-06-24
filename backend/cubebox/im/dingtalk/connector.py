@@ -342,6 +342,13 @@ class DingtalkConnector:
     # Rejection notifier (RejectionNotifier protocol)
     # ------------------------------------------------------------------
 
+    async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
+        """DingTalk session-webhook replies can't upload local media; the
+        artifact dispatcher falls back to a share-link. Native file send needs
+        the OpenAPI media-upload + message-send endpoints (out of scope)."""
+        del local_path, filename, mime
+        return False
+
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         """Send a rejection notice to the conversation."""
         return await self.reply_markdown(

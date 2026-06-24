@@ -11,9 +11,32 @@ See docs/dev/plans/2026-06-11-im-connectors-feishu.md
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from cubebox.im.card_model import CardState
+
+
+@runtime_checkable
+class OutboundConnector(Protocol):
+    """The bound, per-run connector surface the artifact dispatcher calls.
+
+    Distinct from the stateless ``registry.PlatformConnector``: these methods
+    run against a connector instance already bound to a chat (channel + reply
+    target). ``send_file`` is the explicit member that makes a missing
+    implementation a type error at the dispatcher rather than a runtime
+    ``AttributeError``. ``upload_image`` is included because the image path
+    calls it; connectors without an inline-image API return ``None`` so the
+    dispatcher falls back to a share-link.
+    """
+
+    async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool: ...
+
+    async def upload_image(self, local_path: str) -> str | None: ...
+
+    async def send_to_chat(
+        self, chat_id: str, reply_to_id: str | None, text: str
+    ) -> str | None: ...
+
 
 BindingMode = Literal["isolated", "shared"]
 

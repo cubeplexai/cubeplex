@@ -38,16 +38,30 @@ def _new_dispatcher(state: CardState, conn: _FakeConnector) -> IMArtifactDispatc
 
 
 @pytest.mark.asyncio
-async def test_document_artifact_writes_share_url_to_card_state() -> None:
+async def test_website_artifact_writes_share_url_to_card_state() -> None:
+    # ``website`` is link-kind: it still mints a share-link at handle() time.
     state = CardState(bot_name="cubebox", run_id="run_1")
-    state.artifacts.append(ArtifactItem(id="art_1", artifact_type="document", name="r.pdf"))
+    state.artifacts.append(ArtifactItem(id="art_1", artifact_type="website", name="site"))
     conn = _FakeConnector()
     disp = _new_dispatcher(state, conn)
-    await disp.handle({"id": "art_1", "artifact_type": "document", "name": "r.pdf", "version": 1})
+    await disp.handle({"id": "art_1", "artifact_type": "website", "name": "site", "version": 1})
     art = next(a for a in state.artifacts if a.id == "art_1")
     assert art.share_url is not None
     assert "https://example.com" in art.share_url
     assert "nonce_1" in art.share_url
+
+
+@pytest.mark.asyncio
+async def test_file_kind_artifact_is_captured_not_share_linked() -> None:
+    # ``document`` is file-kind: captured for terminal native delivery, NOT
+    # share-linked at handle() time (avoids double-delivery).
+    state = CardState(bot_name="cubebox", run_id="run_1")
+    conn = _FakeConnector()
+    disp = _new_dispatcher(state, conn)
+    await disp.handle({"id": "art_1", "artifact_type": "document", "name": "r.pdf", "version": 1})
+    art = next(a for a in state.artifacts if a.id == "art_1")
+    assert art.share_url is None
+    assert "art_1" in disp._file_artifacts
 
 
 @pytest.mark.asyncio
@@ -57,7 +71,7 @@ async def test_dispatcher_creates_missing_artifact_row() -> None:
     state = CardState(bot_name="cubebox", run_id="run_1")
     conn = _FakeConnector()
     disp = _new_dispatcher(state, conn)
-    await disp.handle({"id": "art_new", "artifact_type": "document", "name": "x.pdf", "version": 1})
+    await disp.handle({"id": "art_new", "artifact_type": "website", "name": "site", "version": 1})
     assert len(state.artifacts) == 1
     assert state.artifacts[0].share_url is not None
 
@@ -74,7 +88,7 @@ async def test_dispatcher_skips_when_id_missing() -> None:
 @pytest.mark.asyncio
 async def test_dispatcher_skips_share_url_when_base_url_invalid() -> None:
     state = CardState(bot_name="cubebox", run_id="run_1")
-    state.artifacts.append(ArtifactItem(id="art_1", artifact_type="document", name="r.pdf"))
+    state.artifacts.append(ArtifactItem(id="art_1", artifact_type="website", name="site"))
     conn = _FakeConnector()
     disp = IMArtifactDispatcher(
         connector=conn,
@@ -87,6 +101,6 @@ async def test_dispatcher_skips_share_url_when_base_url_invalid() -> None:
         card_state=state,
         mint_share_token_fn=_fake_mint,
     )
-    await disp.handle({"id": "art_1", "artifact_type": "document", "name": "r.pdf", "version": 1})
+    await disp.handle({"id": "art_1", "artifact_type": "website", "name": "site", "version": 1})
     art = next(a for a in state.artifacts if a.id == "art_1")
     assert art.share_url is None
