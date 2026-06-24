@@ -435,6 +435,96 @@ async def test_mode_change_adopts_existing_conversation_into_topic(
         assert topic_count == 1
 
 
+async def test_dm_on_shared_account_stays_isolated(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """A DM on a shared-routing bot is never a group chat — its Topic is owned
+    by the sender and the conversation stays personal."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared", sandbox_mode="dedicated"))
+
+    async with maker() as session:
+        resolved = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="dm hi",
+            origin="inbound",
+        )
+        await session.commit()
+
+    assert resolved.is_group_chat is False
+    assert resolved.topic_id is not None
+    async with maker() as session:
+        topic = (
+            await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
+        ).scalar_one()
+        assert topic.creator_user_id == _USER  # sender owns it, not the bot
+        assert topic.title == "cubebox"  # DM title is the bot name
+        conv = (
+            await session.execute(
+                select(Conversation).where(Conversation.id == resolved.conversation_id)
+            )
+        ).scalar_one()
+        assert conv.is_group_chat is False
+
+
+async def test_topic_to_flat_detaches_existing_scope(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """topic→flat settings change: the next message detaches the existing
+    conversation from its Topic and clears the link anchor, so the scope
+    becomes standalone instead of staying grouped forever."""
+    maker, account = _seeded
+
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="topic first",
+            origin="inbound",
+        )
+        await session.commit()
+    assert r1.topic_id is not None
+
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
+    async with maker() as session:
+        r2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="flat now",
+            origin="inbound",
+        )
+        await session.commit()
+
+    # Same conversation, now standalone.
+    assert r2.conversation_id == r1.conversation_id
+    assert r2.topic_id is None
+    async with maker() as session:
+        conv = (
+            await session.execute(
+                select(Conversation).where(Conversation.id == r2.conversation_id)
+            )
+        ).scalar_one()
+        assert conv.topic_id is None
+        link = (
+            await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
+        ).scalar_one()
+        assert link.topic_id is None  # anchor cleared → /new deletes, not rotates
+
+
 async def test_new_rotates_conversation_under_same_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
