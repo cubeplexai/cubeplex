@@ -109,6 +109,12 @@ async def test_put_shared_requires_sandbox_mode(
             base, json={"routing_mode": "shared", "topic_mode": "topic"}
         )
         assert resp.status_code == 422, resp.text
+        # A non-enum sandbox value is also rejected (only dedicated|creator).
+        bad = await async_client.put(
+            base,
+            json={"routing_mode": "shared", "topic_mode": "topic", "sandbox_mode": "nope"},
+        )
+        assert bad.status_code == 422, bad.text
         # And the account's settings stay at the defaults (no partial write).
         assert (await async_client.get(base)).json()["routing_mode"] == "isolated"
     finally:
@@ -154,9 +160,10 @@ async def test_put_requires_admin(
     try:
         # Member CAN read.
         assert ws_member_client.get(base).status_code == 200
-        # Member CANNOT write.
+        # Member CANNOT write (valid body, so we hit the admin gate, not 422).
         put = ws_member_client.put(
-            base, json={"routing_mode": "shared", "topic_mode": "topic", "sandbox_mode": "x"}
+            base,
+            json={"routing_mode": "shared", "topic_mode": "topic", "sandbox_mode": "dedicated"},
         )
         assert put.status_code == 403, put.text
     finally:

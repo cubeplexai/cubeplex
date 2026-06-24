@@ -44,9 +44,19 @@ _CHANNEL = "oc_shared_ch1"
 _EXT_ACCT = "cli_icb_ingest"
 
 
-def _set(account: IMConnectorAccount, settings: IMBotSettings) -> None:
-    """Apply account-level settings in-memory; ingest reads account.config."""
+async def _set(
+    maker: async_sessionmaker[AsyncSession],
+    account: IMConnectorAccount,
+    settings: IMBotSettings,
+) -> None:
+    """Persist account-level settings to the DB. ingest reloads the account at
+    its boundary, so settings must live in the row, not just in memory."""
     account.config = store_bot_settings(account.config, settings)
+    async with maker() as session:
+        row = await session.get(IMConnectorAccount, account.id)
+        assert row is not None
+        row.config = account.config
+        await session.commit()
 
 
 @pytest_asyncio.fixture
@@ -156,7 +166,7 @@ async def test_first_shared_message_creates_topic(
 ) -> None:
     """First @bot in shared mode creates Topic + owner participant + group conv."""
     maker, account = _seeded
-    _set(account, IMBotSettings(routing_mode="shared"))
+    await _set(maker, account, IMBotSettings(routing_mode="shared"))
 
     res = await ingest_inbound_event(_event(), account=account, session_maker=maker)
     assert res.outcome == "enqueued"
@@ -195,7 +205,7 @@ async def test_subsequent_shared_reuses_topic(
 ) -> None:
     """Second message in shared mode reuses the same conversation + topic."""
     maker, account = _seeded
-    _set(account, IMBotSettings(routing_mode="shared"))
+    await _set(maker, account, IMBotSettings(routing_mode="shared"))
 
     r1 = await ingest_inbound_event(
         _event(event_id="ev-sub-1"), account=account, session_maker=maker
@@ -252,12 +262,39 @@ async def test_default_isolated_creates_per_sender_topic(
         assert "im" in topic.attributes
 
 
+async def test_ingest_reloads_stale_account_settings(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """A long-connection transport holds the account captured at startup. When
+    settings change in the DB, ingest must reload and honor them — without a
+    reconnect. Here the passed account object stays stale (empty config) while
+    the DB row is switched to shared."""
+    maker, account = _seeded
+    async with maker() as s:
+        row = await s.get(IMConnectorAccount, account.id)
+        assert row is not None
+        row.config = store_bot_settings(row.config, IMBotSettings(routing_mode="shared"))
+        await s.commit()
+    # The in-memory transport object is deliberately NOT updated.
+    assert (account.config or {}).get("bot_settings") is None
+
+    res = await ingest_inbound_event(_event(event_id="ev-stale-1"), account=account, session_maker=maker)
+    assert res.outcome == "enqueued"
+    async with maker() as s:
+        conv = (
+            await s.execute(select(Conversation).where(Conversation.id == res.conversation_id))
+        ).scalar_one()
+        # Reloaded config took effect: shared routing → group chat + topic.
+        assert conv.is_group_chat is True
+        assert conv.topic_id is not None
+
+
 async def test_flat_mode_no_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
     """Isolated + flat: no Topic; conversation.topic_id is None."""
     maker, account = _seeded
-    _set(account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
+    await _set(maker, account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
 
     res = await ingest_inbound_event(
         _event(event_id="ev-flat-1", scope_key="u:on_senderA", scope_kind="participant"),
