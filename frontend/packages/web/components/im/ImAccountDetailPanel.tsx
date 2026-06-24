@@ -11,7 +11,6 @@ import {
   wsUpdateImBotSettings,
 } from '@cubebox/core'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -62,21 +61,39 @@ export function ImAccountDetailPanel({
     }
   }, [client, account.workspace_id, account.id])
 
-  const loadSettings = useCallback(async () => {
-    try {
-      const res = await wsGetImBotSettings(client, account.workspace_id, account.id)
-      setSettings(res)
-      setSavedSettings(res)
-    } catch {
-      // non-critical; the section just stays in its loading state
-    }
-  }, [client, account.workspace_id, account.id])
-
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- load-on-mount
     void loadLinks()
-    void loadSettings()
-  }, [loadLinks, loadSettings])
+  }, [loadLinks])
+
+  // Bot settings are workspace-scoped (the GET route is guarded by
+  // require_member). The admin page can surface accounts from other
+  // workspaces, where this caller would 403 — so only load + render the
+  // section in workspace scope. On account switch, clear state and ignore a
+  // late response so account B never shows / saves account A's form.
+  const settingsScoped = scope === 'workspace'
+  useEffect(() => {
+    if (!settingsScoped) return
+    let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on account switch
+    setSettings(null)
+    setSavedSettings(null)
+    setSettingsError(null)
+    void (async () => {
+      try {
+        const res = await wsGetImBotSettings(client, account.workspace_id, account.id)
+        if (active) {
+          setSettings(res)
+          setSavedSettings(res)
+        }
+      } catch {
+        // non-critical; the section stays in its loading state
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [client, account.workspace_id, account.id, settingsScoped])
 
   const botName = account.bot_app_name || 'cubebox'
   const settingsDirty =
@@ -93,11 +110,11 @@ export function ImAccountDetailPanel({
     try {
       const payload: ImBotSettings = {
         ...settings,
-        // Backend requires a sandbox_mode for shared routing; default it.
+        // Shared requires a sandbox_mode (default it); outside shared the
+        // field is hidden, so clear it — otherwise a stale value would still
+        // apply to isolated topics.
         sandbox_mode:
-          settings.routing_mode === 'shared'
-            ? settings.sandbox_mode || 'dedicated'
-            : settings.sandbox_mode,
+          settings.routing_mode === 'shared' ? settings.sandbox_mode || 'dedicated' : null,
       }
       const res = await wsUpdateImBotSettings(client, account.workspace_id, account.id, payload)
       setSettings(res)
@@ -117,7 +134,7 @@ export function ImAccountDetailPanel({
         : 'Each person gets their own conversation.'
     const topic =
       settings.topic_mode === 'topic' || settings.routing_mode === 'shared'
-        ? `Grouped under a topic — DM topics are titled “${botName}”, group topics use the chat name.`
+        ? `Grouped under a topic — DM topics are titled “${botName}”; group chats get one topic per channel.`
         : 'Standalone conversations, no topic grouping.'
     return `${routing} ${topic}`
   }, [settings, botName])
@@ -178,71 +195,89 @@ export function ImAccountDetailPanel({
           </dl>
         </section>
 
-        <Separator />
+        {settingsScoped && (
+          <>
+            <Separator />
 
-        <section>
-          <h3 className="mb-2 text-xs uppercase text-muted-foreground">Behavior</h3>
-          {settings === null ? (
-            <p className="text-xs text-muted-foreground">Loading…</p>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <div className="grid grid-cols-[7rem_1fr] items-center gap-x-4 gap-y-3">
-                <Label htmlFor="im-routing-mode">Routing</Label>
-                <Select
-                  value={settings.routing_mode}
-                  onValueChange={(v) =>
-                    setSettings({ ...settings, routing_mode: v as ImBotSettings['routing_mode'] })
-                  }
-                >
-                  <SelectTrigger id="im-routing-mode" size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="isolated">Isolated (per person)</SelectItem>
-                    <SelectItem value="shared">Shared (per channel)</SelectItem>
-                  </SelectContent>
-                </Select>
+            <section>
+              <h3 className="mb-2 text-xs uppercase text-muted-foreground">Behavior</h3>
+              {settings === null ? (
+                <p className="text-xs text-muted-foreground">Loading…</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  <div className="grid grid-cols-[7rem_1fr] items-center gap-x-4 gap-y-3">
+                    <Label htmlFor="im-routing-mode">Routing</Label>
+                    <Select
+                      value={settings.routing_mode}
+                      onValueChange={(v) => {
+                        const routing_mode = v as ImBotSettings['routing_mode']
+                        setSettings({
+                          ...settings,
+                          routing_mode,
+                          // Give shared a valid sandbox up front; clear it
+                          // when leaving shared (the field is hidden).
+                          sandbox_mode:
+                            routing_mode === 'shared' ? settings.sandbox_mode || 'dedicated' : null,
+                        })
+                      }}
+                    >
+                      <SelectTrigger id="im-routing-mode" size="sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="isolated">Isolated (per person)</SelectItem>
+                        <SelectItem value="shared">Shared (per channel)</SelectItem>
+                      </SelectContent>
+                    </Select>
 
-                <Label htmlFor="im-topic-mode">Topic grouping</Label>
-                <Select
-                  value={settings.topic_mode}
-                  onValueChange={(v) =>
-                    setSettings({ ...settings, topic_mode: v as ImBotSettings['topic_mode'] })
-                  }
-                >
-                  <SelectTrigger id="im-topic-mode" size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="topic">Group under a topic</SelectItem>
-                    <SelectItem value="flat">Standalone conversations</SelectItem>
-                  </SelectContent>
-                </Select>
+                    <Label htmlFor="im-topic-mode">Topic grouping</Label>
+                    <Select
+                      value={settings.topic_mode}
+                      onValueChange={(v) =>
+                        setSettings({ ...settings, topic_mode: v as ImBotSettings['topic_mode'] })
+                      }
+                    >
+                      <SelectTrigger id="im-topic-mode" size="sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="topic">Group under a topic</SelectItem>
+                        <SelectItem value="flat">Standalone conversations</SelectItem>
+                      </SelectContent>
+                    </Select>
 
-                {settings.routing_mode === 'shared' && (
-                  <>
-                    <Label htmlFor="im-sandbox-mode">Sandbox</Label>
-                    <Input
-                      id="im-sandbox-mode"
-                      value={settings.sandbox_mode ?? ''}
-                      placeholder="dedicated"
-                      onChange={(e) => setSettings({ ...settings, sandbox_mode: e.target.value })}
-                    />
-                  </>
-                )}
-              </div>
+                    {settings.routing_mode === 'shared' && (
+                      <>
+                        <Label htmlFor="im-sandbox-mode">Sandbox</Label>
+                        <Select
+                          value={settings.sandbox_mode ?? 'dedicated'}
+                          onValueChange={(v) => setSettings({ ...settings, sandbox_mode: v })}
+                        >
+                          <SelectTrigger id="im-sandbox-mode" size="sm">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="dedicated">Dedicated (topic-owned)</SelectItem>
+                            <SelectItem value="creator">Creator&apos;s sandbox</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </>
+                    )}
+                  </div>
 
-              <p className="text-xs text-muted-foreground">{behaviorSummary}</p>
-              {settingsError && <p className="text-xs text-destructive">{settingsError}</p>}
+                  <p className="text-xs text-muted-foreground">{behaviorSummary}</p>
+                  {settingsError && <p className="text-xs text-destructive">{settingsError}</p>}
 
-              <div>
-                <Button size="sm" disabled={!settingsDirty || saving} onClick={saveSettings}>
-                  {saving ? 'Saving…' : 'Save'}
-                </Button>
-              </div>
-            </div>
-          )}
-        </section>
+                  <div>
+                    <Button size="sm" disabled={!settingsDirty || saving} onClick={saveSettings}>
+                      {saving ? 'Saving…' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </section>
+          </>
+        )}
 
         <Separator />
 

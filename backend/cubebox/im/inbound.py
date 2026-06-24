@@ -143,6 +143,16 @@ async def ingest_inbound_event(
                 return IngestResult(outcome="rejected", conversation_id=None)
             effective_user_id = resolved_user_id
 
+        # Live settings: the long-connection / gateway transports captured
+        # this account at startup, so its ``config`` can be stale relative to
+        # a settings change. Reload it at this boundary — every transport
+        # funnels through here — so saved routing/topic settings take effect
+        # without a reconnect. (The webhook path already loads fresh; this is
+        # a cheap PK re-read.)
+        fresh_account = await session.get(IMConnectorAccount, account.id)
+        if fresh_account is not None:
+            account = fresh_account
+
         resolved = await resolve_im_conversation(
             session,
             account,

@@ -28,13 +28,15 @@ class IMBotSettings(BaseModel):
     - ``topic_mode``: ``topic`` (roll each conversation up under a cubebox
       Topic) vs ``flat`` (standalone personal conversations, no Topic).
       ``shared`` always implies a Topic regardless of this knob.
-    - ``sandbox_mode``: sandbox the bot's runs use; defaulted to
-      ``dedicated`` for shared/topic runs at Topic-creation time.
+    - ``sandbox_mode``: sandbox the bot's runs use (``dedicated`` | ``creator``,
+      matching the native Topic schema); defaulted to ``dedicated`` for
+      shared/topic runs at Topic-creation time. An invalid stored value makes
+      ``load_bot_settings`` fall back to defaults rather than raising.
     """
 
     routing_mode: RoutingMode = "isolated"
     topic_mode: TopicMode = "topic"
-    sandbox_mode: str | None = Field(default=None)
+    sandbox_mode: str | None = Field(default=None, pattern=r"^(dedicated|creator)$")
 
 
 def load_bot_settings(config: dict[str, Any] | None) -> IMBotSettings:
