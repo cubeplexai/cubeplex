@@ -27,7 +27,11 @@ if __name__ == "__main__":
         # checkout / worktree would crash on `python main.py` before it exists.
         # mkdir it up front so the existing-dir short-circuit always applies.
         backend_dir = Path(__file__).resolve().parent
-        excluded_dirs = [backend_dir / ".venv", backend_dir / "cubepi-traces"]
+        excluded_dirs = [
+            backend_dir / ".venv",
+            backend_dir / "cubepi-traces",
+            backend_dir / "skills_cache",
+        ]
         for d in excluded_dirs:
             d.mkdir(parents=True, exist_ok=True)
         reload_kwargs = {
