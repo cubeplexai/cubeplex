@@ -328,6 +328,14 @@
       "minutesAgo": "{n}m ago",
       "hoursAgo": "{n}h ago",
       "daysAgo": "{n}d ago"
+    },
+    "memoryChip": {
+      "label": "memories",
+      "ariaLabel": "{n} memories",
+      "popoverTitle": "Memories from this conversation",
+      "openPage": "Open memory",
+      "openPageAria": "Go to memory page",
+      "empty": "No memories yet"
     }
   },
   "subagent": {

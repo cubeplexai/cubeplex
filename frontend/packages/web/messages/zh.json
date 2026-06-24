@@ -328,6 +328,14 @@
       "minutesAgo": "{n} 分钟前",
       "hoursAgo": "{n} 小时前",
       "daysAgo": "{n} 天前"
+    },
+    "memoryChip": {
+      "label": "条记忆",
+      "ariaLabel": "{n} 条记忆",
+      "popoverTitle": "本对话产生的记忆",
+      "openPage": "打开记忆页",
+      "openPageAria": "跳转到记忆页面",
+      "empty": "暂无记忆"
     }
   },
   "subagent": {
