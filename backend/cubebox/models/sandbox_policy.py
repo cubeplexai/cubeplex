@@ -79,3 +79,12 @@ class SandboxPolicy(CubeboxBase, table=True):
         default=None, sa_column=Column(JSON(none_as_null=True))
     )
     egress_proxy: str | None = Field(default=None, max_length=512, nullable=True)
+    # Per-sandbox resource limits as Kubernetes quantity strings (e.g. cpu
+    # "500m"/"2", memory "512Mi"/"2Gi", storage "10Gi"). cpu/memory feed
+    # ``Sandbox.create(resource=...)`` and fall back to the static
+    # ``sandbox.resource.*`` config when NULL. storage feeds the user PVC
+    # capacity request and, when NULL, leaves the cluster StorageClass default
+    # in place (there is no ``sandbox.volume.*`` size config).
+    resource_cpu: str | None = Field(default=None, max_length=32, nullable=True)
+    resource_memory: str | None = Field(default=None, max_length=32, nullable=True)
+    storage: str | None = Field(default=None, max_length=32, nullable=True)

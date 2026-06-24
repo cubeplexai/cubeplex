@@ -24,6 +24,10 @@ export interface SandboxPolicyOut {
   command_rules: SandboxCommandRule[]
   network_default_action: 'allow' | 'deny'
   egress_proxy: string | null
+  // Kubernetes quantity strings; null = use the system default.
+  resource_cpu: string | null
+  resource_memory: string | null
+  storage: string | null
   warnings: string[]
 }
 
@@ -33,6 +37,9 @@ export interface UpdateSandboxPolicyIn {
   command_rules: SandboxCommandRule[] | null
   network_default_action: 'allow' | 'deny'
   egress_proxy: string | null
+  resource_cpu: string | null
+  resource_memory: string | null
+  storage: string | null
 }
 
 export type SandboxStatusValue = 'provisioning' | 'running' | 'paused' | 'terminated' | 'absent'
