@@ -524,6 +524,58 @@ in increasing order of investment:
 - **Product**: a cubebox-side image-warm step / sandbox warm pool so
   the first user after an image bump doesn't eat a 504.
 
+## Product-internal optimizations to review (post-run)
+
+Findings that point at improvements **inside cubebox**, not just the
+benchmark harness. Each was worked around at the periphery (in
+`benchmarks/swebench/` or via ops) so the run could proceed; the
+product-side fix is deferred to a review after the full 500 completes,
+to avoid touching the system prompt / image / sandbox path while a
+20-hour run is in flight. These benefit ALL cubebox sandbox users, not
+just benchmarking.
+
+1. **`SandboxPolicy.egress_proxy` is not injected into the sandbox env.**
+   It's stored and honored nowhere the agent's shell sees it, so the
+   agent must `git config --global http.proxy …` by hand (our prompt
+   does this). Cubebox should export it as `HTTP_PROXY` / `HTTPS_PROXY`
+   (+ lowercase) in the sandbox so git/pip/curl pick it up transparently.
+   Peripheral workaround: prompt sets git proxy. (Task: egress-proxy env.)
+
+2. **Image `PYTHONPATH` / `PIP_PREFIX` break user venvs.** The image
+   bakes `PIP_PREFIX=/workspace/.python-packages` and
+   `PYTHONPATH=/opt/venv…:/workspace…` to make `pip install` persist on
+   the PVC. But inside a fresh `python -m venv`, `pip install -e .` then
+   installs into the wrong prefix (venv stays empty) and PYTHONPATH
+   shadows the venv — so `import <project>` finds the base image's
+   version. The django__django-10554 trace showed the agent burning ~40%
+   of its tool calls fighting this (43× `unset PYTHONPATH PIP_PREFIX`,
+   6× "No module named 'django'"). Options: (a) one line in the cubebox
+   system prompt ("before creating a venv, `unset PYTHONPATH
+   PIP_PREFIX`"); (b) image uses a pip.conf `prefix` that a venv
+   naturally overrides instead of the `PIP_PREFIX` env; (c) sandbox shell
+   clears the vars on venv activation. (a) is lowest-risk but note the
+   prompt-cache discipline doc before editing the system prompt.
+   Peripheral workaround: the benchmark prompt's venv step unsets them
+   (commit on this branch). (Task: venv PYTHONPATH.)
+
+3. **No agent thrash / max-run-duration guard.** django__django-10554
+   ran 53 min / 198 tool calls / 91k output tokens / 0-byte patch — the
+   model thrashed without converging and nothing stopped it (the idle
+   watchdog only fires on a SILENT stream). Cubebox/cubepi could offer a
+   configurable max run duration and/or a repetition detector (same
+   command looping, same error recurring). Peripheral workaround: the
+   harness enforces a 35-min per-task wall-clock cap. (Task: thrash
+   protection.)
+
+4. **No per-run `system_prompt` override in the API.** `SendMessageRequest`
+   has no field for it, so programmatic callers must fold instructions
+   into the user message. Low priority. (Task: per-run system_prompt.)
+
+5. **Default sandbox image lacks pytest + a build toolchain.** Forced a
+   benchmark-specific build variant (`24.04-20260623-build`). Product
+   decision: fold these into the default image (size vs generality) or
+   formalize a dev/full variant. (Task: default image toolchain.)
+
 ## Open questions / decisions to make
 
 1. **Which model preset for the headline run?** `flash` is the default
