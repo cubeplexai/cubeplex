@@ -86,6 +86,10 @@ export function ImAccountDetailPanel({
     setSettings(null)
     setSavedSettings(null)
     setSettingsError(null)
+    // Clear any in-flight save state too: a save started for the previous
+    // account skips its own setSaving(false) once the id changes, which would
+    // otherwise leave the new account's Save button stuck disabled.
+    setSaving(false)
     void (async () => {
       try {
         const res = await wsGetImBotSettings(client, account.workspace_id, account.id)

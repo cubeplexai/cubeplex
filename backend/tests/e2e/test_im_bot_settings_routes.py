@@ -121,6 +121,44 @@ async def test_put_shared_requires_sandbox_mode(
         await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
 
 
+@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+async def test_put_rejects_shared_for_teams(
+    mock_hydrate: Any,
+    async_client: httpx.AsyncClient,
+) -> None:
+    """Teams can't do channel-shared scope, so shared routing is rejected on
+    the API too (not just disabled in the UI)."""
+
+    async def _fake(app_id: str, app_secret: str, domain: str) -> tuple[str, str, str]:
+        return "ou_bot", "", ""
+
+    mock_hydrate.side_effect = _fake
+    from cubebox.db.engine import async_session_maker
+    from cubebox.models.im_connector import IMConnectorAccount
+    from tests.e2e.conftest import DEFAULT_WS_ID
+
+    account_id = await _create_account(async_client, DEFAULT_WS_ID, "teams")
+    base = f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}/settings"
+    try:
+        async with async_session_maker() as s:
+            acct = await s.get(IMConnectorAccount, account_id)
+            assert acct is not None
+            acct.platform = "teams"
+            await s.commit()
+        resp = await async_client.put(
+            base,
+            json={"routing_mode": "shared", "topic_mode": "topic", "sandbox_mode": "dedicated"},
+        )
+        assert resp.status_code == 422, resp.text
+        # Isolated still works for Teams.
+        ok = await async_client.put(
+            base, json={"routing_mode": "isolated", "topic_mode": "topic"}
+        )
+        assert ok.status_code == 200, ok.text
+    finally:
+        await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
+
+
 async def test_get_unknown_account_404(async_client: httpx.AsyncClient) -> None:
     from tests.e2e.conftest import DEFAULT_WS_ID
 
