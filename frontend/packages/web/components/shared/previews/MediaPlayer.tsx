@@ -25,11 +25,7 @@ export function MediaPlayer({ url, type, filename }: MediaPlayerProps) {
 
   return (
     <div className="flex h-full items-center justify-center bg-black/95 p-2">
-      <video
-        controls
-        preload="metadata"
-        className="max-w-full max-h-full rounded"
-      >
+      <video controls preload="metadata" className="max-w-full max-h-full rounded">
         <source src={url} />
       </video>
     </div>

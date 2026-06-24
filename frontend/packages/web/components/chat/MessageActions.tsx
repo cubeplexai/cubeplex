@@ -55,8 +55,7 @@ export function MessageActions({
   const reactId = useId()
   const reasonId = `fork-disabled-${reactId}`
 
-  const runStillRunning =
-    runId != null && activeRunId === runId && isStreaming
+  const runStillRunning = runId != null && activeRunId === runId && isStreaming
   const disabledReason = !runId
     ? t('forkDisabled.noRun')
     : isGroupChat

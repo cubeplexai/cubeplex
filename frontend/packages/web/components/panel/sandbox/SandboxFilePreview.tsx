@@ -18,7 +18,16 @@ const PdfPreview = dynamic(
 const OFFICE_EXTENSIONS = new Set(['.docx', '.xlsx', '.pptx'])
 
 const IMAGE_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico', '.tiff', '.avif',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.svg',
+  '.webp',
+  '.bmp',
+  '.ico',
+  '.tiff',
+  '.avif',
 ])
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.avi', '.mkv', '.ogv'])
@@ -26,15 +35,48 @@ const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.avi', '.mkv', '.ogv
 const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma'])
 
 const CODE_EXTENSIONS = new Set([
-  '.py', '.js', '.ts', '.tsx', '.jsx', '.mjs', '.cjs',
-  '.json', '.yaml', '.yml', '.toml', '.cfg', '.ini',
-  '.sh', '.bash', '.zsh',
-  '.css', '.scss', '.less', '.sql',
-  '.rs', '.go', '.java', '.c', '.cpp', '.h', '.hpp',
-  '.rb', '.php', '.swift', '.kt', '.cs',
-  '.r', '.lua', '.pl', '.ex', '.exs',
-  '.vue', '.svelte', '.xml',
-  '.dockerfile', '.makefile',
+  '.py',
+  '.js',
+  '.ts',
+  '.tsx',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.cfg',
+  '.ini',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.css',
+  '.scss',
+  '.less',
+  '.sql',
+  '.rs',
+  '.go',
+  '.java',
+  '.c',
+  '.cpp',
+  '.h',
+  '.hpp',
+  '.rb',
+  '.php',
+  '.swift',
+  '.kt',
+  '.cs',
+  '.r',
+  '.lua',
+  '.pl',
+  '.ex',
+  '.exs',
+  '.vue',
+  '.svelte',
+  '.xml',
+  '.dockerfile',
+  '.makefile',
 ])
 
 const PLAIN_TEXT_EXTENSIONS = new Set(['.txt', '.log', '.env', '.gitignore'])
@@ -90,31 +132,19 @@ export function SandboxFilePreview({
 
   if (OFFICE_EXTENSIONS.has(ext)) {
     return (
-      <OfficeFilePreview
-        entry={entry}
-        workspaceId={workspaceId}
-        conversationId={conversationId}
-      />
+      <OfficeFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
 
   if (ext === '.html') {
     return (
-      <HtmlFilePreview
-        entry={entry}
-        workspaceId={workspaceId}
-        conversationId={conversationId}
-      />
+      <HtmlFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
 
   if (ext === '.csv') {
     return (
-      <CsvFilePreview
-        entry={entry}
-        workspaceId={workspaceId}
-        conversationId={conversationId}
-      />
+      <CsvFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
 
@@ -131,31 +161,17 @@ export function SandboxFilePreview({
 
   if (CODE_EXTENSIONS.has(ext)) {
     return (
-      <CodeFilePreview
-        entry={entry}
-        workspaceId={workspaceId}
-        conversationId={conversationId}
-      />
+      <CodeFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
 
   if (PLAIN_TEXT_EXTENSIONS.has(ext) || !ext) {
     return (
-      <TextFilePreview
-        entry={entry}
-        workspaceId={workspaceId}
-        conversationId={conversationId}
-      />
+      <TextFilePreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
     )
   }
 
-  return (
-    <FallbackPreview
-      entry={entry}
-      workspaceId={workspaceId}
-      conversationId={conversationId}
-    />
-  )
+  return <FallbackPreview entry={entry} workspaceId={workspaceId} conversationId={conversationId} />
 }
 
 // ── Text content previews (fetch via useSandboxFileContent) ───────
@@ -169,9 +185,7 @@ function CodeFilePreview({
   workspaceId: string
   conversationId?: string | null
 }) {
-  const { content, error, loading } = useSandboxFileContent(
-    workspaceId, entry.path, conversationId,
-  )
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
 
   if (loading) return <PreviewLoading />
   if (error?.message === 'FILE_TOO_LARGE') {
@@ -196,9 +210,7 @@ function CsvFilePreview({
   workspaceId: string
   conversationId?: string | null
 }) {
-  const { content, error, loading } = useSandboxFileContent(
-    workspaceId, entry.path, conversationId,
-  )
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
 
   if (loading) return <PreviewLoading />
   if (error?.message === 'FILE_TOO_LARGE') {
@@ -225,9 +237,7 @@ function MarkdownFilePreview({
   conversationId?: string | null
   onNavigate?: (path: string) => void
 }) {
-  const { content, error, loading } = useSandboxFileContent(
-    workspaceId, entry.path, conversationId,
-  )
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
 
   const resolveAssetUrl = useCallback(
     (path: string) => buildDownloadUrl(workspaceId, path, conversationId),
@@ -270,9 +280,7 @@ function TextFilePreview({
   workspaceId: string
   conversationId?: string | null
 }) {
-  const { content, error, loading } = useSandboxFileContent(
-    workspaceId, entry.path, conversationId,
-  )
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
 
   if (loading) return <PreviewLoading />
   if (error?.message === 'FILE_TOO_LARGE') {
@@ -309,9 +317,7 @@ function HtmlFilePreview({
   workspaceId: string
   conversationId?: string | null
 }) {
-  const { content, error, loading } = useSandboxFileContent(
-    workspaceId, entry.path, conversationId,
-  )
+  const { content, error, loading } = useSandboxFileContent(workspaceId, entry.path, conversationId)
   const blobUrl = useMemo(() => {
     if (!content) return null
     const blob = new Blob([content], { type: 'text/html' })

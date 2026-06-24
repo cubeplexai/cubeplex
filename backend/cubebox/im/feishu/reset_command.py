@@ -47,9 +47,7 @@ async def handle_reset_command(
     scope_key = event.scope_key or ""
     if not channel_id or not scope_key:
         if connector is not None:
-            await connector.send_to_chat(
-                channel_id, event.reply_to_id, "无法确定会话范围。"
-            )
+            await connector.send_to_chat(channel_id, event.reply_to_id, "无法确定会话范围。")
         return
 
     async with session_maker() as session:

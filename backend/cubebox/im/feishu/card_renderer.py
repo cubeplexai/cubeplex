@@ -282,9 +282,7 @@ def _render_tool_step(step: ToolStep) -> list[dict[str, Any]]:
 
 
 def _render_sub_agent_row(row: SubAgentRow) -> dict[str, Any]:
-    return _tool_row_element(
-        f"🤖 sub-agent **{row.name}** · 已调用 {row.tool_count} 个工具"
-    )
+    return _tool_row_element(f"🤖 sub-agent **{row.name}** · 已调用 {row.tool_count} 个工具")
 
 
 def _tool_panel(state: CardState) -> dict[str, Any]:

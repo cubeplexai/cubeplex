@@ -24,7 +24,14 @@ export const ATTACHMENT_PROXY_BODY_LIMIT = '60mb'
 const ADMIN_CSP = "frame-src 'self'; default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:"
 
 export const nextConfig: NextConfig = {
-  allowedDevOrigins: ['localhost', '127.0.0.1', '[::1]', '192.168.1.111', '192.168.1.150', '192.168.1.215'],
+  allowedDevOrigins: [
+    'localhost',
+    '127.0.0.1',
+    '[::1]',
+    '192.168.1.111',
+    '192.168.1.150',
+    '192.168.1.215',
+  ],
   compress: false,
   // Produce a self-contained Next.js bundle (node_modules + server.js) for
   // container deploys. Gated on an env var so dev / E2E aren't affected —

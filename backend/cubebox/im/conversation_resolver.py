@@ -272,9 +272,7 @@ async def resolve_im_conversation(
     )
 
 
-async def _ensure_topic_participant(
-    session: AsyncSession, topic_id: str, user_id: str
-) -> None:
+async def _ensure_topic_participant(session: AsyncSession, topic_id: str, user_id: str) -> None:
     """Idempotently add ``user_id`` to a Topic as a member."""
     existing = (
         await session.execute(

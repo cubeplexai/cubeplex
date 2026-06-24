@@ -418,9 +418,7 @@ async def test_mode_change_adopts_existing_conversation_into_topic(
 
     async with maker() as session:
         conv = (
-            await session.execute(
-                select(Conversation).where(Conversation.id == r2.conversation_id)
-            )
+            await session.execute(select(Conversation).where(Conversation.id == r2.conversation_id))
         ).scalar_one()
         assert conv.topic_id == r2.topic_id  # conversation adopted into the topic
         assert "im" in conv.attributes
@@ -518,9 +516,7 @@ async def test_topic_to_flat_detaches_existing_scope(
     assert r2.topic_id is None
     async with maker() as session:
         conv = (
-            await session.execute(
-                select(Conversation).where(Conversation.id == r2.conversation_id)
-            )
+            await session.execute(select(Conversation).where(Conversation.id == r2.conversation_id))
         ).scalar_one()
         assert conv.topic_id is None
         link = (

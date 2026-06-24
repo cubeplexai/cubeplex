@@ -117,7 +117,8 @@ async def _set_routing_mode(*, account_id: str, mode: str) -> None:
         account = await session.get(IMConnectorAccount, account_id)
         assert account is not None
         account.config = store_bot_settings(
-            account.config, IMBotSettings(routing_mode=mode)  # type: ignore[arg-type]
+            account.config,
+            IMBotSettings(routing_mode=mode),  # type: ignore[arg-type]
         )
         session.add(account)
         await session.commit()

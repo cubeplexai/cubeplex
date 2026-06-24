@@ -124,9 +124,7 @@ async def process_one_queue_item(
             from cubebox.models.topic import Topic
 
             topic_row = (
-                await session.execute(
-                    select(Topic).where(Topic.id == conv_row.topic_id)
-                )
+                await session.execute(select(Topic).where(Topic.id == conv_row.topic_id))
             ).scalar_one_or_none()
 
         if conv_row is not None and (conv_row.topic_id is not None or conv_row.is_group_chat):

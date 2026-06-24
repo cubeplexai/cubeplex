@@ -105,9 +105,7 @@ async def test_put_shared_requires_sandbox_mode(
     account_id = await _create_account(async_client, DEFAULT_WS_ID, "sandbox")
     base = f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}/settings"
     try:
-        resp = await async_client.put(
-            base, json={"routing_mode": "shared", "topic_mode": "topic"}
-        )
+        resp = await async_client.put(base, json={"routing_mode": "shared", "topic_mode": "topic"})
         assert resp.status_code == 422, resp.text
         # A non-enum sandbox value is also rejected (only dedicated|creator).
         bad = await async_client.put(
@@ -151,9 +149,7 @@ async def test_put_rejects_shared_for_teams(
         )
         assert resp.status_code == 422, resp.text
         # Isolated still works for Teams.
-        ok = await async_client.put(
-            base, json={"routing_mode": "isolated", "topic_mode": "topic"}
-        )
+        ok = await async_client.put(base, json={"routing_mode": "isolated", "topic_mode": "topic"})
         assert ok.status_code == 200, ok.text
     finally:
         await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")

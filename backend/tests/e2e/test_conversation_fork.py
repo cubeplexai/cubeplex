@@ -158,14 +158,10 @@ async def test_fork_happy_path(memory_client: httpx.AsyncClient) -> None:
 
         # Forked thread carries the same message bodies (by role+text) as the src.
         src_msgs = (
-            await memory_client.get(
-                f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{src_id}/messages"
-            )
+            await memory_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{src_id}/messages")
         ).json()["messages"]
         new_msgs = (
-            await memory_client.get(
-                f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{new_id}/messages"
-            )
+            await memory_client.get(f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{new_id}/messages")
         ).json()["messages"]
 
         def _shape(msgs: list[dict[str, object]]) -> list[tuple[str, str]]:
@@ -194,9 +190,7 @@ async def test_fork_run_not_completed_returns_400(memory_client: httpx.AsyncClie
         )
         src_id = resp.json()["id"]
         created.append(src_id)
-        await _seed_completed_run(
-            src_id, run_id="run-good", user_text="hi", assistant_text="hey"
-        )
+        await _seed_completed_run(src_id, run_id="run-good", user_text="hi", assistant_text="hey")
 
         resp = await memory_client.post(
             f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{src_id}/fork",
@@ -218,9 +212,7 @@ async def test_fork_group_chat_rejected(memory_client: httpx.AsyncClient) -> Non
         )
         src_id = resp.json()["id"]
         created.append(src_id)
-        await _seed_completed_run(
-            src_id, run_id="run-group", user_text="hi", assistant_text="hey"
-        )
+        await _seed_completed_run(src_id, run_id="run-group", user_text="hi", assistant_text="hey")
         await _set_group_chat(src_id)
 
         resp = await memory_client.post(
@@ -247,9 +239,7 @@ async def test_fork_cross_workspace_returns_404(
         )
         src_id = resp.json()["id"]
         created.append(src_id)
-        await _seed_completed_run(
-            src_id, run_id="run-xws", user_text="hi", assistant_text="hey"
-        )
+        await _seed_completed_run(src_id, run_id="run-xws", user_text="hi", assistant_text="hey")
 
         # Path-scope a request to the *other* workspace pointing at this src id.
         # 404 — visibility is enforced by ConversationRepository, not 403.

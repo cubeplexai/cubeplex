@@ -532,4 +532,3 @@ async def list_identity_links(
             for link, email, display_name in rows
         ]
     )
-

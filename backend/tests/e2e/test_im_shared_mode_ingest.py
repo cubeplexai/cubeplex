@@ -278,7 +278,9 @@ async def test_ingest_reloads_stale_account_settings(
     # The in-memory transport object is deliberately NOT updated.
     assert (account.config or {}).get("bot_settings") is None
 
-    res = await ingest_inbound_event(_event(event_id="ev-stale-1"), account=account, session_maker=maker)
+    res = await ingest_inbound_event(
+        _event(event_id="ev-stale-1"), account=account, session_maker=maker
+    )
     assert res.outcome == "enqueued"
     async with maker() as s:
         conv = (
