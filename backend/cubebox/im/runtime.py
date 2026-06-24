@@ -206,10 +206,19 @@ async def start(app: FastAPI, run_manager: Any) -> None:
             app=app,
         )
 
+    from cubebox.im.inbound_attachments import make_resolver
+
+    resolve_inbound_attachments = make_resolver(
+        session_maker=async_session_maker,
+        load_secrets=_load_secrets,
+        client_for=_client_for,
+    )
+
     worker = IMRunQueueWorker(
         session_maker=async_session_maker,
         run_manager=run_manager,
         on_run_started=_on_run_started,
+        resolve_inbound_attachments=resolve_inbound_attachments,
         poll_interval=1.0,
         lease_seconds=300,
     )

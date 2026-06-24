@@ -36,6 +36,7 @@ from cubebox.im.outbound import _FloodSignal
 from cubebox.im.types import (
     DM_SCOPE_KEY,
     BindingMode,
+    InboundAttachmentRef,
     InboundEvent,
     RenderState,
     make_channel_scope,
@@ -44,6 +45,34 @@ from cubebox.im.types import (
 
 # Matches Feishu inline mention markup: <at user_id="ou_xxx">name</at>
 _AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>", re.DOTALL)
+
+# Feishu message types that carry a downloadable resource.
+_FEISHU_MEDIA_TYPES = frozenset({"image", "file", "audio", "media"})
+
+
+def _parse_feishu_attachments(
+    message_type: str, content_obj: dict[str, Any]
+) -> list[InboundAttachmentRef]:
+    """Build attachment refs from a Feishu media message's parsed content.
+
+    ``handle`` is the resource id only (``image_key`` / ``file_key``); the
+    message id needed by ``message_resource.get`` is read from the queue row at
+    resolve time.
+    """
+    if message_type == "image":
+        key = content_obj.get("image_key")
+        if not key:
+            return []
+        return [
+            InboundAttachmentRef(kind="image", filename="image.png", mime=None, handle=str(key))
+        ]
+    key = content_obj.get("file_key")
+    if not key:
+        return []
+    kind = {"audio": "audio", "media": "video"}.get(message_type, "file")
+    name = str(content_obj.get("file_name") or message_type)
+    return [InboundAttachmentRef(kind=kind, filename=name, mime=None, handle=str(key))]
+
 
 # Feishu reaction_type literals (no enum in the SDK). Names are UPPERCASE
 # in Feishu's emoji_type set — mixed case (e.g. "ThumbsUp") is rejected with
@@ -118,33 +147,40 @@ class FeishuConnector:
             return None
         if self._bot_open_id is not None and sender_open_id == self._bot_open_id:
             return None
-        if message.get("message_type") != "text":
+        message_type = message.get("message_type")
+        if message_type != "text" and message_type not in _FEISHU_MEDIA_TYPES:
             return None
 
         try:
             content_obj = json.loads(message.get("content", "{}"))
         except json.JSONDecodeError:
             return None
-        raw_text = content_obj.get("text", "")
-        # Feishu inbound text uses ``@_user_N`` placeholders + a separate
-        # ``mentions[]`` array (NOT inline ``<at>`` tags — those are the
-        # outbound shape). Drop the bot's own at-mention (so the LLM sees
-        # only the message body) and substitute remaining ``@_user_N`` with
-        # the mention's human-readable ``name`` (e.g. "@巩向锋") so the LLM
-        # gets a name it can actually reason about instead of a placeholder.
-        mentions = message.get("mentions") or []
-        for mention in mentions:
-            key = mention.get("key") or ""
-            if not key:
-                continue
-            mid = (mention.get("id") or {}).get("open_id")
-            name = mention.get("name") or ""
-            if mid and mid == self._bot_open_id:
-                raw_text = raw_text.replace(key, "")
-            elif name:
-                raw_text = raw_text.replace(key, f"@{name}")
-        text = _AT_TAG_RE.sub("", raw_text).strip()
-        if not text:
+
+        attachments: list[InboundAttachmentRef] = []
+        if message_type == "text":
+            raw_text = content_obj.get("text", "")
+            # Feishu inbound text uses ``@_user_N`` placeholders + a separate
+            # ``mentions[]`` array (NOT inline ``<at>`` tags — those are the
+            # outbound shape). Drop the bot's own at-mention (so the LLM sees
+            # only the message body) and substitute remaining ``@_user_N`` with
+            # the mention's human-readable ``name`` (e.g. "@巩向锋") so the LLM
+            # gets a name it can actually reason about instead of a placeholder.
+            mentions = message.get("mentions") or []
+            for mention in mentions:
+                key = mention.get("key") or ""
+                if not key:
+                    continue
+                mid = (mention.get("id") or {}).get("open_id")
+                name = mention.get("name") or ""
+                if mid and mid == self._bot_open_id:
+                    raw_text = raw_text.replace(key, "")
+                elif name:
+                    raw_text = raw_text.replace(key, f"@{name}")
+            text = _AT_TAG_RE.sub("", raw_text).strip()
+        else:
+            text = ""
+            attachments = _parse_feishu_attachments(message_type, content_obj)
+        if not text and not attachments:
             return None
 
         chat_id = message.get("chat_id", "")
@@ -182,6 +218,7 @@ class FeishuConnector:
             sender_ref=sender_ref,
             sender_open_id=sender_open_id,
             text=text,
+            attachments=attachments,
         )
 
     def _group_message_mentions_bot(self, message: dict[str, Any]) -> bool:
