@@ -92,6 +92,14 @@ def main(argv: list[str] | None = None) -> int:
         "a crash and only the unfinished instances run.",
     )
     parser.add_argument(
+        "--max-task-seconds",
+        type=float,
+        default=2100.0,
+        help="Hard wall-clock cap per instance (default 2100s = 35 min). The idle "
+        "watchdog only catches a SILENT stream; this catches an agent that "
+        "thrashes without converging (e.g. 53 min / 0-byte patch). Set 0 to disable.",
+    )
+    parser.add_argument(
         "--stop-on-rate-limit",
         action="store_true",
         help="Abort the whole sweep (exit 3) the first time an instance fails with "
@@ -167,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
             thinking=args.thinking,
             cleanup_conversation=args.cleanup_conversation,
             egress_proxy=args.egress_proxy,
+            max_task_seconds=(args.max_task_seconds or None),
         )
         append_prediction(predictions_path, result, model_name)
         summary = result.to_summary()

@@ -75,6 +75,7 @@ def run_instance(
     thinking: str = "off",
     cleanup_conversation: bool = False,
     egress_proxy: str | None = None,
+    max_task_seconds: float | None = None,
 ) -> TaskResult:
     """Drive a single instance end-to-end and write artifacts under
     ``out_dir/tasks/<instance_id>/``.
@@ -112,6 +113,17 @@ def run_instance(
             ):
                 sse_file.write(json.dumps(event, ensure_ascii=False) + "\n")
                 sse_event_count += 1
+                # Hard per-task wall-clock cap. The idle watchdog (client
+                # ReadTimeout) only fires when the stream goes SILENT; an agent
+                # that THRASHES — emitting events for an hour without converging
+                # to a patch (see django__django-10554: 53 min, 198 tool calls,
+                # 0 bytes) — never goes idle. This bounds the worst case.
+                if max_task_seconds is not None and (time.time() - started) > max_task_seconds:
+                    error = (
+                        f"max_task_seconds ({max_task_seconds:.0f}s) exceeded after "
+                        f"{sse_event_count} events / {tool_call_count} tool calls"
+                    )
+                    break
                 etype = event.get("type")
                 if etype == "tool_call":
                     tool_call_count += 1
