@@ -202,6 +202,11 @@ export function MessageList({ conversationId }: MessageListProps) {
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
   const streamingConversationId = useMessageStore((s) => s.streamingConversationId)
+  // Active run guard for the per-message Fork action — MessageActions
+  // greys the button when the clicked message is part of the still-running
+  // turn (cubepi rejects ``cp.fork`` with run_not_completed until the
+  // run's ``completion_seq`` is stamped).
+  const activeRunId = useMessageStore((s) => s.currentRunId)
   // `failoverEvents` is populated by the message store's SSE consumer
   // whenever a `model_failover` event arrives. The core slice's per-event
   // shape is structurally identical to the web `FailoverEvent` type, so
@@ -433,6 +438,8 @@ export function MessageList({ conversationId }: MessageListProps) {
                   workspaceId={workspaceId}
                   runId={msg.run_id}
                   isGroupChat={isGroupChat}
+                  activeRunId={activeRunId}
+                  isStreaming={isStreaming}
                 />
               </>
             )}
@@ -444,6 +451,8 @@ export function MessageList({ conversationId }: MessageListProps) {
                 conversationId={conversationId}
                 workspaceId={workspaceId}
                 isGroupChat={isGroupChat}
+                activeRunId={activeRunId}
+                isStreamingTurn={isStreaming}
                 pendingConfirmMap={pendingConfirmMap}
                 onSandboxConfirm={handleSandboxConfirm}
               />

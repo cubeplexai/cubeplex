@@ -534,6 +534,16 @@ async def fork_conversation(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "new_thread_exists"},
         ) from exc
+    # Index the forked conversation so it shows up in conversation-search
+    # right away — without this, the fork is invisible to search until the
+    # caller sends another message. Best-effort; same shape as the
+    # post-send-message index trigger.
+    await _enqueue_search_index(
+        new_conv.id,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+        user_id=ctx.user.id,
+    )
     return _serialize_conversation(new_conv)
 
 

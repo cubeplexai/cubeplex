@@ -148,6 +148,12 @@ interface HistoryProps {
   conversationId?: string
   workspaceId?: string | null
   isGroupChat?: boolean
+  // Whether a turn is streaming somewhere in this conversation. If
+  // ``activeRunId === message.run_id`` the fork action greys out for
+  // this bubble (mid-turn fork is rejected by the backend with
+  // run_not_completed).
+  activeRunId?: string | null
+  isStreamingTurn?: boolean
   stream?: never
   isStreaming?: never
   statusPhase?: never
@@ -164,6 +170,8 @@ interface StreamingProps {
   conversationId?: string
   workspaceId?: string | null
   isGroupChat?: boolean
+  activeRunId?: string | null
+  isStreamingTurn?: boolean
   stream: AgentStream
   isStreaming: boolean
   statusPhase?: string | null
@@ -532,6 +540,8 @@ export function AssistantMessage({
   conversationId,
   workspaceId,
   isGroupChat,
+  activeRunId,
+  isStreamingTurn,
   pendingConfirmMap,
   onSandboxConfirm,
 }: AssistantMessageProps) {
@@ -652,6 +662,8 @@ export function AssistantMessage({
                   workspaceId={workspaceId ?? null}
                   runId={message.run_id}
                   isGroupChat={isGroupChat ?? false}
+                  activeRunId={activeRunId ?? null}
+                  isStreaming={isStreamingTurn ?? false}
                 />
               </div>
             )}

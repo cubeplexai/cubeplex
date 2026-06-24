@@ -100,6 +100,11 @@ export interface AgentEvent {
   agent_id: string | null
   agent_name: string | null
   event_id?: string
+  // Set by the backend ``run_manager._publish_event`` on every payload it
+  // emits. The send/streamMessages path uses the first event that carries
+  // it to populate ``currentRunId`` on the direct-SSE branch (the JSON
+  // branch learns it from the POST response body instead).
+  run_id?: string | null
 }
 
 export interface TextDeltaEvent extends AgentEvent {

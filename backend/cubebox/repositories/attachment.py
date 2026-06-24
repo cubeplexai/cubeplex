@@ -2,10 +2,15 @@
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from cubebox.models import Attachment
 from cubebox.repositories.base import ScopedRepository
+
+# Max ancestor hops walked by ``get_with_fork_fallback``. A request that has
+# climbed past this many forks-of-forks is either pathological or someone
+# probing for an exfiltration loop — short-circuit with a 404.
+_FORK_WALK_MAX_HOPS = 8
 
 
 class AttachmentRepository(ScopedRepository[Attachment]):
@@ -25,6 +30,51 @@ class AttachmentRepository(ScopedRepository[Attachment]):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_with_fork_fallback(
+        self, *, conversation_id: str, attachment_id: str
+    ) -> Attachment | None:
+        """Resolve an attachment, walking up the fork chain on miss.
+
+        A forked conversation's cloned cubepi messages still reference the
+        SOURCE conversation's attachment ids (the messages were copied
+        verbatim, and Attachment rows are PK'd by id under a single
+        conversation_id — no per-fork clone, no row aliasing). Without
+        this fallback every image / file in a fork would 404 on first
+        render.
+
+        Walks ``cubepi_threads.parent_thread_id`` up to ``_FORK_WALK_MAX_HOPS``
+        ancestors, retrying the per-conversation lookup at each step. The
+        workspace scope from ``_scoped_select`` is preserved at every hop,
+        so this can never reach an attachment outside the caller's
+        workspace.
+        """
+        row = await self.get_in_conversation(
+            conversation_id=conversation_id, attachment_id=attachment_id
+        )
+        if row is not None:
+            return row
+        # Climb the fork chain.  Direct SQL against the cubepi-owned table
+        # (no SQLModel for it on the cubebox side) — kept to a single
+        # column SELECT so the coupling is minimal and obvious.
+        current = conversation_id
+        seen: set[str] = {current}
+        for _ in range(_FORK_WALK_MAX_HOPS):
+            result = await self.session.execute(
+                text("SELECT parent_thread_id FROM cubepi_threads WHERE thread_id = :tid"),
+                {"tid": current},
+            )
+            parent = result.scalar_one_or_none()
+            if not parent or parent in seen:
+                return None
+            seen.add(parent)
+            current = parent
+            row = await self.get_in_conversation(
+                conversation_id=current, attachment_id=attachment_id
+            )
+            if row is not None:
+                return row
+        return None
 
     async def list_by_conversation(
         self, *, conversation_id: str, status: str | None = None

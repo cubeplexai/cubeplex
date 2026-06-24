@@ -15,6 +15,13 @@ interface MessageActionsProps {
   workspaceId: string | null
   runId: string | null | undefined
   isGroupChat: boolean
+  // Active-run guard: when this message belongs to the run that is still
+  // streaming (or paused on HITL), the backend's ``cp.fork`` will reject
+  // with ``run_not_completed`` because the run row's ``completion_seq``
+  // is still NULL. Disable the button up-front instead of round-tripping
+  // for a 400 toast.
+  activeRunId: string | null
+  isStreaming: boolean
 }
 
 /**
@@ -34,6 +41,8 @@ export function MessageActions({
   workspaceId,
   runId,
   isGroupChat,
+  activeRunId,
+  isStreaming,
 }: MessageActionsProps) {
   const t = useTranslations('chat')
   const router = useRouter()
@@ -46,11 +55,15 @@ export function MessageActions({
   const reactId = useId()
   const reasonId = `fork-disabled-${reactId}`
 
+  const runStillRunning =
+    runId != null && activeRunId === runId && isStreaming
   const disabledReason = !runId
     ? t('forkDisabled.noRun')
     : isGroupChat
       ? t('forkDisabled.groupChat')
-      : null
+      : runStillRunning
+        ? t('forkDisabled.runStreaming')
+        : null
 
   const handleFork = async () => {
     if (!runId || !workspaceId || busy) return
