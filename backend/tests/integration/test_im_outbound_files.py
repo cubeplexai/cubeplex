@@ -181,6 +181,32 @@ async def test_total_failure_releases_claim_so_replay_retries(
     assert claim_key in redis.store  # success keeps the claim
 
 
+async def test_exception_during_delivery_releases_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If delivery RAISES (not just returns False), the claim is still released
+    so a replay retries. Guards the round-2 regression where an exception in
+    share-link minting leaked the NX claim.
+    """
+
+    async def _boom(_c: str, _a: dict[str, Any]) -> Path:
+        raise RuntimeError("objectstore exploded")
+
+    monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _boom)
+    conn = _FakeConnector(send_ok=True)
+    redis = _FakeRedis()
+    disp = _dispatcher(conn, redis)
+    await disp.handle(_artifact("document"))
+
+    await disp.deliver_terminal_files()  # raises internally, caught
+    assert "t:im:artifact_sent:run-1:art-1" not in redis.store  # released
+
+    # Replay with a working download → retries and delivers.
+    monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _make_temp)
+    await disp.deliver_terminal_files()
+    assert len(conn.send_file_calls) == 1
+
+
 async def test_website_artifact_stays_share_link_never_native(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
