@@ -204,11 +204,24 @@ export async function* streamMessages(
     if (contentType.includes('text/event-stream')) {
       const reader = res.body?.getReader()
       if (!reader) return
+      // SSE branch: no JSON {run_id} envelope to pluck. Every payload
+      // ``run_manager._publish_event`` produces already carries ``run_id``
+      // at the top level, so fire ``onRunId`` on the first event that has
+      // one. Skipping the JSON-branch handshake here would leave
+      // ``currentRunId`` null for the whole turn — the fresh assistant +
+      // tool messages would stamp ``run_id: null`` and Fork would stay
+      // disabled on the just-finished turn until reload.
+      let runIdReported = false
       try {
         for await (const line of readLines(reader)) {
           if (line.startsWith('data: ')) {
             try {
-              yield JSON.parse(line.slice(6)) as AgentEvent
+              const event = JSON.parse(line.slice(6)) as AgentEvent
+              if (!runIdReported && event.run_id) {
+                options?.onRunId?.(event.run_id)
+                runIdReported = true
+              }
+              yield event
             } catch {
               // skip malformed lines
             }

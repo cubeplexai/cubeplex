@@ -6,6 +6,8 @@ interface UserMessageProps {
   workspaceId: string | null
   runId: string | null | undefined
   isGroupChat: boolean
+  activeRunId: string | null
+  isStreaming: boolean
 }
 
 export function UserMessage({
@@ -14,6 +16,8 @@ export function UserMessage({
   workspaceId,
   runId,
   isGroupChat,
+  activeRunId,
+  isStreaming,
 }: UserMessageProps) {
   return (
     <div data-role="user" className="group relative flex justify-end">
@@ -29,6 +33,8 @@ export function UserMessage({
           workspaceId={workspaceId}
           runId={runId}
           isGroupChat={isGroupChat}
+          activeRunId={activeRunId}
+          isStreaming={isStreaming}
         />
       </div>
     </div>

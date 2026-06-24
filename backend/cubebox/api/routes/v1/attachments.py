@@ -126,7 +126,7 @@ async def get_attachment(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
     )
-    row = await repo.get_in_conversation(
+    row = await repo.get_with_fork_fallback(
         conversation_id=conversation_id,
         attachment_id=attachment_id,
     )
@@ -156,7 +156,7 @@ async def download_attachment(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
     )
-    row = await repo.get_in_conversation(
+    row = await repo.get_with_fork_fallback(
         conversation_id=conversation_id,
         attachment_id=attachment_id,
     )
@@ -191,7 +191,7 @@ async def thumbnail_attachment(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
     )
-    row = await repo.get_in_conversation(
+    row = await repo.get_with_fork_fallback(
         conversation_id=conversation_id,
         attachment_id=attachment_id,
     )
