@@ -11,6 +11,7 @@ export type FieldDef = {
   showIf?: (form: FormState) => boolean
   options?: { value: string; labelKey: string }[]
   placeholder?: string
+  default?: string
 }
 
 export type PrereqItem = {

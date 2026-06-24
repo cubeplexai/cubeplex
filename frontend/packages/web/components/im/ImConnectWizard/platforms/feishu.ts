@@ -98,6 +98,7 @@ export const feishuDescriptor: PlatformDescriptor = {
       labelKey: 'im.wizard.feishu.field.deliveryMode',
       type: 'select',
       required: true,
+      default: 'long_connection',
       options: [
         {
           value: 'long_connection',

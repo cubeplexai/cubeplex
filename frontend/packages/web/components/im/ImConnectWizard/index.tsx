@@ -14,6 +14,14 @@ import { useConnectMutation } from './useConnectMutation'
 import { ALL_PLATFORMS } from './platforms'
 import type { FormState, PlatformDescriptor } from './platforms/types'
 
+function defaultsFor(p: PlatformDescriptor): FormState {
+  const out: FormState = {}
+  for (const f of p.credentialFields) {
+    if (f.default !== undefined) out[f.key] = f.default
+  }
+  return out
+}
+
 type DynamicT = (key: string, values?: Record<string, string | number>) => string
 
 interface Props {
@@ -34,13 +42,16 @@ export function ImConnectWizard({
 }: Props): React.ReactElement {
   const t = useTranslations() as unknown as DynamicT
   const client = useMemo(() => createApiClient(''), [])
-  const [platform, setPlatform] = useState<PlatformDescriptor | null>(() => {
+  const initialPlatform = useMemo(() => {
     if (!initialPlatformId) return null
     const p = ALL_PLATFORMS.find((x) => x.id === initialPlatformId)
     return p && p.live ? p : null
-  })
+  }, [initialPlatformId])
+  const [platform, setPlatform] = useState<PlatformDescriptor | null>(initialPlatform)
   const [stepIdx, setStepIdx] = useState(0)
-  const [form, setForm] = useState<FormState>({})
+  const [form, setForm] = useState<FormState>(() =>
+    initialPlatform ? defaultsFor(initialPlatform) : {},
+  )
   const mut = useConnectMutation(client, wsId)
 
   function handleClose(): void {
@@ -81,6 +92,7 @@ export function ImConnectWizard({
             onPick={(p) => {
               setPlatform(p)
               setStepIdx(0)
+              setForm(defaultsFor(p))
             }}
           />
         ) : (
