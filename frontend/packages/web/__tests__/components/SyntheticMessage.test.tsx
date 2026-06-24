@@ -7,6 +7,11 @@ class ResizeObserverStub {
   disconnect(): void {}
 }
 vi.stubGlobal('ResizeObserver', ResizeObserverStub)
+
+// MessageActions (rendered inside MessageList) calls useRouter for /fork.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => undefined }),
+}))
 import { NextIntlClientProvider } from 'next-intl'
 import en from '../../messages/en.json'
 import { MessageList } from '@/components/chat/MessageList'

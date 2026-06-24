@@ -1,9 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import en from '../../messages/en.json'
 import { AssistantMessage, HistoryAssistantMessage } from '@/components/chat/AssistantMessage'
 import type { AssistantMessage as AssistantMessageType } from '@cubebox/core'
+
+// MessageActions (rendered inside AssistantMessage) calls useRouter for /fork.
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => undefined }),
+}))
 
 const baseMessage = {
   id: 'msg-1',
