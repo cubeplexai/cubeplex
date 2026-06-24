@@ -25,6 +25,16 @@ from swebench_harness.patch_filter import clean_patch
 DEFAULT_DATASET = "princeton-nlp/SWE-bench_Verified"
 DEFAULT_SPLIT = "test"
 
+# A local materialised copy of the Verified dataset. swebench's scorer loads
+# the dataset by name; passing a .jsonl path makes it read this file instead
+# of hitting the HF Hub. The HF unauthenticated path is rate-limited and
+# intermittently returns an EMPTY dataset, which makes the scorer think every
+# instance_id is "not found in dataset" and abort. Materialise once with:
+#   python -c "from datasets import load_dataset; import json; \
+#     [print(json.dumps(dict(r))) for r in load_dataset('princeton-nlp/SWE-bench_Verified', split='test')]" \
+#     > runs/SWE-bench_Verified.jsonl
+_LOCAL_DATASET = Path(__file__).resolve().parents[1] / "runs" / "SWE-bench_Verified.jsonl"
+
 
 @dataclass(slots=True)
 class ScoreResult:
@@ -93,24 +103,47 @@ def score(
     cleaned = _clean_predictions_in_place(predictions)
     run_id = run_dir.name  # the scorer needs a unique id; use the run name
 
-    # We invoke the scorer from inside the run dir so its incidental output
-    # (the per-model summary JSON it drops into cwd) lands alongside our
-    # artifacts instead of polluting the harness root.
-    cmd = [
-        sys.executable, "-m", "swebench.harness.run_evaluation",
-        "--dataset_name", dataset_name,
-        "--split", split,
-        "--predictions_path", str(cleaned),
-        "--run_id", run_id,
-        "--max_workers", str(max_workers),
-        "--timeout", str(timeout),
-        "--cache_level", cache_level,
-        "--namespace", namespace,
-    ]
-    if instance_ids:
-        cmd += ["--instance_ids", *instance_ids]
+    # Prefer the local materialised dataset over the HF name, unless the caller
+    # explicitly overrode dataset_name. Avoids the HF-throttle-returns-empty
+    # failure mode (every instance_id "not found in dataset").
+    effective_dataset = dataset_name
+    if dataset_name == DEFAULT_DATASET and _LOCAL_DATASET.exists():
+        effective_dataset = str(_LOCAL_DATASET)
 
-    print(f"[score] $ {' '.join(cmd)}", flush=True)
+    # Invoke run_evaluation.main IN-PROCESS via _score_runner (subprocessed for
+    # isolation). The `python -m swebench.harness.run_evaluation` CLI path
+    # intermittently loads an empty dataset at line 521 and aborts with "Some
+    # instance IDs not found in dataset!" — calling main(**kwargs) directly
+    # with an explicit instance_ids list is reliable. Run from inside the run
+    # dir so the scorer's incidental per-model summary JSON lands with our
+    # artifacts.
+    kwargs = {
+        "dataset_name": effective_dataset,
+        "split": split,
+        "instance_ids": list(instance_ids) if instance_ids else None,
+        "predictions_path": str(cleaned),
+        "max_workers": max_workers,
+        "force_rebuild": False,
+        "cache_level": cache_level,
+        "clean": False,
+        "open_file_limit": 4096,
+        "run_id": run_id,
+        "timeout": timeout,
+        "namespace": namespace,
+        "rewrite_reports": False,
+        "modal": False,
+        "instance_image_tag": "latest",
+        "env_image_tag": "latest",
+        "report_dir": None,
+    }
+    kwargs_file = run_dir / ".score_kwargs.json"
+    kwargs_file.write_text(json.dumps(kwargs), encoding="utf-8")
+    runner = Path(__file__).resolve().parent / "_score_runner.py"
+    cmd = [sys.executable, str(runner), str(kwargs_file)]
+
+    print(f"[score] in-process run_evaluation: dataset={effective_dataset} "
+          f"n_ids={len(instance_ids) if instance_ids else 'all'} namespace={namespace}",
+          flush=True)
     proc = subprocess.run(cmd, cwd=str(run_dir))
     if proc.returncode != 0:
         print(f"[score] scorer exited {proc.returncode}", file=sys.stderr)
