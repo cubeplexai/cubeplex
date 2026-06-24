@@ -184,6 +184,15 @@ class IMRunQueueItem(CubeboxBase, OrgScopedMixin, table=True):
     # AskUser / SandboxConfirm card-action callback only carries open_id,
     # so we persist it explicitly to gate button clicks per sender.
     sender_open_id: str | None = Field(default=None, max_length=128, nullable=True)
+    # Inbound file attachments. ``attachment_refs`` is the raw platform handles
+    # written at ingest (pre-download); ``attachment_ids`` is the resolved
+    # ``atch`` ids written by the worker after download+upload. The latter is
+    # also the re-claim idempotency marker — present means "already resolved,
+    # reuse without re-uploading". See docs/dev/specs/2026-06-24-im-file-transfer-design.md.
+    attachment_refs: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    attachment_ids: list[str] | None = Field(default=None, sa_column=Column(JSON, nullable=True))
     status: str = Field(default="pending", max_length=16)
     claimed_at: datetime | None = Field(
         default=None,

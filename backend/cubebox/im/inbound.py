@@ -178,6 +178,7 @@ async def ingest_inbound_event(
             inbound_message_id=event.inbound_message_id,
             sender_im_user_id=event.sender_ref,
             sender_open_id=event.sender_open_id,
+            attachment_refs=[r.to_json() for r in event.attachments] or None,
         )
         session.add(item)
         try:

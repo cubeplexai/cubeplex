@@ -16,12 +16,41 @@ from cubebox.im.outbound import _FloodSignal
 from cubebox.im.types import (
     DM_SCOPE_KEY,
     BindingMode,
+    InboundAttachmentRef,
     InboundEvent,
     make_channel_scope,
     make_participant_scope,
     make_thread_participant_scope,
     make_thread_scope,
 )
+
+
+def _parse_discord_attachments(message: Any) -> list[InboundAttachmentRef]:
+    """Build attachment refs from a discord.py Message's ``attachments``.
+
+    ``handle`` is the CDN URL (pre-signed; the resolver fetches it with no auth).
+    Unlike Slack, Discord delivers the file on the same message as any mention,
+    so attachments are valid in every branch (DM / thread / channel).
+    """
+    refs: list[InboundAttachmentRef] = []
+    for a in getattr(message, "attachments", None) or []:
+        url = getattr(a, "url", None)
+        if not url:
+            continue
+        mime = getattr(a, "content_type", None)
+        size = getattr(a, "size", None)
+        kind = "image" if str(mime or "").startswith("image/") else "file"
+        refs.append(
+            InboundAttachmentRef(
+                kind=kind,
+                filename=str(getattr(a, "filename", None) or "file"),
+                mime=str(mime) if mime else None,
+                handle=str(url),
+                size_hint=int(size) if isinstance(size, int) else None,
+            )
+        )
+    return refs
+
 
 _USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
 _ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")
@@ -104,7 +133,8 @@ class DiscordConnector:
 
         text = str(message.content or "")
         text = self._clean_mentions(text, message)
-        if not text:
+        attachments = _parse_discord_attachments(message)
+        if not text and not attachments:
             return None
 
         message_id = str(message.id)
@@ -123,6 +153,7 @@ class DiscordConnector:
                 sender_ref=sender_ref,
                 sender_open_id=sender_ref,
                 text=text,
+                attachments=attachments,
             )
 
         if not self._mentions_bot(message):
@@ -146,6 +177,7 @@ class DiscordConnector:
                 sender_ref=sender_ref,
                 sender_open_id=sender_ref,
                 text=text,
+                attachments=attachments,
             )
 
         if binding_mode == "shared":
@@ -164,6 +196,7 @@ class DiscordConnector:
             sender_ref=sender_ref,
             sender_open_id=sender_ref,
             text=text,
+            attachments=attachments,
         )
 
     def _mentions_bot(self, message: Any) -> bool:

@@ -16,6 +16,7 @@ from cubebox.im.slack.format import markdown_to_slack_mrkdwn
 from cubebox.im.types import (
     DM_SCOPE_KEY,
     BindingMode,
+    InboundAttachmentRef,
     InboundEvent,
     make_channel_scope,
     make_participant_scope,
@@ -24,6 +25,32 @@ from cubebox.im.types import (
 )
 
 _SECTION_CHAR_LIMIT = 3000
+
+
+def _parse_slack_files(files: list[dict[str, Any]]) -> list[InboundAttachmentRef]:
+    """Build attachment refs from a Slack message's ``files[]`` array.
+
+    ``handle`` is the authenticated download URL; the resolver fetches it with
+    the bot token. Slack file inbound is DM-only (see parse_inbound).
+    """
+    refs: list[InboundAttachmentRef] = []
+    for f in files:
+        url = f.get("url_private_download") or f.get("url_private")
+        if not url:
+            continue
+        mime = f.get("mimetype")
+        size = f.get("size")
+        kind = "image" if str(mime or "").startswith("image/") else "file"
+        refs.append(
+            InboundAttachmentRef(
+                kind=kind,
+                filename=str(f.get("name") or "file"),
+                mime=str(mime) if mime else None,
+                handle=str(url),
+                size_hint=int(size) if isinstance(size, int) else None,
+            )
+        )
+    return refs
 
 
 class SlackRateLimitError(_FloodSignal):
@@ -65,8 +92,11 @@ class SlackConnector:
         Returns None for messages we should ignore: subtypes, bot messages,
         own messages.
         """
-        # Ignore edited/deleted/system messages
-        if raw.get("subtype"):
+        # Ignore edited/deleted/system messages — but admit ``file_share`` so a
+        # user can drop a file (with or without a caption). Other subtypes
+        # (bot_message, message_changed, channel_join, …) stay dropped.
+        subtype = raw.get("subtype")
+        if subtype and subtype != "file_share":
             return None
 
         user: str = raw.get("user", "")
@@ -87,7 +117,13 @@ class SlackConnector:
         if self._mention_re:
             text = self._mention_re.sub("", text).strip()
 
-        if not text:
+        # Slack file inbound is DM-only: a channel mention+file arrives as TWO
+        # events (app_mention text + a separate file_share message with no
+        # mention), so files are reliably attributable only in a DM. Parse
+        # files[] here; only the DM branch below consumes them.
+        attachments = _parse_slack_files(raw.get("files") or [])
+
+        if not text and not attachments:
             return None
 
         # Platform event ID: prefer client_msg_id, fall back to channel:ts
@@ -110,7 +146,14 @@ class SlackConnector:
                 sender_ref=sender_ref,
                 sender_open_id=sender_open_id,
                 text=text,
+                attachments=attachments,
             )
+
+        # Beyond DM, file ingestion is out of scope (channel files arrive as a
+        # separate, mention-less file_share event). The app_mention branches
+        # below carry text only.
+        if not text:
+            return None
 
         # Thread replies (thread_ts present and different from ts)
         if event_type == "app_mention" and thread_ts and thread_ts != ts:

@@ -50,6 +50,8 @@ class _RunStarter(Protocol):
 
 
 RunStartedCallback = Callable[[str, IMRunQueueItem], Awaitable[None]]
+# (queue item, uploader user id) -> (attachment ids, rejected-file notes)
+ResolveInboundAttachments = Callable[[IMRunQueueItem, str], Awaitable[tuple[list[str], list[str]]]]
 
 
 async def process_one_queue_item(
@@ -58,6 +60,7 @@ async def process_one_queue_item(
     run_manager: _RunStarter,
     on_run_started: RunStartedCallback | None,
     lease_seconds: int,
+    resolve_inbound_attachments: ResolveInboundAttachments | None = None,
 ) -> bool:
     """Claim and process at most one queue row. Returns True iff a row was processed."""
     async with session_maker() as session:
@@ -160,11 +163,33 @@ async def process_one_queue_item(
         }
         captured_item = item
 
+    # Resolve inbound file attachments (download → AttachmentService.upload)
+    # BEFORE start_run, since the ids are an argument to it. Runs at most once
+    # per inbound message: the resolved ids + the noted content are persisted
+    # onto the queue row, so a re-claim (e.g. the 'already has an active run'
+    # rewind below) reuses them instead of re-downloading / re-uploading.
+    attachment_ids: list[str] | None = captured_item.attachment_ids
+    if (
+        resolve_inbound_attachments is not None
+        and captured_item.attachment_refs
+        and not captured_item.attachment_ids
+    ):
+        ids, notes = await resolve_inbound_attachments(captured_item, captured["acting_user_id"])
+        attachment_ids = ids or None
+        if notes:
+            captured["content"] = "\n".join([*notes, captured["content"]])
+        async with session_maker() as session:
+            row = await session.get(IMRunQueueItem, captured_item.id)
+            if row is not None:
+                row.attachment_ids = ids
+                row.content = captured["content"]
+                await session.commit()
+
     try:
         run_id = await run_manager.start_run(
             conversation_id=captured["conversation_id"],
             content=captured["content"],
-            attachments=None,
+            attachments=attachment_ids,
             ctx=RunContext(
                 user_id=captured["acting_user_id"],
                 org_id=captured["org_id"],
@@ -258,12 +283,14 @@ class IMRunQueueWorker:
         session_maker: async_sessionmaker[Any],
         run_manager: _RunStarter,
         on_run_started: RunStartedCallback | None,
+        resolve_inbound_attachments: ResolveInboundAttachments | None = None,
         poll_interval: float = 1.0,
         lease_seconds: int = 300,
     ) -> None:
         self._session_maker = session_maker
         self._run_manager = run_manager
         self._on_run_started = on_run_started
+        self._resolve_inbound_attachments = resolve_inbound_attachments
         self._poll_interval = poll_interval
         self._lease_seconds = lease_seconds
         self._task: asyncio.Task[None] | None = None
@@ -277,6 +304,7 @@ class IMRunQueueWorker:
                     run_manager=self._run_manager,
                     on_run_started=self._on_run_started,
                     lease_seconds=self._lease_seconds,
+                    resolve_inbound_attachments=self._resolve_inbound_attachments,
                 )
             except Exception:
                 logger.opt(exception=True).warning("[IM worker] poll error")

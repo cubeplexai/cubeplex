@@ -10,7 +10,7 @@ See docs/dev/plans/2026-06-11-im-connectors-feishu.md
 ("Connector-neutral session boundary") for the per-platform mapping.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from cubebox.im.card_model import CardState
@@ -112,6 +112,36 @@ def make_thread_participant_scope(sender_ref: str, thread_id: str) -> str:
 
 
 @dataclass(slots=True)
+class InboundAttachmentRef:
+    """A platform file handle parsed inbound, resolved to bytes later by the worker.
+
+    Connector-opaque: the same platform that produced ``handle`` resolves it.
+    ``handle`` is the resource id ONLY (e.g. Feishu ``file_key``); the message id
+    needed by some download APIs is read from the queue row at resolve time, not
+    encoded here (encoding it would duplicate a field that can drift).
+    """
+
+    kind: str  # "image" | "file" | "audio" | "video" — observability + Feishu type
+    filename: str
+    mime: str | None
+    handle: str
+    size_hint: int | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_json(cls, d: dict[str, Any]) -> "InboundAttachmentRef":
+        return cls(
+            kind=str(d.get("kind") or "file"),
+            filename=str(d.get("filename") or "file"),
+            mime=d.get("mime"),
+            handle=str(d.get("handle") or ""),
+            size_hint=d.get("size_hint"),
+        )
+
+
+@dataclass(slots=True)
 class InboundEvent:
     """Normalized inbound IM message ready for binding / scope / identity resolution.
 
@@ -122,6 +152,8 @@ class InboundEvent:
     - ``inbound_message_id``: the originating user message id (for reactions).
     - ``sender_ref``: most stable sender id available (Feishu: union_id).
     - ``sender_open_id``: app-scoped id (mention gating only).
+    - ``attachments``: parsed file refs (empty for text-only / connectors that
+      don't parse files), resolved to attachment ids by the worker.
     """
 
     platform: str
@@ -135,6 +167,7 @@ class InboundEvent:
     sender_ref: str
     sender_open_id: str | None
     text: str
+    attachments: list[InboundAttachmentRef] = field(default_factory=list)
 
 
 @dataclass(slots=True)
