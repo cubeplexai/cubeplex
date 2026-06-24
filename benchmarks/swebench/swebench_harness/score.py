@@ -96,6 +96,10 @@ def score(
     image build pulls ubuntu via whatever mirror the Docker daemon is
     configured with, which is far more reliable here.
     """
+    # Resolve to absolute up front: the scorer subprocess runs with
+    # cwd=run_dir, so any relative path (predictions, kwargs file) would
+    # break against that working directory.
+    run_dir = run_dir.resolve()
     predictions = run_dir / "predictions.jsonl"
     if not predictions.exists():
         raise FileNotFoundError(f"missing predictions: {predictions}")
