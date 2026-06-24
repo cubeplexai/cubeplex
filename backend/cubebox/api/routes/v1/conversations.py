@@ -1624,7 +1624,7 @@ async def get_conversation_bootstrap(
     """
     import asyncio
 
-    from cubebox.services.history_window import load_history_window
+    from cubebox.services.history_window import find_latest_todos, load_history_window
     from cubebox.streams.hitl_resume import serialize_pending_hitl
 
     conv_repo = ConversationRepository(
@@ -1684,9 +1684,19 @@ async def get_conversation_bootstrap(
     pending_req, persisted_run_id = pending_pair
     pending_hitl: dict[str, Any] | None = None
     if pending_req is not None:
-        # Run_id resolution order: Redis active-run (already fetched above) first,
-        # DB-persisted fallback for long-pause TTL recovery.
-        run_id_for_pending = active_run.run_id if active_run is not None else persisted_run_id
+        # Run_id resolution order: Redis active-run (cheapest, hot path) first,
+        # DB-persisted fallback for long-pause TTL recovery. When the stage-A
+        # active_run was None (or got cleared by the staleness check above),
+        # a fresh fetch may pick up a brand-new run a worker just created —
+        # preserve the original semantics by re-checking Redis in that case.
+        run_id_for_pending: str | None
+        if active_run is not None:
+            run_id_for_pending = active_run.run_id
+        else:
+            fresh = await get_active_run(
+                rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
+            )
+            run_id_for_pending = fresh.run_id if fresh is not None else persisted_run_id
         if run_id_for_pending is None:
             # Legacy row (pre-cubepi-v3) — log + degrade to null so the user
             # can at least see other conversation state.
@@ -1725,11 +1735,15 @@ async def get_conversation_bootstrap(
         encryption_backend=raw_request.app.state.encryption_backend,
         last_user_message_ts=last_user_ts,
     )
+    # Todos can live below the bootstrap tail — walk the most recent assistant
+    # rows directly so the panel hydrates correctly on long conversations.
+    todos = await find_latest_todos(session, conversation_id)
 
     return {
         "messages": history.messages,
         "oldest_seq": history.oldest_seq,
         "has_more": history.has_more,
+        "todos": todos,
         "active_run": active_run_payload,
         "last_run_status": last_run_status,
         "last_run_error": last_run_error_payload,

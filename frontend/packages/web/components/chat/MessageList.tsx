@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import {
   useMessageStore,
@@ -213,6 +213,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
   const loadOlderMessages = useMessageStore((s) => s.loadOlderMessages)
+  const loadOlderUntilSeq = useMessageStore((s) => s.loadOlderUntilSeq)
   const hasMoreOlder = useMessageStore((s) => s.hasMoreByConv[conversationId] ?? false)
   const isLoadingOlder = useMessageStore((s) => s.loadingOlderByConv[conversationId] ?? false)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
@@ -481,11 +482,66 @@ export function MessageList({ conversationId }: MessageListProps) {
     }
   }, [isStreaming])
 
+  // Scroll-anchor snapshot taken right before a backscroll request. After the
+  // older slice renders we shift scrollTop by exactly (newHeight - oldHeight),
+  // so the message that was at the top of the viewport stays at the top
+  // instead of jumping when content is prepended.
+  const pendingAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
+
   const handleLoadEarlier = useCallback(() => {
+    const scroller = scrollRef.current
+    if (scroller) {
+      pendingAnchorRef.current = {
+        scrollHeight: scroller.scrollHeight,
+        scrollTop: scroller.scrollTop,
+      }
+      // Suppress the streaming-stick-to-bottom auto-scroll for this update —
+      // the user is reading old history, they don't want to be yanked back
+      // to the live tail.
+      stickToBottom.current = false
+    }
     const client = createApiClient('')
     if (workspaceId) client.setWorkspaceId(workspaceId)
     void loadOlderMessages(client, conversationId)
   }, [conversationId, loadOlderMessages, workspaceId])
+
+  useLayoutEffect(() => {
+    const anchor = pendingAnchorRef.current
+    const scroller = scrollRef.current
+    if (!anchor || !scroller) return
+    scroller.scrollTop = anchor.scrollTop + (scroller.scrollHeight - anchor.scrollHeight)
+    pendingAnchorRef.current = null
+  }, [messages?.length])
+
+  // Deep-link from conversation search: ``#msg-<seq>`` may target a message
+  // older than the bootstrap tail. After the initial load completes, walk
+  // backscroll until ``oldest_seq <= targetSeq``, then scroll the anchor
+  // into view. Ref-guarded so we only resolve the hash once per conv open.
+  const hashResolvedForRef = useRef<string | null>(null)
+  const messagesLoaded = (messages?.length ?? 0) > 0
+  useEffect(() => {
+    if (!messagesLoaded) return
+    if (typeof window === 'undefined') return
+    if (hashResolvedForRef.current === conversationId) return
+    hashResolvedForRef.current = conversationId
+    const m = /^#msg-(\d+)$/.exec(window.location.hash)
+    if (!m) return
+    const targetSeq = parseInt(m[1], 10)
+    if (Number.isNaN(targetSeq)) return
+    let cancelled = false
+    void (async () => {
+      const client = createApiClient('')
+      if (workspaceId) client.setWorkspaceId(workspaceId)
+      await loadOlderUntilSeq(client, conversationId, targetSeq)
+      if (cancelled) return
+      requestAnimationFrame(() => {
+        document.getElementById(`msg-${targetSeq}`)?.scrollIntoView({ block: 'start' })
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [conversationId, messagesLoaded, loadOlderUntilSeq, workspaceId])
 
   return (
     <ScrollArea ref={scrollRef} className="flex-1 p-4" onScroll={handleScroll}>
@@ -502,13 +558,15 @@ export function MessageList({ conversationId }: MessageListProps) {
             </button>
           </div>
         )}
-        {(messages ?? []).map((msg, idx) => (
+        {(messages ?? []).map((msg) => (
           // id="msg-{seq}" matches the conversation-search route's
-          // matched_message_seq (1-based load order over cubepi's
-          // data.messages — see backend/cubebox/search/worker.py).
-          // SearchResultRow links to #msg-N; the browser scrolls to this
-          // anchor when the user clicks a search hit.
-          <div key={msg.id} id={`msg-${idx + 1}`}>
+          // matched_message_seq (cubepi_messages.seq — see
+          // backend/cubebox/search/worker.py). SearchResultRow links to
+          // #msg-N; the browser scrolls to this anchor when the user
+          // clicks a search hit. ``seq`` is missing only on the optimistic
+          // user bubble before the run is claimed — those are never search
+          // targets, so we just skip the anchor.
+          <div key={msg.id} id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
             {msg.role === 'user' && msg.metadata?.synthetic !== true && (
               <>
                 {msg.metadata?.sender_display_name && msg.metadata?.sender_user_id && (

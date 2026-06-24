@@ -56,6 +56,12 @@ export interface MessageUsage {
 interface MessageBase {
   // Synthesized client-side for React keys; never sent to the backend.
   id: string
+  // Server-side cubepi_messages.seq for this row. Stable across reloads and
+  // tail/backscroll pagination — drives the ``#msg-<seq>`` DOM anchor that
+  // conversation-search deep-links into. Absent on in-memory messages that
+  // have not yet been persisted (e.g. the optimistic user bubble before the
+  // run claims it).
+  seq?: number
   timestamp?: number | null // epoch seconds (cubepi convention)
   // Identifies the agent run this message belongs to. User + assistant
   // messages produced within the same turn share a run_id. Null on

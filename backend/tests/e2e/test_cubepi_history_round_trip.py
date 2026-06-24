@@ -38,7 +38,8 @@ async def test_cubepi_history_round_trip(member_client) -> None:
     resp.raise_for_status()
     body = resp.json()
     messages = body["messages"]
-    assert body["total"] >= 2, f"expected ≥2 messages, got {body!r}"
+    assert len(messages) >= 2, f"expected ≥2 messages, got {body!r}"
+    assert body["has_more"] is False, f"two-message history shouldn't paginate: {body!r}"
     roles = [m.get("role") for m in messages]
     assert "user" in roles, f"no user message in history: {roles}"
     assert "assistant" in roles, f"no assistant message in history: {roles}"
