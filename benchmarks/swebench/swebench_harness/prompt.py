@@ -58,14 +58,25 @@ PROCEDURE — execute every step. Use the `execute` tool for shell commands.
      cd {workdir}
 
 5. Set up an isolated Python venv OUTSIDE the worktree so it never
-   ends up in `git diff`:
+   ends up in `git diff`. CRITICAL: the sandbox image bakes in
+   PYTHONPATH (pointing at /opt/venv + /workspace user site-packages)
+   and PIP_PREFIX (/workspace/.python-packages). If you don't clear
+   these, `pip install -e .` installs into the wrong prefix (the venv
+   stays empty) AND PYTHONPATH shadows the venv's packages with the
+   base image's — so `import <project>` finds the wrong version. Always
+   unset them for this venv:
+     unset PYTHONPATH PIP_PREFIX NPM_CONFIG_PREFIX
      VENV=/workspace/swebench/venvs/{instance_id}
      python3 -m venv "$VENV"
      . "$VENV/bin/activate"
-     pip install --quiet --upgrade pip
+     # setuptools+wheel: many older projects need distutils, which
+     # Python 3.12 removed; setuptools ships the shim.
+     pip install --quiet --upgrade pip setuptools wheel
      if [ -f setup.py ] || [ -f pyproject.toml ]; then
          pip install --quiet -e . || true
      fi
+   Whenever you open a NEW shell for this task, re-run the `unset` and
+   re-`activate` the venv first — otherwise the baked-in env returns.
 
 6. Run the targeted failing tests to confirm they currently fail.
 7. Read the source, write a fix, re-run the targeted tests until they pass.
