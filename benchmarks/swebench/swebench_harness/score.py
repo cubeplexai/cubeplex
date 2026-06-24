@@ -211,10 +211,16 @@ def _parse_report(report_path: Path, *, run_name: str) -> ScoreResult:
         v = data.get(key, [])
         return [str(x) for x in v] if isinstance(v, list) else []
 
-    submitted_count = int(
-        data.get("submitted_instances", 0) or len(as_list("submitted_ids"))
-    )
-    dataset_count = int(data.get("total_instances", 0)) or submitted_count
+    # "submitted_count" = instances actually EVALUATED this run (the
+    # denominator for resolve-rate). Use completed_instances, NOT
+    # submitted_instances: the latter counts every row in the predictions
+    # file (including empty-patch rows for instances we didn't score this
+    # time), which would understate the rate when scoring a subset.
+    completed = as_list("completed_ids") or as_list("completed")
+    submitted_count = int(data.get("completed_instances", 0)) or len(completed)
+    # dataset_count = full Verified size (500); total_instances is the
+    # scored subset when --instance_ids is passed, so prefer the known 500.
+    dataset_count = 500
 
     return ScoreResult(
         run_name=run_name,
@@ -224,7 +230,7 @@ def _parse_report(report_path: Path, *, run_name: str) -> ScoreResult:
         unresolved=as_list("unresolved_ids") or as_list("unresolved"),
         error=as_list("error_ids") or as_list("error"),
         no_generation=as_list("empty_patch_ids") or as_list("no_generation"),
-        completed=as_list("completed_ids") or as_list("completed"),
+        completed=completed,
         raw_report_path=report_path,
     )
 
