@@ -154,6 +154,12 @@ interface HistoryProps {
   // run_not_completed).
   activeRunId?: string | null
   isStreamingTurn?: boolean
+  // Whether to render the Fork action for this bubble. Set by MessageList
+  // for the *last* assistant message of each completed run, so fork anchors
+  // are run-granular (matches cubepi's ``cp.fork(after_run_id=...)`` which
+  // only accepts run-end checkpoints — intermediate tool-use bubbles in a
+  // multi-step turn would all collapse to the same fork point).
+  showForkAction?: boolean
   stream?: never
   isStreaming?: never
   statusPhase?: never
@@ -172,6 +178,7 @@ interface StreamingProps {
   isGroupChat?: boolean
   activeRunId?: string | null
   isStreamingTurn?: boolean
+  showForkAction?: never
   stream: AgentStream
   isStreaming: boolean
   statusPhase?: string | null
@@ -542,6 +549,7 @@ export function AssistantMessage({
   isGroupChat,
   activeRunId,
   isStreamingTurn,
+  showForkAction,
   pendingConfirmMap,
   onSandboxConfirm,
 }: AssistantMessageProps) {
@@ -652,7 +660,7 @@ export function AssistantMessage({
                 </div>
               </div>
             )}
-            {message && conversationId && (
+            {message && conversationId && showForkAction && (
               <div
                 className="opacity-0 transition-opacity group-hover:opacity-100
                   focus-within:opacity-100"

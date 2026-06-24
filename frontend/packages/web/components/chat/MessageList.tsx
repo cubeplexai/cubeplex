@@ -364,6 +364,21 @@ export function MessageList({ conversationId }: MessageListProps) {
   // skipping it briefly hid the Thinking + Q/A card. Always render history.
   const lastAssistantId: string | null = null
 
+  // Fork anchors: per cubepi semantics fork is run-granular (``cp.fork``
+  // takes ``after_run_id``, copies the whole run). A run may produce
+  // multiple assistant bubbles (thinking → tool_use → final text) all
+  // sharing one ``run_id`` — clicking fork on any of them would produce
+  // the same result. Collapse the action to the *last* assistant bubble
+  // of each run so the button placement matches the fork point 1:1.
+  const forkAnchorIds = useMemo(() => {
+    const anchors = new Map<string, string>()
+    for (const msg of messages ?? []) {
+      if (msg.role !== 'assistant' || !msg.run_id) continue
+      anchors.set(msg.run_id, msg.id)
+    }
+    return new Set(anchors.values())
+  }, [messages])
+
   // --- Auto-scroll: keep chat pinned to bottom during streaming ---
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -432,15 +447,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                     conversationId={conversationId}
                   />
                 )}
-                <UserMessage
-                  content={getTextContent(msg)}
-                  conversationId={conversationId}
-                  workspaceId={workspaceId}
-                  runId={msg.run_id}
-                  isGroupChat={isGroupChat}
-                  activeRunId={activeRunId}
-                  isStreaming={isStreaming}
-                />
+                <UserMessage content={getTextContent(msg)} />
               </>
             )}
             {msg.role === 'assistant' && msg.id !== lastAssistantId && (
@@ -453,6 +460,7 @@ export function MessageList({ conversationId }: MessageListProps) {
                 isGroupChat={isGroupChat}
                 activeRunId={activeRunId}
                 isStreamingTurn={isStreaming}
+                showForkAction={forkAnchorIds.has(msg.id)}
                 pendingConfirmMap={pendingConfirmMap}
                 onSandboxConfirm={handleSandboxConfirm}
               />
