@@ -274,6 +274,10 @@ def write_worktree_env(
         f"\n"
         f"# Backend: frontend URL for link generation (IM identity link etc.)\n"
         f"CUBEBOX_FRONTEND_BASE_URL=http://localhost:{fe}\n"
+        f"\n"
+        f"# Disable the egress exchange mTLS listener — worktrees share the\n"
+        f"# host network and the main backend already owns port 9443.\n"
+        f"CUBEBOX_EGRESS_EXCHANGE__LISTENER__ENABLED=false\n"
     )
     env_file_path(worktree_root).write_text(content)
 

@@ -85,6 +85,11 @@ class ExchangeListener:
         keyfile: str,
         ca_certs: str,
     ) -> None:
+        self._host = host
+        self._port = port
+        self._certfile = certfile
+        self._keyfile = keyfile
+        self._ca_certs = ca_certs
         config = uvicorn.Config(
             app,
             host=host,
@@ -100,9 +105,33 @@ class ExchangeListener:
         self._server = _NoSignalServer(config)
         self._task: asyncio.Task[None] | None = None
 
+    def _preflight(self) -> None:
+        """Fail fast before ``serve()`` if the listener obviously can't start."""
+        import socket
+        from pathlib import Path
+
+        for label, path in [
+            ("certfile", self._certfile),
+            ("keyfile", self._keyfile),
+            ("ca_certs", self._ca_certs),
+        ]:
+            if not Path(path).is_file():
+                raise RuntimeError(f"Egress exchange listener: {label} not found: {path}")
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind((self._host, self._port))
+        except OSError as exc:
+            raise RuntimeError(
+                f"Egress exchange listener: cannot bind {self._host}:{self._port}: {exc}"
+            ) from exc
+        finally:
+            sock.close()
+
     async def start(self) -> None:
+        self._preflight()
         self._task = asyncio.create_task(self._server.serve())
-        logger.info("Egress exchange mTLS listener started")
+        logger.info("Egress exchange mTLS listener started on port {}", self._port)
 
     async def stop(self) -> None:
         self._server.should_exit = True
