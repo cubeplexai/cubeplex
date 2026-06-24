@@ -475,6 +475,17 @@ async def update_bot_settings(
             detail="sandbox_mode is required when routing_mode is shared",
         )
     svc = _service(session, backend, ctx)
+    account = await svc.get(account_id=account_id, workspace_id=ctx.workspace_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    # Teams' connector only emits per-sender scopes, so shared routing would
+    # silently make one group conversation per sender. Reject it on the API
+    # too, not just in the UI.
+    if body.routing_mode == "shared" and account.platform == "teams":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="shared routing is not supported for this platform",
+        )
     updated = await svc.update_bot_settings(
         account_id=account_id, settings=body, workspace_id=ctx.workspace_id
     )
