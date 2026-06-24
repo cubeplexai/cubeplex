@@ -54,13 +54,30 @@ async def is_shared_mode_for_tailer(
     channel_id: str,
     conversation_id: str,
 ) -> bool:
-    """Whether the bot is in shared routing mode (account-level).
+    """Whether the tailer should treat this run as a shared/group conversation.
 
-    ``channel_id`` / ``conversation_id`` are no longer load-bearing now that
-    routing is uniform per bot; kept for caller compatibility.
+    Read it from the RESOLVED conversation's ``is_group_chat`` rather than the
+    account routing flag: ``resolve_im_conversation`` already encodes the real
+    decision there, including that a DM on a shared-routing bot is NOT shared.
+    Deriving it from account routing alone would make the tailer skip
+    ``maybe_register_awaiting_responder`` for such a DM, so the sender's own
+    HITL/ask-user card clicks would later be rejected. Falls back to the
+    account routing flag only if the conversation can't be loaded.
     """
-    del conversation_id
-    return (await lookup_binding_mode(session_maker, account_id, channel_id)) == "shared"
+    del channel_id  # superseded by the conversation's resolved is_group_chat
+    from sqlmodel import col, select
+
+    from cubebox.models.conversation import Conversation
+
+    async with session_maker() as session:
+        conv = (
+            await session.execute(
+                select(Conversation).where(col(Conversation.id) == conversation_id)
+            )
+        ).scalar_one_or_none()
+    if conv is not None:
+        return bool(conv.is_group_chat)
+    return (await lookup_binding_mode(session_maker, account_id, "")) == "shared"
 
 
 def make_participant_scope(sender_ref: str) -> str:

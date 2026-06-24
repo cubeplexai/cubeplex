@@ -31,6 +31,7 @@ from cubebox.im.conversation_resolver import (
     reset_im_conversation,
     resolve_im_conversation,
 )
+from cubebox.im.types import is_shared_mode_for_tailer
 from cubebox.models.conversation import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
 from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
@@ -523,6 +524,182 @@ async def test_topic_to_flat_detaches_existing_scope(
             await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
         ).scalar_one()
         assert link.topic_id is None  # anchor cleared → /new deletes, not rotates
+
+
+async def test_new_honors_flat_mode_after_switch(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """A topic→flat settings change followed immediately by /new (before any
+    normal message clears the link's stale anchor) must delete the link, not
+    rotate under the old Topic. reset reads the account's current mode."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="topic first",
+            origin="inbound",
+        )
+        await session.commit()
+    assert r1.topic_id is not None
+
+    # Persist flat mode to the DB row (reset loads settings from the row).
+    async with maker() as session:
+        row = await session.get(IMConnectorAccount, _ACCOUNT)
+        assert row is not None
+        row.config = store_bot_settings(
+            row.config, IMBotSettings(routing_mode="isolated", topic_mode="flat")
+        )
+        await session.commit()
+
+    async with maker() as session:
+        outcome = await reset_im_conversation(
+            session, account_id=_ACCOUNT, channel_id=_CHANNEL, scope_key="dm"
+        )
+        await session.commit()
+    assert outcome == "flat"
+    async with maker() as session:
+        link = (
+            await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
+        ).scalar_one_or_none()
+        assert link is None  # deleted → next message starts a fresh standalone conv
+
+
+async def test_archived_topic_is_replaced(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """If the linked Topic is archived (user removed it from the UI), the next
+    message mints a fresh, visible Topic instead of appending under the dead one."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="first",
+            origin="inbound",
+        )
+        await session.commit()
+    first_topic = r1.topic_id
+    assert first_topic is not None
+
+    async with maker() as session:
+        topic = await session.get(Topic, first_topic)
+        assert topic is not None
+        topic.is_archived = True
+        await session.commit()
+
+    async with maker() as session:
+        r2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="after archive",
+            origin="inbound",
+        )
+        await session.commit()
+
+    assert r2.topic_id is not None
+    assert r2.topic_id != first_topic
+    async with maker() as session:
+        link = (
+            await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
+        ).scalar_one()
+        assert link.topic_id == r2.topic_id
+        fresh = await session.get(Topic, r2.topic_id)
+        assert fresh is not None and fresh.is_archived is False
+
+
+async def test_isolated_topic_rejoins_missing_participant(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Topic visibility is gated on TopicParticipant. If the sender's row goes
+    missing on their own isolated topic, the next message re-adds it so their
+    replies stay visible."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="topic"))
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="first",
+            origin="inbound",
+        )
+        await session.commit()
+    topic_id = r1.topic_id
+    assert topic_id is not None
+
+    async with maker() as session:
+        await session.execute(
+            text("DELETE FROM topic_participants WHERE topic_id = :t AND user_id = :u"),
+            {"t": topic_id, "u": _USER},
+        )
+        await session.commit()
+
+    async with maker() as session:
+        await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="second",
+            origin="inbound",
+        )
+        await session.commit()
+
+    async with maker() as session:
+        tp = (
+            await session.execute(
+                select(TopicParticipant).where(
+                    TopicParticipant.topic_id == topic_id,
+                    TopicParticipant.user_id == _USER,
+                )
+            )
+        ).scalar_one_or_none()
+        assert tp is not None  # re-added → replies stay visible
+
+
+async def test_tailer_uses_conversation_not_account_routing(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """is_shared_mode_for_tailer must reflect the resolved conversation, so a
+    DM on a shared-routing bot is NOT treated as shared (otherwise the tailer
+    skips HITL responder registration and the sender's clicks get rejected)."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared", sandbox_mode="dedicated"))
+    async with maker() as session:
+        r = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="dm",
+            origin="inbound",
+        )
+        await session.commit()
+    assert r.is_group_chat is False
+    shared = await is_shared_mode_for_tailer(maker, _ACCOUNT, _CHANNEL, r.conversation_id)
+    assert shared is False
 
 
 async def test_new_rotates_conversation_under_same_topic(
