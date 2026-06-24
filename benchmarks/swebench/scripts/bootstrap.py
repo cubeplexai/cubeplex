@@ -54,6 +54,8 @@ def bootstrap(
     out_path: Path,
     open_egress: bool,
     key_label: str,
+    image: str | None = None,
+    egress_proxy: str | None = None,
 ) -> None:
     s = requests.Session()
     base = base_url.rstrip("/")
@@ -114,11 +116,11 @@ def bootstrap(
             _die(f"GET admin/sandbox-policy failed: {r.status_code} {r.text[:300]}")
         current = r.json()
         body = {
-            "default_image": current["default_image"],
+            "default_image": image or current["default_image"],
             "network_default_action": "allow",
             "network_rules": None,
             "command_rules": current.get("command_rules") or None,
-            "egress_proxy": current.get("egress_proxy"),
+            "egress_proxy": egress_proxy or current.get("egress_proxy"),
         }
         r = requests.put(
             f"{base}/api/v1/admin/sandbox-policy",
@@ -185,6 +187,17 @@ def main(argv: list[str] | None = None) -> int:
         default="swebench-harness",
         help="Label for the minted API key (shown in the cubebox settings UI).",
     )
+    parser.add_argument(
+        "--image",
+        default=None,
+        help="Override the SandboxPolicy default_image (e.g. the build variant "
+        "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260623-build).",
+    )
+    parser.add_argument(
+        "--egress-proxy",
+        default=None,
+        help="Set the SandboxPolicy egress_proxy (e.g. http://192.168.1.215:7892).",
+    )
     args = parser.parse_args(argv)
 
     base_url = args.base_url or _env_or_default()
@@ -201,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
         out_path=args.out,
         open_egress=not args.no_open_egress,
         key_label=args.key_label,
+        image=args.image,
+        egress_proxy=args.egress_proxy,
     )
     return 0
 

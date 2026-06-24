@@ -84,6 +84,20 @@ def main(argv: list[str] | None = None) -> int:
         "tell git/pip to use. Workaround for sandboxes whose direct outbound to "
         "GitHub is unstable. Defaults to $CUBEBOX_BENCH_EGRESS_PROXY.",
     )
+    parser.add_argument(
+        "--skip-done",
+        action="store_true",
+        help="Skip instances that already have a non-empty patch.diff under the "
+        "run dir. Makes a long run resumable: re-launch the same command after "
+        "a crash and only the unfinished instances run.",
+    )
+    parser.add_argument(
+        "--stop-on-rate-limit",
+        action="store_true",
+        help="Abort the whole sweep (exit 3) the first time an instance fails with "
+        "a 429 / quota / rate-limit error, instead of recording a MISS and "
+        "continuing. Use for shared LLM endpoints with hard quotas.",
+    )
     args = parser.parse_args(argv)
 
     if not args.instances and args.limit is None:
@@ -128,9 +142,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"[bench] resolved {len(instances)} instance(s) to run", flush=True)
 
+    _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "quota", "too many requests",
+                           "insufficient", "exhausted")
+
     summaries: list[dict[str, object]] = []
+    skipped = 0
     t0 = time.time()
     for i, inst in enumerate(instances, 1):
+        if args.skip_done:
+            existing = out_dir / "tasks" / inst.instance_id / "patch.diff"
+            if existing.exists() and existing.stat().st_size > 0:
+                skipped += 1
+                print(f"[bench] {i}/{len(instances)} {inst.instance_id} SKIP (already done)", flush=True)
+                continue
         print(
             f"[bench] {i}/{len(instances)} {inst.instance_id} ({inst.repo}@{inst.base_commit[:8]})",
             flush=True,
@@ -157,11 +181,22 @@ def main(argv: list[str] | None = None) -> int:
             f"usage={summary['usage']}",
             flush=True,
         )
+        if args.stop_on_rate_limit and result.error:
+            low = result.error.lower()
+            if any(m in low for m in _RATE_LIMIT_MARKERS):
+                print(
+                    f"[bench] STOP: rate-limit/quota error on {inst.instance_id}: "
+                    f"{result.error[:200]}",
+                    flush=True,
+                )
+                return 3
 
     elapsed = time.time() - t0
     aggregate = {
         "run_name": run_name,
         "total_instances": len(instances),
+        "ran": len(summaries),
+        "skipped_already_done": skipped,
         "with_nonempty_patch": sum(1 for s in summaries if int(s["patch_bytes"]) > 0),
         "with_error": sum(1 for s in summaries if s["error"]),
         "elapsed_seconds": round(elapsed, 2),
