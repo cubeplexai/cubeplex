@@ -759,6 +759,51 @@ Caveats for a publishable number (vs this internal sanity result):
   a real run needs an eval network that can reach test-fixture hosts, or
   must exclude/flag network-dependent instances honestly.
 
+## Mid-run signal — full-500, first 93 completed (2026-06-24)
+
+The full 500 run (max tier / glm-5.2, 6 sharded workspaces) is gated by
+the Volcengine agent plan's **rolling 5-hour usage quota**: each burst
+does ~90 instances over ~3.5 h, then the quota exhausts and must
+genuinely idle ~5 h to recover (resuming the moment the "reset" time
+passes only frees a sliver — confirmed empirically). So the full run
+spans multiple bursts across ~1.5 days, resumed via `--skip-done`.
+
+After the first ~2 bursts, 93 instances had non-empty patches. Scored
+with the official Docker harness (0 errors after retrying transient
+docker.io-mirror pull contention at lower worker count):
+
+**77 resolved / 93 evaluated = 82.8%**
+
+| Repo | resolved/total |
+|---|---|
+| **django** | **62/71 = 87%** |
+| astropy | 14/21 = 67% |
+| scikit-learn | 1/1 |
+
+Notes:
+- django — the bulk of this sample and a heavily-weighted leaderboard
+  repo — lands at 87%, squarely first-tier. astropy is the weak spot,
+  dragged down by "implement a new feature/transform" tasks (e.g. the
+  ITRS→Observed instance: a thorough 428-tool-call trajectory that built
+  a correct-looking new module + physics-level verification, yet didn't
+  match the gold test interface — a reminder that a sound *process*
+  doesn't guarantee a *resolved* verdict).
+- This is the EARLY slice each shard completed before the quota wall, so
+  it over-represents whatever each shard reached first. The remaining 407
+  include sympy (~75, often hard), sphinx, matplotlib, pylint, pytest,
+  xarray — so the final 500 number will likely settle somewhat below
+  82.8%. But 82.8% with django at 87% is a strong signal that the cubebox
+  harness extracts — and on this slice slightly exceeds — glm-5.2's
+  leaderboard tier (~74-79%).
+
+Scorer-infra hardening landed while producing this number, making
+scoring fully deterministic and network-independent: local materialised
+dataset (no HF throttle), in-process run_evaluation (avoids a CLI argv
+ambiguity — the real culprit of an earlier "instance IDs not found" red
+herring was zsh not word-splitting an unquoted `$VAR`), absolute paths,
+and a docker.io registry mirror with a low-concurrency retry for pull
+contention.
+
 ## References
 
 - Hello-world verification trace: this branch, `.test.env`-driven port
