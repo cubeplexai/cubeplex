@@ -20,6 +20,7 @@ from uuid_utils import uuid7
 from cubebox.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, FailoverEvent, StatusEvent
 from cubebox.errors import ErrorCode, classify_exception, english_fallback
 from cubebox.streams.run_events import (
+    RunMeta,
     append_run_event,
     clear_active_run,
     clear_conversation_last_error,
@@ -27,6 +28,8 @@ from cubebox.streams.run_events import (
     expire_run_data,
     get_active_run,
     get_run_meta,
+    is_stale_meta,
+    mark_run_stale,
     set_conversation_last_error,
     update_run_meta,
 )
@@ -901,25 +904,53 @@ class RunManager:
             _pending_req, _old_run_id = _db_pending
             await self._force_cancel_hitl(conversation_id, _old_run_id)
 
-        created_run = await create_run(
-            self._redis,
-            prefix=self._key_prefix,
-            run_id=run_id,
-            conversation_id=conversation_id,
-            status="running",
-            started_at=started_at,
-            user_message=content,
-            ttl_seconds=self._run_event_ttl_seconds,
-        )
+        async def _try_create_run() -> RunMeta | None:
+            return await create_run(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                status="running",
+                started_at=started_at,
+                user_message=content,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )
+
+        created_run = await _try_create_run()
         if created_run is None:
             existing = await get_active_run(
                 self._redis,
                 prefix=self._key_prefix,
                 conversation_id=conversation_id,
             )
-            if existing and existing.status in ("running", "paused_hitl"):
-                raise RuntimeError(f"Conversation {conversation_id} already has an active run")
-            raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
+            # An "active" run can be a phantom left behind by a crashed
+            # process: status="running" but nothing has appended an event for
+            # threshold_seconds (server killed mid-stream, OOM, etc). Mirror
+            # the user-facing /conversations route's behavior: detect it via
+            # is_stale_meta, finalize it, retry once. Without this the IM
+            # worker loops forever on "already has an active run". HITL stays
+            # untouched — paused_hitl is a real state, not a leak.
+            if existing and existing.status == "running":
+                from cubebox.config import config as _cfg
+
+                threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
+                if is_stale_meta(existing, threshold_seconds=threshold):
+                    await mark_run_stale(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=existing.run_id,
+                        conversation_id=conversation_id,
+                    )
+                    created_run = await _try_create_run()
+            if created_run is None:
+                existing = await get_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                )
+                if existing and existing.status in ("running", "paused_hitl"):
+                    raise RuntimeError(f"Conversation {conversation_id} already has an active run")
+                raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
 
         # Clear the per-conversation last-error pointer so subsequent reloads
         # after a successful new run don't keep showing the previous failure.

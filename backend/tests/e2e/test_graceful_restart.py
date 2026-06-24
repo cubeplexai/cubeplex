@@ -419,6 +419,88 @@ async def test_update_run_meta_status_cas_preserves_stale(redis_client: Redis) -
 
 
 @pytest.mark.asyncio
+async def test_create_run_succeeds_after_stale_recovery(redis_client: Redis) -> None:
+    """Stranded-run scenario: a crashed process left status=running in redis.
+
+    The next caller (e.g. IM worker) must be able to mark the stranded run
+    stale and start a fresh run for the same conversation. Without the
+    staleness sweep inside RunManager.start_run this loops forever on
+    "already has an active run".
+    """
+    import uuid
+    from datetime import UTC, datetime, timedelta
+
+    from cubebox.streams.run_events import (
+        create_run,
+        get_active_run,
+        get_run_meta,
+    )
+
+    # Unique prefix per invocation so we don't trip on residual state from
+    # an earlier failed run (redis_client doesn't FLUSHDB between tests).
+    prefix = f"test_stale_recovery_{uuid.uuid4().hex[:8]}"
+    conv_id = "c-stale-recover"
+    stranded_run_id = "r-stranded"
+    fresh_run_id = "r-fresh"
+    long_ago = (datetime.now(UTC) - timedelta(seconds=600)).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
+
+    # 1. Simulate a process that started a run and crashed before any event:
+    #    status=running, last_event_at=None, started_at=10min ago.
+    await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=stranded_run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=long_ago,
+        ttl_seconds=3600,
+    )
+
+    # 2. The next caller's create_run is rejected because the active-run key
+    #    still points at the stranded run.
+    blocked = await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=fresh_run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=now_iso,
+        ttl_seconds=3600,
+    )
+    assert blocked is None, "stranded active run should block a fresh create_run"
+
+    # 3. The caller checks staleness — well past threshold — and finalizes it.
+    existing = await get_active_run(redis_client, prefix=prefix, conversation_id=conv_id)
+    assert existing is not None and existing.status == "running"
+    assert is_stale_meta(existing, threshold_seconds=120)
+    await mark_run_stale(
+        redis_client, prefix=prefix, run_id=stranded_run_id, conversation_id=conv_id
+    )
+
+    # 4. After mark_run_stale, the active-run key is cleared and a retry of
+    #    create_run for the same conversation succeeds.
+    retry = await create_run(
+        redis_client,
+        prefix=prefix,
+        run_id=fresh_run_id,
+        conversation_id=conv_id,
+        status="running",
+        started_at=now_iso,
+        ttl_seconds=3600,
+    )
+    assert retry is not None, "create_run should succeed once the stranded run is finalized"
+    assert retry.run_id == fresh_run_id
+
+    # 5. The stranded run row is preserved as stale (for audit/UI), while the
+    #    active-run pointer now references the new run.
+    stranded_meta = await get_run_meta(redis_client, prefix=prefix, run_id=stranded_run_id)
+    assert stranded_meta is not None and stranded_meta.status == "stale"
+    active = await get_active_run(redis_client, prefix=prefix, conversation_id=conv_id)
+    assert active is not None and active.run_id == fresh_run_id
+
+
+@pytest.mark.asyncio
 async def test_update_run_meta_status_cas_allows_running_transition(
     redis_client: Redis,
 ) -> None:
