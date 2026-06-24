@@ -212,6 +212,9 @@ export function MessageList({ conversationId }: MessageListProps) {
     contextTokens,
   } = useMessages(conversationId)
   const loadMessages = useMessageStore((s) => s.loadMessages)
+  const loadOlderMessages = useMessageStore((s) => s.loadOlderMessages)
+  const hasMoreOlder = useMessageStore((s) => s.hasMoreByConv[conversationId] ?? false)
+  const isLoadingOlder = useMessageStore((s) => s.loadingOlderByConv[conversationId] ?? false)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
@@ -478,9 +481,27 @@ export function MessageList({ conversationId }: MessageListProps) {
     }
   }, [isStreaming])
 
+  const handleLoadEarlier = useCallback(() => {
+    const client = createApiClient('')
+    if (workspaceId) client.setWorkspaceId(workspaceId)
+    void loadOlderMessages(client, conversationId)
+  }, [conversationId, loadOlderMessages, workspaceId])
+
   return (
     <ScrollArea ref={scrollRef} className="flex-1 p-4" onScroll={handleScroll}>
       <div ref={contentRef} className="space-y-4 max-w-2xl mx-auto px-4 md:px-0">
+        {hasMoreOlder && (
+          <div className="flex justify-center py-2">
+            <button
+              type="button"
+              onClick={handleLoadEarlier}
+              disabled={isLoadingOlder}
+              className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-60 transition-colors px-3 py-1 rounded-md border border-border bg-background/60"
+            >
+              {isLoadingOlder ? t('loadingEarlier') : t('loadEarlier')}
+            </button>
+          </div>
+        )}
         {(messages ?? []).map((msg, idx) => (
           // id="msg-{seq}" matches the conversation-search route's
           // matched_message_seq (1-based load order over cubepi's
