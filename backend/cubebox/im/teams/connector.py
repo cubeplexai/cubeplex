@@ -233,6 +233,12 @@ class TeamsConnector:
     # RejectionNotifier protocol
     # ------------------------------------------------------------------
 
+    async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
+        """Teams native file send needs Graph/SharePoint drive upload (out of
+        scope); the artifact dispatcher falls back to a share-link."""
+        del local_path, filename, mime
+        return False
+
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         if self._app is None:
             return None

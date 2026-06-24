@@ -267,6 +267,30 @@ class SlackConnector:
             logger.opt(exception=True).warning("[Slack] send_message_with_blocks failed")
             return None
 
+    async def upload_image(self, local_path: str) -> str | None:
+        """Slack has no inline-image key; image artifacts fall back to share-link."""
+        del local_path
+        return None
+
+    async def send_file(self, *, local_path: str, filename: str, mime: str | None) -> bool:
+        """Upload + send a native file to the bound channel via files_upload_v2."""
+        del mime  # Slack infers type from the filename/bytes.
+        if self._client is None or not self._channel_id:
+            return False
+        try:
+            kwargs: dict[str, Any] = {
+                "channel": self._channel_id,
+                "file": local_path,
+                "filename": filename,
+            }
+            if self._thread_ts:
+                kwargs["thread_ts"] = self._thread_ts
+            await self._client.files_upload_v2(**kwargs)
+            return True
+        except Exception:
+            logger.opt(exception=True).warning("[Slack] send_file failed")
+            return False
+
     async def add_reaction(self, message_ts: str, emoji: str) -> bool:
         """Add an emoji reaction to a message."""
         if self._client is None or not self._channel_id:

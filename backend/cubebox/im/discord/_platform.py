@@ -62,6 +62,26 @@ class DiscordPlatform:
         )
         op_dispatcher = DiscordOpDispatcher(connector=dc, state=state)
 
+        from cubebox.im.artifacts import IMArtifactDispatcher
+
+        cfg_obj = kwargs.get("config")
+        public_base = str(cfg_obj.get("api.public_url", "") or "") if cfg_obj is not None else ""
+        artifact_disp = IMArtifactDispatcher(
+            connector=dc,
+            redis=app.state.redis,
+            redis_key_prefix=app.state.redis_key_prefix,
+            public_base_url=public_base,
+            org_id=account.org_id,
+            workspace_id=account.workspace_id,
+            conversation_id=queue_item.conversation_id,
+            card_state=state.card_state,
+            run_id=run_id,
+            platform="discord",
+            chat_id=queue_item.channel_id,
+            reply_to_id=queue_item.reply_to_id,
+            supports_inline_image=False,
+        )
+
         shared_mode = False
         _sm = kwargs.get("session_maker")
         if _sm is not None:
@@ -81,6 +101,7 @@ class DiscordPlatform:
             connector=dc,
             state=state,
             dispatcher=op_dispatcher,
+            artifact_dispatcher=artifact_disp,
             responder_open_id=queue_item.sender_open_id,
             shared_mode=shared_mode,
         )

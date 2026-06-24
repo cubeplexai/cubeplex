@@ -579,6 +579,16 @@ class OutboundRunTailer:
                         # failed run indistinguishable from a healthy one.
                         if delivered and self._state.card_state.error is None:
                             succeeded = True
+                        # Deliver file-kind artifacts as native messages AFTER
+                        # the card is finalized + succeeded is marked, so a slow
+                        # upload can't strand teardown. Runs on done OR error.
+                        if self._artifact_dispatcher is not None:
+                            try:
+                                await self._artifact_dispatcher.deliver_terminal_files()
+                            except Exception:
+                                logger.opt(exception=True).warning(
+                                    "[outbound] deliver_terminal_files raised"
+                                )
                 if done:
                     return
         finally:

@@ -77,6 +77,11 @@ class FeishuPlatform:
             workspace_id=account.workspace_id,
             conversation_id=queue_item.conversation_id,
             card_state=state.card_state,
+            run_id=run_id,
+            platform="feishu",
+            chat_id=queue_item.channel_id,
+            reply_to_id=queue_item.reply_to_id,
+            supports_inline_image=True,
         )
         cardkit = _build_cardkit_client(client, secrets)
         op_dispatcher = FeishuOpDispatcher(connector=connector, state=state, cardkit=cardkit)
