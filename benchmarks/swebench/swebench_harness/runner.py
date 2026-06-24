@@ -138,6 +138,18 @@ def run_instance(
                               "cache_read_tokens", "cache_write_tokens"):
                         if k in data:
                             usage[k] = usage.get(k, 0) + int(data[k])
+                elif etype == "model_failover":
+                    # The LLM-side rate-limit/quota signal lives HERE, not in an
+                    # `error` event: cubebox emits model_failover as each model
+                    # in the preset chain is tried. When the LAST one fails
+                    # (next_ref is null) with a 429, the run is dead — surface
+                    # that as the error so --stop-on-rate-limit can catch it,
+                    # instead of falling through to a confusing patch-download
+                    # 500 (no sandbox was ever created).
+                    data = event.get("data") or {}
+                    reason = str(data.get("reason") or "")
+                    if data.get("next_ref") is None and reason:
+                        error = f"model_failover_exhausted: {reason[:400]}"
                 elif etype == "done":
                     data = event.get("data") or {}
                     session = (data.get("usage") or {}).get("session") or {}
@@ -149,16 +161,20 @@ def run_instance(
                     error = json.dumps(event.get("data") or {})[:500]
                     break
 
-        patch_path = f"/workspace/swebench/runs/{instance.instance_id}/patch.diff"
-        try:
-            patch_bytes = client.download_file(
-                path=patch_path, conversation_id=conversation_id
-            )
-        except CubeboxAPIError as e:
-            if e.status == 404:
-                error = error or f"patch.diff missing (download 404): {e.body[:200]}"
-            else:
-                raise
+        # If the agent produced no tool calls AND we already have an error
+        # (e.g. failover-exhausted), there is no sandbox/patch to fetch — the
+        # download would 500. Skip it.
+        if not (error and tool_call_count == 0):
+            patch_path = f"/workspace/swebench/runs/{instance.instance_id}/patch.diff"
+            try:
+                patch_bytes = client.download_file(
+                    path=patch_path, conversation_id=conversation_id
+                )
+            except CubeboxAPIError as e:
+                # 404 (no file) and 500 (no sandbox/internal) both mean "no
+                # patch", not a fatal harness error — record and move on,
+                # preserving any earlier (e.g. rate-limit) error.
+                error = error or f"patch.diff unavailable (download {e.status}): {e.body[:160]}"
 
     except Exception as e:  # noqa: BLE001 — Phase 1 wants soft failures
         error = error or f"{type(e).__name__}: {e}"

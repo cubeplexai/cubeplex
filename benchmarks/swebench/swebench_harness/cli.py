@@ -150,8 +150,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"[bench] resolved {len(instances)} instance(s) to run", flush=True)
 
-    _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "quota", "too many requests",
-                           "insufficient", "exhausted")
+    _RATE_LIMIT_MARKERS = ("429", "rate limit", "rate_limit", "ratelimit", "quota",
+                           "too many requests", "exhausted", "accountquota",
+                           "accountratelimit", "model_failover_exhausted")
 
     summaries: list[dict[str, object]] = []
     skipped = 0
