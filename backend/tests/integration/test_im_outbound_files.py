@@ -32,10 +32,14 @@ class _FakeRedis:
         self.store[key] = value
         return True
 
+    async def delete(self, key: str) -> int:
+        return 1 if self.store.pop(key, None) is not None else 0
+
 
 class _FakeConnector:
-    def __init__(self, *, send_ok: bool = True) -> None:
+    def __init__(self, *, send_ok: bool = True, chat_ok: bool = True) -> None:
         self.send_ok = send_ok
+        self.chat_ok = chat_ok
         self.send_file_calls: list[dict[str, Any]] = []
         self.chat_calls: list[str] = []
 
@@ -48,7 +52,7 @@ class _FakeConnector:
 
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         self.chat_calls.append(text)
-        return "msg-1"
+        return "msg-1" if self.chat_ok else None
 
 
 async def _make_temp(_conv: str, _artifact: dict[str, Any], *, size: int = 100) -> Path:
@@ -136,8 +140,10 @@ async def test_oversize_file_falls_back_to_share_link(monkeypatch: pytest.Monkey
 
     await disp.deliver_terminal_files()
     assert len(conn.send_file_calls) == 0
+    # Link reaches the user via a standalone message (card is already finalized,
+    # so the dispatcher does NOT mutate the card's share_url).
     assert len(conn.chat_calls) == 1
-    assert disp.card_state.artifacts[0].share_url is not None
+    assert "/api/v1/public/artifacts/share/" in conn.chat_calls[0]
 
 
 async def test_failed_send_falls_back_to_share_link(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,6 +155,30 @@ async def test_failed_send_falls_back_to_share_link(monkeypatch: pytest.MonkeyPa
     await disp.deliver_terminal_files()
     assert len(conn.send_file_calls) == 1
     assert len(conn.chat_calls) == 1  # fell back
+
+
+async def test_total_failure_releases_claim_so_replay_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Native send AND fallback both fail → claim released → a later replay
+    retries instead of the burned claim silently losing the artifact forever.
+    """
+    monkeypatch.setattr(artifacts_mod, "download_artifact_to_tempfile", _make_temp)
+    conn = _FakeConnector(send_ok=False, chat_ok=False)  # both delivery paths fail
+    redis = _FakeRedis()
+    disp = _dispatcher(conn, redis)
+    await disp.handle(_artifact("document"))
+
+    claim_key = "t:im:artifact_sent:run-1:art-1"
+    await disp.deliver_terminal_files()
+    assert len(conn.send_file_calls) == 1  # attempted once, failed
+    assert claim_key not in redis.store  # claim released for retry
+
+    # Replay: now delivery succeeds; the released claim lets it retry.
+    conn.send_ok = True
+    await disp.deliver_terminal_files()
+    assert len(conn.send_file_calls) == 2  # retried, not silently skipped
+    assert claim_key in redis.store  # success keeps the claim
 
 
 async def test_website_artifact_stays_share_link_never_native(

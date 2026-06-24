@@ -169,10 +169,14 @@ async def process_one_queue_item(
     # onto the queue row, so a re-claim (e.g. the 'already has an active run'
     # rewind below) reuses them instead of re-downloading / re-uploading.
     attachment_ids: list[str] | None = captured_item.attachment_ids
+    # Resolve only when not yet resolved. Test ``is None`` (not falsiness): an
+    # all-rejected message persists ``attachment_ids = []``, and ``not []`` is
+    # True, which would otherwise re-download + re-prepend the rejection notes
+    # on every re-claim.
     if (
         resolve_inbound_attachments is not None
         and captured_item.attachment_refs
-        and not captured_item.attachment_ids
+        and captured_item.attachment_ids is None
     ):
         ids, notes = await resolve_inbound_attachments(captured_item, captured["acting_user_id"])
         attachment_ids = ids or None

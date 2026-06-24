@@ -247,3 +247,59 @@ async def test_reclaim_reuses_persisted_ids_without_duplicate_upload(
     assert download_calls["n"] == 1  # NOT re-downloaded
     assert rm.calls[0]["attachments"] == [first_rows[0].id]
     assert len(await _attachments_for_ws(maker)) == 1  # no duplicate Attachment
+
+
+async def test_all_rejected_persists_empty_and_does_not_re_resolve(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every attachment is rejected, attachment_ids persists as [] (not
+    None), so a re-claim does NOT re-download or re-prepend the rejection note.
+
+    Bug guarded: ``not [] == True`` would re-resolve forever, duplicating the
+    '[附件 … 已忽略]' note and re-hitting the platform download on each re-claim.
+    """
+    maker, account = _seeded
+    from cubebox.im.inbound_attachments import DownloadError
+
+    download_calls = {"n": 0}
+
+    async def _failing_download(platform, client, ref, *, message_id):  # type: ignore[no-untyped-def]
+        download_calls["n"] += 1
+        raise DownloadError("boom")
+
+    monkeypatch.setattr(inbound_attachments, "download_for", _failing_download)
+    await ingest_inbound_event(_file_event("evA3"), account=account, session_maker=maker)
+    resolver = _resolver(maker)
+
+    class _BusyRM:
+        async def start_run(self, **kwargs: object) -> str:
+            raise RuntimeError("conversation already has an active run")
+
+    await process_one_queue_item(
+        session_maker=maker,
+        run_manager=_BusyRM(),
+        on_run_started=None,
+        lease_seconds=300,
+        resolve_inbound_attachments=resolver,
+    )
+    assert download_calls["n"] == 1
+    async with maker() as s:
+        item = (
+            await s.execute(select(IMRunQueueItem).where(IMRunQueueItem.account_id == _ACCOUNT_ID))
+        ).scalar_one()
+        assert item.attachment_ids == []  # persisted empty, NOT None
+        assert item.content.count("已忽略") == 1  # noted exactly once
+    assert len(await _attachments_for_ws(maker)) == 0
+
+    # Re-claim: attachment_ids is [] (not None) → no re-resolve, no second note.
+    rm = _RecordingRM()
+    await process_one_queue_item(
+        session_maker=maker,
+        run_manager=rm,
+        on_run_started=None,
+        lease_seconds=300,
+        resolve_inbound_attachments=resolver,
+    )
+    assert download_calls["n"] == 1  # NOT re-downloaded
+    assert str(rm.calls[0]["content"]).count("已忽略") == 1  # note not duplicated

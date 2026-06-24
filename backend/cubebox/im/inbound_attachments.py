@@ -78,11 +78,18 @@ async def _download_feishu(client: Any, ref: InboundAttachmentRef, message_id: s
     return file_obj.read() if hasattr(file_obj, "read") else bytes(file_obj)
 
 
-async def _download_url(url: str, headers: dict[str, str] | None = None) -> bytes:
+async def _download_url(
+    url: str, headers: dict[str, str] | None = None, *, reject_html: bool = False
+) -> bytes:
     async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT) as http:
         resp = await http.get(url, headers=headers, follow_redirects=True)
     if resp.status_code != 200:
         raise DownloadError(f"download {url[:64]} → HTTP {resp.status_code}")
+    if reject_html and resp.headers.get("content-type", "").lower().startswith("text/html"):
+        # Slack serves a 200 HTML sign-in page when the bot token can't read the
+        # file. Treat it as a failure rather than storing the login page as the
+        # user's document.
+        raise DownloadError(f"download {url[:64]} returned an HTML page (auth/scope?)")
     return resp.content
 
 
@@ -96,7 +103,9 @@ async def download_for(
         token = str(client or "")
         if not token:
             raise DownloadError("slack download needs a bot token")
-        return await _download_url(ref.handle, {"Authorization": f"Bearer {token}"})
+        return await _download_url(
+            ref.handle, {"Authorization": f"Bearer {token}"}, reject_html=True
+        )
     if platform == "discord":
         # Discord CDN URLs are pre-signed; no auth header.
         return await _download_url(ref.handle)
