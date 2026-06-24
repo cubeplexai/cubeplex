@@ -11,6 +11,12 @@ class SandboxPolicyOut(BaseModel):
     network_rules: list[dict[str, Any]] = []
     command_rules: list[dict[str, Any]] = []
     egress_proxy: str | None = None
+    # Resource limits as Kubernetes quantity strings. null = the org hasn't
+    # overridden the system default (sandbox.resource.* for cpu/memory; the
+    # cluster StorageClass default for storage).
+    resource_cpu: str | None = None
+    resource_memory: str | None = None
+    storage: str | None = None
     # OQ-6 soft-conflict warnings (e.g. deny rule covers an installed
     # credential's required host). Empty on GET and on a clean PUT.
     warnings: list[str] = []
@@ -22,6 +28,9 @@ class UpdateSandboxPolicyIn(BaseModel):
     network_rules: list[dict[str, Any]] | None = None
     command_rules: list[dict[str, Any]] | None = None
     egress_proxy: str | None = None
+    resource_cpu: str | None = None
+    resource_memory: str | None = None
+    storage: str | None = None
 
 
 SandboxStatusValue = Literal["provisioning", "running", "paused", "terminated", "absent"]

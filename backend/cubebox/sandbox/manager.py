@@ -234,17 +234,24 @@ class SandboxManager:
                 except Exception:
                     pass
 
-    def _build_user_volume(self, workspace_id: str, user_id: str) -> Volume:
+    def _build_user_volume(
+        self, workspace_id: str, user_id: str, *, storage: str | None = None
+    ) -> Volume:
         """Build a PVC Volume keyed on (workspace_id, user_id).
 
         Keying on the workspace too is the storage half of the ownership
         boundary the unique index enforces in the DB: the same user in two
         workspaces must never mount the same /workspace PVC.
+
+        ``storage`` is the admin-policy capacity request (Kubernetes quantity
+        like "10Gi"); None leaves the cluster/StorageClass default in place.
+        Only honoured when the PVC is auto-created — an existing PVC keeps its
+        provisioned size.
         """
         pvc_name = build_user_pvc_name(self._volume_pvc_prefix, workspace_id, user_id)
         return Volume(
             name="user-workspace",
-            pvc=PVC(claimName=pvc_name),
+            pvc=PVC(claimName=pvc_name, storage=storage),
             mountPath=self._volume_mount_path,
             readOnly=False,
         )
@@ -565,7 +572,7 @@ class SandboxManager:
             try:
                 volumes: list[Volume] | None = None
                 if self._volume_enabled:
-                    volume = self._build_user_volume(workspace_id, user_id)
+                    volume = self._build_user_volume(workspace_id, user_id, storage=policy.storage)
                     volumes = [volume]
                     logger.info(
                         "Creating new sandbox for user {} with PVC {}",
@@ -613,7 +620,10 @@ class SandboxManager:
                     timeout=timedelta(seconds=self._ttl),
                     ready_timeout=timedelta(seconds=self._ready_timeout),
                     volumes=volumes,
-                    resource={"cpu": self._resource_cpu, "memory": self._resource_memory},
+                    resource={
+                        "cpu": policy.resource_cpu or self._resource_cpu,
+                        "memory": policy.resource_memory or self._resource_memory,
+                    },
                     secure_access=self._secure_access,
                     network_policy=network_policy,
                 )

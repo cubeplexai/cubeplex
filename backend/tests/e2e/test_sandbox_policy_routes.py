@@ -59,6 +59,33 @@ async def test_put_then_get_roundtrip(admin_client) -> None:
     assert body["network_default_action"] == "deny"
 
 
+async def test_put_then_get_resource_limits_roundtrip(admin_client) -> None:
+    client, _ws = admin_client
+    put = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={
+            "default_image": "ubuntu:22.04",
+            "resource_cpu": "500m",
+            "resource_memory": "2Gi",
+            "storage": "10Gi",
+        },
+    )
+    assert put.status_code == 200, put.text
+    got = (await client.get("/api/v1/admin/sandbox-policy")).json()
+    assert got["resource_cpu"] == "500m"
+    assert got["resource_memory"] == "2Gi"
+    assert got["storage"] == "10Gi"
+
+
+async def test_put_rejects_bad_resource_quantity(admin_client) -> None:
+    client, _ws = admin_client
+    resp = await client.put(
+        "/api/v1/admin/sandbox-policy",
+        json={"default_image": "ubuntu:22.04", "resource_memory": "2 gigs"},
+    )
+    assert resp.status_code == 400
+
+
 async def test_put_rejects_bad_network_target(admin_client) -> None:
     client, _ws = admin_client
     resp = await client.put(

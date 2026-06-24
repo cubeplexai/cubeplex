@@ -35,6 +35,9 @@ class SandboxPolicyRepository:
         command_rules: list[dict[str, Any]] | None,
         network_default_action: str,
         egress_proxy: str | None = None,
+        resource_cpu: str | None = None,
+        resource_memory: str | None = None,
+        storage: str | None = None,
     ) -> SandboxPolicy:
         """Upsert the org-default policy row (scope_workspace_id=NULL).
 
@@ -48,6 +51,9 @@ class SandboxPolicyRepository:
             existing.command_rules = command_rules
             existing.network_default_action = network_default_action
             existing.egress_proxy = egress_proxy
+            existing.resource_cpu = resource_cpu
+            existing.resource_memory = resource_memory
+            existing.storage = storage
             await self.session.commit()
             await self.session.refresh(existing)
             return existing
@@ -59,6 +65,9 @@ class SandboxPolicyRepository:
             command_rules=command_rules,
             network_default_action=network_default_action,
             egress_proxy=egress_proxy,
+            resource_cpu=resource_cpu,
+            resource_memory=resource_memory,
+            storage=storage,
         )
         self.session.add(row)
         await self.session.commit()
