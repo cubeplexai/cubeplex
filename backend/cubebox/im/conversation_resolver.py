@@ -80,7 +80,10 @@ async def resolve_im_conversation(
     del origin  # currently unused; reserved for future observability.
 
     settings = load_bot_settings(account.config)
-    is_shared = settings.routing_mode == "shared"
+    # A DM is always 1:1 — never a shared/group conversation, even on a bot
+    # configured for shared routing (the topic is the sender's, personal
+    # memory applies, HITL binds to the one user).
+    is_shared = settings.routing_mode == "shared" and scope_kind != "dm"
     should_topic = wants_topic(settings)
     sandbox_mode: str | None = settings.sandbox_mode
 
@@ -112,7 +115,12 @@ async def resolve_im_conversation(
             )
         )
     ).scalar_one_or_none()
-    topic_id: str | None = existing_link.topic_id if existing_link is not None else None
+    # Reuse an existing scope's Topic only while topic mode is on. In flat
+    # mode we deliberately ignore (and below, clear) any prior anchor so a
+    # topic→flat settings change actually takes effect for active scopes.
+    topic_id: str | None = (
+        existing_link.topic_id if (existing_link is not None and should_topic) else None
+    )
 
     if should_topic and topic_id is None:
         topic = Topic(
@@ -168,27 +176,40 @@ async def resolve_im_conversation(
         make_conversation_id=_make_conversation_id,
     )
 
-    # Backfill the anchor onto the link (new links, or links that predate
-    # topic_mode being enabled).
-    if topic_id is not None and link.topic_id != topic_id:
-        link.topic_id = topic_id
-        session.add(link)
+    if should_topic:
+        # Backfill the anchor onto the link (new links, or links that predate
+        # topic_mode being enabled).
+        if topic_id is not None and link.topic_id != topic_id:
+            link.topic_id = topic_id
+            session.add(link)
 
-    # When we reused an EXISTING conversation (``_make_conversation_id`` never
-    # ran), it still carries whatever topic/group/attributes it had before —
-    # e.g. after a flat→topic settings change, or a link that predates topic
-    # mode. Adopt it into the resolved Topic so the link, the conversation,
-    # and the Topic agree; otherwise the just-created Topic is orphaned, the
-    # conversation stays ungrouped, and (in shared mode) the worker rejects it
-    # for lacking attributes.im. We reconcile whenever the row actually lags,
-    # which also repairs any row left split by an earlier resolve.
-    if should_topic and topic_id is not None and reused is not None:
-        if reused.topic_id != topic_id or reused.is_group_chat != is_shared:
-            reused.topic_id = topic_id
-            reused.is_group_chat = is_shared
-            merged = dict(reused.attributes or {})
-            merged.update(im_attrs)
-            reused.attributes = merged
+        # When we reused an EXISTING conversation (``_make_conversation_id``
+        # never ran), it still carries whatever topic/group/attributes it had
+        # before — e.g. after a flat→topic change, or a link predating topic
+        # mode. Adopt it into the resolved Topic so the link, the conversation,
+        # and the Topic agree; otherwise the just-created Topic is orphaned,
+        # the conversation stays ungrouped, and (shared) the worker rejects it
+        # for lacking attributes.im. We reconcile whenever the row lags, which
+        # also repairs any row left split by an earlier resolve.
+        if topic_id is not None and reused is not None:
+            if reused.topic_id != topic_id or reused.is_group_chat != is_shared:
+                reused.topic_id = topic_id
+                reused.is_group_chat = is_shared
+                merged = dict(reused.attributes or {})
+                merged.update(im_attrs)
+                reused.attributes = merged
+                session.add(reused)
+                await session.flush()
+    else:
+        # Flat mode: drop any prior Topic anchor so existing scopes become
+        # standalone — clear it off the link (so /new deletes rather than
+        # rotates) and detach the reused conversation from its old Topic.
+        if link.topic_id is not None:
+            link.topic_id = None
+            session.add(link)
+        if reused is not None and (reused.topic_id is not None or reused.is_group_chat):
+            reused.topic_id = None
+            reused.is_group_chat = False
             session.add(reused)
             await session.flush()
 
