@@ -59,7 +59,7 @@ async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bo
     else:
         scope_key = make_participant_scope(sender_ref)
 
-    from cubebox.models.im_connector import IMThreadLink
+    from cubebox.im.conversation_resolver import reset_im_conversation
 
     session_maker = getattr(bot, "_cubebox_session_maker", None)
     account_id = getattr(bot, "_cubebox_account_id", None)
@@ -67,22 +67,21 @@ async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bo
         await interaction.response.send_message("内部错误。", ephemeral=True)
         return
 
+    # Route through the mode-aware reset so topic-mode accounts rotate the
+    # conversation under the same durable Topic instead of dropping the anchor
+    # (which would spawn a second Topic on the next message).
     async with session_maker() as session:
-        from sqlmodel import select
-
-        stmt = select(IMThreadLink).where(
-            IMThreadLink.account_id == account_id,
-            IMThreadLink.channel_id == channel_id,
-            IMThreadLink.scope_key == scope_key,
+        outcome = await reset_im_conversation(
+            session, account_id=account_id, channel_id=channel_id, scope_key=scope_key
         )
-        link = (await session.execute(stmt)).scalar_one_or_none()
-        if link is not None:
-            await session.delete(link)
-            await session.commit()
+        await session.commit()
 
-    await interaction.response.send_message(
-        "✅ 新对话已开始。下一条消息将创建新的会话。", ephemeral=True
+    msg = (
+        "ℹ️ 当前还没有进行中的会话，直接发送消息即可开始新对话。"
+        if outcome == "none"
+        else "✅ 新对话已开始。"
     )
+    await interaction.response.send_message(msg, ephemeral=True)
 
 
 async def _initiate_link(

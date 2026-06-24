@@ -29,9 +29,10 @@ never ``commit``s.
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.im.bot_settings import (
@@ -130,6 +131,15 @@ async def resolve_im_conversation(
             # fresh, visible one below.
             existing_link.topic_id = None
             session.add(existing_link)
+            # Also soft-delete the conversation tied to the archived Topic so
+            # get_or_create_thread_link repoints to a FRESH conversation. Were
+            # it left live, the adoption step below would re-home the archived
+            # Topic's hidden history under the new Topic, making it visible again.
+            old_conv = await session.get(Conversation, existing_link.conversation_id)
+            if old_conv is not None and old_conv.deleted_at is None:
+                old_conv.deleted_at = datetime.now(UTC)
+                session.add(old_conv)
+                await session.flush()
 
     if should_topic and topic_id is None:
         topic = Topic(
@@ -220,6 +230,14 @@ async def resolve_im_conversation(
             reused.topic_id = None
             reused.is_group_chat = False
             session.add(reused)
+            # A topicless conversation is visible via ConversationParticipant
+            # rows, so a flattened ex-shared conversation would still be
+            # readable by every former channel member. Drop those rows.
+            await session.execute(
+                delete(ConversationParticipant).where(
+                    ConversationParticipant.conversation_id == reused.id  # type: ignore[arg-type]
+                )
+            )
             await session.flush()
 
     # Topic visibility is gated on TopicParticipant (a topic conversation is

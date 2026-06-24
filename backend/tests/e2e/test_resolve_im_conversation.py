@@ -613,13 +613,82 @@ async def test_archived_topic_is_replaced(
 
     assert r2.topic_id is not None
     assert r2.topic_id != first_topic
+    # The fresh Topic must start CLEAN: a brand-new conversation, with the old
+    # (archived-topic) conversation soft-deleted so its hidden history isn't
+    # re-homed/resurrected under the new Topic.
+    assert r2.conversation_id != r1.conversation_id
     async with maker() as session:
         link = (
             await session.execute(select(IMThreadLink).where(IMThreadLink.account_id == _ACCOUNT))
         ).scalar_one()
         assert link.topic_id == r2.topic_id
+        assert link.conversation_id == r2.conversation_id
         fresh = await session.get(Topic, r2.topic_id)
         assert fresh is not None and fresh.is_archived is False
+        old_conv = await session.get(Conversation, r1.conversation_id)
+        assert old_conv is not None and old_conv.deleted_at is not None
+        new_conv = await session.get(Conversation, r2.conversation_id)
+        assert new_conv is not None and new_conv.topic_id == r2.topic_id
+
+
+async def test_shared_to_flat_drops_participants(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """Flattening a shared scope must drop the conversation's participant rows;
+    a topicless conversation is visible via those rows, so leaving them would
+    let former channel members keep reading the now-standalone chat."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared", sandbox_mode="dedicated"))
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="shared first",
+            origin="inbound",
+        )
+        await session.commit()
+    conv_id = r1.conversation_id
+    async with maker() as session:
+        n = (
+            await session.execute(
+                select(func.count())
+                .select_from(ConversationParticipant)
+                .where(ConversationParticipant.conversation_id == conv_id)
+            )
+        ).scalar()
+        assert n and n >= 1  # shared seeded a participant
+
+    # Switch to flat; the next message in the same scope detaches + clears rows.
+    _with_settings(account, IMBotSettings(routing_mode="isolated", topic_mode="flat"))
+    async with maker() as session:
+        r2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="flat now",
+            origin="inbound",
+        )
+        await session.commit()
+    assert r2.conversation_id == conv_id
+    assert r2.topic_id is None
+    async with maker() as session:
+        conv = await session.get(Conversation, conv_id)
+        assert conv is not None and conv.topic_id is None and conv.is_group_chat is False
+        left = (
+            await session.execute(
+                select(func.count())
+                .select_from(ConversationParticipant)
+                .where(ConversationParticipant.conversation_id == conv_id)
+            )
+        ).scalar()
+        assert left == 0  # former shared participants removed
 
 
 async def test_isolated_topic_rejoins_missing_participant(
