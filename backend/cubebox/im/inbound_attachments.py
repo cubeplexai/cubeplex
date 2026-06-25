@@ -66,23 +66,27 @@ def _normalize_mime(mime: str | None) -> str | None:
 def _effective_name_mime(ref: InboundAttachmentRef, data: bytes) -> tuple[str, str | None]:
     """Resolve the filename + mime to store.
 
-    Images (and any ref without a declared mime) get content-sniffed via the
-    project's ``sniff_mime`` (libmagic), so a Feishu JPEG/GIF/WebP isn't stored
-    as image/png and an extensionless file gets a real type. The declared mime
-    is otherwise normalized (charset stripped).
+    Non-image refs keep the user's filename verbatim (its extension is
+    authoritative — ``合同终稿.csv`` must not become ``.txt``); the declared mime
+    is just charset-normalized, and ``None`` lets ``AttachmentService`` guess
+    from the extension (correct for docx/xlsx/csv).
+
+    Images are the exception: Feishu sends a placeholder name + no mime, so we
+    sniff the real format from the bytes and fix the extension — otherwise a
+    JPEG/GIF/WebP would be stored and declared as image/png.
     """
-    declared = _normalize_mime(ref.mime)
-    if ref.kind != "image" and declared:
-        return ref.filename, declared
+    if ref.kind != "image":
+        return ref.filename, _normalize_mime(ref.mime)
+
     sniffed = _normalize_mime(sniff_mime(ref.filename, data))
-    mime = sniffed or declared
+    mime = sniffed or _normalize_mime(ref.mime)
     filename = ref.filename
     if mime:
         ext = mimetypes.guess_extension(mime)
         if ext and Path(filename).suffix.lower() != ext.lower():
             stem = Path(filename).stem
             if not stem or stem.startswith("."):
-                stem = ref.kind  # "image" / "file"
+                stem = "image"
             filename = f"{stem}{ext}"
     return filename, mime
 

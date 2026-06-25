@@ -55,3 +55,19 @@ def test_effective_name_mime_sniffs_image_format_over_placeholder() -> None:
 def test_effective_name_mime_passes_through_non_images() -> None:
     ref = InboundAttachmentRef(kind="file", filename="r.pdf", mime="application/pdf", handle="k")
     assert _effective_name_mime(ref, _PNG) == ("r.pdf", "application/pdf")
+
+
+def test_effective_name_mime_preserves_non_image_extension() -> None:
+    # A Feishu file (mime=None) must keep its real extension — NOT get renamed
+    # to a sniffed coarse type. AttachmentService guesses the mime from .csv.
+    ref = InboundAttachmentRef(kind="file", filename="合同终稿.csv", mime=None, handle="k")
+    name, mime = _effective_name_mime(ref, b"a,b,c\n1,2,3\n")
+    assert name == "合同终稿.csv"  # extension preserved, not clobbered to .txt
+    assert mime is None  # let AttachmentService guess from the extension
+
+
+def test_effective_name_mime_strips_charset_on_non_image() -> None:
+    ref = InboundAttachmentRef(
+        kind="file", filename="n.txt", mime="text/plain; charset=utf-8", handle="k"
+    )
+    assert _effective_name_mime(ref, b"hi") == ("n.txt", "text/plain")
