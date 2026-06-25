@@ -121,25 +121,30 @@ async def find_latest_todos(
         if not isinstance(content, list):
             continue
         for block in content:
-            if (
+            if not (
                 isinstance(block, dict)
                 and block.get("type") == "tool_call"
                 and block.get("name") == "write_todos"
             ):
-                args = block.get("arguments") or {}
-                raw_todos = args.get("todos") if isinstance(args, dict) else None
-                if not isinstance(raw_todos, list):
-                    return []
-                out: list[dict[str, Any]] = []
-                for t in raw_todos:
-                    if not isinstance(t, dict):
-                        continue
-                    description = t.get("content")
-                    if not isinstance(description, str) or not description.strip():
-                        continue
-                    status = t.get("status")
-                    if status not in ("in_progress", "completed"):
-                        status = "pending"
-                    out.append({"id": None, "description": description.strip(), "status": status})
-                return out
+                continue
+            args = block.get("arguments")
+            raw_todos = args.get("todos") if isinstance(args, dict) else None
+            if not isinstance(raw_todos, list):
+                # Malformed call (e.g. mid-stream tool args truncated, or a
+                # future schema with a different field name): fall through to
+                # an older assistant row rather than clobbering a still-valid
+                # todo list with an empty panel.
+                continue
+            out: list[dict[str, Any]] = []
+            for t in raw_todos:
+                if not isinstance(t, dict):
+                    continue
+                description = t.get("content")
+                if not isinstance(description, str) or not description.strip():
+                    continue
+                status = t.get("status")
+                if status not in ("in_progress", "completed"):
+                    status = "pending"
+                out.append({"id": None, "description": description.strip(), "status": status})
+            return out
     return None
