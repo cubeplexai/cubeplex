@@ -1696,7 +1696,14 @@ async def get_conversation_bootstrap(
             fresh = await get_active_run(
                 rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
             )
-            run_id_for_pending = fresh.run_id if fresh is not None else persisted_run_id
+            # Apply the same staleness gate stage-A does: a row that's already
+            # past the heartbeat threshold would point pending_hitl at a dead
+            # run, and every approve/decline from the client would 404.
+            threshold = int(_config.get("lifecycle.stale_run_threshold_seconds", 120))
+            if fresh is not None and not is_stale_meta(fresh, threshold_seconds=threshold):
+                run_id_for_pending = fresh.run_id
+            else:
+                run_id_for_pending = persisted_run_id
         if run_id_for_pending is None:
             # Legacy row (pre-cubepi-v3) — log + degrade to null so the user
             # can at least see other conversation state.

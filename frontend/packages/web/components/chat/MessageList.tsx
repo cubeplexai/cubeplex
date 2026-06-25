@@ -216,6 +216,7 @@ export function MessageList({ conversationId }: MessageListProps) {
   const loadOlderUntilSeq = useMessageStore((s) => s.loadOlderUntilSeq)
   const hasMoreOlder = useMessageStore((s) => s.hasMoreByConv[conversationId] ?? false)
   const isLoadingOlder = useMessageStore((s) => s.loadingOlderByConv[conversationId] ?? false)
+  const oldestSeq = useMessageStore((s) => s.oldestSeqByConv[conversationId] ?? null)
   const lastRunStatus = useMessageStore((s) => s.lastRunStatus)
   const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
   const pendingAsk = useMessageStore((s) => s.pendingAsk)
@@ -505,13 +506,19 @@ export function MessageList({ conversationId }: MessageListProps) {
     void loadOlderMessages(client, conversationId)
   }, [conversationId, loadOlderMessages, workspaceId])
 
+  // ``oldestSeq`` moves only when older messages are prepended (bootstrap
+  // arrival or backscroll); appended turns / mid-stream finalizes don't
+  // touch it. Keying the anchor restore on that signal — instead of
+  // ``messages.length`` — avoids consuming the snapshot on an unrelated
+  // append that happens to land between Load earlier's click and its
+  // network response.
   useLayoutEffect(() => {
     const anchor = pendingAnchorRef.current
     const scroller = scrollRef.current
     if (!anchor || !scroller) return
     scroller.scrollTop = anchor.scrollTop + (scroller.scrollHeight - anchor.scrollHeight)
     pendingAnchorRef.current = null
-  }, [messages?.length])
+  }, [oldestSeq])
 
   // Deep-link from conversation search: ``#msg-<seq>`` may target a message
   // older than the bootstrap tail. After the initial load completes, walk
@@ -528,18 +535,21 @@ export function MessageList({ conversationId }: MessageListProps) {
     if (!m) return
     const targetSeq = parseInt(m[1], 10)
     if (Number.isNaN(targetSeq)) return
-    let cancelled = false
+    // Abort the backscroll walk on conv switch / unmount so we don't keep
+    // pulling pages into a conversation the user has left (which would also
+    // bleed an error bubble into the foreground conv on 404).
+    const controller = new AbortController()
     void (async () => {
       const client = createApiClient('')
       if (workspaceId) client.setWorkspaceId(workspaceId)
-      await loadOlderUntilSeq(client, conversationId, targetSeq)
-      if (cancelled) return
+      await loadOlderUntilSeq(client, conversationId, targetSeq, controller.signal)
+      if (controller.signal.aborted) return
       requestAnimationFrame(() => {
         document.getElementById(`msg-${targetSeq}`)?.scrollIntoView({ block: 'start' })
       })
     })()
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [conversationId, messagesLoaded, loadOlderUntilSeq, workspaceId])
 

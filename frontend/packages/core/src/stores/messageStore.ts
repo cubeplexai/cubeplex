@@ -132,8 +132,14 @@ export interface MessageStore {
   /** Repeatedly fetch older windows until ``oldestSeqByConv[conversationId]``
    *  reaches ``targetSeq`` or there is no more history. Used by the search
    *  deep-link path to make ``#msg-<seq>`` anchors reachable even when the
-   *  requested message lives below the bootstrap tail. */
-  loadOlderUntilSeq(client: ApiClient, conversationId: string, targetSeq: number): Promise<void>
+   *  requested message lives below the bootstrap tail. Pass ``signal`` to
+   *  stop the loop when the user navigates away mid-walk. */
+  loadOlderUntilSeq(
+    client: ApiClient,
+    conversationId: string,
+    targetSeq: number,
+    signal?: AbortSignal,
+  ): Promise<void>
   send(
     client: ApiClient,
     conversationId: string,
@@ -163,6 +169,12 @@ let activeStreamController: AbortController | null = null
 /** Dedup map for ``loadMessages``: the page-level effect and ``<MessageList>``'s
  *  effect both fire on mount, but we only want one bootstrap fetch per open. */
 const loadMessagesInFlight = new Map<string, Promise<void>>()
+
+/** Dedup map for ``loadOlderMessages``: a user click on "Load earlier" and the
+ *  ``loadOlderUntilSeq`` deep-link loop may both fire concurrently. Sharing
+ *  the in-flight promise lets the loop ``await`` the click's fetch instead
+ *  of short-circuiting without progress. */
+const loadOlderInFlight = new Map<string, Promise<void>>()
 
 const MAIN_AGENT_KEY = 'main'
 
@@ -377,19 +389,6 @@ export function trimHistoryForActiveRun(
     // Not the original (e.g. a steer turn) — keep scanning back.
   }
   return [...messages, buildPendingUserMessage(runId, content)]
-}
-
-function restoreTodosFromHistory(messages: Message[]): TodoItem[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role !== 'assistant') continue
-    for (const block of msg.content) {
-      if (block.type === 'tool_call' && block.name === 'write_todos') {
-        return parseTodosFromToolCall(block.arguments)
-      }
-    }
-  }
-  return []
 }
 
 function hydrateCitationsFromHistory(conversationId: string, messages: Message[]): void {
@@ -1153,11 +1152,11 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
           )
         }
 
-        // Prefer the backend-precomputed todos (walks the full history, so
-        // the panel hydrates correctly even when the last ``write_todos`` lives
-        // below the bootstrap tail). Fall back to the in-tail scan only if the
-        // server didn't send the field (older deployments).
-        const restoredTodos = bootstrap.todos ?? restoreTodosFromHistory(messages)
+        // Backend walks the full history (not just the tail) to pick the
+        // latest ``write_todos`` state — see ``find_latest_todos`` in
+        // services/history_window.py. ``null`` means no todos were ever
+        // written for this thread.
+        const restoredTodos = bootstrap.todos ?? []
         hydrateCitationsFromHistory(conversationId, messages)
         const usageSummary = bootstrap.usage_summary
         const newTurnUsage = {
@@ -1380,64 +1379,81 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
 
   async loadOlderMessages(client: ApiClient, conversationId: string) {
     const state = get()
-    if (state.loadingOlderByConv[conversationId]) return
     if (!state.hasMoreByConv[conversationId]) return
     const cursor = state.oldestSeqByConv[conversationId]
     if (cursor == null) return
+    // Click-spam + deep-link loop share one fetch — see ``loadOlderInFlight``.
+    const existing = loadOlderInFlight.get(conversationId)
+    if (existing) return existing
 
     set((s) => ({
       loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: true },
     }))
-    try {
-      const page = await getHistoryWindow(client, conversationId, { beforeSeq: cursor })
-      const older = normalizeMessages(page.messages)
-      hydrateCitationsFromHistory(conversationId, older)
-      set((s) => ({
-        messages: {
-          ...s.messages,
-          [conversationId]: [...older, ...(s.messages[conversationId] ?? [])],
-        },
-        oldestSeqByConv: {
-          ...s.oldestSeqByConv,
-          [conversationId]: page.oldest_seq ?? s.oldestSeqByConv[conversationId],
-        },
-        hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: page.has_more },
-      }))
-    } catch (err) {
-      // Surface the failure through the same per-conversation errors slice
-      // ``loadMessages`` uses, so a failed backscroll renders the existing
-      // RunErrorBubble instead of silently re-enabling the button.
-      set((s) => ({
-        errors: {
-          ...s.errors,
-          [conversationId]: {
-            runId: s.currentRunId ?? '',
-            data: { error_code: 'internal_error', message: (err as Error).message },
+    const promise = (async () => {
+      try {
+        const page = await getHistoryWindow(client, conversationId, { beforeSeq: cursor })
+        const older = normalizeMessages(page.messages)
+        hydrateCitationsFromHistory(conversationId, older)
+        set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: [...older, ...(s.messages[conversationId] ?? [])],
           },
-        },
-      }))
+          oldestSeqByConv: {
+            ...s.oldestSeqByConv,
+            [conversationId]: page.oldest_seq ?? s.oldestSeqByConv[conversationId],
+          },
+          hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: page.has_more },
+        }))
+      } catch (err) {
+        // Surface the failure through the same per-conversation errors slice
+        // ``loadMessages`` uses, so a failed backscroll renders the existing
+        // RunErrorBubble instead of silently re-enabling the button.
+        set((s) => ({
+          errors: {
+            ...s.errors,
+            [conversationId]: {
+              runId: s.currentRunId ?? '',
+              data: { error_code: 'internal_error', message: (err as Error).message },
+            },
+          },
+        }))
+      } finally {
+        set((s) => ({
+          loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: false },
+        }))
+      }
+    })()
+    loadOlderInFlight.set(conversationId, promise)
+    try {
+      await promise
     } finally {
-      set((s) => ({
-        loadingOlderByConv: { ...s.loadingOlderByConv, [conversationId]: false },
-      }))
+      loadOlderInFlight.delete(conversationId)
     }
   },
 
-  async loadOlderUntilSeq(client: ApiClient, conversationId: string, targetSeq: number) {
+  async loadOlderUntilSeq(
+    client: ApiClient,
+    conversationId: string,
+    targetSeq: number,
+    signal?: AbortSignal,
+  ) {
     // Bounded by the dataset (each iteration either advances ``oldestSeq``
     // toward ``targetSeq`` or trips ``hasMore=false``); ``loadOlderMessages``
     // self-dedups so concurrent triggers don't double-fire.
     while (true) {
+      if (signal?.aborted) return
       const s = get()
       const oldest = s.oldestSeqByConv[conversationId]
       if (oldest != null && oldest <= targetSeq) return
       if (!s.hasMoreByConv[conversationId]) return
-      const before = s.messages[conversationId]?.length ?? 0
       await get().loadOlderMessages(client, conversationId)
-      const after = get().messages[conversationId]?.length ?? 0
-      // Stall guard: if a fetch returned no new rows (or failed into the
-      // errors slice), abandon rather than loop forever.
-      if (after === before) return
+      // Stall guard: only ``oldestSeq`` retreating signals a real prepend.
+      // A length / dedup-skip / fetch-failure leaves ``oldestSeq`` pinned,
+      // so we abandon instead of looping forever — but a concurrent click
+      // on "Load earlier" that also moves the cursor counts as progress.
+      const next = get().oldestSeqByConv[conversationId]
+      if (next == null || next === oldest) return
     }
   },
 

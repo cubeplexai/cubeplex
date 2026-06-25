@@ -175,3 +175,48 @@ async def test_find_latest_todos_no_write_returns_none(db_session: AsyncSession)
         assert await find_latest_todos(db_session, thread_id) is None
     finally:
         await _delete_thread(thread_id)
+
+
+@pytest.mark.asyncio
+async def test_find_latest_todos_skips_malformed_args(db_session: AsyncSession) -> None:
+    """A write_todos call with non-list ``todos`` (or non-dict ``arguments``)
+    should be skipped, not clobber a still-valid earlier call. Pre-fix the
+    scan returned ``[]`` on the first bad call and silently wiped the panel."""
+    thread_id = "t-hwin-bad-args"
+    async with init_checkpointer() as cp:
+        # Older valid call
+        await cp.append(
+            thread_id,
+            [
+                AssistantMessage(
+                    content=[
+                        ToolCall(
+                            id="tc-good",
+                            name="write_todos",
+                            arguments={
+                                "todos": [{"content": "real task", "status": "in_progress"}]
+                            },
+                        )
+                    ],
+                    stop_reason="tool_use",
+                ),
+            ],
+        )
+        # Newer malformed call (e.g. mid-stream truncation / schema drift)
+        await cp.append(
+            thread_id,
+            [
+                AssistantMessage(
+                    content=[ToolCall(id="tc-bad", name="write_todos", arguments={"todos": None})],
+                    stop_reason="tool_use",
+                ),
+            ],
+        )
+
+    try:
+        result = await find_latest_todos(db_session, thread_id)
+        assert result == [
+            {"id": None, "description": "real task", "status": "in_progress"},
+        ]
+    finally:
+        await _delete_thread(thread_id)
