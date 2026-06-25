@@ -65,7 +65,7 @@ function injectWorkspace(path: string, wsId: string): string {
   return `${SCOPED_ROOT}ws/${wsId}/${path.slice(SCOPED_ROOT.length)}`
 }
 
-function readCookie(name: string): string {
+export function readCookie(name: string): string {
   if (typeof document === 'undefined') return ''
   const match = document.cookie.split('; ').find((c) => c.startsWith(`${name}=`))
   return match ? decodeURIComponent(match.slice(name.length + 1)) : ''

@@ -1,5 +1,6 @@
 import type { UserEvent } from '../types'
-import type { ApiClient } from './client'
+import { readCookie, type ApiClient } from './client'
+import { CSRF_COOKIE_NAME } from './cookieNames'
 
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {
   let buffer = ''
@@ -79,10 +80,17 @@ export async function markUserEventRead(client: ApiClient, eventId: string): Pro
   // POST direct via fetch — same reason as streamUserEvents above. Uses the
   // existing /api/v1/user/events/{id}/read endpoint added in v2.
   const url = `${client.baseUrl}/api/v1/user/events/${encodeURIComponent(eventId)}/read`
+  // Mirror ApiClient: a mutating request needs the double-submit CSRF token
+  // (cookie value echoed in the X-CSRF-Token header), or the CSRF middleware
+  // 403s it and the event is never marked read.
+  const csrf = readCookie(CSRF_COOKIE_NAME)
   await fetch(url, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+    },
   })
   // No error inspection — fire-and-forget. Network blip / 5xx is fine, event
   // gets re-delivered next reconnect and the store dedupes.
