@@ -84,6 +84,126 @@ def _parse_feishu_attachments(
     ]
 
 
+def _substitute_mentions(
+    raw_text: str, mentions: list[dict[str, Any]], bot_open_id: str | None
+) -> str:
+    """Replace Feishu ``@_user_N`` placeholders with ``@name``; drop the bot's
+    own mention so the LLM sees only the message body."""
+    for mention in mentions:
+        key = mention.get("key") or ""
+        if not key:
+            continue
+        mid = (mention.get("id") or {}).get("open_id")
+        name = mention.get("name") or ""
+        if mid and mid == bot_open_id:
+            raw_text = raw_text.replace(key, "")
+        elif name:
+            raw_text = raw_text.replace(key, f"@{name}")
+    return _AT_TAG_RE.sub("", raw_text).strip()
+
+
+def _index_mentions(mentions: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    """Index mentions by BOTH placeholder key and open_id → {open_id, name}.
+
+    Post ``at`` elements carry ``user_id`` that may be either the placeholder
+    (``@_user_N``) or the real open_id, so we index both ways.
+    """
+    index: dict[str, dict[str, str]] = {}
+    for m in mentions:
+        oid = (m.get("id") or {}).get("open_id") or ""
+        entry = {"open_id": oid, "name": m.get("name") or ""}
+        key = m.get("key") or ""
+        if key:
+            index[key] = entry
+        if oid:
+            index[oid] = entry
+    return index
+
+
+def _render_post_at(
+    elem: dict[str, Any], mention_index: dict[str, dict[str, str]], bot_open_id: str | None
+) -> str:
+    uid = str(elem.get("user_id", "")).strip()
+    entry = mention_index.get(uid)
+    open_id = (entry or {}).get("open_id") or uid
+    if bot_open_id and open_id == bot_open_id:
+        return ""  # drop the bot's own mention
+    name = (entry or {}).get("name") or str(elem.get("user_name", "")).strip() or "user"
+    return f"@{name}"
+
+
+def _resolve_post_payload(content_obj: dict[str, Any]) -> dict[str, Any]:
+    """Unwrap a possibly language-keyed post payload to ``{title, content}``.
+
+    The receive event usually sends the post body directly, but the send-API
+    shape is language-wrapped (``{"zh_cn": {...}}``); accept either.
+    """
+    if isinstance(content_obj.get("content"), list):
+        return content_obj
+    for value in content_obj.values():
+        if isinstance(value, dict) and isinstance(value.get("content"), list):
+            return value
+    return content_obj
+
+
+def _parse_feishu_post(
+    content_obj: dict[str, Any], mentions: list[dict[str, Any]], bot_open_id: str | None
+) -> tuple[str, list[InboundAttachmentRef]]:
+    """Walk a Feishu post (rich-text) body into ``(text, attachments)``.
+
+    A post is a list of paragraphs, each a list of tagged elements:
+    ``text``/``a``/``at`` render into the text; ``img``/``media``/``file``/
+    ``audio`` become attachment refs resolved to bytes later, exactly like a
+    flat media message. One post can mix text + several images + files.
+    """
+    payload = _resolve_post_payload(content_obj)
+    rows = payload.get("content")
+    if not isinstance(rows, list):
+        return "", []
+    mention_index = _index_mentions(mentions)
+    lines: list[str] = []
+    title = str(payload.get("title") or "").strip()
+    if title:
+        lines.append(title)
+    attachments: list[InboundAttachmentRef] = []
+    for paragraph in rows:
+        if not isinstance(paragraph, list):
+            continue
+        parts: list[str] = []
+        for elem in paragraph:
+            if not isinstance(elem, dict):
+                continue
+            tag = str(elem.get("tag", "")).strip().lower()
+            if tag == "text":
+                parts.append(str(elem.get("text", "")))
+            elif tag == "a":
+                href = str(elem.get("href", "")).strip()
+                label = str(elem.get("text", "") or href).strip()
+                parts.append(f"[{label}]({href})" if href else label)
+            elif tag == "at":
+                parts.append(_render_post_at(elem, mention_index, bot_open_id))
+            elif tag in ("img", "image"):
+                key = str(elem.get("image_key", "")).strip()
+                if key:
+                    attachments.append(
+                        InboundAttachmentRef(
+                            kind="image", filename="image.png", mime=None, handle=key
+                        )
+                    )
+            elif tag in ("media", "file", "audio", "video"):
+                key = str(elem.get("file_key", "")).strip()
+                if key:
+                    name = str(elem.get("file_name") or elem.get("title") or "file")
+                    kind = {"audio": "audio", "video": "video", "media": "video"}.get(tag, "file")
+                    attachments.append(
+                        InboundAttachmentRef(kind=kind, filename=name, mime=None, handle=key)
+                    )
+        line = "".join(parts).strip()
+        if line:
+            lines.append(line)
+    return "\n".join(lines).strip(), attachments
+
+
 # Feishu reaction_type literals (no enum in the SDK). Names are UPPERCASE
 # in Feishu's emoji_type set — mixed case (e.g. "ThumbsUp") is rejected with
 # code=231001 "reaction type is invalid".
@@ -158,7 +278,7 @@ class FeishuConnector:
         if self._bot_open_id is not None and sender_open_id == self._bot_open_id:
             return None
         message_type = message.get("message_type")
-        if message_type != "text" and message_type not in _FEISHU_MEDIA_TYPES:
+        if message_type not in ("text", "post") and message_type not in _FEISHU_MEDIA_TYPES:
             return None
 
         try:
@@ -166,27 +286,16 @@ class FeishuConnector:
         except json.JSONDecodeError:
             return None
 
+        # Feishu inbound mentions use ``@_user_N`` placeholders + a separate
+        # ``mentions[]`` array (NOT inline ``<at>`` tags — those are the
+        # outbound shape). The bot's own mention is dropped; others become
+        # ``@name`` so the LLM reads a name, not a placeholder.
+        mentions = message.get("mentions") or []
         attachments: list[InboundAttachmentRef] = []
         if message_type == "text":
-            raw_text = content_obj.get("text", "")
-            # Feishu inbound text uses ``@_user_N`` placeholders + a separate
-            # ``mentions[]`` array (NOT inline ``<at>`` tags — those are the
-            # outbound shape). Drop the bot's own at-mention (so the LLM sees
-            # only the message body) and substitute remaining ``@_user_N`` with
-            # the mention's human-readable ``name`` (e.g. "@巩向锋") so the LLM
-            # gets a name it can actually reason about instead of a placeholder.
-            mentions = message.get("mentions") or []
-            for mention in mentions:
-                key = mention.get("key") or ""
-                if not key:
-                    continue
-                mid = (mention.get("id") or {}).get("open_id")
-                name = mention.get("name") or ""
-                if mid and mid == self._bot_open_id:
-                    raw_text = raw_text.replace(key, "")
-                elif name:
-                    raw_text = raw_text.replace(key, f"@{name}")
-            text = _AT_TAG_RE.sub("", raw_text).strip()
+            text = _substitute_mentions(content_obj.get("text", ""), mentions, self._bot_open_id)
+        elif message_type == "post":
+            text, attachments = _parse_feishu_post(content_obj, mentions, self._bot_open_id)
         else:
             text = ""
             attachments = _parse_feishu_attachments(message_type, content_obj)
