@@ -1,7 +1,7 @@
 """add attachment cols to im_run_queue
 
 Revision ID: d1f37c369298
-Revises: 2031a448c1f6
+Revises: 9d6af066fe66
 Create Date: 2026-06-24 16:55:22.357776
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = 'd1f37c369298'
-down_revision: Union[str, Sequence[str], None] = '2031a448c1f6'
+down_revision: Union[str, Sequence[str], None] = '9d6af066fe66'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
