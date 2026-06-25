@@ -166,6 +166,7 @@ class SkillVersionRepository:
         storage_prefix: str,
         entry_file: str,
         uploaded_by_user_id: str | None,
+        content_hash: str = "",
     ) -> SkillVersion:
         sv = SkillVersion(
             skill_id=skill_id,
@@ -176,6 +177,7 @@ class SkillVersionRepository:
             storage_prefix=storage_prefix,
             entry_file=entry_file,
             uploaded_by_user_id=uploaded_by_user_id,
+            content_hash=content_hash,
         )
         self.session.add(sv)
         await self.session.commit()

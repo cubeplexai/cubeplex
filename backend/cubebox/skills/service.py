@@ -27,6 +27,7 @@ from cubebox.skills.frontmatter import (  # noqa: F401
     parse_skill_md,
     peek_skill_name,
 )
+from cubebox.skills.content_hash import compute_skill_version_hash
 from cubebox.skills.storage_paths import org_skill_prefix, skill_object_key
 
 
@@ -408,6 +409,7 @@ class SkillPublishService:
             )
             skill = existing_skill
 
+        content_hash = await compute_skill_version_hash(files)
         sv = await versions.create(
             skill_id=skill.id,
             version=fm.version,
@@ -417,6 +419,7 @@ class SkillPublishService:
             storage_prefix=prefix,
             entry_file="SKILL.md",
             uploaded_by_user_id=actor_user_id,
+            content_hash=content_hash,
         )
         if workspace_id is None:
             await installs.upsert(
