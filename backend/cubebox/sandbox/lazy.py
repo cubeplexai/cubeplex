@@ -157,6 +157,8 @@ class LazySandbox(Sandbox):
         self._op_timeout_seconds = op_timeout_seconds
         self._sandbox: Sandbox | None = None
         self._lock = asyncio.Lock()
+        self._synced_for_this_run = False
+        self._sync_lock = asyncio.Lock()  # independent of _lock; serialises _sync_skills
 
     # ------------------------------------------------------------------
     # Properties
@@ -203,22 +205,36 @@ class LazySandbox(Sandbox):
                 org_id=self._org_id,
                 workspace_id=self._workspace_id,
             )
-            if self._catalog is not None:
-                try:
-                    await _sync_skills(
-                        catalog=self._catalog,
-                        workspace_id=self._workspace_id,
-                        org_id=self._org_id,
-                        sandbox=sandbox,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Skill sync failed for ws {}; sandbox usable without skills",
-                        self._workspace_id,
-                    )
             self._sandbox = sandbox
             logger.info("Lazy sandbox: ready (id={})", self._sandbox.id)
             return self._sandbox
+
+    async def _ensure_skills_synced(self, sandbox: Sandbox) -> None:
+        """Sync skills into sandbox at most once per run.
+
+        Double-check pattern: fast path avoids lock acquisition after first sync.
+        Failure does NOT set the flag so the next tool call retries (F4).
+        """
+        if self._catalog is None or self._synced_for_this_run:
+            return
+        async with self._sync_lock:
+            # Second concurrent call may have already completed the sync.
+            if self._synced_for_this_run:
+                return
+            try:
+                await _sync_skills(
+                    catalog=self._catalog,
+                    workspace_id=self._workspace_id,
+                    org_id=self._org_id,
+                    sandbox=sandbox,
+                )
+            except Exception:
+                logger.exception(
+                    "Skill sync failed for ws {}; sandbox usable without skills",
+                    self._workspace_id,
+                )
+                return  # do NOT set flag — next tool call retries (F4)
+            self._synced_for_this_run = True
 
     async def _ensure_with_retry(self) -> Sandbox:
         """Ensure sandbox, retrying once if the existing one is broken."""
@@ -228,12 +244,15 @@ class LazySandbox(Sandbox):
             # First attempt failed — reset and try creating a fresh one
             async with self._lock:
                 self._sandbox = None
+                self._synced_for_this_run = False  # new sandbox must re-sync (F5)
             logger.warning(
                 "Lazy sandbox: first attempt failed for scope {}/{}, retrying",
                 self._scope_type,
                 self._scope_id,
             )
             sandbox = await self._ensure()
+
+        await self._ensure_skills_synced(sandbox)
 
         # Refresh last_activity so cleanup_expired won't kill an in-use
         # sandbox mid-turn. Throttled inside the manager.
@@ -292,8 +311,10 @@ class LazySandbox(Sandbox):
             # Sandbox may have died — invalidate and retry once
             async with self._lock:
                 self._sandbox = None
+                self._synced_for_this_run = False  # new sandbox must re-sync (F5)
             logger.warning("Lazy sandbox: execute failed, recreating sandbox")
             sandbox = await self._ensure()
+            await self._ensure_skills_synced(sandbox)
             return await sandbox.execute(command, timeout=timeout, envs=envs)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
@@ -303,8 +324,10 @@ class LazySandbox(Sandbox):
         except Exception:
             async with self._lock:
                 self._sandbox = None
+                self._synced_for_this_run = False  # new sandbox must re-sync (F5)
             logger.warning("Lazy sandbox: upload failed, recreating sandbox")
             sandbox = await self._ensure()
+            await self._ensure_skills_synced(sandbox)
             await sandbox.upload(files)
 
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
