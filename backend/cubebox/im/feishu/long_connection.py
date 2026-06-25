@@ -332,6 +332,7 @@ class FeishuLongConnection:
         self._domain = domain
         self._ws_future: asyncio.Future[Any] | None = None
         self._client: Any = None
+        self._thread_loop: asyncio.AbstractEventLoop | None = None
 
     async def connect(self) -> None:
         assert lark is not None
@@ -383,23 +384,32 @@ class FeishuLongConnection:
             new_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(new_loop)
             _ws_client_mod.loop = new_loop
+            self._thread_loop = new_loop
             try:
                 self._client.start()
             finally:
                 with suppress(Exception):
                     new_loop.close()
+                self._thread_loop = None
 
         # ws.Client.start() is blocking — run it in a thread executor.
         self._ws_future = loop.run_in_executor(None, _start_in_thread)
 
     async def disconnect(self) -> None:
-        if self._client is not None:
-            try:
-                stop = getattr(self._client, "stop", None)
-                if callable(stop):
-                    stop()
-            except Exception:
-                logger.opt(exception=True).debug("[Feishu LC] stop() raised")
+        # The lark SDK has no stop() method. client.start() blocks on
+        # loop.run_until_complete(_select()) where _select is
+        # `while True: sleep(3600)`. Break out by stopping the thread's
+        # event loop, which unblocks run_until_complete and lets the
+        # executor thread exit.
+        tl = self._thread_loop
+        if tl is not None:
+            with suppress(Exception):
+                # Close the WS connection first so _receive_message_loop exits.
+                conn = getattr(self._client, "_conn", None)
+                if conn is not None:
+                    tl.call_soon_threadsafe(tl.create_task, conn.close())
+            with suppress(Exception):
+                tl.call_soon_threadsafe(tl.stop)
         if self._ws_future is not None:
             self._ws_future.cancel()
 
