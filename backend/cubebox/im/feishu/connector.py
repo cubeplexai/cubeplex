@@ -71,17 +71,24 @@ def _parse_feishu_attachments(
         return []
     kind = {"audio": "audio", "media": "video"}.get(message_type, "file")
     name = str(content_obj.get("file_name") or message_type)
-    raw_size = content_obj.get("file_size")
-    size_hint: int | None = None
-    if isinstance(raw_size, int):
-        size_hint = raw_size
-    elif isinstance(raw_size, str) and raw_size.isdigit():
-        size_hint = int(raw_size)
     return [
         InboundAttachmentRef(
-            kind=kind, filename=name, mime=None, handle=str(key), size_hint=size_hint
+            kind=kind,
+            filename=name,
+            mime=None,
+            handle=str(key),
+            size_hint=_parse_size_hint(content_obj.get("file_size")),
         )
     ]
+
+
+def _parse_size_hint(raw: Any) -> int | None:
+    """Coerce a Feishu file_size (int or numeric str) to an int hint, else None."""
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.isdigit():
+        return int(raw)
+    return None
 
 
 def _substitute_mentions(
@@ -124,12 +131,14 @@ def _render_post_at(
     elem: dict[str, Any], mention_index: dict[str, dict[str, str]], bot_open_id: str | None
 ) -> str:
     uid = str(elem.get("user_id", "")).strip()
+    if uid == "@_all":
+        return "@all"
     entry = mention_index.get(uid)
     open_id = (entry or {}).get("open_id") or uid
     if bot_open_id and open_id == bot_open_id:
         return ""  # drop the bot's own mention
-    name = (entry or {}).get("name") or str(elem.get("user_name", "")).strip() or "user"
-    return f"@{name}"
+    name = (entry or {}).get("name") or str(elem.get("user_name", "")).strip()
+    return f"@{name}" if name else ""
 
 
 def _resolve_post_payload(content_obj: dict[str, Any]) -> dict[str, Any]:
@@ -140,6 +149,12 @@ def _resolve_post_payload(content_obj: dict[str, Any]) -> dict[str, Any]:
     """
     if isinstance(content_obj.get("content"), list):
         return content_obj
+    # Multi-language send-shape ({"zh_cn": {...}, "en_us": {...}}): prefer a
+    # known locale order so the choice isn't dict-iteration-order roulette.
+    for locale in ("zh_cn", "zh_hk", "zh_tw", "en_us", "ja_jp"):
+        value = content_obj.get(locale)
+        if isinstance(value, dict) and isinstance(value.get("content"), list):
+            return value
     for value in content_obj.values():
         if isinstance(value, dict) and isinstance(value.get("content"), list):
             return value
@@ -194,9 +209,15 @@ def _parse_feishu_post(
                 key = str(elem.get("file_key", "")).strip()
                 if key:
                     name = str(elem.get("file_name") or elem.get("title") or "file")
-                    kind = {"audio": "audio", "video": "video", "media": "video"}.get(tag, "file")
+                    kind = {"audio": "audio", "media": "video", "video": "video"}.get(tag, "file")
                     attachments.append(
-                        InboundAttachmentRef(kind=kind, filename=name, mime=None, handle=key)
+                        InboundAttachmentRef(
+                            kind=kind,
+                            filename=name,
+                            mime=None,
+                            handle=key,
+                            size_hint=_parse_size_hint(elem.get("file_size")),
+                        )
                     )
         line = "".join(parts).strip()
         if line:
