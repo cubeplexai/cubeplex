@@ -9,6 +9,7 @@ without re-uploading anything.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -18,14 +19,18 @@ MANIFEST_SCHEMA_VERSION = 1
 MANIFEST_PATH = f"{SKILLS_ROOT}/manifest.json"
 
 
-class _ResolvedLike(Protocol):
-    name: str
-    version: str
-    skill_version_id: str
-    content_hash: str
+class ResolvedLike(Protocol):
+    @property
+    def name(self) -> str: ...
+    @property
+    def version(self) -> str: ...
+    @property
+    def skill_version_id(self) -> str: ...
+    @property
+    def content_hash(self) -> str: ...
 
 
-def build_manifest(enabled: list[_ResolvedLike]) -> dict[str, Any]:
+def build_manifest(enabled: Sequence[ResolvedLike]) -> dict[str, Any]:
     """Build a fresh manifest reflecting the given enabled set."""
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,

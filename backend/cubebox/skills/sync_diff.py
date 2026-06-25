@@ -5,23 +5,29 @@ Drives ``_sync_skills`` — no I/O, no DB; everything passed in.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from cubebox.skills.sandbox_paths import safe_skill_name
 
 
-class _ResolvedLike(Protocol):
-    name: str
-    version: str
-    skill_version_id: str
-    content_hash: str
-    storage_prefix: str
+class ResolvedLike(Protocol):
+    @property
+    def name(self) -> str: ...
+    @property
+    def version(self) -> str: ...
+    @property
+    def skill_version_id(self) -> str: ...
+    @property
+    def content_hash(self) -> str: ...
+    @property
+    def storage_prefix(self) -> str: ...
 
 
 @dataclass(frozen=True)
 class SkillSyncDiff:
-    to_push: list[_ResolvedLike]
+    to_push: list[ResolvedLike]
     to_remove: list[str]
     to_keep: list[str]
 
@@ -30,7 +36,7 @@ class SkillSyncDiff:
 
 
 def compute_skill_sync_diff(
-    manifest: dict[str, object], desired: list[_ResolvedLike]
+    manifest: dict[str, object], desired: Sequence[ResolvedLike]
 ) -> SkillSyncDiff:
     """Compute push/remove/keep partitions.
 
@@ -50,9 +56,9 @@ def compute_skill_sync_diff(
     manifest_skills = manifest.get("skills", {}) if isinstance(manifest, dict) else {}
     if not isinstance(manifest_skills, dict):
         manifest_skills = {}
-    desired_by_key: dict[str, _ResolvedLike] = {safe_skill_name(s.name): s for s in desired}
+    desired_by_key: dict[str, ResolvedLike] = {safe_skill_name(s.name): s for s in desired}
 
-    to_push: list[_ResolvedLike] = []
+    to_push: list[ResolvedLike] = []
     to_keep: list[str] = []
     for key, s in desired_by_key.items():
         cur = manifest_skills.get(key)

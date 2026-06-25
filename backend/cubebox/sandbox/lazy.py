@@ -12,23 +12,24 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from cubebox.sandbox.base import ExecuteResult, Sandbox, SandboxError
 from cubebox.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
-from cubebox.skills.sync_diff import compute_skill_sync_diff
+from cubebox.skills.sync_diff import ResolvedLike, compute_skill_sync_diff
 from cubebox.skills.sync_manifest import MANIFEST_PATH, build_manifest, parse_manifest
 from cubebox.skills.sync_tar import build_extract_and_remove_cmd, build_tarball
 
 if TYPE_CHECKING:
     from cubebox.sandbox.manager import SandboxManager
-    from cubebox.skills.service import ResolvedSkill, SkillCatalogService
+    from cubebox.skills.service import SkillCatalogService
 
 
 async def _collect_files_for_push(
-    catalog: SkillCatalogService, to_push: list[ResolvedSkill]
+    catalog: SkillCatalogService, to_push: Sequence[ResolvedLike]
 ) -> list[tuple[str, bytes]]:
     """Flatten per-skill file lists into tar-relative ``(rel, bytes)`` pairs.
 
@@ -65,9 +66,15 @@ async def _sync_skills(
     # 1. read manifest. OpenSandbox.download maps "not found" to
     # FileNotFoundError, but other backends (LocalSandbox) and non-404 errors
     # bubble up as SandboxError. Both → treat as "no usable manifest, cold".
+    # Defensive unpack: if a backend returns [] instead of raising on missing
+    # file, the single-element destructure would raise ValueError uncaught.
     try:
-        [(_, raw)] = await sandbox.download([MANIFEST_PATH])
-        manifest = parse_manifest(raw)
+        download_result = await sandbox.download([MANIFEST_PATH])
+        if not download_result:
+            manifest: dict[str, Any] = {"skills": {}}
+        else:
+            _, raw = download_result[0]
+            manifest = parse_manifest(raw)
     except FileNotFoundError:
         manifest = {"skills": {}}
     except SandboxError:
@@ -77,8 +84,7 @@ async def _sync_skills(
     enabled = await catalog.list_enabled_for_workspace(workspace_id, org_id=org_id)
 
     # 3. diff
-    # cast: list is invariant; ResolvedSkill satisfies _ResolvedLike structurally
-    diff = compute_skill_sync_diff(manifest, cast("list[Any]", enabled))
+    diff = compute_skill_sync_diff(manifest, enabled)
     if diff.is_empty():
         return
 
@@ -89,7 +95,7 @@ async def _sync_skills(
     # push", or tar -xzf will fail looking for a file we never sent (F2).
     files: list[tuple[str, bytes]] = []
     if diff.to_push:
-        files = await _collect_files_for_push(catalog, cast("list[ResolvedSkill]", diff.to_push))
+        files = await _collect_files_for_push(catalog, diff.to_push)
     files_uploaded = bool(files)
     if files_uploaded:
         tarball = await asyncio.to_thread(build_tarball, files)
@@ -106,7 +112,7 @@ async def _sync_skills(
         await sandbox.execute(cmd)
 
     # 5. manifest last (so partial failures are healed by next sync)
-    new_manifest = build_manifest(cast("list[Any]", enabled))
+    new_manifest = build_manifest(enabled)
     blob = json.dumps(new_manifest, ensure_ascii=False).encode("utf-8")
     await sandbox.upload([(MANIFEST_PATH, blob)])
 
