@@ -142,7 +142,9 @@ def test_bot_echo_by_open_id_ignored() -> None:
     assert c.parse_inbound(BOT_ECHO_BY_ID) is None
 
 
-def test_non_text_message_ignored() -> None:
+def test_image_message_parsed_as_attachment() -> None:
+    # Media messages are no longer dropped — a DM image becomes an InboundEvent
+    # carrying an image attachment ref (resolved to bytes later by the worker).
     raw = {
         "header": {"event_id": "ev_img", "event_type": "im.message.receive_v1"},
         "event": {
@@ -156,6 +158,58 @@ def test_non_text_message_ignored() -> None:
                 "chat_type": "p2p",
                 "message_type": "image",
                 "content": json.dumps({"image_key": "img_key_1"}),
+            },
+        },
+    }
+    c = FeishuConnector(bot_open_id="ou_bot")
+    ev = c.parse_inbound(raw)
+    assert ev is not None
+    assert ev.text == ""
+    assert len(ev.attachments) == 1
+    assert ev.attachments[0].kind == "image"
+    assert ev.attachments[0].handle == "img_key_1"
+
+
+def test_file_message_parsed_as_attachment() -> None:
+    raw = {
+        "header": {"event_id": "ev_file", "event_type": "im.message.receive_v1"},
+        "event": {
+            "sender": {
+                "sender_id": {"open_id": "ou_user", "union_id": "on_user"},
+                "sender_type": "user",
+            },
+            "message": {
+                "message_id": "om_msg",
+                "chat_id": "oc_dm",
+                "chat_type": "p2p",
+                "message_type": "file",
+                "content": json.dumps({"file_key": "file_key_1", "file_name": "r.pdf"}),
+            },
+        },
+    }
+    c = FeishuConnector(bot_open_id="ou_bot")
+    ev = c.parse_inbound(raw)
+    assert ev is not None
+    assert ev.attachments[0].kind == "file"
+    assert ev.attachments[0].handle == "file_key_1"
+    assert ev.attachments[0].filename == "r.pdf"
+
+
+def test_unsupported_message_type_still_ignored() -> None:
+    # A type outside text + the media set (e.g. sticker) is still dropped.
+    raw = {
+        "header": {"event_id": "ev_st", "event_type": "im.message.receive_v1"},
+        "event": {
+            "sender": {
+                "sender_id": {"open_id": "ou_user", "union_id": "on_user"},
+                "sender_type": "user",
+            },
+            "message": {
+                "message_id": "om_msg",
+                "chat_id": "oc_dm",
+                "chat_type": "p2p",
+                "message_type": "sticker",
+                "content": json.dumps({"file_key": "sticker_1"}),
             },
         },
     }
