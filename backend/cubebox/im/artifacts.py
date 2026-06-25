@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from loguru import logger
 
 from cubebox.config import config
@@ -61,7 +61,11 @@ async def download_artifact_to_tempfile(
     try:
         store = get_objectstore_client()
         data, _ctype = await store.download_file(key)
-    except (ClientError, OSError, ValueError):
+    except (ClientError, BotoCoreError, OSError, ValueError):
+        # Covers missing object (ClientError) AND transient network/endpoint
+        # errors (BotoCoreError: EndpointConnectionError/ConnectTimeoutError) so
+        # a blip degrades to a share-link instead of stranding the artifact. A
+        # key-construction bug (built above, outside the try) still propagates.
         logger.opt(exception=True).warning(
             "[IM artifacts] objectstore download failed for {}", artifact_id
         )
@@ -173,7 +177,17 @@ class IMArtifactDispatcher:
         )
 
     async def _deliver_one(self, artifact_id: str, artifact: dict[str, Any]) -> None:
-        if not await self._claim_send(artifact_id):
+        try:
+            claimed = await self._claim_send(artifact_id)
+        except Exception:
+            # A Redis blip on the claim SET must not silently swallow the
+            # artifact. We didn't win the claim, so don't release it; a replay
+            # retries (the key wasn't set).
+            logger.opt(exception=True).warning(
+                "[IM artifacts] send-claim check failed for {}", artifact_id
+            )
+            return
+        if not claimed:
             return
         delivered = False
         try:
