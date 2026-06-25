@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 from redis.asyncio import Redis
+from sqlalchemy import select
 
+from cubebox.models.skill import SkillVersion
 from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
 from cubebox.seeders import seed_preinstalled_skills
 
@@ -118,3 +120,29 @@ async def test_seed_redis_lock_prevents_concurrent_runs(
     # Now seed should run
     await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
     assert await SkillRepository(db_session).find_by_name(skill_name) is not None
+
+
+@pytest.mark.asyncio
+async def test_seeder_writes_content_hash(tmp_path: Path, db_session, redis_client: Redis) -> None:
+    """Every SkillVersion row created by the seeder must have a non-empty content_hash."""
+    skill_name = _unique_name("hash-check")
+    src = tmp_path / "preinstalled"
+    _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
+
+    await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
+
+    # Fetch all SkillVersion rows that have an empty content_hash.
+    rows = (
+        (await db_session.execute(select(SkillVersion).where(SkillVersion.content_hash == "")))
+        .scalars()
+        .all()
+    )
+    assert rows == [], f"preinstalled skills missing content_hash: {rows}"
+
+    # Also confirm the seeded row itself has a sha256 hash.
+    skills = SkillRepository(db_session)
+    skill = await skills.find_by_name(skill_name)
+    assert skill is not None
+    versions = await SkillVersionRepository(db_session).list_for_skill(skill.id)
+    assert len(versions) == 1
+    assert versions[0].content_hash.startswith("sha256:")

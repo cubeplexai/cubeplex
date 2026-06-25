@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.objectstore import get_objectstore_client
 from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
+from cubebox.skills.content_hash import compute_skill_version_hash
 from cubebox.skills.frontmatter import parse_skill_md
 from cubebox.skills.storage_paths import global_skill_prefix, skill_object_key
 
@@ -107,14 +108,17 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
         # 3. Upload all files to object storage.
         # Always check for presence even when DB row exists: objectstore data can be
         # lost (e.g. Docker restart wipes /tmp/rustfs) while the DB row survives.
+        # Build files dict unconditionally — needed for content_hash even on re-upload.
+        files: dict[str, bytes] = {
+            file_path.relative_to(skill_dir).as_posix(): file_path.read_bytes()
+            for file_path in skill_dir.rglob("*")
+            if file_path.is_file()
+        }
         existing_keys = await store.list_objects(prefix)
         if not existing_keys:
-            for file_path in skill_dir.rglob("*"):
-                if not file_path.is_file():
-                    continue
-                rel = file_path.relative_to(skill_dir).as_posix()
+            for rel, data in files.items():
                 key = skill_object_key(prefix, rel)
-                await store.upload_file(key, file_path.read_bytes())
+                await store.upload_file(key, data)
             if existing is not None:
                 logger.info("Re-uploaded missing objectstore files for {} v{}", fm.name, fm.version)
 
@@ -122,6 +126,7 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
             continue
 
         # 4. Insert SkillVersion row
+        content_hash = await compute_skill_version_hash(files)
         await versions.create(
             skill_id=skill.id,
             version=fm.version,
@@ -131,7 +136,7 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
             storage_prefix=prefix,
             entry_file="SKILL.md",
             uploaded_by_user_id=None,
-            content_hash="",  # filled in by Task 1.5
+            content_hash=content_hash,
         )
         logger.info("Seeded preinstalled skill {} v{}", fm.name, fm.version)
 
