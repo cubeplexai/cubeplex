@@ -400,14 +400,10 @@ class FeishuLongConnection:
         # loop.run_until_complete(_select()) where _select is
         # `while True: sleep(3600)`. Break out by stopping the thread's
         # event loop, which unblocks run_until_complete and lets the
-        # executor thread exit.
+        # executor thread exit. The WS socket is cleaned up when the
+        # loop closes in _start_in_thread's finally block.
         tl = self._thread_loop
         if tl is not None:
-            with suppress(Exception):
-                # Close the WS connection first so _receive_message_loop exits.
-                conn = getattr(self._client, "_conn", None)
-                if conn is not None:
-                    tl.call_soon_threadsafe(tl.create_task, conn.close())
             with suppress(Exception):
                 tl.call_soon_threadsafe(tl.stop)
         if self._ws_future is not None:
