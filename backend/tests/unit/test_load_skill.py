@@ -95,6 +95,32 @@ async def test_load_skill_returns_content(catalog: _FakeCatalog) -> None:
 
 
 @pytest.mark.asyncio
+async def test_load_skill_returns_sandbox_path(catalog: _FakeCatalog) -> None:
+    # The agent must be handed the exact sandbox dir for sibling files instead
+    # of guessing it from the name.
+    tool = create_load_skill_tool(catalog=catalog, workspace_id="ws-1", org_id="org-1")
+    result = await tool.execute(
+        "tc-1", tool.parameters(skill_name="writing"), signal=None, on_update=None
+    )
+    payload = json.loads(result.content[0].text)
+    assert payload["path"] == "/.skills/writing/1.0.0"
+
+
+@pytest.mark.asyncio
+async def test_load_skill_path_normalises_colon_name() -> None:
+    # Registry canonical name <org>:<skill> — the returned path must not carry
+    # the path-hostile colon that broke bundled-file reads.
+    catalog = _FakeCatalog({"acme:designer": ("3.0.0", "Design boldly.")})
+    tool = create_load_skill_tool(catalog=catalog, workspace_id="ws-1", org_id="org-1")
+    result = await tool.execute(
+        "tc-c", tool.parameters(skill_name="acme:designer"), signal=None, on_update=None
+    )
+    payload = json.loads(result.content[0].text)
+    assert payload["path"] == "/.skills/acme__designer/3.0.0"
+    assert ":" not in payload["path"]
+
+
+@pytest.mark.asyncio
 async def test_load_skill_second_skill_returns_content(catalog: _FakeCatalog) -> None:
     tool = create_load_skill_tool(catalog=catalog, workspace_id="ws-1", org_id="org-1")
     args = tool.parameters(skill_name="math")

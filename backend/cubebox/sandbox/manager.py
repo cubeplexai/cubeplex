@@ -9,7 +9,9 @@ Core responsibilities:
 Note: skill sync no longer happens here. After M3 it is handled by
 ``LazySandbox._ensure()`` via the SkillCatalogService — only the skills
 that are enabled for the request's workspace get pushed, and they get
-versioned paths under ``/.skills/<name>/<version>/``.
+versioned paths under ``/.skills/<name>/<version>/`` (see
+``cubebox.skills.sandbox_paths.sandbox_skill_dir`` — a ``:`` in the canonical
+name is normalised to ``__`` so the path is filesystem-safe).
 """
 
 import asyncio
