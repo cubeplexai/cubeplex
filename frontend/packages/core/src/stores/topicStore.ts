@@ -57,6 +57,12 @@ export interface TopicStore {
   ): Promise<{ conversationId: string }>
 }
 
+// In-flight fetchDetail requests keyed by topicId, so concurrent callers
+// (sidebar TopicNode, chat-header badge, member panel, StrictMode double
+// effects) coalesce onto a single GET instead of each firing their own. Only
+// dedups overlapping requests — a later refetch still hits the network.
+const _detailInFlight = new Map<string, Promise<TopicWithParticipants | null>>()
+
 export const useTopicStore = create<TopicStore>((set) => ({
   topics: [],
   topicParticipants: {},
@@ -86,22 +92,30 @@ export const useTopicStore = create<TopicStore>((set) => ({
   },
 
   async fetchDetail(client: ApiClient, topicId: string) {
-    try {
-      const data = await getTopic(client, topicId)
-      set((s) => ({
-        topicParticipants: {
-          ...s.topicParticipants,
-          [topicId]: data.participants,
-        },
-        topicConversations: {
-          ...s.topicConversations,
-          [topicId]: data.conversations,
-        },
-      }))
-      return { topic: data.topic, participants: data.participants }
-    } catch {
-      return null
-    }
+    const existing = _detailInFlight.get(topicId)
+    if (existing) return existing
+    const request = (async (): Promise<TopicWithParticipants | null> => {
+      try {
+        const data = await getTopic(client, topicId)
+        set((s) => ({
+          topicParticipants: {
+            ...s.topicParticipants,
+            [topicId]: data.participants,
+          },
+          topicConversations: {
+            ...s.topicConversations,
+            [topicId]: data.conversations,
+          },
+        }))
+        return { topic: data.topic, participants: data.participants }
+      } catch {
+        return null
+      } finally {
+        _detailInFlight.delete(topicId)
+      }
+    })()
+    _detailInFlight.set(topicId, request)
+    return request
   },
 
   async create(client, body) {
