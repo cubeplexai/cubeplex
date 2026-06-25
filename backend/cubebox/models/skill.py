@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import sqlalchemy as sa
-from sqlalchemy import JSON, Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, Index, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from cubebox.models.mixins import CubeboxBase, TimestampMixin
@@ -60,6 +60,10 @@ class SkillVersion(CubeboxBase, table=True):
     storage_prefix: str = Field(max_length=512)
     entry_file: str = Field(max_length=128, default="SKILL.md")
     uploaded_by_user_id: str | None = Field(default=None, foreign_key="users.id", max_length=20)
+    content_hash: str = Field(
+        max_length=71,
+        sa_column=Column(String(71), nullable=False, server_default=""),
+    )
 
     __table_args__ = (UniqueConstraint("skill_id", "version", name="uq_skill_version"),)
 
