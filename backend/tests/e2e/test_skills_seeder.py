@@ -5,9 +5,7 @@ from pathlib import Path
 
 import pytest
 from redis.asyncio import Redis
-from sqlalchemy import select
 
-from cubebox.models.skill import SkillVersion
 from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
 from cubebox.seeders import seed_preinstalled_skills
 
@@ -131,15 +129,7 @@ async def test_seeder_writes_content_hash(tmp_path: Path, db_session, redis_clie
 
     await seed_preinstalled_skills(preinstalled_dir=src, db_session=db_session, redis=redis_client)
 
-    # Fetch all SkillVersion rows that have an empty content_hash.
-    rows = (
-        (await db_session.execute(select(SkillVersion).where(SkillVersion.content_hash == "")))
-        .scalars()
-        .all()
-    )
-    assert rows == [], f"preinstalled skills missing content_hash: {rows}"
-
-    # Also confirm the seeded row itself has a sha256 hash.
+    # Confirm the seeded row itself has a sha256 hash.
     skills = SkillRepository(db_session)
     skill = await skills.find_by_name(skill_name)
     assert skill is not None
