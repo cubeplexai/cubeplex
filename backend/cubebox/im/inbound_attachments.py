@@ -12,6 +12,7 @@ See docs/dev/specs/2026-06-24-im-file-transfer-design.md.
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ from cubebox.api.exceptions import (
 from cubebox.config import config
 from cubebox.im.types import InboundAttachmentRef
 from cubebox.models.im_connector import IMConnectorAccount, IMRunQueueItem
+from cubebox.parsers.mime import sniff_mime
 from cubebox.repositories import AttachmentRepository
 from cubebox.services.attachments import AttachmentService
 
@@ -53,31 +55,36 @@ def _lark_type(kind: str) -> str:
     return "image" if kind == "image" else "file"
 
 
-# (ext, mime) keyed by leading magic bytes. Feishu image messages carry no
-# filename/mime; sniffing the bytes avoids storing a JPEG/GIF/WebP as image/png.
-def _sniff_image(data: bytes) -> tuple[str, str] | None:
-    if data[:8] == b"\x89PNG\r\n\x1a\n":
-        return ".png", "image/png"
-    if data[:3] == b"\xff\xd8\xff":
-        return ".jpg", "image/jpeg"
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return ".gif", "image/gif"
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return ".webp", "image/webp"
-    return None
+def _normalize_mime(mime: str | None) -> str | None:
+    """Strip charset/parameters so the exact-match allowlist sees a bare mime
+    (Discord/Slack send e.g. ``text/plain; charset=utf-8``)."""
+    if not mime:
+        return None
+    return mime.split(";", 1)[0].strip() or None
 
 
 def _effective_name_mime(ref: InboundAttachmentRef, data: bytes) -> tuple[str, str | None]:
-    """Resolve the filename + mime to store. For image refs, prefer the format
-    sniffed from the actual bytes over a placeholder/declared type."""
-    if ref.kind != "image":
-        return ref.filename, ref.mime
-    sniffed = _sniff_image(data)
-    if sniffed is None:
-        return ref.filename, ref.mime
-    ext, mime = sniffed
-    stem = Path(ref.filename).stem or "image"
-    return f"{stem}{ext}", mime
+    """Resolve the filename + mime to store.
+
+    Images (and any ref without a declared mime) get content-sniffed via the
+    project's ``sniff_mime`` (libmagic), so a Feishu JPEG/GIF/WebP isn't stored
+    as image/png and an extensionless file gets a real type. The declared mime
+    is otherwise normalized (charset stripped).
+    """
+    declared = _normalize_mime(ref.mime)
+    if ref.kind != "image" and declared:
+        return ref.filename, declared
+    sniffed = _normalize_mime(sniff_mime(ref.filename, data))
+    mime = sniffed or declared
+    filename = ref.filename
+    if mime:
+        ext = mimetypes.guess_extension(mime)
+        if ext and Path(filename).suffix.lower() != ext.lower():
+            stem = Path(filename).stem
+            if not stem or stem.startswith("."):
+                stem = ref.kind  # "image" / "file"
+            filename = f"{stem}{ext}"
+    return filename, mime
 
 
 async def _download_feishu(client: Any, ref: InboundAttachmentRef, message_id: str | None) -> bytes:
