@@ -18,6 +18,7 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 
+from cubebox.skills.sandbox_paths import sandbox_skill_dir
 from cubebox.skills.service import SkillCatalogService
 
 
@@ -35,6 +36,10 @@ class LoadSkillOutput(BaseModel):
     content: str
     version: str
     loaded: bool
+    # Absolute directory the skill's sibling files (scripts/, templates/,
+    # references/) are mounted at in the sandbox. Use this path verbatim — do
+    # not construct it from the skill name yourself. Empty when not loaded.
+    path: str = ""
     error: str | None = None
 
     def __str__(self) -> str:
@@ -93,6 +98,7 @@ def create_load_skill_tool(
             content=content,
             version=resolved.version,
             loaded=True,
+            path=sandbox_skill_dir(resolved.name, resolved.version),
             error=None,
         ).model_dump_json()
         return AgentToolResult(content=[TextContent(text=text)])
@@ -100,8 +106,12 @@ def create_load_skill_tool(
     return AgentTool(
         name="load_skill",
         description=(
-            "Read a skill's instructions. Returns SKILL.md content plus version. "
-            "Skills are listed in your system prompt; pass the exact name."
+            "Read a skill's instructions. Returns the SKILL.md content, its "
+            "version, and `path` — the exact sandbox directory holding the "
+            "skill's sibling files (scripts/, templates/, references/). Use that "
+            "`path` verbatim to reference those files; do not build the path from "
+            "the skill name. Skills are listed in your system prompt; pass the "
+            "exact name."
         ),
         parameters=LoadSkillInput,
         execute=_execute,

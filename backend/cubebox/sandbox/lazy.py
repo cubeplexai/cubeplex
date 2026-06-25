@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from cubebox.sandbox.base import ExecuteResult, Sandbox
+from cubebox.skills.sandbox_paths import sandbox_skill_dir
 
 if TYPE_CHECKING:
     from cubebox.sandbox.manager import SandboxManager
@@ -41,7 +42,7 @@ async def _sync_skills(
         per_skill = await catalog.list_files_for_sandbox_sync(
             s.skill_version_id, storage_prefix=s.storage_prefix
         )
-        target_root = f"/.skills/{s.name}/{s.version}/"
+        target_root = sandbox_skill_dir(s.name, s.version) + "/"
         files = [(target_root + rel, data) for rel, data in per_skill]
         if files:
             await sandbox.upload(files)
@@ -242,14 +243,15 @@ class LazySandbox(Sandbox):
 
     async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
         sandbox = await self._ensure_with_retry()
-        try:
-            return await sandbox.download(paths)
-        except Exception:
-            async with self._lock:
-                self._sandbox = None
-            logger.warning("Lazy sandbox: download failed, recreating sandbox")
-            sandbox = await self._ensure()
-            return await sandbox.download(paths)
+        # A download failure is almost always a missing / unreadable path (e.g.
+        # the agent guessed a wrong skill-file path), NOT a dead sandbox.
+        # Recreating the sandbox here would wipe /workspace AND still not
+        # produce the file (a fresh sandbox can't hold work it never ran), so
+        # the recreate is pure data loss. Surface the error to the caller
+        # instead — the file_read tool turns it into a corrigible error the
+        # agent can act on. A genuinely dead sandbox is detected and recreated
+        # by the next execute/upload call.
+        return await sandbox.download(paths)
 
     async def close(self) -> None:
         if self._sandbox is not None:

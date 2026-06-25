@@ -7,7 +7,8 @@ SKILLS_PROMPT_TEMPLATE = """\
 
 {skills_list}
 
-Use `load_skill(name)` to read a skill's instructions. Skills' sibling files
-(scripts, templates) are available at `/.skills/<name>/<version>/` inside the
-sandbox when you actually use them.
+Use `load_skill(name)` to read a skill's instructions. Its result includes a
+`path` field — the exact sandbox directory holding that skill's sibling files
+(scripts, templates, references). Reference those files using that `path`
+verbatim; do not construct the path from the skill name yourself.
 """
