@@ -17,35 +17,40 @@ You can also click **New Chat** in the sidebar to start fresh at any time.
 
 The layout has three main areas:
 
-- **Sidebar** (left) -- lists your recent conversations, workspace navigation (skills, tools, memory, settings), and workspace switcher.
-- **Chat area** (center) -- the message thread and input bar.
-- **Side panel** (right, opens on demand) -- previews artifacts, attachment images, tool call details, or the sandbox browser.
+- **Sidebar** (left) — lists your recent conversations, workspace navigation (skills, tools, memory, settings), and workspace switcher.
+- **Chat area** (center) — the message thread and input bar.
+- **Side panel** (right, opens on demand) — previews artifacts, attachment images, tool call details, or the sandbox browser.
+
+:::info 📸 Screenshot placeholder
+**Capture:** The full conversation view with the three areas labeled — sidebar (left), chat thread (center), and the side panel open on the right showing an artifact preview.
+**Asset:** `/img/conversations/conversation-layout.png`
+:::
 
 The input bar sits at the bottom. It includes:
 
-- **Model preset picker** -- choose which model to use for this message.
-- **Thinking control** -- set the reasoning depth (off, low, medium, high, extra-high).
-- **Attach button** (paperclip icon) -- add files to your message.
-- **Text area** -- type your message. Press **Enter** to send, **Shift+Enter** for a new line.
-- **Send / Stop button** -- sends the message, or stops a running response.
+- **Model preset picker** — choose which model to use for this message.
+- **Thinking control** — set the reasoning depth (Off, Low, Medium, High, Extra High).
+- **Attach button** (paperclip icon) — add files to your message.
+- **Text area** — type your message. Press **Enter** to send, **Shift+Enter** for a new line.
+- **Send / Stop button** — sends the message, or stops a running response.
 
 ## What the agent can do
 
 During a conversation, the agent can:
 
-- **Respond with text** -- standard conversational replies with markdown formatting.
-- **Think** -- show its reasoning process in a collapsible "thinking" block (when thinking is enabled).
-- **Call tools** -- invoke MCP connectors to reach external services (databases, APIs, SaaS products).
-- **Execute code** -- run commands in a sandboxed environment.
-- **Generate artifacts** -- produce downloadable files, live website previews, images, data files, and more. See [Artifacts](./artifacts.md).
-- **Save memories** -- store facts, preferences, or decisions for future conversations. See [Memory overview](../memory/overview.md).
+- **Respond with text** — standard conversational replies with markdown formatting.
+- **Think** — show its reasoning process in a collapsible "thinking" block (when thinking is enabled).
+- **Call tools** — invoke MCP connectors to reach external services (databases, APIs, SaaS products).
+- **Execute code** — run commands in a sandboxed environment.
+- **Generate artifacts** — produce downloadable files, live website previews, images, data files, and more. See [Artifacts](./artifacts.md).
+- **Save memories** — store facts, preferences, or decisions for future conversations. See [Memory overview](../memory/overview.md).
 
 ## Steering and stopping
 
 While the agent is responding, you can:
 
-- **Stop the response** -- click the stop button (square icon) to cancel the current response.
-- **Steer mid-stream** -- type a message while the agent is still responding and press Enter. This sends a "steer" instruction that redirects the agent without waiting for it to finish.
+- **Stop the response** — click the stop button (square icon) to cancel the current response.
+- **Steer mid-stream** — type a message while the agent is still responding and press Enter. This sends a "steer" instruction that redirects the agent without waiting for it to finish.
 
 When the agent needs your input (e.g., a confirmation before proceeding), the input bar locks until you respond to the prompt card that appears in the chat.
 
@@ -53,10 +58,10 @@ When the agent needs your input (e.g., a confirmation before proceeding), the in
 
 Right-click (or click the three-dot menu) on any conversation in the sidebar to access these actions:
 
-- **Rename** -- give the conversation a descriptive title. By default, CubeBox auto-generates a title from your first message.
-- **Pin** -- pinned conversations stick to the top of the sidebar list so you can find them quickly.
-- **Unpin** -- remove a conversation from the pinned section.
-- **Delete** -- soft-deletes the conversation. It disappears from the sidebar but its data (messages, artifacts, cost records) is preserved internally.
+- **Rename** — give the conversation a descriptive title. By default, CubeBox auto-generates a title from your first message.
+- **Pin** — pinned conversations stick to the top of the sidebar list so you can find them quickly.
+- **Unpin** — remove a conversation from the pinned section.
+- **Delete** — soft-deletes the conversation. It disappears from the sidebar but its data (messages, artifacts, cost records) is preserved internally.
 
 ## Auto-generated titles
 

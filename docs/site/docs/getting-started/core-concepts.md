@@ -43,7 +43,7 @@ Skills are packaged capabilities you install to extend what the agent can do. Th
 - **Org-uploaded** — your organization creates and shares custom skills.
 - **Remote registries** — community skills hosted on registries like [skills.sh](https://skills.sh).
 
-You discover and install skills from within a conversation or from the workspace settings page. Once installed, the agent can use a skill whenever it is relevant to the conversation.
+You discover and install skills from within a conversation or from the **Skills** page in the workspace sidebar. Once installed, the agent can use a skill whenever it is relevant to the conversation.
 
 See the [Skills guide](../guides/skills/overview.md) for details.
 
@@ -83,9 +83,9 @@ Model Context Protocol (MCP) connectors let the agent call external APIs — dat
 
 **Authentication modes:**
 
-- **API key** — you provide a static key.
+- **Static credential** — you provide a fixed secret (an API key or bearer token), sent as an `Authorization` header, a custom header, or a query parameter depending on the connector.
 - **OAuth** — the connector walks you through an OAuth flow.
-- **Bearer token** — a pre-issued token.
+- **None** — the connector needs no credential.
 
 See the [MCP Tools guide](../guides/mcp/overview.md) for details.
 

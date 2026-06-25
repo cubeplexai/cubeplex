@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
             'guides/conversations/attachments',
             'guides/conversations/artifacts',
             'guides/conversations/model-selection',
+            'guides/conversations/topics',
           ],
         },
         {
@@ -60,6 +61,18 @@ const sidebars: SidebarsConfig = {
           items: [
             'guides/automation/scheduled-tasks',
             'guides/automation/event-triggers',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'IM Connectors',
+          items: [
+            'guides/im/overview',
+            'guides/im/feishu',
+            'guides/im/slack',
+            'guides/im/dingtalk',
+            'guides/im/teams',
+            'guides/im/discord',
           ],
         },
       ],

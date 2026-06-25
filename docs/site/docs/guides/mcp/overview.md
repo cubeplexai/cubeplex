@@ -29,13 +29,18 @@ CubeBox ships with templates for a growing list of services:
 | **Infrastructure** | Cloudflare (API, Workers, Observability, Logs, Radar) |
 | **Knowledge** | Microsoft Learn |
 
-Your admin may have additional connectors available. Check the connector catalog in your workspace to see what is installed.
+Your admin may have additional connectors available. Open the **MCP** page in your workspace sidebar to see what is installed and what is available to add.
+
+:::info 📸 Screenshot placeholder
+**Capture:** The workspace **MCP** page showing the **Installed** and **Available** connector sections, with at least one connector in each (one ready, one showing a "Connect" action).
+**Asset:** `/img/mcp/workspace-mcp-page.png`
+:::
 
 ## Authentication modes
 
 Different connectors use different authentication methods:
 
-- **OAuth** — You authorize CubeBox to access the service on your behalf. The connector walks you through the vendor's consent screen. Some connectors (Notion, Linear, Asana, Sentry, Intercom, Cloudflare) handle this automatically; others (GitHub, Slack, Google Workspace) require admin pre-configuration.
+- **OAuth** — You authorize CubeBox to access the service on your behalf. The connector walks you through the vendor's consent screen. Most connectors (Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare) handle this automatically; a few (GitHub, Slack, Google Workspace) require your administrator to pre-register an OAuth app first.
 - **API key** — You or your admin provides a static API key. Common for search connectors like Tavily and Exa.
 - **Bearer token** — A pre-issued token, similar to an API key. Used by connectors that issue long-lived access tokens.
 

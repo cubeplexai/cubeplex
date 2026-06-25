@@ -5,7 +5,7 @@ title: Model Selection
 
 # Model Selection
 
-CubeBox lets you choose which AI model powers each message. Different models have different strengths -- cost, speed, reasoning depth, vision support, and more. You pick the model from the input bar before sending a message.
+CubeBox lets you choose which AI model powers each message. Different models have different strengths — cost, speed, reasoning depth, vision support, and more. You pick the model from the input bar before sending a message.
 
 ## Presets
 
@@ -19,7 +19,7 @@ Each workspace has a **default preset** that is automatically selected when you 
 2. Click the dropdown and choose a different preset.
 3. Your next message (and all subsequent messages in this conversation) will use the new preset, until you switch again.
 
-The preset choice is **sticky per workspace** -- if you switch to "Claude Opus," it stays selected for your next conversation in that workspace too, until you change it.
+The preset choice is **sticky per workspace** — if you switch to "Claude Opus," it stays selected for your next conversation in that workspace too, until you change it. Each workspace remembers its own choice independently in your browser, so switching workspaces does not carry the selection over.
 
 ### Default badge
 
@@ -27,7 +27,7 @@ The preset marked as the workspace default shows a small "Default" badge in the 
 
 ## Thinking (extended reasoning)
 
-Some models support **extended thinking** -- a mode where the agent reasons step-by-step before producing its final answer. CubeBox exposes this as a separate control next to the preset picker.
+Some models support **extended thinking** — a mode where the agent reasons step-by-step before producing its final answer. CubeBox exposes this as a separate **Effort** control (a "Faster → Smarter" slider) next to the preset picker.
 
 ### Thinking levels
 
@@ -37,7 +37,7 @@ Some models support **extended thinking** -- a mode where the agent reasons step
 | **Low** | Brief internal reasoning. Fast, low cost. |
 | **Medium** | Moderate reasoning depth. Good default for most tasks. |
 | **High** | Deep reasoning. Better for complex analytical or coding tasks. |
-| **Extra-high** | Maximum reasoning depth. Use for the hardest problems. |
+| **Extra High** | Maximum reasoning depth. Use for the hardest problems. |
 
 Higher thinking levels consume more tokens and take longer, but produce more thorough analysis for complex questions. For simple questions ("What is the capital of France?"), thinking adds cost without benefit.
 
@@ -53,13 +53,13 @@ When thinking is enabled, the agent's response includes a collapsible **Thinking
 
 ## Model failover
 
-If the selected model is temporarily unavailable (provider outage, rate limit, network issue), CubeBox can automatically fail over to a backup model in the same preset's fallback chain. When this happens, a small banner appears in the chat:
+If the selected model is temporarily unavailable (provider outage, rate limit, network issue), CubeBox can automatically fail over to a backup model in the same preset's fallback chain. When this happens, a small banner appears in the chat naming the model it switched from and the one it switched to:
 
-> Switched from claude-sonnet-4-20250514 to claude-haiku-4-20250414
+> Switched from `<provider>/<model>` to `<fallback-provider>/<fallback-model>`
 
-Expand the banner to see the reason for the failover. The conversation continues on the backup model until the next message, at which point CubeBox tries the primary model again.
+Click the banner to expand it and see the reason for the failover. The conversation continues on the backup model until the next message, at which point CubeBox tries the primary model again.
 
-If the entire fallback chain is exhausted (all models in the preset are unavailable), you see a "Failover exhausted" message and the run stops. Wait and try again, or switch to a different preset.
+If the entire fallback chain is exhausted (all models in the preset are unavailable), the banner instead reads **"Failover exhausted on `<provider>/<model>`"** and the run stops. Wait and try again, or switch to a different preset.
 
 ## Which model to choose
 
@@ -69,7 +69,7 @@ There is no single best model. Here are practical guidelines:
 |---|---|
 | Quick questions, summarization, formatting | A fast, cost-efficient model (e.g., Haiku, GPT-4o-mini). Thinking off. |
 | Coding, debugging, code review | A capable model with thinking on medium or high. |
-| Complex analysis, multi-step reasoning | A top-tier model with thinking on high or extra-high. |
+| Complex analysis, multi-step reasoning | A top-tier model with thinking on high or extra high. |
 | Image understanding, screenshot analysis | A model with **vision** support. Check with your admin which presets support vision. |
 | Long documents, large context | A model with a large context window. |
 

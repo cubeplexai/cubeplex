@@ -39,13 +39,13 @@ The agent may call both the GitHub and Linear connectors, then synthesize the re
 
 ## Progressive disclosure
 
-When your workspace has many connectors installed, CubeBox uses **progressive disclosure** to keep the agent efficient. Instead of loading every tool into the agent's context at once, the system:
+When your workspace has many connectors installed, CubeBox uses **progressive disclosure** to keep the agent efficient. When the combined tool definitions would take up too much of the model's context window, the system stops loading every tool upfront and instead:
 
-1. Loads the most commonly used tools upfront.
-2. Defers less-used tools into named groups.
-3. Activates deferred tools on demand when the agent determines they are relevant.
+1. Groups each connector's tools into a named, deferred group rather than loading them all into the agent's context.
+2. Shows the agent a lightweight summary of what each group can do.
+3. Loads a group's full tools on demand, only when the agent decides that connector is relevant to your request.
 
-This happens transparently. You do not need to configure anything — it is an automatic optimization that keeps responses fast even when dozens of connectors are installed.
+This kicks in automatically once enough connectors are installed (it needs at least two before it activates) and the tools grow large relative to the context window. You do not need to configure anything — it is an automatic optimization that keeps responses fast even when dozens of connectors are installed.
 
 ## What you can ask the agent to do
 
@@ -79,7 +79,7 @@ Here are common patterns for each connector category:
 
 **The agent does not use a tool I expected:**
 
-- Confirm the connector is installed: check workspace **Settings > MCP Connectors**.
+- Confirm the connector is installed: open the workspace **MCP** page.
 - Make sure the connector is not disabled for your workspace.
 - Try being more explicit in your request (e.g., "Use the GitHub connector to...").
 
@@ -91,7 +91,7 @@ Here are common patterns for each connector category:
 
 **I do not see any tool calls:**
 
-- Your workspace may not have any connectors installed. Ask your workspace admin to set up connectors from the catalog.
+- Your workspace may not have any connectors installed. Open the workspace **MCP** page to check, or ask your workspace admin to set up connectors from the catalog.
 - The model you selected may not support tool use. Switch to a model that does (most modern models support tools).
 
 ## Next steps

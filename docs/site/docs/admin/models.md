@@ -9,6 +9,11 @@ CubeBox connects to LLM providers through API keys you configure at the organiza
 
 All model management happens at **Admin > Models** (`/admin/models`).
 
+:::info 📸 Screenshot placeholder
+**Capture:** The Admin > Models page showing the list of configured providers with their logos and connection/test status, and the models each provider exposes.
+**Asset:** `/img/admin/models-providers.png`
+:::
+
 ## Providers
 
 A provider represents an LLM API endpoint. Each provider has:
@@ -55,7 +60,7 @@ You can configure the following for each model:
 |---|---|
 | **Reasoning mode** | How the model handles extended thinking. Options vary by model: binary on/off, budget (token budget), effort level, or enum selection. |
 | **Modalities** | Input/output capabilities — text, vision, tool use, etc. |
-| **Cost rates** | Input and output token costs, used for the [Cost Tracking](./cost-tracking.md) dashboard. |
+| **Cost rates** | Per-token costs — input, output, and (where applicable) cache read / cache write — used for the [Cost Tracking](./cost-tracking.md) dashboard. |
 
 ### How models reach workspaces
 

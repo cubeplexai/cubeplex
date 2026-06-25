@@ -9,8 +9,8 @@ This guide walks you through adding MCP connectors to your workspace. You need *
 
 ## Browse the catalog
 
-1. Go to **Settings > MCP Connectors** (for workspace-level installs) or **Admin > MCP** (for org-wide installs).
-2. You will see the connector catalog — a list of available templates with their names, descriptions, and authentication requirements.
+1. Open the **MCP** page from your workspace sidebar (for workspace-level installs). Org admins install org-wide connectors from **Admin > MCP Connectors** (`/admin/mcp`).
+2. You will see the connector catalog. The page splits into an **Installed** section (connectors already set up for your workspace) and an **Available** section (connectors you can add), each showing names, descriptions, and authentication requirements.
 
 Each catalog entry shows its current status for your workspace:
 
@@ -40,11 +40,16 @@ For connectors that use OAuth (like GitHub, Notion, Slack, or Linear):
 
 1. Click the connector in the catalog.
 2. Select **OAuth** as the authentication method.
-3. Click **Authorize**. You will be redirected to the service's consent screen.
+3. Click **Connect with &lt;provider&gt;**. A new window opens with the service's consent screen.
 4. Grant the requested permissions.
-5. You are redirected back to CubeBox. The connector is now installed and active.
+5. The window returns you to CubeBox. The connector is now connected and active.
 
-**What happens behind the scenes:** CubeBox uses PKCE (Proof Key for Code Exchange) for all OAuth flows. For services that support Dynamic Client Registration (Notion, Linear, Asana, Sentry, Intercom, Cloudflare), no pre-configuration is needed. For services that require a pre-registered OAuth app (GitHub, Slack, Google Workspace), your system administrator must configure the OAuth client credentials before the connector appears in the catalog.
+**What happens behind the scenes:** CubeBox uses PKCE (Proof Key for Code Exchange) for all OAuth flows. For services that support Dynamic Client Registration — DCR (Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare), no pre-configuration is needed: CubeBox registers its own OAuth client with the service automatically the first time someone installs the connector. For services that do not support DCR (GitHub, Slack, Google Workspace), your system administrator must register an OAuth app in the vendor's developer console and load its client credentials into CubeBox (via environment variables and the catalog seeder) before the connector can complete an OAuth flow.
+
+:::info 📸 Screenshot placeholder
+**Capture:** A connector card mid-OAuth, showing the **Connect with &lt;provider&gt;** button and the "Waiting for authorization in the new window…" state.
+**Asset:** `/img/mcp/oauth-connect.png`
+:::
 
 ### User-scoped OAuth
 
@@ -52,22 +57,22 @@ Some connectors may be configured so that each user authorizes their own account
 
 ### Reconnecting expired tokens
 
-OAuth tokens can expire. If a connector loses its authorization, you will see a **Reconnect** prompt the next time the agent tries to use that connector. Click it to re-authorize.
+OAuth tokens can expire. If a connector loses its authorization, its card on the **MCP** page shows a **Needs your credential** state with a **Re-authenticate** action. Click it to re-run the OAuth flow and restore access.
 
 ## Org-wide vs. workspace installs
 
 | Scope | Who can install | Visible in |
 |---|---|---|
-| **Org-wide** | Org admin (via **Admin > MCP**) | All workspaces in the organization |
-| **Workspace** | Workspace admin (via workspace **Settings > MCP Connectors**) | That workspace only |
+| **Org-wide** | Org admin (via **Admin > MCP Connectors**) | All workspaces in the organization |
+| **Workspace** | Workspace admin (via the workspace **MCP** page) | That workspace only |
 
 - Org-wide installs are useful for connectors the whole team needs (e.g., a shared GitHub integration).
 - Workspace installs are useful for project-specific tools or when different workspaces need different credentials.
 
 ## Disable or remove a connector
 
-- **Disable an org-wide connector** for your workspace: go to workspace **Settings > MCP Connectors**, find the connector, and toggle it off. The connector remains installed org-wide but is hidden from your workspace.
-- **Remove a workspace connector**: go to workspace **Settings > MCP Connectors**, find the connector, and click **Remove**. This deletes the install and its credentials.
+- **Disable an org-wide connector** for your workspace: open the workspace **MCP** page, find the connector, and turn it off. The connector remains installed org-wide but is hidden from your workspace.
+- **Remove a workspace connector**: open the workspace **MCP** page, find the connector, and choose **Uninstall**. This deletes the install and its credentials.
 
 ## Verifying the install
 
