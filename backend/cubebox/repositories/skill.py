@@ -166,7 +166,7 @@ class SkillVersionRepository:
         storage_prefix: str,
         entry_file: str,
         uploaded_by_user_id: str | None,
-        content_hash: str = "",
+        content_hash: str,
     ) -> SkillVersion:
         sv = SkillVersion(
             skill_id=skill_id,

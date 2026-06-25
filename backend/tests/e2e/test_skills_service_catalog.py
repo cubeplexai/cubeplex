@@ -85,6 +85,7 @@ async def test_list_enabled_for_workspace(tmp_path, db_session) -> None:
         storage_prefix=prefix,
         entry_file="SKILL.md",
         uploaded_by_user_id=None,
+        content_hash="",
     )
     install = await installs.upsert(
         org_id=org_id,
@@ -125,6 +126,7 @@ async def test_fetch_skill_md_returns_content(tmp_path, db_session) -> None:
         storage_prefix=prefix,
         entry_file="SKILL.md",
         uploaded_by_user_id=None,
+        content_hash="",
     )
 
     catalog = SkillCatalogService(
@@ -163,6 +165,7 @@ async def test_find_enabled_by_name(tmp_path, db_session) -> None:
         storage_prefix=prefix,
         entry_file="SKILL.md",
         uploaded_by_user_id=None,
+        content_hash="",
     )
     install = await installs.upsert(
         org_id=org_id,

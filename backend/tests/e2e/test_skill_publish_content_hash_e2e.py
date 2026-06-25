@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.skill import SkillVersion
+from cubebox.models.skill import OrgSkillInstall, Skill, SkillVersion
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.service import SkillPublishService
 
@@ -80,6 +80,18 @@ async def test_publish_writes_content_hash(tmp_path, db_session: AsyncSession) -
     assert row.content_hash.startswith("sha256:")
     assert len(row.content_hash) == len("sha256:") + 64
 
-    # cleanup
+    # cleanup — delete in FK order: OrgSkillInstall → SkillVersion → Skill
+    install_row = (
+        await db_session.execute(
+            select(OrgSkillInstall).where(OrgSkillInstall.skill_id == sv.skill_id)
+        )
+    ).scalar_one_or_none()
+    if install_row is not None:
+        await db_session.delete(install_row)
     await db_session.delete(row)
+    skill_row = (
+        await db_session.execute(select(Skill).where(Skill.id == sv.skill_id))
+    ).scalar_one_or_none()
+    if skill_row is not None:
+        await db_session.delete(skill_row)
     await db_session.commit()

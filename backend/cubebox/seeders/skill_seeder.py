@@ -131,6 +131,7 @@ async def _do_seed(preinstalled_dir: Path, db_session: AsyncSession) -> None:
             storage_prefix=prefix,
             entry_file="SKILL.md",
             uploaded_by_user_id=None,
+            content_hash="",  # filled in by Task 1.5
         )
         logger.info("Seeded preinstalled skill {} v{}", fm.name, fm.version)
 
