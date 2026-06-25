@@ -41,6 +41,7 @@
 | `backend/tests/unit/test_skill_sync_diff.py` | diff 算法单测 |
 | `backend/tests/unit/test_skill_sync_tar.py` | tar 打包单测 |
 | `backend/tests/unit/test_skill_sync_manifest.py` | manifest 序列化单测 |
+| `backend/tests/unit/test_lazy_sandbox_sync_lifecycle.py` | LazySandbox 的 sync flag / 锁 / sandbox 重建 reset 不变量（F3/F4/F5） |
 | `backend/tests/e2e/test_skills_sync_cold_start_e2e.py` | cold start → 全量同步 |
 | `backend/tests/e2e/test_skills_sync_manifest_hit_e2e.py` | manifest 命中 → 0 push |
 | `backend/tests/e2e/test_skills_sync_diff_e2e.py` | enabled 集变化 → 只动差集 |
@@ -53,7 +54,7 @@
 |---|---|
 | `backend/cubebox/models/skill.py` | `SkillVersion` 加 `content_hash: str` 列 |
 | `backend/cubebox/skills/sandbox_paths.py` | `SKILLS_ROOT` 改值；export 新 helper `safe_skill_name`；docstring 更新 |
-| `backend/cubebox/skills/service.py` | `SkillPublishService._publish_from_files` 算 hash 写入 |
+| `backend/cubebox/skills/service.py` | `SkillPublishService._publish_from_files` 算 hash 写入；`ResolvedSkill` 加 `content_hash: str` 字段；`SkillCatalogService.list_enabled_for_workspace` 把 `SkillVersion.content_hash` 透传到 ResolvedSkill 构造（F1） |
 | `backend/cubebox/seeders/skill_seeder.py` | seed 时算 hash 写入 |
 | `backend/cubebox/skills/sources/clawhub.py` 等 | import 时算 hash（依据 sources 目录下实际文件枚举） |
 | `backend/cubebox/sandbox/base.py` | 删 `has_synced` / `mark_synced` / `_synced_skill_version_ids` |
@@ -603,6 +604,52 @@ git commit -m "feat(skills): all source adapters write content_hash on import"
 
 ---
 
+## Task 1.6b: 扩展 `ResolvedSkill` + `list_enabled_for_workspace` 透传 content_hash
+
+**Files:**
+- Modify: `backend/cubebox/skills/service.py:33-67`（`ResolvedSkill` dataclass + `list_enabled_for_workspace`）
+
+**Interfaces:**
+- Consumes: `SkillVersion.content_hash`（Task 1.1）
+- Produces: `ResolvedSkill.content_hash: str` 字段；`list_enabled_for_workspace` 返回的每个 ResolvedSkill 都带 hash
+
+**关键 finding**：`compute_skill_sync_diff` 和 `build_manifest` 都读 `s.content_hash`，但 ResolvedSkill 今天没这字段（service.py:33-44）。不修这个 PR2 全线 AttributeError。
+
+- [ ] **Step 1: ResolvedSkill 加字段**
+
+打开 `backend/cubebox/skills/service.py`，找到第 33 行的 `@dataclass(frozen=True) class ResolvedSkill:` 块，在最后一个字段后追加：
+
+```python
+    content_hash: str
+```
+
+- [ ] **Step 2: list_enabled_for_workspace SELECT 已 join SkillVersion，构造时透传**
+
+`list_enabled_for_workspace` 已经 `select(Skill, SkillVersion).join(SkillVersion, ...)`，构造 ResolvedSkill 的地方（搜 `ResolvedSkill(`）把 `content_hash=sv.content_hash` 加进 kwargs。
+
+- [ ] **Step 3: mypy 验证 ResolvedSkill 不再缺字段**
+
+```bash
+cd backend && uv run mypy cubebox/skills/service.py 2>&1 | tail -3
+```
+
+- [ ] **Step 4: 跑现有 catalog e2e 确认不挂**
+
+```bash
+cd backend && uv run pytest tests/e2e/test_skills_service_catalog.py -v --no-cov 2>&1 | tee ../tmp/task-1.6b.log | tail -10
+```
+
+期望：PASS。
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add backend/cubebox/skills/service.py
+git commit -m "feat(skills): ResolvedSkill carries content_hash from SkillVersion"
+```
+
+---
+
 ## Task 1.7: backfill 脚本
 
 **Files:**
@@ -648,6 +695,9 @@ async def _files_for_version(cache: SkillCache, sv: SkillVersion) -> dict[str, b
 
 
 async def main() -> None:
+    from cubebox.config import get_settings   # project settings expose skill_cache_root
+    from pathlib import Path
+
     engine = get_async_engine()
     async with AsyncSession(engine) as session:
         rows = (
@@ -657,7 +707,12 @@ async def main() -> None:
         ).scalars().all()
         logger.info("backfill: {} SkillVersion row(s) need content_hash", len(rows))
 
-        cache = SkillCache.from_env()  # if the project exposes this; else construct
+        settings = get_settings()
+        # SkillCache 构造签名是 SkillCache(cache_root: Path)；项目里没有 from_env。
+        # 沿用 SandboxManager 创建 SkillCache 时的路径即可（通常是 settings 上一个
+        # skill_cache_root 字段或者 tmp 子目录）。如果不知道，看 backend/cubebox/
+        # streams/run_manager.py 是怎么实例化 SkillCache 的，照搬同一路径。
+        cache = SkillCache(Path(settings.skills.cache_root))
         backfilled = 0
         for sv in rows:
             try:
@@ -680,7 +735,7 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-**注意**：`SkillCache.from_env()` 是占位 —— 替换为项目里实际的 SkillCache 构造方式（参考 `lazy.py` 或 `service.py` 怎么拿 cache）。如果是经过 DI，直接 `from cubebox.skills.cache import SkillCache; cache = SkillCache(...)`。
+**注意**：`SkillCache` 真实签名是 `SkillCache(cache_root: Path)`（`backend/cubebox/skills/cache.py:20`），没有 `from_env` 工厂方法。脚本里要从 settings 取 cache root 然后显式 `SkillCache(Path(...))`。如果 settings 路径名跟例子里的 `settings.skills.cache_root` 不一样，搜 `SkillCache(` 看 `backend/cubebox/streams/run_manager.py` 怎么实例化的，照搬。
 
 - [ ] **Step 2: 跑一次 dry-run（在 dev DB 上验证语法 + 路径）**
 
@@ -1053,14 +1108,24 @@ def test_mixed_case():
     assert d.to_keep == ["a"]
 
 
-def test_empty_content_hash_on_existing_entry_treated_as_push():
-    """Legacy SkillVersion rows with content_hash == "" should always re-push."""
+def test_legacy_empty_hash_no_perpetual_repush():
+    """Legacy SkillVersion rows with content_hash == "" must NOT trigger
+    re-push every sync. Once pushed (manifest stores ""), subsequent syncs
+    must hit hot path. Otherwise backfill-less deployments churn forever."""
     desired = [_FakeResolved("docx", "1.0.0", "skv_a", "")]
     m = _manifest({
         "docx": {"skill_version_id": "skv_a", "version": "1.0.0", "content_hash": ""}
     })
     d = compute_skill_sync_diff(m, desired)
-    # Conservative: empty hash on desired forces push every time
+    # version matches + desired has no hash to verify against → hot path
+    assert d.is_empty()
+
+
+def test_legacy_empty_hash_pushes_on_cold_start():
+    """First sync after deploy: manifest absent → push even if desired hash
+    is empty. Only the steady-state (manifest matches) should hot-path."""
+    desired = [_FakeResolved("docx", "1.0.0", "skv_a", "")]
+    d = compute_skill_sync_diff(_manifest({}), desired)
     assert [s.name for s in d.to_push] == ["docx"]
 ```
 
@@ -1116,8 +1181,15 @@ def compute_skill_sync_diff(
     A desired entry is in ``to_push`` if:
       - manifest has no entry for its ``safe_skill_name``, OR
       - manifest entry's version differs, OR
-      - manifest entry's content_hash differs, OR
-      - desired's content_hash is empty (conservative legacy fallback)
+      - both sides carry a content_hash AND they differ
+
+    ``desired.content_hash == ""`` (legacy SkillVersion row pre-backfill)
+    disables the secondary hash check — we trust version alone. Otherwise
+    every sync would re-push the same files since manifest also stores ``""``
+    and the next round would diff "" vs "" and... wait, no, "" == "" would
+    match, BUT if we forced push on empty-desired, manifest writes back ""
+    AND next round forces again. The fix: don't force when desired is empty;
+    let version comparison decide. (F7 in code review.)
 
     A manifest entry is in ``to_remove`` if its key is not in desired's
     ``safe_skill_name`` set.
@@ -1131,16 +1203,19 @@ def compute_skill_sync_diff(
     to_keep: list[str] = []
     for key, s in desired_by_key.items():
         cur = manifest_skills.get(key)
-        if (
-            cur is None
-            or not isinstance(cur, dict)
-            or cur.get("version") != s.version
-            or cur.get("content_hash") != s.content_hash
-            or s.content_hash == ""
-        ):
+        if cur is None or not isinstance(cur, dict):
             to_push.append(s)
-        else:
-            to_keep.append(key)
+            continue
+        if cur.get("version") != s.version:
+            to_push.append(s)
+            continue
+        # Only do the hash check if BOTH sides have a non-empty hash.
+        # Empty on either side → trust version equality, fall through to keep.
+        if s.content_hash and cur.get("content_hash") and \
+                s.content_hash != cur.get("content_hash"):
+            to_push.append(s)
+            continue
+        to_keep.append(key)
 
     to_remove = [key for key in manifest_skills if key not in desired_by_key]
 
@@ -1234,19 +1309,40 @@ def test_tar_no_leading_slash():
     assert all(not n.startswith("/") for n in names)
 
 
-def test_cmd_push_only():
+def test_cmd_push_only_no_repush_no_remove():
     cmd = build_extract_and_remove_cmd(
-        skills_root="/workspace/.skills", has_push=True, to_remove=[]
+        skills_root="/workspace/.skills",
+        has_push=True,
+        to_repush_names=[],
+        to_remove=[],
     )
     assert "mkdir -p '/workspace/.skills'" in cmd
     assert "tar -xzf /tmp/skills_delta.tgz -C '/workspace/.skills'" in cmd
     assert "rm -f /tmp/skills_delta.tgz" in cmd
-    assert "rm -rf" not in cmd
+    assert "rm -rf '/workspace/.skills/" not in cmd
+
+
+def test_cmd_push_with_repush_wipes_old_version_dirs():
+    """Bump version case: when pushing skill X, wipe /workspace/.skills/X/
+    BEFORE extract so old version dirs vanish (F9)."""
+    cmd = build_extract_and_remove_cmd(
+        skills_root="/workspace/.skills",
+        has_push=True,
+        to_repush_names=["docx"],
+        to_remove=[],
+    )
+    # rm -rf must come BEFORE tar -xzf, otherwise we'd wipe what we just extracted
+    rm_idx = cmd.index("rm -rf '/workspace/.skills/docx'")
+    tar_idx = cmd.index("tar -xzf")
+    assert rm_idx < tar_idx
 
 
 def test_cmd_remove_only():
     cmd = build_extract_and_remove_cmd(
-        skills_root="/workspace/.skills", has_push=False, to_remove=["docx", "ppt"]
+        skills_root="/workspace/.skills",
+        has_push=False,
+        to_repush_names=[],
+        to_remove=["docx", "ppt"],
     )
     assert "mkdir -p" not in cmd
     assert "rm -rf '/workspace/.skills/docx'" in cmd
@@ -1255,7 +1351,10 @@ def test_cmd_remove_only():
 
 def test_cmd_push_and_remove():
     cmd = build_extract_and_remove_cmd(
-        skills_root="/workspace/.skills", has_push=True, to_remove=["docx"]
+        skills_root="/workspace/.skills",
+        has_push=True,
+        to_repush_names=[],
+        to_remove=["docx"],
     )
     parts = cmd.split(" && ")
     # extract block first, then removes
@@ -1265,14 +1364,20 @@ def test_cmd_push_and_remove():
 
 def test_cmd_nothing_returns_empty_string():
     cmd = build_extract_and_remove_cmd(
-        skills_root="/workspace/.skills", has_push=False, to_remove=[]
+        skills_root="/workspace/.skills",
+        has_push=False,
+        to_repush_names=[],
+        to_remove=[],
     )
     assert cmd == ""
 
 
 def test_cmd_handles_special_chars_in_skill_name():
     cmd = build_extract_and_remove_cmd(
-        skills_root="/workspace/.skills", has_push=False, to_remove=["a b'c"]
+        skills_root="/workspace/.skills",
+        has_push=False,
+        to_repush_names=[],
+        to_remove=["a b'c"],
     )
     # shlex.quote should escape; raw single quote must not appear inside the quoted name
     assert "a b'c" not in cmd.split("rm -rf ", 1)[1].split(" ")[0]
@@ -1321,11 +1426,21 @@ def build_tarball(files: list[tuple[str, bytes]]) -> bytes:
 
 
 def build_extract_and_remove_cmd(
-    *, skills_root: str, has_push: bool, to_remove: list[str]
+    *,
+    skills_root: str,
+    has_push: bool,
+    to_repush_names: list[str],
+    to_remove: list[str],
 ) -> str:
     """Build a single shell command chain that:
-      1. extracts /tmp/skills_delta.tgz into skills_root (only if has_push)
-      2. removes any sub-dirs listed in ``to_remove``
+      1. mkdir -p skills_root
+      2. rm -rf each /skills_root/<name> in to_repush_names (wipes any
+         leftover old-version dirs before extract — F9)
+      3. extracts /tmp/skills_delta.tgz into skills_root (only if has_push)
+      4. removes any sub-dirs listed in to_remove
+
+    Order matters: repush-wipe BEFORE extract, otherwise we'd delete what we
+    just put down.
 
     Returns empty string when there's nothing to do.
 
@@ -1335,10 +1450,16 @@ def build_extract_and_remove_cmd(
     parts: list[str] = []
     quoted_root = shlex.quote(skills_root)
     if has_push:
+        prelude = f"mkdir -p {quoted_root}"
+        if to_repush_names:
+            wipe = " ".join(
+                shlex.quote(f"{skills_root}/{n}") for n in to_repush_names
+            )
+            prelude += f" && rm -rf {wipe}"
         parts.append(
-            f"mkdir -p {quoted_root} && "
-            f"tar -xzf /tmp/skills_delta.tgz -C {quoted_root} && "
-            f"rm -f /tmp/skills_delta.tgz"
+            prelude
+            + f" && tar -xzf /tmp/skills_delta.tgz -C {quoted_root}"
+            + " && rm -f /tmp/skills_delta.tgz"
         )
     for name in to_remove:
         target = shlex.quote(f"{skills_root}/{name}")
@@ -1551,6 +1672,7 @@ git commit -m "feat(skills): manifest schema + parser/builder for /workspace/.sk
 打开 `backend/cubebox/sandbox/lazy.py`，找到第 19-51 行的 `import` 和旧 `_sync_skills`。替换为：
 
 ```python
+from cubebox.sandbox.base import SandboxError
 from cubebox.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
 from cubebox.skills.sync_diff import compute_skill_sync_diff
 from cubebox.skills.sync_manifest import MANIFEST_PATH, build_manifest, parse_manifest
@@ -1594,11 +1716,15 @@ async def _sync_skills(
     Always-final step is a separate manifest write so a partial failure leaves
     files-already-present + stale-manifest, which the next sync will heal.
     """
-    # 1. read manifest
+    # 1. read manifest. OpenSandbox.download maps "not found" to
+    # FileNotFoundError, but other backends (LocalSandbox) and non-404 errors
+    # bubble up as SandboxError. Both → treat as "no usable manifest, cold".
     try:
         [(_, raw)] = await sandbox.download([MANIFEST_PATH])
         manifest = parse_manifest(raw)
     except FileNotFoundError:
+        manifest = {"skills": {}}
+    except SandboxError:
         manifest = {"skills": {}}
 
     # 2. desired
@@ -1610,17 +1736,24 @@ async def _sync_skills(
         return
 
     # 4. push + remove
+    # files=[] is possible even when to_push is non-empty (catalog returned no
+    # files for a skill_version_id — bad storage_prefix, race with delete...).
+    # has_push must reflect "we actually uploaded a tarball", not "diff said to
+    # push", or tar -xzf will fail looking for a file we never sent (F2).
+    files: list[tuple[str, bytes]] = []
     if diff.to_push:
         files = await _collect_files_for_push(catalog, diff.to_push)
-        if files:
-            import asyncio
+    files_uploaded = bool(files)
+    if files_uploaded:
+        import asyncio
+        tarball = await asyncio.to_thread(build_tarball, files)
+        await sandbox.upload([("/tmp/skills_delta.tgz", tarball)])
 
-            tarball = await asyncio.to_thread(build_tarball, files)
-            await sandbox.upload([("/tmp/skills_delta.tgz", tarball)])
-
+    repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
     cmd = build_extract_and_remove_cmd(
         skills_root=SKILLS_ROOT,
-        has_push=bool(diff.to_push),
+        has_push=files_uploaded,
+        to_repush_names=repush_names,
         to_remove=diff.to_remove,
     )
     if cmd:
@@ -1691,29 +1824,41 @@ git commit -m "refactor(sandbox): drop has_synced/mark_synced — manifest is no
 
 ---
 
-## Task 2.9: `LazySandbox._synced_for_this_run` flag + sync 嵌入 `_ensure_with_retry`
+## Task 2.9: `LazySandbox` per-run sync flag + lock + recreate reset
 
 **Files:**
 - Modify: `backend/cubebox/sandbox/lazy.py` — `LazySandbox` 类
 
 **Interfaces:**
 - Consumes: `_sync_skills` from Task 2.7
-- Produces: 每个 cubepi run 第一次 execute / upload 触发一次 `_sync_skills`；本 run 内后续 0 开销
+- Produces: 每个 cubepi run 第一次 execute / upload 触发一次成功的 `_sync_skills`；本 run 内后续 tool call 命中 flag → 0 开销；失败时 flag **不**置位（同 run 后续 tool call 可重试）；sandbox 被重建时 flag 自动 reset
 
-- [ ] **Step 1: 在 `__init__` 添加 flag**
+**关键失败模式（来自 code review）**：
+- F3：`LazySandbox._lock` 只在 `_ensure()` 里持有；sync 在它之外跑。两个并发 execute 都过 `_ensure` 之后会**同时**看到 `_synced_for_this_run=False` 并并发跑 sync → tar.gz 互踩。需要独立 `_sync_lock`
+- F4：flag 必须只在 sync **成功**之后置位，否则本 run 一次失败 = 永久跳过
+- F5：execute / upload 失败重建 sandbox 的分支（`self._sandbox = None` 那段）必须同步 reset `_synced_for_this_run = False`，否则新 sandbox 无 skills
+
+- [ ] **Step 1: 在 `__init__` 添加 flag + 独立 lock**
 
 `LazySandbox.__init__` 末尾（`self._lock = asyncio.Lock()` 之后）加：
 
 ```python
         self._synced_for_this_run = False
+        self._sync_lock = asyncio.Lock()  # 独立于 _lock，专门串行 _sync_skills
 ```
 
-- [ ] **Step 2: 在 `_ensure_with_retry` 嵌入 sync**
+- [ ] **Step 2: 抽 `_ensure_skills_synced` helper**
 
-找到 `_ensure_with_retry` 方法，**移除**旧的 `if self._catalog is not None: await _sync_skills(...)` 调用如果还在 `_ensure` 里。在 `_ensure_with_retry` 内 `sandbox = await self._ensure()` 之后、`await self._manager.touch(...)` 之前插入：
+在 `_ensure_with_retry` 之前加 helper：
 
 ```python
-        if self._catalog is not None and not self._synced_for_this_run:
+    async def _ensure_skills_synced(self, sandbox: Sandbox) -> None:
+        if self._catalog is None or self._synced_for_this_run:
+            return
+        async with self._sync_lock:
+            # double-check: 第二个并发 tool call 拿到锁后可能已经被设了 flag
+            if self._synced_for_this_run:
+                return
             try:
                 await _sync_skills(
                     catalog=self._catalog,
@@ -1726,32 +1871,337 @@ git commit -m "refactor(sandbox): drop has_synced/mark_synced — manifest is no
                     "Skill sync failed for ws {}; sandbox usable without skills",
                     self._workspace_id,
                 )
+                return  # 失败 → 不置位 → 同 run 后续 tool call 重试 (F4)
             self._synced_for_this_run = True
 ```
 
-同时把旧的 `_ensure` 里的 sync 调用块（lazy.py:140-152）**删掉**，因为现在 sync 在 `_ensure_with_retry` 入口处管理（更精确：sync 应在每个 _ensure_with_retry 调用前评估，但只跑一次）。
+- [ ] **Step 3: `_ensure_with_retry` 入口调用 helper**
 
-- [ ] **Step 3: 跑现有 unit 测试**
+在 `_ensure_with_retry` 内 `sandbox = await self._ensure()` 之后、`await self._manager.touch(...)` 之前插入：
+
+```python
+        await self._ensure_skills_synced(sandbox)
+```
+
+`_ensure_with_retry` 中已有的"first attempt failed → 重试 _ensure"分支里 `self._sandbox = None` 那一行旁同步加：
+
+```python
+            async with self._lock:
+                self._sandbox = None
+                self._synced_for_this_run = False  # F5: 新 sandbox 必须重 sync
+            ...
+            sandbox = await self._ensure()
+```
+
+并且把旧 `_ensure` 内 sync 调用块（`lazy.py:140-152` 的 `if self._catalog is not None: await _sync_skills`）**整段删掉** —— sync 现在归 `_ensure_skills_synced` 管。
+
+- [ ] **Step 4: 修 execute / upload 的 sandbox-recreate 路径（F5）**
+
+`LazySandbox.execute` 与 `LazySandbox.upload` 都有"sandbox 失败重建"分支（今天 `lazy.py:225-231` 和 `:237-242`），把它们里面的 `self._sandbox = None` 改成 reset 一对：
+
+```python
+        except Exception:
+            async with self._lock:
+                self._sandbox = None
+                self._synced_for_this_run = False  # F5
+            logger.warning("Lazy sandbox: execute failed, recreating sandbox")
+            sandbox = await self._ensure()
+            await self._ensure_skills_synced(sandbox)  # 新 sandbox 也要 sync
+            return await sandbox.execute(command, timeout=timeout, envs=envs)
+```
+
+`upload` 分支同理。
+
+- [ ] **Step 5: 跑现有 unit 测试**
 
 ```bash
 cd backend && uv run pytest tests/unit/test_lazy_sandbox_download.py -v --no-cov 2>&1 | tee ../tmp/task-2.9.log | tail -10
 ```
 
-期望：PASS（download 路径没改）。
+期望：PASS。
 
-- [ ] **Step 4: mypy**
+- [ ] **Step 6: 加针对性 unit 测试**
+
+`backend/tests/unit/test_lazy_sandbox_sync_lifecycle.py`（新建）：
+
+```python
+"""Unit: LazySandbox sync flag / lock / recreate-reset invariants.
+
+If F3/F4/F5 regress, these tests catch it.
+"""
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from cubebox.sandbox.lazy import LazySandbox
+
+
+def _make_lazy(catalog, sandbox):
+    """Construct a LazySandbox whose _ensure already returns the given sandbox."""
+    manager = MagicMock()
+    manager.get_or_create = AsyncMock(return_value=sandbox)
+    manager.touch = AsyncMock()
+    manager.renew_lease = AsyncMock()
+    return LazySandbox(
+        manager=manager,
+        scope_type="user",
+        scope_id="u1",
+        user_id="u1",
+        org_id="o1",
+        workspace_id="w1",
+        catalog=catalog,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_runs_once_per_run():
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
+    sandbox.upload = AsyncMock()
+    lazy = _make_lazy(catalog, sandbox)
+
+    await lazy.execute("true")
+    await lazy.execute("true")
+
+    # list_enabled_for_workspace called exactly once
+    assert catalog.list_enabled_for_workspace.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_failure_does_not_set_flag_so_next_call_retries():
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(side_effect=[
+        RuntimeError("first sync boom"),
+        [],  # second attempt succeeds
+    ])
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
+    sandbox.upload = AsyncMock()
+    lazy = _make_lazy(catalog, sandbox)
+
+    await lazy.execute("true")
+    await lazy.execute("true")
+
+    assert catalog.list_enabled_for_workspace.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_calls_only_sync_once():
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
+    sandbox.upload = AsyncMock()
+    lazy = _make_lazy(catalog, sandbox)
+
+    await asyncio.gather(lazy.execute("a"), lazy.execute("b"), lazy.execute("c"))
+
+    assert catalog.list_enabled_for_workspace.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sandbox_recreate_resets_sync_flag():
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)
+    sandbox.upload = AsyncMock()
+
+    # First execute succeeds; second execute raises (simulates dead sandbox);
+    # recreate then succeeds.
+    call_count = {"n": 0}
+
+    async def flaky_exec(*a, **kw):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("dead")
+        return MagicMock(output="", exit_code=0)
+
+    sandbox.execute = AsyncMock(side_effect=flaky_exec)
+    lazy = _make_lazy(catalog, sandbox)
+
+    await lazy.execute("first")  # sync runs (count=1)
+    await lazy.execute("recreate-path")  # 2nd execute fails, recreate, sync again (count=2)
+
+    assert catalog.list_enabled_for_workspace.await_count == 2
+```
+
+跑：
+
+```bash
+cd backend && uv run pytest tests/unit/test_lazy_sandbox_sync_lifecycle.py -v --no-cov 2>&1 | tee ../tmp/task-2.9-lifecycle.log | tail -15
+```
+
+- [ ] **Step 7: mypy**
 
 ```bash
 cd backend && uv run mypy cubebox/sandbox/lazy.py 2>&1 | tail -3
 ```
 
-期望：clean。
+- [ ] **Step 8: Commit**
+
+```bash
+git add backend/cubebox/sandbox/lazy.py backend/tests/unit/test_lazy_sandbox_sync_lifecycle.py
+git commit -m "feat(sandbox): per-run sync with lock, success-only flag, recreate reset"
+```
+
+---
+
+## Task 2.9b: e2e 共享 fixture + helper（F10）
+
+**Files:**
+- Modify or Create: `backend/tests/e2e/conftest.py`（追加 helper / fixture，若文件不存在则新建）
+
+**Interfaces:**
+- Consumes: 项目已有 fixture（`session`, `default_org`, `default_user`）
+- Produces:
+  - `fresh_workspace_and_sandbox` async fixture：返回带 `workspace_id` / `org_id` / `sandbox` 的对象
+  - `install_skill_for_workspace(workspace_id, slug) -> skill_id`：在 workspace 下装一个 minimal skill，返回 skill_id（用于 diff 测试）
+  - `uninstall_skill_for_workspace(workspace_id, skill_id) -> None`：卸载
+
+下游 Tasks 2.10-2.14 都用这套，不要在它们里再写 `...` 占位。
+
+- [ ] **Step 1: 看现有 e2e helper 风格**
+
+```bash
+ls backend/tests/e2e/ | head -10
+test -f backend/tests/e2e/conftest.py && grep -n "fixture\|workspace" backend/tests/e2e/conftest.py | head -20
+```
+
+记下：现有 `default_workspace` / `default_org` / `default_user` fixture 怎么提供 session；ws 创建走 `Workspace(...)` 还是经 service。
+
+- [ ] **Step 2: 加 `fresh_workspace_and_sandbox` fixture**
+
+在 `backend/tests/e2e/conftest.py` 末尾追加：
+
+```python
+import contextlib
+from types import SimpleNamespace
+
+import pytest_asyncio
+
+from cubebox.models import Workspace, Organization
+from cubebox.sandbox.lazy import LazySandbox
+
+
+@pytest_asyncio.fixture
+async def fresh_workspace_and_sandbox(
+    session, default_org, default_user, sandbox_manager, skill_catalog_service
+):
+    """Brand-new workspace + a LazySandbox pinned to (default_user, that ws)
+    + an opensandbox-backed underlying sandbox already created. cleanup removes
+    everything created here."""
+    ws = Workspace(name="skills-sync-e2e", org_id=default_org.id)
+    session.add(ws)
+    await session.commit()
+    await session.refresh(ws)
+
+    lazy = LazySandbox(
+        manager=sandbox_manager,
+        scope_type="user",
+        scope_id=default_user.id,
+        user_id=default_user.id,
+        org_id=default_org.id,
+        workspace_id=ws.id,
+        catalog=skill_catalog_service,
+    )
+
+    # Materialise the underlying sandbox (first execute triggers create)
+    await lazy.execute("true")
+
+    try:
+        yield SimpleNamespace(
+            workspace_id=ws.id,
+            org_id=default_org.id,
+            sandbox=lazy._sandbox,        # underlying OpenSandbox handle
+            lazy=lazy,
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            await lazy.close()
+        await session.delete(ws)
+        await session.commit()
+```
+
+如果 `sandbox_manager` / `skill_catalog_service` 不在 conftest 现有 fixture 列表里，从 `backend/tests/e2e/test_*.py` 里找一个已经用的例子，照搬同样的 fixture 名 + 同样的构造方式。
+
+- [ ] **Step 3: 加 `install_skill_for_workspace` / `uninstall_skill_for_workspace` helper**
+
+同 conftest 里追加：
+
+```python
+import io
+import zipfile
+
+from cubebox.skills.service import SkillPublishService
+
+
+def _minimal_skill_zip(slug: str, version: str = "1.0.0") -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "SKILL.md",
+            f"---\nname: {slug}\nversion: {version}\n"
+            f"description: probe skill\n---\n# {slug}\n",
+        )
+    return buf.getvalue()
+
+
+async def install_skill_for_workspace(
+    session, *, org_id: str, org_slug: str, workspace_id: str, user_id: str,
+    cache, slug: str = "probe-1",
+) -> str:
+    """Publish + install a minimal skill, returning the skill_id."""
+    publisher = SkillPublishService(session=session, cache=cache)
+    sv = await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id=user_id,
+        zip_bytes=_minimal_skill_zip(slug),
+        workspace_id=workspace_id,
+    )
+    return sv.skill_id
+
+
+async def uninstall_skill_for_workspace(
+    session, *, workspace_id: str, org_id: str, skill_id: str
+) -> None:
+    """Soft-delete: remove the OrgSkillInstall row scoped to this workspace."""
+    from sqlalchemy import delete
+    from cubebox.models import OrgSkillInstall
+
+    await session.execute(
+        delete(OrgSkillInstall).where(
+            (OrgSkillInstall.org_id == org_id)
+            & (OrgSkillInstall.workspace_id == workspace_id)
+            & (OrgSkillInstall.skill_id == skill_id)
+        )
+    )
+    await session.commit()
+```
+
+如果项目实际的 install 路径走 `SkillInstallService` / `SkillRegistry` 而不是 OrgSkillInstall 直插，查 `backend/cubebox/skills/service.py` 看 `_publish_from_files` 之后 install 逻辑在哪，照搬。
+
+- [ ] **Step 4: 自检 conftest 不挂**
+
+```bash
+cd backend && uv run pytest tests/e2e/test_skills_seeder.py -v --no-cov 2>&1 | tee ../tmp/task-2.9b.log | tail -10
+```
+
+期望：现有 e2e 测试 PASS（确认 conftest 改动没破坏既有 fixture）。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/lazy.py
-git commit -m "feat(sandbox): per-run sync flag; _ensure_with_retry drives _sync_skills"
+git add backend/tests/e2e/conftest.py
+git commit -m "test(e2e): add fresh_workspace_and_sandbox fixture + install/uninstall helpers"
 ```
 
 ---
@@ -1806,23 +2256,7 @@ async def test_cold_start_writes_files_and_manifest(
     assert files[0][1].startswith(b"---") or b"name:" in files[0][1]
 ```
 
-`fresh_workspace_and_sandbox` 是新 fixture —— 如果项目里没有现成的，新建在该测试文件顶部或 `backend/tests/e2e/conftest.py`。形式：
-
-```python
-import pytest
-import pytest_asyncio
-
-
-@pytest_asyncio.fixture
-async def fresh_workspace_and_sandbox(session, default_org, default_user, sandbox_manager):
-    # Create one-off workspace + sandbox; cleanup after test
-    ws = await _make_workspace(session, default_org)
-    ...
-    yield SimpleNamespace(workspace_id=ws.id, sandbox=...)
-    await _cleanup(...)
-```
-
-按 `backend/tests/e2e/conftest.py` 已有 helper 风格对齐。
+`fresh_workspace_and_sandbox` 在 Task 2.9b 已经定义到 `backend/tests/e2e/conftest.py`，直接消费。
 
 - [ ] **Step 2: 跑测试**
 
@@ -1882,14 +2316,13 @@ async def test_warm_sandbox_no_push(fresh_workspace_and_sandbox, monkeypatch):
 
     monkeypatch.setattr(sb, "upload", spy_upload)
 
-    # Simulate "new LazySandbox for next run" — reset the per-run flag
-    # by re-creating a LazySandbox over the same backend sandbox handle
+    # Simulate "new LazySandbox for next run" — call _sync_skills directly with
+    # the SAME catalog the fixture's LazySandbox was constructed with. The
+    # fixture exposes the lazy wrapper so we can reach its _catalog attribute.
     from cubebox.sandbox.lazy import _sync_skills
-    from cubebox.skills.service import SkillCatalogService
 
-    catalog = SkillCatalogService(...)  # use the same one the fixture wires
     await _sync_skills(
-        catalog=catalog,
+        catalog=fresh_workspace_and_sandbox.lazy._catalog,
         workspace_id=fresh_workspace_and_sandbox.workspace_id,
         org_id=fresh_workspace_and_sandbox.org_id,
         sandbox=sb,
@@ -1947,12 +2380,19 @@ async def test_install_uninstall_version_bump(fresh_workspace_and_sandbox):
     await sb.execute("true")
     initial = (await sb.download([MANIFEST_PATH]))[0][1]
 
-    # Install a fresh skill (helper: install_skill_for_workspace)
+    # Install a fresh skill via the conftest helper (Task 2.9b)
     new_skill_id = await install_skill_for_workspace(
-        fresh_workspace_and_sandbox.workspace_id, slug="probe-1"
+        session,
+        org_id=fresh_workspace_and_sandbox.org_id,
+        org_slug=default_org.slug,
+        workspace_id=fresh_workspace_and_sandbox.workspace_id,
+        user_id=default_user.id,
+        cache=skill_cache,
+        slug="probe-1",
     )
 
-    # Next "run" — trigger sync
+    # Reset per-run flag so the next execute triggers a fresh sync
+    fresh_workspace_and_sandbox.lazy._synced_for_this_run = False
     await sb.execute("true")
     after_install = (await sb.download([MANIFEST_PATH]))[0][1]
     assert b"probe-1" in after_install
@@ -1963,8 +2403,12 @@ async def test_install_uninstall_version_bump(fresh_workspace_and_sandbox):
 
     # Uninstall
     await uninstall_skill_for_workspace(
-        fresh_workspace_and_sandbox.workspace_id, skill_id=new_skill_id
+        session,
+        workspace_id=fresh_workspace_and_sandbox.workspace_id,
+        org_id=fresh_workspace_and_sandbox.org_id,
+        skill_id=new_skill_id,
     )
+    fresh_workspace_and_sandbox.lazy._synced_for_this_run = False
     await sb.execute("true")
     after_uninstall = (await sb.download([MANIFEST_PATH]))[0][1]
     assert b"probe-1" not in after_uninstall
@@ -1974,7 +2418,7 @@ async def test_install_uninstall_version_bump(fresh_workspace_and_sandbox):
         await sb.download(["/workspace/.skills/probe-1/1.0.0/SKILL.md"])
 ```
 
-`install_skill_for_workspace` / `uninstall_skill_for_workspace` 是测试 helper —— 参考 `backend/tests/e2e/test_skills_service_catalog.py` 等已有的 install 路径，提到 `backend/tests/e2e/conftest.py` 或 `backend/tests/e2e/helpers/`。
+`install_skill_for_workspace` / `uninstall_skill_for_workspace` 在 Task 2.9b 已经定义在 `backend/tests/e2e/conftest.py`，直接 import。`session` / `default_org` / `default_user` / `skill_cache` 是项目已有的 fixture。
 
 - [ ] **Step 2: 跑测试**
 
@@ -2125,13 +2569,11 @@ async def test_pause_resume_no_push(fresh_workspace_and_sandbox, monkeypatch):
 
     monkeypatch.setattr(resumed, "upload", spy_upload)
 
-    # Trigger sync over the new handle
+    # Trigger sync over the new handle using the same catalog the fixture used
     from cubebox.sandbox.lazy import _sync_skills
-    from cubebox.skills.service import SkillCatalogService
 
-    catalog = ...  # wire same SkillCatalogService
     await _sync_skills(
-        catalog=catalog,
+        catalog=fresh_workspace_and_sandbox.lazy._catalog,
         workspace_id=fresh_workspace_and_sandbox.workspace_id,
         org_id=fresh_workspace_and_sandbox.org_id,
         sandbox=resumed,
