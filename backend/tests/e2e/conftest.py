@@ -1,18 +1,22 @@
 import asyncio
+import contextlib
 import io
 import json as json_lib
 import os
 import secrets
 import socket
+import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
 import pytest_asyncio
 import uvicorn
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
 from fastapi.testclient import TestClient
@@ -29,6 +33,7 @@ from cubebox.api.app import create_app
 from cubebox.api.middleware.rate_limit import limiter
 from cubebox.auth.users import UserManager
 from cubebox.config import config as _cubebox_config
+from cubebox.credentials.encryption import FernetBackend
 from cubebox.db.engine import _build_database_url, engine
 from cubebox.db.session import get_session
 from cubebox.models import Role, User
@@ -37,6 +42,8 @@ from cubebox.repositories import (
     OrganizationRepository,
     WorkspaceRepository,
 )
+from cubebox.sandbox.lazy import LazySandbox
+from cubebox.sandbox.manager import SandboxManager
 from tests.e2e.helpers import csrf_cookie_name
 
 
@@ -1634,3 +1641,183 @@ async def seed_remote_source() -> AsyncIterator[Callable[..., Awaitable[str]]]:
         yield _seed
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Sandbox-skills-sync shared fixtures + helpers (Tasks 2.10-2.14).
+#
+# ``fresh_workspace_and_sandbox`` yields a brand-new org/workspace/user trio
+# plus a materialised LazySandbox. The two helper functions are plain async
+# callables (not fixtures) because callers need to pass different slugs and
+# use the same db_session opened for the test's assertions.
+#
+# Design choices:
+#   - ``fake_opensandbox`` is required by the fixture to avoid real provider
+#     calls; the fixture depends on it so the monkeypatch is active for the
+#     whole fixture lifetime.
+#   - SandboxManager is constructed inline (mirrors test_sandbox_scoping.py).
+#   - SkillCache uses a per-call tempfile.mkdtemp so there is no pytest
+#     tmp_path dependency at fixture level.
+#   - S3 uploads in ``install_skill_for_workspace`` are real (rustfs :9010).
+# ---------------------------------------------------------------------------
+
+_SYNC_ENCRYPTION_BACKEND = FernetBackend([Fernet.generate_key()])
+
+
+@pytest_asyncio.fixture
+async def fresh_workspace_and_sandbox(
+    fake_opensandbox: None,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[SimpleNamespace]:
+    """Brand-new org/workspace/user + a materialised LazySandbox.
+
+    Yields ``SimpleNamespace(workspace_id, org_id, org_slug, user_id,
+    sandbox, lazy)``. Cleanup removes the workspace (org remains to avoid
+    cascade issues across tests; it has no persisted data outside the ws).
+
+    ``fake_opensandbox`` is required so sandbox.create never calls a real
+    provider — this fixture is about skill-sync state, not sandbox lifecycle.
+    """
+    del fake_opensandbox  # consumed to activate monkeypatch
+
+    from cubebox.auth.users import _slugify_org_name
+    from cubebox.models import Organization, Workspace
+
+    suffix = secrets.token_hex(4)
+    org_name = f"sync-e2e-{suffix}"
+    org_slug = _slugify_org_name(org_name)
+
+    async with session_factory() as setup_session:
+        org = Organization(name=org_name, slug=org_slug)
+        setup_session.add(org)
+        await setup_session.flush()
+        ws = Workspace(name=f"sync-ws-{suffix}", org_id=org.id)
+        setup_session.add(ws)
+        await setup_session.flush()
+        org_id: str = org.id
+        ws_id: str = ws.id
+        # Use a synthetic user_id — skill sync only needs an id for the
+        # UserSandbox row's user_id FK; we don't need a full User record
+        # because the fixture drives manager.get_or_create directly.
+        from cubebox.models.public_id import PREFIX_USER, generate_public_id
+
+        user_id: str = generate_public_id(PREFIX_USER)
+        await setup_session.commit()
+
+    mgr = SandboxManager(session_factory, _SYNC_ENCRYPTION_BACKEND)
+    lazy = LazySandbox(
+        manager=mgr,
+        scope_type="user",
+        scope_id=user_id,
+        user_id=user_id,
+        org_id=org_id,
+        workspace_id=ws_id,
+    )
+
+    # Materialise the underlying sandbox (first execute triggers create).
+    await lazy.execute("true")
+
+    try:
+        yield SimpleNamespace(
+            workspace_id=ws_id,
+            org_id=org_id,
+            org_slug=org_slug,
+            user_id=user_id,
+            sandbox=lazy._sandbox,  # underlying Sandbox handle
+            lazy=lazy,
+        )
+    finally:
+        with contextlib.suppress(Exception):
+            await lazy.close()
+        async with session_factory() as cleanup_session:
+            ws_row = await cleanup_session.get(Workspace, ws_id)
+            if ws_row is not None:
+                await cleanup_session.delete(ws_row)
+            await cleanup_session.commit()
+
+
+def _minimal_skill_zip(slug: str, version: str = "1.0.0") -> bytes:
+    """Return a minimal valid SKILL.md zip for the given slug."""
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "SKILL.md",
+            f"---\nname: {slug}\nversion: {version}\ndescription: probe skill\n---\n# {slug}\n",
+        )
+    return buf.getvalue()
+
+
+async def install_skill_for_workspace(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    org_slug: str,
+    workspace_id: str,
+    user_id: str,
+    slug: str = "probe-1",
+) -> str:
+    """Publish + workspace-install a minimal skill; return the skill_id.
+
+    The OrgSkillInstall row is workspace-private (workspace_id set), so it
+    only appears in this workspace's enabled-skills list.  Object storage
+    upload is real (rustfs).
+    """
+    from cubebox.skills.cache import SkillCache
+    from cubebox.skills.service import SkillPublishService
+
+    cache_dir = Path(tempfile.mkdtemp())
+    publisher = SkillPublishService(session=session, cache=SkillCache(cache_root=cache_dir))
+    sv = await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id=user_id,
+        zip_bytes=_minimal_skill_zip(slug),
+        workspace_id=workspace_id,
+    )
+    return sv.skill_id
+
+
+async def uninstall_skill_for_workspace(
+    session: AsyncSession,
+    *,
+    workspace_id: str,
+    org_id: str,
+    skill_id: str,
+) -> None:
+    """Remove the OrgSkillInstall row scoping skill_id to workspace_id.
+
+    Also deletes the SkillVersion and Skill rows so tests that iterate
+    the full catalog don't see stale rows from prior runs.
+    """
+    from sqlalchemy import delete, select
+
+    from cubebox.models.skill import OrgSkillInstall, Skill, SkillVersion
+
+    await session.execute(
+        delete(OrgSkillInstall).where(
+            OrgSkillInstall.org_id == org_id,  # type: ignore[arg-type]
+            OrgSkillInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
+            OrgSkillInstall.skill_id == skill_id,  # type: ignore[arg-type]
+        )
+    )
+    sv_ids = (
+        (
+            await session.execute(
+                select(SkillVersion.id).where(
+                    SkillVersion.skill_id == skill_id  # type: ignore[arg-type]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if sv_ids:
+        await session.execute(
+            delete(SkillVersion).where(SkillVersion.id.in_(sv_ids))  # type: ignore[attr-defined]
+        )
+    await session.execute(
+        delete(Skill).where(Skill.id == skill_id)  # type: ignore[arg-type]
+    )
+    await session.commit()
