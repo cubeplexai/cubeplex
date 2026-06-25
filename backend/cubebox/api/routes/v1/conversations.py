@@ -582,41 +582,24 @@ async def delete_conversation(
         )
 
 
-async def _conversation_has_external_binding(session: AsyncSession, conversation_id: str) -> bool:
-    """Return True if this conversation is referenced by an IM thread
-    or a scheduled task target. Upgrading such a conversation to a topic
-    would silently break those bindings (each binding assumes a stable
-    1:1 conversation identity).
+async def _adopt_external_bindings(
+    session: AsyncSession, conversation_id: str, topic_id: str
+) -> None:
+    """Sync IM thread links that point at this conversation into the new topic.
 
-    Triggers are not checked: they always create a fresh draft
-    conversation per fire (``triggers/pipeline.py``); they never bind to
-    an existing conversation id.
+    Without this, ``IMThreadLink.topic_id`` stays NULL after a web-side
+    upgrade, and ``/new`` treats the link as flat mode — creating a new
+    standalone conversation instead of rotating under the topic.
     """
-    from sqlalchemy import func, select
+    from sqlalchemy import update
 
     from cubebox.models.im_connector import IMThreadLink
-    from cubebox.models.scheduled_task import ScheduledTask
 
-    im_stmt = (
-        select(func.count())
-        .select_from(IMThreadLink)
+    await session.execute(
+        update(IMThreadLink)
         .where(IMThreadLink.conversation_id == conversation_id)  # type: ignore[arg-type]
+        .values(topic_id=topic_id)
     )
-    if (await session.execute(im_stmt)).scalar_one() > 0:
-        return True
-
-    sched_stmt = (
-        select(func.count())
-        .select_from(ScheduledTask)
-        .where(
-            ScheduledTask.target_conversation_id == conversation_id,  # type: ignore[arg-type]
-            ScheduledTask.deleted_at.is_(None),  # type: ignore[union-attr]
-        )
-    )
-    if (await session.execute(sched_stmt)).scalar_one() > 0:
-        return True
-
-    return False
 
 
 @router.post("/{conversation_id}/upgrade-to-topic", status_code=status.HTTP_201_CREATED)
@@ -664,12 +647,6 @@ async def upgrade_conversation_to_topic(
     conversation = locked
     creator_user_id = conversation.creator_user_id
 
-    if await _conversation_has_external_binding(session, conversation_id):
-        raise HTTPException(
-            status_code=409,
-            detail="Conversation has IM/schedule/trigger bindings; cannot upgrade",
-        )
-
     topic_repo = TopicRepository(
         session,
         org_id=ctx.org_id,
@@ -683,6 +660,8 @@ async def upgrade_conversation_to_topic(
 
     conversation.topic_id = topic.id
     session.add(conversation)
+
+    await _adopt_external_bindings(session, conversation_id, topic.id)
 
     if body.member_user_ids:
         await topic_repo.add_participants(topic.id, body.member_user_ids)
