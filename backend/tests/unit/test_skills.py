@@ -127,6 +127,35 @@ async def test_after_tool_call_writes_skill_to_extra() -> None:
 
 
 @pytest.mark.asyncio
+async def test_after_tool_call_persists_sandbox_path_in_content() -> None:
+    # The sandbox `path` must survive into the persisted content so it is
+    # re-injected on later turns (the tool result alone is gone by then), or
+    # colon-named multi-file skills resume guessing the path.
+    extra: dict[str, Any] = {}
+    mw = _make_middleware(extra)
+
+    result_obj = LoadSkillOutput(
+        skill_name="acme:designer",
+        content="# Designer\n\nDesign boldly.",
+        version="2.0.0",
+        loaded=True,
+        path="/.skills/acme__designer/2.0.0",
+    )
+    ctx = _make_after_ctx(
+        result=AgentToolResult(content=[TextContent(text=result_obj.model_dump_json())]),
+    )
+    await mw.after_tool_call(ctx)
+
+    stored = extra["loaded_skills"]["acme:designer"]
+    assert "/.skills/acme__designer/2.0.0" in stored
+    assert stored.endswith("# Designer\n\nDesign boldly.")
+
+    # And it renders into the system prompt on a subsequent call.
+    out = await mw.transform_system_prompt("BASE", ctx=_make_context(extra))
+    assert "/.skills/acme__designer/2.0.0" in out
+
+
+@pytest.mark.asyncio
 async def test_after_tool_call_accumulates_multiple_skills() -> None:
     """Loading a second skill appends to existing loaded_skills dict."""
     extra: dict[str, Any] = {"loaded_skills": {"alpha": "Alpha content"}}

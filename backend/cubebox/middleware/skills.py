@@ -116,10 +116,24 @@ class SkillsMiddleware(Middleware):
         if not output.loaded or not output.content:
             return None
 
+        # Carry the sandbox file path *into* the persisted content. The
+        # immediate tool result has `path`, but subsequent model calls only see
+        # what transform_system_prompt re-injects from extra — so without this
+        # the model loses the exact path and goes back to guessing it (the very
+        # 404 this skill's `path` is meant to prevent). Keeping it inside the
+        # content string preserves the str-valued loaded_skills contract.
+        content = output.content
+        if output.path:
+            content = (
+                f"Skill files (scripts, templates, references) are in "
+                f"`{output.path}` — reference them using that path verbatim.\n\n"
+                f"{content}"
+            )
+
         # Write into the live extra dict so transform_system_prompt can read it.
         extra = self._extra_ref()
         loaded: dict[str, str] = extra.setdefault(_LOADED_SKILLS_KEY, {})
-        loaded[output.skill_name] = output.content
+        loaded[output.skill_name] = content
 
         return None
 
