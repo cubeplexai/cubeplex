@@ -324,3 +324,106 @@ def test_open_id_fallback_when_union_id_missing() -> None:
     assert ev is not None
     assert ev.sender_ref == "ou_user"
     assert ev.scope_key == "u:ou_user"
+
+
+def _post_event(content: dict, *, chat_type: str = "p2p", mentions: list | None = None) -> dict:
+    msg: dict = {
+        "message_id": "om_post",
+        "chat_id": "oc_dm",
+        "chat_type": chat_type,
+        "message_type": "post",
+        "content": json.dumps(content),
+    }
+    if mentions is not None:
+        msg["mentions"] = mentions
+    return {
+        "header": {"event_id": "ev_post", "event_type": "im.message.receive_v1"},
+        "event": {
+            "sender": {
+                "sender_id": {"open_id": "ou_user", "union_id": "on_user"},
+                "sender_type": "user",
+            },
+            "message": msg,
+        },
+    }
+
+
+def test_post_mixes_text_and_image() -> None:
+    # The headline case: a rich-text post with text + an embedded image must
+    # yield BOTH the text and an image attachment — previously the whole
+    # message (text included) was dropped.
+    raw = _post_event(
+        {
+            "title": "周报",
+            "content": [
+                [{"tag": "text", "text": "这是本周进展："}],
+                [{"tag": "img", "image_key": "img_v2_abc"}],
+                [{"tag": "text", "text": "请查收。"}],
+            ],
+        }
+    )
+    ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
+    assert ev is not None
+    assert "周报" in ev.text and "本周进展" in ev.text and "请查收" in ev.text
+    assert len(ev.attachments) == 1
+    assert ev.attachments[0].kind == "image"
+    assert ev.attachments[0].handle == "img_v2_abc"
+
+
+def test_post_renders_links_and_files() -> None:
+    raw = _post_event(
+        {
+            "content": [
+                [
+                    {"tag": "text", "text": "见文档 "},
+                    {"tag": "a", "text": "设计稿", "href": "https://x.test/d"},
+                ],
+                [{"tag": "media", "file_key": "file_v3_1", "file_name": "spec.pdf"}],
+            ]
+        }
+    )
+    ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
+    assert ev is not None
+    assert "[设计稿](https://x.test/d)" in ev.text
+    assert len(ev.attachments) == 1
+    assert ev.attachments[0].handle == "file_v3_1"
+    assert ev.attachments[0].filename == "spec.pdf"
+
+
+def test_post_image_only_no_text_still_parsed() -> None:
+    raw = _post_event({"content": [[{"tag": "img", "image_key": "img_only"}]]})
+    ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
+    assert ev is not None
+    assert ev.text == ""
+    assert len(ev.attachments) == 1
+
+
+def test_post_group_drops_bot_mention_and_passes_gate() -> None:
+    # A group post that @-mentions the bot passes the group gate, and the bot's
+    # own @ is stripped from the reconstructed text.
+    raw = _post_event(
+        {
+            "content": [
+                [
+                    {"tag": "at", "user_id": "@_user_1"},
+                    {"tag": "text", "text": " 看下这个"},
+                    {"tag": "img", "image_key": "img_grp"},
+                ]
+            ]
+        },
+        chat_type="group",
+        mentions=[{"key": "@_user_1", "id": {"open_id": "ou_bot"}, "name": "Bot"}],
+    )
+    ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
+    assert ev is not None
+    assert "@Bot" not in ev.text and "看下这个" in ev.text
+    assert len(ev.attachments) == 1
+
+
+def test_post_language_wrapped_payload_unwrapped() -> None:
+    raw = _post_event(
+        {"zh_cn": {"title": "T", "content": [[{"tag": "text", "text": "wrapped body"}]]}}
+    )
+    ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
+    assert ev is not None
+    assert "wrapped body" in ev.text
