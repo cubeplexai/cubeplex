@@ -11,16 +11,41 @@ transparently create a new one.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
-from cubebox.sandbox.base import ExecuteResult, Sandbox
-from cubebox.skills.sandbox_paths import sandbox_skill_dir
+from cubebox.sandbox.base import ExecuteResult, Sandbox, SandboxError
+from cubebox.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
+from cubebox.skills.sync_diff import compute_skill_sync_diff
+from cubebox.skills.sync_manifest import MANIFEST_PATH, build_manifest, parse_manifest
+from cubebox.skills.sync_tar import build_extract_and_remove_cmd, build_tarball
 
 if TYPE_CHECKING:
     from cubebox.sandbox.manager import SandboxManager
-    from cubebox.skills.service import SkillCatalogService
+    from cubebox.skills.service import ResolvedSkill, SkillCatalogService
+
+
+async def _collect_files_for_push(
+    catalog: SkillCatalogService, to_push: list[ResolvedSkill]
+) -> list[tuple[str, bytes]]:
+    """Flatten per-skill file lists into tar-relative ``(rel, bytes)`` pairs.
+
+    Each skill version contributes
+    ``<safe_name>/<version>/<rel-inside-bundle>`` paths — no leading slash, so
+    sandbox-side ``tar -xzf -C /workspace/.skills`` puts them at the right
+    place.
+    """
+    result: list[tuple[str, bytes]] = []
+    for s in to_push:
+        per_skill = await catalog.list_files_for_sandbox_sync(
+            s.skill_version_id, storage_prefix=s.storage_prefix
+        )
+        for rel, data in per_skill:
+            tar_rel = f"{safe_skill_name(s.name)}/{s.version}/{rel}"
+            result.append((tar_rel, data))
+    return result
 
 
 async def _sync_skills(
@@ -30,25 +55,60 @@ async def _sync_skills(
     org_id: str,
     sandbox: Sandbox,
 ) -> None:
-    """Push enabled skills' files into the freshly-created sandbox.
+    """Sync enabled skills into the sandbox via persistent PVC manifest + diff.
 
-    Idempotent per skill_version_id: a sandbox tracks what it has already
-    received via ``Sandbox.has_synced``/``mark_synced``.
+    Hot path (manifest matches desired): one ``download`` + one DB query, no
+    file transfer. Cold path: one tar.gz upload + one extract command.
+    Always-final step is a separate manifest write so a partial failure leaves
+    files-already-present + stale-manifest, which the next sync will heal.
     """
-    skills = await catalog.list_enabled_for_workspace(workspace_id, org_id=org_id)
-    for s in skills:
-        if sandbox.has_synced(s.skill_version_id):
-            continue
-        per_skill = await catalog.list_files_for_sandbox_sync(
-            s.skill_version_id, storage_prefix=s.storage_prefix
-        )
-        target_root = sandbox_skill_dir(s.name, s.version) + "/"
-        files = [(target_root + rel, data) for rel, data in per_skill]
-        if files:
-            await sandbox.upload(files)
-        # Mark only after a successful upload so a failed upload is retried
-        # the next time this sandbox instance is used.
-        sandbox.mark_synced(s.skill_version_id)
+    # 1. read manifest. OpenSandbox.download maps "not found" to
+    # FileNotFoundError, but other backends (LocalSandbox) and non-404 errors
+    # bubble up as SandboxError. Both → treat as "no usable manifest, cold".
+    try:
+        [(_, raw)] = await sandbox.download([MANIFEST_PATH])
+        manifest = parse_manifest(raw)
+    except FileNotFoundError:
+        manifest = {"skills": {}}
+    except SandboxError:
+        manifest = {"skills": {}}
+
+    # 2. desired
+    enabled = await catalog.list_enabled_for_workspace(workspace_id, org_id=org_id)
+
+    # 3. diff
+    # cast: list is invariant; ResolvedSkill satisfies _ResolvedLike structurally
+    diff = compute_skill_sync_diff(manifest, cast("list[Any]", enabled))
+    if diff.is_empty():
+        return
+
+    # 4. push + remove
+    # files=[] is possible even when to_push is non-empty (catalog returned no
+    # files for a skill_version_id — bad storage_prefix, race with delete...).
+    # has_push must reflect "we actually uploaded a tarball", not "diff said to
+    # push", or tar -xzf will fail looking for a file we never sent (F2).
+    files: list[tuple[str, bytes]] = []
+    if diff.to_push:
+        files = await _collect_files_for_push(catalog, cast("list[ResolvedSkill]", diff.to_push))
+    files_uploaded = bool(files)
+    if files_uploaded:
+        tarball = await asyncio.to_thread(build_tarball, files)
+        await sandbox.upload([("/tmp/skills_delta.tgz", tarball)])
+
+    repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
+    cmd = build_extract_and_remove_cmd(
+        skills_root=SKILLS_ROOT,
+        has_push=files_uploaded,
+        to_repush_names=repush_names,
+        to_remove=diff.to_remove,
+    )
+    if cmd:
+        await sandbox.execute(cmd)
+
+    # 5. manifest last (so partial failures are healed by next sync)
+    new_manifest = build_manifest(cast("list[Any]", enabled))
+    blob = json.dumps(new_manifest, ensure_ascii=False).encode("utf-8")
+    await sandbox.upload([(MANIFEST_PATH, blob)])
 
 
 class LazySandbox(Sandbox):
