@@ -42,6 +42,7 @@ class ResolvedSkill:
     version: str
     storage_prefix: str
     entry_file: str
+    content_hash: str
 
 
 class SkillCatalogService:
@@ -100,6 +101,7 @@ class SkillCatalogService:
                 version=sv.version,
                 storage_prefix=sv.storage_prefix,
                 entry_file=sv.entry_file,
+                content_hash=sv.content_hash,
             )
             for (skill, sv) in rows
         ]
@@ -128,6 +130,7 @@ class SkillCatalogService:
                 version=sv.version,
                 storage_prefix=sv.storage_prefix,
                 entry_file=sv.entry_file,
+                content_hash=sv.content_hash,
             )
             for (skill, sv) in ws_private_rows
         ]
