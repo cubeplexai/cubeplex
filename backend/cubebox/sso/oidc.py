@@ -8,9 +8,10 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
-from authlib.jose import JsonWebKey
-from authlib.jose import jwt as jose_jwt
-from authlib.jose.errors import JoseError
+from joserfc.errors import JoseError
+from joserfc.jwk import KeySet
+from joserfc.jwt import JWTClaimsRegistry
+from joserfc.jwt import decode as jwt_decode
 
 from cubebox.models.sso_connection import SSOConnection
 
@@ -141,20 +142,20 @@ async def exchange_code(
             raise OIDCValidationError(f"jwks_status_{exc.response.status_code}") from exc
         except httpx.RequestError as exc:
             raise OIDCValidationError("jwks_unreachable") from exc
-        jwks = JsonWebKey.import_key_set(jwks_resp.json())
+        jwks = KeySet.import_key_set(jwks_resp.json())
 
         try:
-            claims = jose_jwt.decode(
-                id_token,
-                jwks,
-                claims_options={
-                    "iss": {"essential": True, "value": cfg.issuer},
-                    "aud": {"essential": True, "values": [cfg.client_id]},
-                    "exp": {"essential": True},
-                    "nonce": {"essential": True, "value": expected_nonce},
-                },
+            token = jwt_decode(id_token, jwks)
+            claims = token.claims
+            registry = JWTClaimsRegistry(
+                now=int(time.time()),
+                leeway=clock_skew_seconds,
+                iss={"essential": True, "value": cfg.issuer},
+                aud={"essential": True, "values": [cfg.client_id]},
+                exp={"essential": True},
+                nonce={"essential": True, "value": expected_nonce},
             )
-            claims.validate(now=int(time.time()), leeway=clock_skew_seconds)
+            registry.validate(claims)
         except JoseError as exc:
             raise OIDCValidationError(f"id_token_invalid: {exc}") from exc
 

@@ -10,8 +10,8 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
-from authlib.jose import JsonWebKey
-from authlib.jose import jwt as jose_jwt
+from joserfc import jwt as jose_jwt
+from joserfc.jwk import RSAKey
 
 from cubebox.models.sso_connection import SSOConnection
 from cubebox.sso.oidc import (
@@ -36,11 +36,11 @@ USERINFO_ENDPOINT = "https://idp.example.com/userinfo"
 
 @pytest.fixture
 def rsa_key() -> Any:
-    return JsonWebKey.generate_key("RSA", 2048, options={"kid": "test-kid"}, is_private=True)
+    return RSAKey.generate_key(2048, parameters={"kid": "test-kid"})
 
 
 def _jwks(key: Any) -> dict[str, Any]:
-    return {"keys": [key.as_dict(is_private=False)]}
+    return {"keys": [key.as_dict(private=False)]}
 
 
 def _id_token(
@@ -70,8 +70,7 @@ def _id_token(
     }
     if name is not None:
         payload["name"] = name
-    tok = jose_jwt.encode(header, payload, key)
-    return tok.decode("ascii") if isinstance(tok, bytes) else str(tok)
+    return jose_jwt.encode(header, payload, key)
 
 
 def _make_transport(
