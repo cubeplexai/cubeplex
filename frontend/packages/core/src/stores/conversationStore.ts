@@ -24,6 +24,11 @@ function sortPinnedFirst(list: Conversation[]): Conversation[] {
 export interface ConversationStore {
   conversations: Conversation[]
   activeId: string | null
+  /** The topic_id of the currently open conversation, or null if it's
+   *  topicless / unknown. Lets the sidebar auto-expand the active
+   *  conversation's topic even when that conversation falls outside the
+   *  limited flat conversation list. */
+  activeTopicId: string | null
   isLoading: boolean
   isFetchingList: boolean
   error: string | null
@@ -38,6 +43,7 @@ export interface ConversationStore {
   setPin(client: ApiClient, id: string, isPinned: boolean): Promise<void>
   generateTitle(client: ApiClient, id: string, content: string): Promise<void>
   setActive(id: string | null): void
+  setActiveTopic(topicId: string | null): void
   inviteToGroup(client: ApiClient, conversationId: string, userIds: string[]): Promise<void>
   fetchConversationParticipants(client: ApiClient, conversationId: string): Promise<void>
 }
@@ -45,6 +51,7 @@ export interface ConversationStore {
 export const useConversationStore = create<ConversationStore>((set, get) => ({
   conversations: [],
   activeId: null,
+  activeTopicId: null,
   isLoading: false,
   isFetchingList: false,
   error: null,
@@ -149,6 +156,10 @@ export const useConversationStore = create<ConversationStore>((set, get) => ({
 
   setActive(id: string | null) {
     set({ activeId: id })
+  },
+
+  setActiveTopic(topicId: string | null) {
+    set({ activeTopicId: topicId })
   },
 
   async inviteToGroup(client: ApiClient, conversationId: string, userIds: string[]) {

@@ -659,7 +659,6 @@ async def upgrade_conversation_to_topic(
     )
 
     conversation.topic_id = topic.id
-    conversation.updated_at = datetime.now(UTC)
     session.add(conversation)
 
     await _adopt_external_bindings(session, conversation_id, topic.id)

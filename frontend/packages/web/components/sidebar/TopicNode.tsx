@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
@@ -93,13 +93,43 @@ export function TopicNode({
 }): React.ReactElement {
   const tTopics = useTranslations('topics')
   const tSidebar = useTranslations('sidebar')
+  const activeTopicId = useConversationStore((s) => s.activeTopicId)
   const [expanded, setExpanded] = useState<boolean>(
-    conversations.some((c) => c.id === activeConvId),
+    conversations.some((c) => c.id === activeConvId) || topic.id === activeTopicId,
   )
   const router = useRouter()
-  const { topicParticipants, fetchDetail, remove, createConversation, setPin } = useTopicStore()
+  const { topicParticipants, topicConversations, fetchDetail, remove, createConversation, setPin } =
+    useTopicStore()
   const fetchConversations = useConversationStore((s) => s.fetchList)
   const participants = topicParticipants[topic.id] ?? []
+
+  // Load the topic's full conversation list once (the detail endpoint has no
+  // limit, unlike the flat list). Idempotent: gated on whether we've fetched.
+  const ensureDetailLoaded = useCallback((): void => {
+    if (!currentWsId) return
+    if (topicConversations[topic.id] !== undefined) return
+    void fetchDetail(buildClient(currentWsId), topic.id).catch((err) =>
+      console.error('Failed to load topic detail:', err),
+    )
+  }, [currentWsId, topicConversations, topic.id, fetchDetail])
+
+  // When this topic becomes the active conversation's topic (e.g. a deep link
+  // to an old conversation outside the flat list), auto-expand it. Tracked via
+  // the previous activeTopicId so it fires once per switch and doesn't override
+  // a later manual collapse. Adjusted during render (the React-recommended
+  // alternative to setState-in-effect).
+  const [prevActiveTopicId, setPrevActiveTopicId] = useState(activeTopicId)
+  if (activeTopicId !== prevActiveTopicId) {
+    setPrevActiveTopicId(activeTopicId)
+    if (activeTopicId === topic.id) setExpanded(true)
+  }
+
+  // Load the active topic's conversations when it auto-expands. The fetch is a
+  // side effect (and calls a store action, not React setState), so it lives in
+  // an effect rather than the render-time block above.
+  useEffect(() => {
+    if (topic.id === activeTopicId) ensureDetailLoaded()
+  }, [activeTopicId, topic.id, ensureDetailLoaded])
   const [creating, setCreating] = useState<boolean>(false)
   const [memberDialogOpen, setMemberDialogOpen] = useState<boolean>(false)
 
@@ -131,11 +161,7 @@ export function TopicNode({
   const toggle = (): void => {
     const next = !expanded
     setExpanded(next)
-    if (next && participants.length === 0) {
-      void fetchDetail(buildClient(currentWsId), topic.id).catch((err) =>
-        console.error('Failed to load topic detail:', err),
-      )
-    }
+    if (next) ensureDetailLoaded()
   }
 
   return (

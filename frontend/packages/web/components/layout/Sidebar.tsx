@@ -405,19 +405,23 @@ type MixedEntry =
   | { kind: 'group-chat'; conversation: Conversation; sortKey: number }
   | { kind: 'topic'; topic: Topic; conversations: Conversation[]; sortKey: number }
 
-function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEntry[] {
+function buildMixedList(
+  topics: Topic[],
+  conversations: Conversation[],
+  topicConversations: Record<string, Conversation[]>,
+): MixedEntry[] {
   const ts = (iso: string): number => {
     const t = new Date(iso).getTime()
     return Number.isNaN(t) ? 0 : t
   }
 
-  // Pinned conversations float out of their topic so the user can find
-  // them at the top regardless of which topic they live under. The topic
-  // still appears below with the rest of its (unpinned) conversations.
+  // A conversation with a topic_id belongs under that topic (pinned or not —
+  // pinning sorts it first *within* the topic). Only topicless conversations
+  // go in the flat list, where pinned ones float to the top.
   const byTopic = new Map<string, Conversation[]>()
   const flat: Conversation[] = []
   for (const c of conversations) {
-    if (c.topic_id && !c.is_pinned) {
+    if (c.topic_id) {
       const list = byTopic.get(c.topic_id) ?? []
       list.push(c)
       byTopic.set(c.topic_id, list)
@@ -432,12 +436,21 @@ function buildMixedList(topics: Topic[], conversations: Conversation[]): MixedEn
     entries.push({ kind, conversation: c, sortKey: ts(c.updated_at) })
   }
   for (const topic of topics) {
-    const convs = (byTopic.get(topic.id) ?? [])
-      .slice()
-      .sort((a, b) => ts(b.updated_at) - ts(a.updated_at))
+    // Merge the full per-topic list (from the topic-detail endpoint, no limit)
+    // with the window subset (from the limited flat list). Dedup by id,
+    // preferring the window copy since it carries live updates (new messages,
+    // pin toggles). This decouples a topic's conversations from the flat
+    // list's limit, so old conversations under a topic aren't truncated.
+    const merged = new Map<string, Conversation>()
+    for (const c of topicConversations[topic.id] ?? []) merged.set(c.id, c)
+    for (const c of byTopic.get(topic.id) ?? []) merged.set(c.id, c)
+    const convs = [...merged.values()].sort((a, b) => {
+      if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1
+      return ts(b.updated_at) - ts(a.updated_at)
+    })
     // last_activity_at bumps on every message; updated_at only on metadata
     // edits. Without this, topics freeze in place after the first message.
-    const newest = convs.length > 0 ? ts(convs[0]!.updated_at) : 0
+    const newest = convs.reduce((m, c) => Math.max(m, ts(c.updated_at)), 0)
     const sortKey = Math.max(ts(topic.last_activity_at), newest)
     entries.push({ kind: 'topic', topic, conversations: convs, sortKey })
   }
@@ -463,7 +476,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
   const tShell = useTranslations('shellLayout')
   const t = useTranslations('topics')
   const { conversations, activeId } = useConversationStore()
-  const { topics } = useTopicStore()
+  const { topics, topicConversations } = useTopicStore()
   const pathname = usePathname()
   const [groupDialogOpen, setGroupDialogOpen] = useState(false)
 
@@ -474,7 +487,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
 
   // Build a mixed list: standalone conversations (no topic_id) and topics with
   // their grouped conversations, ordered by most-recent activity in the group.
-  const mixedList = buildMixedList(topics, conversations)
+  const mixedList = buildMixedList(topics, conversations, topicConversations)
 
   return (
     <aside

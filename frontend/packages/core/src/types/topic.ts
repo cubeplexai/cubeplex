@@ -1,3 +1,5 @@
+import type { Conversation } from './conversation'
+
 export interface Topic {
   id: string
   title: string
@@ -33,5 +35,5 @@ export interface TopicCreateResponse {
 export interface TopicDetailResponse {
   topic: Topic
   participants: TopicParticipant[]
-  conversations: { id: string; title: string; topic_id: string }[]
+  conversations: Conversation[]
 }

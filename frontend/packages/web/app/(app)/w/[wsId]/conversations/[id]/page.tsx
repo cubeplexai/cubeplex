@@ -28,6 +28,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   const t = useTranslations('conversationPage')
   const { wsId, id: conversationId } = use(params)
   const setActive = useConversationStore((s) => s.setActive)
+  const setActiveTopic = useConversationStore((s) => s.setActiveTopic)
   const conversations = useConversationStore((s) => s.conversations)
   const loadArtifacts = useArtifactStore((s) => s.loadArtifacts)
   const focusArtifactId = useSearchParams().get('artifact')
@@ -50,6 +51,10 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
   useEffect(() => {
     usePanelStore.getState().close()
     setActive(conversationId)
+    // Clear the previous conversation's topic anchor until this one's
+    // metadata resolves below — avoids the sidebar auto-expanding the wrong
+    // topic during a switch.
+    setActiveTopic(null)
     // Snapshot the composer selection at open time. A late response (the user
     // switched conversations before this fetch resolved) is dropped via
     // `cancelled`; an edit the user made while the fetch was in flight is
@@ -79,6 +84,9 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
         try {
           const convo = (await res.json()) as Conversation
           if (cancelled) return
+          // Anchor the sidebar to this conversation's topic so it can
+          // auto-expand even when the conversation is outside the flat list.
+          setActiveTopic(convo.topic_id ?? null)
           if (!consumeLocallyCreatedConversation(conversationId)) {
             const store = getPresetSelectionStore(wsId).getState()
             if (store.modelKey === before.modelKey && store.thinking === before.thinking) {
@@ -96,7 +104,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
     return () => {
       cancelled = true
     }
-  }, [conversationId, client, wsId, setActive, loadArtifacts])
+  }, [conversationId, client, wsId, setActive, setActiveTopic, loadArtifacts])
 
   // Arriving from the artifacts library with `?artifact=<id>` auto-opens that
   // artifact's preview. Runs after the reset effect above (declaration order),
