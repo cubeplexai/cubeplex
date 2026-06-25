@@ -12,6 +12,10 @@ default:
   logging:
     third_party_level: "WARNING"
     verbose_modules: []
+    # One loguru line per HTTP request (method, path, status, duration).
+    # Health probes and OPTIONS preflights are always skipped. Set false to
+    # silence access logging (e.g. behind a proxy that already logs requests).
+    access_log: true
 
   # Deployment Configuration
   deployment:

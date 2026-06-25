@@ -471,18 +471,23 @@ def create_app(
     app.state.drain_state = DrainState()
 
     # Register middleware
+    from cubebox.api.middleware.access_log import AccessLogMiddleware
     from cubebox.api.middleware.cancellation import CancellationMiddleware
     from cubebox.api.middleware.csrf import CSRFMiddleware
     from cubebox.api.middleware.drain import DrainMiddleware
     from cubebox.api.middleware.rate_limit import limiter
     from cubebox.api.middleware.user_identity import UserIdentityMiddleware
+    from cubebox.config import config
 
     app.add_middleware(CancellationMiddleware)
     app.add_middleware(UserIdentityMiddleware)
     app.add_middleware(CSRFMiddleware)
-    # Registered last → outermost on the request path. A draining server
-    # refuses new runs before any other middleware does work.
+    # A draining server refuses new runs before any other middleware does work.
     app.add_middleware(DrainMiddleware, drain_state=app.state.drain_state)
+    # Registered last → outermost on the request path, so it times the full
+    # request and logs even drain-rejected (503) responses. Gated by config.
+    if config.get("logging.access_log", True):
+        app.add_middleware(AccessLogMiddleware)
 
     # Wire slowapi limiter into app state + exception handler
     from slowapi import _rate_limit_exceeded_handler
