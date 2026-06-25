@@ -608,7 +608,10 @@ async def _conversation_has_external_binding(session: AsyncSession, conversation
     sched_stmt = (
         select(func.count())
         .select_from(ScheduledTask)
-        .where(ScheduledTask.target_conversation_id == conversation_id)  # type: ignore[arg-type]
+        .where(
+            ScheduledTask.target_conversation_id == conversation_id,  # type: ignore[arg-type]
+            ScheduledTask.deleted_at.is_(None),  # type: ignore[union-attr]
+        )
     )
     if (await session.execute(sched_stmt)).scalar_one() > 0:
         return True
