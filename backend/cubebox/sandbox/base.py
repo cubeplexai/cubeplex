@@ -172,23 +172,6 @@ class Sandbox(ABC):
         """
         raise NotImplementedError("browser live view is not supported by this sandbox backend")
 
-    def has_synced(self, skill_version_id: str) -> bool:
-        """Whether ``skill_version_id`` has already been uploaded to this sandbox.
-
-        Concrete subclasses get this for free; ``mark_synced`` is the matching
-        setter. Storage is in-memory on the sandbox instance — fine because
-        sandboxes are per-user and the sync set lives only as long as the
-        sandbox does. Recreating a sandbox naturally re-syncs.
-        """
-        if not hasattr(self, "_synced_skill_version_ids"):
-            self._synced_skill_version_ids: set[str] = set()
-        return skill_version_id in self._synced_skill_version_ids
-
-    def mark_synced(self, skill_version_id: str) -> None:
-        if not hasattr(self, "_synced_skill_version_ids"):
-            self._synced_skill_version_ids = set()
-        self._synced_skill_version_ids.add(skill_version_id)
-
     async def file_read(
         self,
         path: str,
