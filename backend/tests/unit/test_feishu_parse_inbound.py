@@ -427,3 +427,23 @@ def test_post_language_wrapped_payload_unwrapped() -> None:
     ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
     assert ev is not None
     assert "wrapped body" in ev.text
+
+
+def test_post_group_without_bot_mention_dropped() -> None:
+    # Defense-in-depth: a group post that does NOT @ the bot must be dropped,
+    # exactly like a group text message.
+    raw = _post_event(
+        {"content": [[{"tag": "text", "text": "闲聊一下"}, {"tag": "img", "image_key": "x"}]]},
+        chat_type="group",
+        mentions=[],
+    )
+    assert FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw) is None
+
+
+def test_post_at_all_renders_at_all() -> None:
+    raw = _post_event(
+        {"content": [[{"tag": "at", "user_id": "@_all"}, {"tag": "text", "text": " 通知"}]]}
+    )
+    ev = FeishuConnector(bot_open_id="ou_bot").parse_inbound(raw)
+    assert ev is not None
+    assert "@all" in ev.text
