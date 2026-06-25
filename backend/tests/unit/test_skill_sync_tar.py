@@ -1,6 +1,7 @@
 """Unit tests for tar packing + shell command building."""
 
 import io
+import shlex
 import tarfile
 
 from cubebox.skills.sync_tar import build_extract_and_remove_cmd, build_tarball
@@ -48,10 +49,10 @@ def test_cmd_push_only_no_repush_no_remove() -> None:
         to_repush_names=[],
         to_remove=[],
     )
-    assert "mkdir -p '/workspace/.skills'" in cmd
-    assert "tar -xzf /tmp/skills_delta.tgz -C '/workspace/.skills'" in cmd
+    assert "mkdir -p " + shlex.quote("/workspace/.skills") in cmd
+    assert "tar -xzf /tmp/skills_delta.tgz -C " + shlex.quote("/workspace/.skills") in cmd
     assert "rm -f /tmp/skills_delta.tgz" in cmd
-    assert "rm -rf '/workspace/.skills/" not in cmd
+    assert "rm -rf " + shlex.quote("/workspace/.skills/") not in cmd
 
 
 def test_cmd_push_with_repush_wipes_old_version_dirs() -> None:
@@ -64,7 +65,7 @@ def test_cmd_push_with_repush_wipes_old_version_dirs() -> None:
         to_remove=[],
     )
     # rm -rf must come BEFORE tar -xzf, otherwise we'd wipe what we just extracted
-    rm_idx = cmd.index("rm -rf '/workspace/.skills/docx'")
+    rm_idx = cmd.index("rm -rf " + shlex.quote("/workspace/.skills/docx"))
     tar_idx = cmd.index("tar -xzf")
     assert rm_idx < tar_idx
 
@@ -77,8 +78,8 @@ def test_cmd_remove_only() -> None:
         to_remove=["docx", "ppt"],
     )
     assert "mkdir -p" not in cmd
-    assert "rm -rf '/workspace/.skills/docx'" in cmd
-    assert "rm -rf '/workspace/.skills/ppt'" in cmd
+    assert "rm -rf " + shlex.quote("/workspace/.skills/docx") in cmd
+    assert "rm -rf " + shlex.quote("/workspace/.skills/ppt") in cmd
 
 
 def test_cmd_push_and_remove() -> None:
@@ -88,10 +89,14 @@ def test_cmd_push_and_remove() -> None:
         to_repush_names=[],
         to_remove=["docx"],
     )
-    parts = cmd.split(" && ")
-    # extract block first, then removes
-    assert "tar -xzf" in parts[0]
-    assert "rm -rf '/workspace/.skills/docx'" in parts[1]
+    # Whole command is && chained.
+    assert " && " in cmd
+    # Extract must come BEFORE the to_remove rm
+    tar_idx = cmd.index("tar -xzf")
+    rm_idx = cmd.index("rm -rf " + shlex.quote("/workspace/.skills/docx"))
+    assert tar_idx < rm_idx
+    # No `;` — only `&&` chaining.
+    assert ";" not in cmd
 
 
 def test_cmd_nothing_returns_empty_string() -> None:

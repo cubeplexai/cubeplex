@@ -8,19 +8,6 @@ import shlex
 import tarfile
 
 
-def _q(path: str) -> str:
-    """Shell-quote a path, always wrapping in single quotes for clarity.
-
-    We use shlex.quote then, if it returned an unquoted string (only possible
-    when the path is already "safe"), we force single-quoting so that command
-    strings are unambiguous and tests can rely on the quoting style.
-    """
-    quoted = shlex.quote(path)
-    if not quoted.startswith("'"):
-        quoted = f"'{path}'"
-    return quoted
-
-
 def build_tarball(files: list[tuple[str, bytes]]) -> bytes:
     """Pack ``files`` into a gzip'd tar blob.
 
@@ -63,19 +50,15 @@ def build_extract_and_remove_cmd(
     out of the command.
     """
     segments: list[str] = []
-    quoted_root = _q(skills_root)
+    quoted_root = shlex.quote(skills_root)
     if has_push:
-        # Build the push block as a single ';'-chained segment so that
-        # callers can split on ' && ' to separate this block from post-extract
-        # cleanup without splitting within the block itself.
-        push_steps: list[str] = [f"mkdir -p {quoted_root}"]
+        segments.append(f"mkdir -p {quoted_root}")
         for name in to_repush_names:
-            target = _q(f"{skills_root}/{name}")
-            push_steps.append(f"rm -rf {target}")
-        push_steps.append(f"tar -xzf /tmp/skills_delta.tgz -C {quoted_root}")
-        push_steps.append("rm -f /tmp/skills_delta.tgz")
-        segments.append("; ".join(push_steps))
+            target = shlex.quote(f"{skills_root}/{name}")
+            segments.append(f"rm -rf {target}")
+        segments.append(f"tar -xzf /tmp/skills_delta.tgz -C {quoted_root}")
+        segments.append("rm -f /tmp/skills_delta.tgz")
     for name in to_remove:
-        target = _q(f"{skills_root}/{name}")
+        target = shlex.quote(f"{skills_root}/{name}")
         segments.append(f"rm -rf {target}")
     return " && ".join(segments)
