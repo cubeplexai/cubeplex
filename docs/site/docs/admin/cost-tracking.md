@@ -13,10 +13,13 @@ Every LLM call made through CubeBox records:
 
 - **Input tokens** — the number of tokens sent to the model (prompt, system instructions, tool results, etc.).
 - **Output tokens** — the number of tokens the model generated in its response.
-- **Model** — which model was used.
-- **Timestamp** — when the call was made.
+- **Cache read / cache write tokens** — tokens served from or written to the prompt cache, billed at their own rates (often much cheaper than fresh input tokens).
+- **Provider and model** — which provider and model handled the call.
+- **Timestamps** — when the call started and ended.
 
-CubeBox multiplies token counts by the per-model cost rates you configured in [Model Management](./models.md) to calculate dollar amounts.
+Each call also records the per-model price rates (input, output, cache read, and cache write) **as a snapshot at the time of the call**, so historical costs stay accurate even after you later change a model's rates in [Model Management](./models.md).
+
+Cost tracking also records **sandbox compute** events, so the totals reflect more than just LLM token spend.
 
 ## Usage dashboard
 
@@ -24,11 +27,27 @@ The dashboard gives you a high-level view of your organization's AI spending.
 
 ### Spend over time
 
-A time-series chart showing daily or weekly spend. Use this to spot trends — increasing usage after onboarding new team members, spikes from large batch tasks, or the impact of switching to a cheaper model.
+A time-series chart of spend, viewable at **daily** or **weekly** granularity. You can break the series down by **workspace**, **model**, or **user**. Use this to spot trends — increasing usage after onboarding new team members, spikes from large batch tasks, or the impact of switching to a cheaper model.
 
-### Per-model breakdown
+### Breakdowns
 
-A breakdown table showing token consumption and cost for each model. This helps you understand which models drive the most spend and whether cheaper alternatives might work for certain use cases.
+Alongside the org-wide totals, the dashboard breaks spend down several ways for the selected period:
+
+- **By model** — which models drive the most spend, and whether cheaper alternatives might work for certain use cases.
+- **By workspace** — which teams or projects are spending the most.
+- **By user** — per-person usage.
+- **By day** — daily totals across the period.
+
+Each row shows input/output and cache token counts, the call count, and the cost.
+
+### Export
+
+You can export the raw cost data as CSV — for the whole organization or for a single workspace — to analyze it in a spreadsheet or feed it into your own reporting.
+
+:::info 📸 Screenshot placeholder
+**Capture:** The Admin > Cost dashboard showing the spend-over-time chart at the top (with the workspace/model/user dimension toggle) and a breakdown table below it.
+**Asset:** `/img/admin/cost-dashboard.png`
+:::
 
 ## Tips for managing costs
 

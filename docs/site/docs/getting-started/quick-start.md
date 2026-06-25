@@ -23,8 +23,8 @@ Get from zero to your first AI conversation in a few minutes.
 <TabItem value="self-hosted" label="Self-hosted">
 
 1. Open the CubeBox URL your administrator provided.
-2. If you are the **first user**, you will create the organization and become its owner.
-3. Otherwise, register with an invite link or sign up and wait for an admin to approve your membership.
+2. If you are the **first user**, registration takes you to a one-time **setup** screen where you name the organization and choose a slug. You become its owner.
+3. Otherwise, register normally — you join the existing organization as a member and land in your own personal workspace.
 
 </TabItem>
 </Tabs>
@@ -33,7 +33,7 @@ Get from zero to your first AI conversation in a few minutes.
 
 Before chatting, make sure at least one AI model is available.
 
-- **Org owners/admins**: Go to **Settings > Models** and add a provider (e.g., Anthropic, OpenAI) with your API key. Then enable the models you want your team to use.
+- **Org owners/admins**: Open the **Admin** area and go to **Models > Model Providers**. Add a provider (e.g., Anthropic, OpenAI) with your API key, then enable the models you want your team to use.
 - **Members**: You will see whichever models your admin has enabled. No setup needed.
 
 ## 3. Start a conversation
@@ -43,6 +43,11 @@ Before chatting, make sure at least one AI model is available.
 3. Type a message and press **Send**.
 
 The agent responds with text, and may also produce tool calls, code execution results, or artifacts depending on the model and available tools.
+
+:::info 📸 Screenshot placeholder
+**Capture:** The chat view mid-conversation — show the model selector on the chat input, the attachment icon, and a streaming agent response.
+**Asset:** `/img/getting-started/first-conversation.png`
+:::
 
 ### Try attaching a file
 

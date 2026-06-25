@@ -56,6 +56,22 @@ cubebox is a full-stack agent platform.
     task; reserve the full suite for the pre-PR sweep.
 12. **Plain language in docs/specs.** Don't invent abstract jargon. Say what
     literally happens + why, in concrete words.
+13. **Docs ship with the code.** Any change that adds, removes, or alters a
+    user-facing behavior — a route or its path, a header, an enum/option,
+    a default limit, a config key, a UI flow, a role/permission, a CLI/slash
+    command — MUST update the matching page under `docs/site/docs/` in the
+    **same PR**. A PR that changes documented behavior without touching the
+    doc is incomplete. New user-facing subsystems get a new doc page (this is
+    the one sanctioned exception to "don't create new docs"). When a screenshot
+    is needed but not yet captured, leave a placeholder, never a silent gap:
+    ```md
+    :::info 📸 Screenshot placeholder
+    **Capture:** <what to show, incl. the interaction/state>
+    **Asset:** `/img/<area>/<name>.png`
+    :::
+    ```
+    The mapping from code area to doc page lives in the docs-overhaul plan
+    ([docs/dev/plans/2026-06-23-docs-overhaul.md](docs/dev/plans/2026-06-23-docs-overhaul.md)).
 
 ---
 

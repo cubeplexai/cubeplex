@@ -41,11 +41,12 @@ Local catalog skills (built-in and uploaded) take priority over remote duplicate
 
 ## Using the Skills marketplace
 
-For a more visual browsing experience, open the **Skills** page from the workspace sidebar. The URL pattern is:
+For a more visual browsing experience, open the **Skills** page from the workspace sidebar. It lives under your workspace at `/w/<workspace-id>/skills`, where `<workspace-id>` is your current workspace.
 
-```
-/<workspace>/skills
-```
+:::info 📸 Screenshot placeholder
+**Capture:** The workspace Skills marketplace page showing the System Catalog list on the left, a remote search query producing External Sources results below it, and a skill detail panel open on the right.
+**Asset:** `/img/skills/marketplace.png`
+:::
 
 The marketplace shows two sections:
 
@@ -55,7 +56,7 @@ The marketplace shows two sections:
 ### Browsing and searching
 
 - Use the **search bar** in the toolbar to filter by name or keyword. When remote registries are connected, the search also queries them.
-- Toggle **External only** to show only results from remote registries, hiding the local catalog.
+- Use the **Source** dropdown in the toolbar to narrow the list. It offers **All**, **Preinstalled**, **Uploaded**, and **External** — choosing **External** shows only results from remote registries and hides the local catalog.
 - Click any skill card to open its detail panel on the right, which shows the full description, keywords, version, download count (for remote skills), trust tier, and a rendered preview of the skill's `SKILL.md` content.
 
 ### Installing from the marketplace

@@ -28,7 +28,7 @@ The exact set of allowed MIME types is configured by your org admin. If you try 
 3. The files appear as chips above the input area while they upload.
 4. Type your message (optional) and press **Enter** to send.
 
-You can attach multiple files to a single message.
+You can attach multiple files to a single message, up to the per-message cap (see [Size and quota limits](#size-and-quota-limits)).
 
 ### Drag and drop
 
@@ -60,9 +60,10 @@ Sent attachments appear above the message bubble:
 | Limit | Default |
 |---|---|
 | **Max file size** | 50 MB per file |
+| **Max files per message** | 10 attachments referenced in a single message |
 | **Max per conversation** | 500 MB total across all attachments |
 
-These limits are configurable by the org admin. If you exceed the per-file limit, the upload is rejected. If you exceed the per-conversation quota, you need to start a new conversation or ask an admin to adjust the limit.
+These limits are configurable by the org admin. If you exceed the per-file limit, the upload is rejected. If you attach more than the per-message cap, sending the message is rejected — split the files across multiple messages. If you exceed the per-conversation quota, you need to start a new conversation or ask an admin to adjust the limit.
 
 ## Tips
 
