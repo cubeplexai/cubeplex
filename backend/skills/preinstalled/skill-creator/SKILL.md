@@ -1,7 +1,7 @@
 ---
 name: skill-creator
 description: Use when the user asks to create, build, write, or design a skill, or wants to package an agent behavior or workflow as a reusable skill. Also use when the user wants to edit, modify, update, improve, fix, rename, or bump the version of an existing skill (preinstalled or already published), or publish a new version of one. Also use when the user wants to publish, upload, or share a skill in the current workspace.
-version: 0.2.0
+version: 0.3.0
 keywords:
   - skill-authoring
   - marketplace
@@ -18,7 +18,7 @@ A cubebox skill is a **directory** containing `SKILL.md` at its root plus any si
 
 1. **Ground the request** — Ask the user what problem the skill solves, who it is for, and what the agent should do when the skill is active. One paragraph of context is enough.
 
-2. **Create the bundle directory** somewhere under `/workspace/` — `/workspace` is the user's persistent volume, so the bundle survives sandbox restarts and the user can come back and iterate. **Do not** draft under `/tmp/` (lost on restart) and **do not** write into `/.skills/...` (that's the read-only sync path for already-installed skills). A recommended location is `/workspace/skills/<name>/`, but anywhere under `/workspace/` works.
+2. **Create the bundle directory** somewhere under `/workspace/` — `/workspace` is the user's persistent volume, so the bundle survives sandbox restarts and the user can come back and iterate. **Do not** draft under `/tmp/` (lost on restart) and **do not** write into `/workspace/.skills/...` (that's the read-only sync path for already-installed skills). A recommended location is `/workspace/skills/<name>/`, but anywhere under `/workspace/` works.
 
    For a skill called `weekly-report`, a typical layout:
 
@@ -37,7 +37,7 @@ A cubebox skill is a **directory** containing `SKILL.md` at its root plus any si
 
 3. **Write SKILL.md** at the root of the bundle directory. See **Frontmatter Reference** and **Body Guidelines** below.
 
-4. **Add supporting files** (optional) — Drop scripts, reference docs, and templates into subdirectories of the bundle. Reference them from SKILL.md by their bundle-relative path (e.g. `python scripts/fetch_metrics.py`, `cat reference/schema.md`). When the skill is enabled in a workspace, cubebox syncs the whole directory into the sandbox under `/.skills/<safe-name>/<version>/` (colons in the canonical name are normalised to `__`), so the agent can read or execute them from there at runtime — use the `path` field returned by `load_skill` rather than constructing it yourself.
+4. **Add supporting files** (optional) — Drop scripts, reference docs, and templates into subdirectories of the bundle. Reference them from SKILL.md by their bundle-relative path (e.g. `python scripts/fetch_metrics.py`, `cat reference/schema.md`). When the skill is enabled in a workspace, cubebox syncs the whole directory into the sandbox under `/workspace/.skills/<safe-name>/<version>/` (colons in the canonical name are normalised to `__`), so the agent can read or execute them from there at runtime — use the `path` field returned by `load_skill` rather than constructing it yourself.
 
 5. **Register as skill artifact** — Call `save_artifact` with:
 
@@ -59,14 +59,14 @@ A cubebox skill is a **directory** containing `SKILL.md` at its root plus any si
 
 ## Editing an Existing Skill
 
-When the user wants to modify a skill that is already installed (preinstalled or published), the source under `/.skills/<safe-name>/<version>/` is read-only and gets rewritten on every sync — never edit in place.
+When the user wants to modify a skill that is already installed (preinstalled or published), the source under `/workspace/.skills/<safe-name>/<version>/` is read-only and gets rewritten on every sync — never edit in place.
 
 Instead:
 
 1. **Copy the bundle out** to a writable workspace path. Use the `path` returned by `load_skill` verbatim as the source — don't reconstruct it from the canonical name, because a name like `acme:my-skill` is normalised to `acme__my-skill` on disk. For example:
 
    ```bash
-   cp -r /.skills/acme__my-skill/1.0.3 /workspace/skills/my-skill
+   cp -r /workspace/.skills/acme__my-skill/1.0.3 /workspace/skills/my-skill
    ```
 
 2. **Edit under the copy** — change SKILL.md or any sibling file. Leave the `version` field in SKILL.md unset (or remove it); the server will auto-assign the next patch on publish. Only set a specific version if the user explicitly wants one.
