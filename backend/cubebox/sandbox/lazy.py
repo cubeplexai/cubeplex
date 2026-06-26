@@ -126,6 +126,24 @@ async def _sync_skills(
         if cmd:
             await sandbox.execute(cmd)
 
+        # Spec §7: if diff said to push skills but catalog returned no files,
+        # do NOT write the manifest (which would lie that the skills are synced).
+        # Return failed so the next sync retries.
+        desired_push_count = len(diff.to_push)
+        if desired_push_count > 0 and not files_uploaded:
+            logger.warning(
+                "_sync_skills: catalog returned no files for {} to_push skill(s); "
+                "skipping manifest write so next sync retries",
+                desired_push_count,
+            )
+            return SyncResult(
+                started_at=started,
+                finished_at=datetime.now(UTC),
+                status="failed",
+                error_type="EmptyCollectFiles",
+                error_message=f"to_push had {desired_push_count} entries but collect_files returned empty",
+            )
+
         # 5) Manifest last
         new_manifest = build_manifest(enabled)
         blob = json.dumps(new_manifest, ensure_ascii=False).encode("utf-8")
