@@ -1190,16 +1190,63 @@ async def four_layer_admin_and_member() -> AsyncIterator[
 # ---------------------------------------------------------------------------
 
 
+class _FakeLog:
+    def __init__(self, text: str = "") -> None:
+        self.text = text
+
+
+class _FakeExecution:
+    def __init__(self) -> None:
+        self.id: str | None = None
+        self.logs = SimpleNamespace(stdout=[], stderr=[])
+
+
+class _FakeCommandStatus:
+    def __init__(self) -> None:
+        self.exit_code: int = 0
+
+
+class _FakeCommands:
+    async def run(self, command: str, *, opts: object = None) -> _FakeExecution:
+        del command, opts
+        return _FakeExecution()
+
+    async def get_command_status(self, execution_id: str) -> _FakeCommandStatus:
+        del execution_id
+        return _FakeCommandStatus()
+
+
+class _FakeFiles:
+    def __init__(self) -> None:
+        self._store: dict[str, bytes] = {}
+
+    async def write_file(self, path: str, content: bytes) -> None:
+        self._store[path] = content
+
+    async def read_bytes(self, path: str) -> bytes:
+        if path not in self._store:
+            raise Exception(f"404: {path} not found")
+        return self._store[path]
+
+
 class _FakeRaw:
     """Minimal stand-in for ``opensandbox.Sandbox`` used by Task 9 E2E.
 
     IDs are randomized per-instance (``token_hex``) instead of a process-local
     counter so re-running the E2E doesn't collide with leftover rows from a
     prior run that survived in the persistent test DB.
+
+    ``commands`` and ``files`` are fake sub-objects so that ``OpenSandbox``
+    wrappers (and therefore ``LazySandbox``) can call ``execute`` /
+    ``upload`` / ``download`` without raising ``AttributeError``.  They use
+    an in-memory dict for file storage — sufficient for materialising the
+    LazySandbox in ``fresh_workspace_and_sandbox``.
     """
 
     def __init__(self) -> None:
         self.id = f"prov-{secrets.token_hex(6)}"
+        self.commands = _FakeCommands()
+        self.files = _FakeFiles()
 
     async def is_healthy(self) -> bool:
         return True
@@ -1696,12 +1743,20 @@ async def fresh_workspace_and_sandbox(
         await setup_session.flush()
         org_id: str = org.id
         ws_id: str = ws.id
-        # Use a synthetic user_id — skill sync only needs an id for the
-        # UserSandbox row's user_id FK; we don't need a full User record
-        # because the fixture drives manager.get_or_create directly.
-        from cubebox.models.public_id import PREFIX_USER, generate_public_id
+        # Create a real User row so user_sandboxes.user_id FK is satisfied.
+        from fastapi_users.db import SQLAlchemyUserDatabase
+        from fastapi_users.schemas import BaseUserCreate
 
-        user_id: str = generate_public_id(PREFIX_USER)
+        from cubebox.auth.users import UserManager
+
+        email = f"sync-e2e-{suffix}@example.com"
+        password = secrets.token_urlsafe(12)
+        user_db = SQLAlchemyUserDatabase(setup_session, User)
+        manager_user = UserManager(user_db)
+        user_obj = await manager_user.create(
+            BaseUserCreate(email=email, password=password), safe=False
+        )
+        user_id: str = str(user_obj.id)
         await setup_session.commit()
 
     mgr = SandboxManager(session_factory, _SYNC_ENCRYPTION_BACKEND)
@@ -1730,6 +1785,17 @@ async def fresh_workspace_and_sandbox(
         with contextlib.suppress(Exception):
             await lazy.close()
         async with session_factory() as cleanup_session:
+            # Delete user_sandboxes rows before the workspace to satisfy
+            # the user_sandboxes.workspace_id → workspaces FK.
+            from sqlalchemy import delete
+
+            from cubebox.models.user_sandbox import UserSandbox
+
+            await cleanup_session.execute(
+                delete(UserSandbox).where(
+                    UserSandbox.workspace_id == ws_id  # type: ignore[arg-type]
+                )
+            )
             ws_row = await cleanup_session.get(Workspace, ws_id)
             if ws_row is not None:
                 await cleanup_session.delete(ws_row)
