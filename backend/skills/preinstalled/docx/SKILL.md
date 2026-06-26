@@ -100,5 +100,9 @@ field — Word refreshes on open) · `page_numbers()` · `page_break()` ·
   checker; tofu is an error, not a warning.
 - **Never deliver without a clean checker run.** No placeholder text, no empty
   headings, no `[TODO]`.
-- Output is standard editable `.docx` (Word / WPS / LibreOffice). This skill
-  creates documents; it does not read or heavily edit existing `.docx`.
+- Output is standard editable `.docx` (Word / WPS / LibreOffice). This skill is
+  built for **creating** documents. If the user gives you an existing `.docx` to
+  fill or lightly edit, open it directly with `python-docx` and modify it in
+  place (it's installed) — `docbuilder`/the style sets are for new documents, so
+  don't force an edit job through them. Heavy template-application / track-changes
+  workflows are out of scope for now.
