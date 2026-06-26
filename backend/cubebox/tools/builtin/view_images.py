@@ -9,7 +9,7 @@ cubepi.AgentTool instance.
 from __future__ import annotations
 
 import base64
-from typing import Literal
+from typing import Any, Literal
 
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import ImageContent, TextContent
@@ -27,7 +27,11 @@ class ViewImagesInput(BaseModel):
         ...,
         min_length=1,
         max_length=8,
-        description="Sandbox paths of attachment images (from [Attachments] hint).",
+        description=(
+            "Sandbox file paths of images to view — both images you created/"
+            "processed in your sandbox and user-uploaded attachments (from the "
+            "[Attachments] hint)."
+        ),
     )
     detail: Literal["auto", "low", "high"] = Field(
         default="auto",
@@ -51,10 +55,17 @@ def make_view_images_tool(
     workspace_id: str,
     objectstore: ObjectStoreClient,
     capabilities: LLMCapabilities,
+    sandbox: Any | None = None,
     max_long_edge: int = 1568,
     jpeg_quality: int = 85,
 ) -> AgentTool[ViewImagesInput]:
     """Build the view_images cubepi.AgentTool with bound dependencies.
+
+    Resolution is sandbox-first: a path is read straight from the run's sandbox
+    filesystem when a sandbox is bound (``sandbox`` is the run's SandboxBackend),
+    so the model can see images it created/processed in its own sandbox — not
+    just user-uploaded attachments. Falls back to the conversation-attachment
+    object store (the only source when ``sandbox is None``).
 
     A fresh DB session is opened per call. org_id / workspace_id are
     bound at construction (run-scoped).
@@ -96,20 +107,48 @@ def make_view_images_tool(
                 workspace_id=workspace_id,
             )
             for idx, path in enumerate(args.paths, 1):
-                row = await repo.find_by_sandbox_path(path)
-                if row is None or row.kind != "image":
+                data: bytes | None = None
+                label = path
+                dims: tuple[int, int] | None = None
+
+                # Sandbox-first: read the file straight from the run's sandbox FS.
+                # Covers images the agent created/processed in its sandbox AND
+                # hydrated attachments (which also land on the sandbox FS), with
+                # no object-store round-trip.
+                if sandbox is not None:
+                    try:
+                        files = await sandbox.download([path])
+                        if files and files[0][1]:
+                            data = files[0][1]
+                    except Exception:  # noqa: BLE001 — fall through to the attachment store
+                        data = None
+
+                # Fallback: the conversation-attachment store (object store + DB dims).
+                if data is None:
+                    row = await repo.find_by_sandbox_path(path)
+                    if row is not None and row.kind == "image":
+                        try:
+                            data, _ = await objectstore.download_file(row.object_key)
+                            label = row.filename
+                            dims = (row.width or 0, row.height or 0)
+                        except Exception as exc:  # noqa: BLE001
+                            from loguru import logger
+
+                            logger.exception("view_images attachment fetch failed for {}", path)
+                            content_blocks.append(
+                                TextContent(text=f"[{idx}] {path}: error — {exc}")
+                            )
+                            continue
+
+                if data is None:
                     content_blocks.append(
                         TextContent(text=f"[{idx}] {path}: error — image not found")
                     )
                     continue
+
                 try:
-                    data, _ = await objectstore.download_file(row.object_key)
-                    if (
-                        args.detail == "auto"
-                        and (row.width or 0) <= 768
-                        and (row.height or 0) <= 768
-                    ):
-                        target = max(row.width or 0, row.height or 0)
+                    if args.detail == "auto" and dims and dims[0] <= 768 and dims[1] <= 768:
+                        target = max(dims)
                     else:
                         resolved_detail = "high" if args.detail == "auto" else args.detail
                         target = _resolve_target(resolved_detail, default=max_long_edge)
@@ -121,7 +160,7 @@ def make_view_images_tool(
                     b64 = base64.b64encode(resized).decode("ascii")
                     content_blocks.append(
                         TextContent(
-                            text=f"[{idx}] {row.filename} (target {target}px, jpeg q={jpeg_quality})"
+                            text=f"[{idx}] {label} (target {target}px, jpeg q={jpeg_quality})"
                         )
                     )
                     content_blocks.append(
@@ -141,9 +180,10 @@ def make_view_images_tool(
     return AgentTool(
         name="view_images",
         description=(
-            "Load and inspect one or more image attachments the user uploaded. "
-            "Pass sandbox paths from the [Attachments] hint. Returns the images "
-            "in a multimodal tool result for the next reasoning step."
+            "Load and inspect one or more images by sandbox path — images you "
+            "created or processed in your sandbox (screenshots, renders, downloads) "
+            "as well as user-uploaded attachments (from the [Attachments] hint). "
+            "Returns the images in a multimodal tool result for the next reasoning step."
         ),
         parameters=ViewImagesInput,
         execute=_execute,
