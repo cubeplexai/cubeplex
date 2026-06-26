@@ -75,3 +75,22 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
     )
+    # Skill sync observability (see docs/dev/specs/2026-06-26-sandbox-observability-design.md).
+    # Snapshot of the PVC manifest as observed at the most recent successful sync.
+    # PVC remains the source of truth; these columns are derived.
+    skills_manifest_hash: str | None = Field(
+        default=None,
+        max_length=71,
+        nullable=True,
+    )
+    skills_count: int = Field(default=0)
+    last_skill_sync_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    last_skill_sync_event_id: str | None = Field(
+        default=None,
+        foreign_key="user_sandbox_sync_events.id",
+        max_length=20,
+        nullable=True,
+    )
