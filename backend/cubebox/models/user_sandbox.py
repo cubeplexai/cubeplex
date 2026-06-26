@@ -83,7 +83,7 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
         max_length=71,
         nullable=True,
     )
-    skills_count: int = Field(default=0)
+    skills_count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     last_skill_sync_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
