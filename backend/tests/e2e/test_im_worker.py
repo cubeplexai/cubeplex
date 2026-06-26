@@ -105,6 +105,7 @@ class _FakeRunManager:
                 "org_id": ctx.org_id,
                 "workspace_id": ctx.workspace_id,
                 "trigger": ctx.trigger,
+                "sender_display_name": ctx.sender_display_name,
                 "cancel_pending_hitl": cancel_pending_hitl,
             }
         )
@@ -150,6 +151,10 @@ async def test_worker_processes_one_item_and_completes_receipt(
     assert rm.calls[0]["org_id"] == account.org_id
     assert rm.calls[0]["workspace_id"] == account.workspace_id
     assert rm.calls[0]["trigger"] == "im"
+    # Sender identity is derived from the effective user (here the acting user,
+    # seeded with no display_name → falls back to email) so cubepi attribution
+    # and the group-chat SenderBadge fire for IM messages.
+    assert rm.calls[0]["sender_display_name"] == f"{account.acting_user_id}@example.com"
 
     assert captured_runs and captured_runs[0][0] == "run-fake-1"
 
