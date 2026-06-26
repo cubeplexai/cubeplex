@@ -519,10 +519,21 @@ def _convert_terminal_agent_event(evt: AgentEvent) -> list[dict[str, Any]]:
             ]
 
     if isinstance(evt, MessageEndEvent) and isinstance(evt.message, UserMessage):
-        steer_id = evt.message.metadata.get("steer_id")
+        meta = evt.message.metadata
+        steer_id = meta.get("steer_id")
         if steer_id:
             text = "".join(c.text for c in evt.message.content if isinstance(c, TextContent))
-            return [{"type": "injected_message", "content": text, "steer_id": steer_id}]
+            injected: dict[str, Any] = {
+                "type": "injected_message",
+                "content": text,
+                "steer_id": steer_id,
+            }
+            # Group-chat sender identity so live viewers render the SenderBadge
+            # without waiting for a refresh (history reads these from metadata).
+            if meta.get("sender_user_id") and meta.get("sender_display_name"):
+                injected["sender_user_id"] = meta["sender_user_id"]
+                injected["sender_display_name"] = meta["sender_display_name"]
+            return [injected]
 
     if isinstance(evt, HitlRequestEvent):
         req = evt.request

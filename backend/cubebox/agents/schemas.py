@@ -169,7 +169,12 @@ class InjectedMessageEvent(AgentEvent):
     """
 
     type: Literal["injected_message"] = "injected_message"
-    data: dict[str, Any] = Field(description="Event data with content and steer_id")
+    data: dict[str, Any] = Field(
+        description=(
+            "Event data with content and steer_id, plus sender_user_id and "
+            "sender_display_name when the injected message came from a group chat"
+        )
+    )
 
 
 class SandboxConfirmRequestEvent(AgentEvent):
