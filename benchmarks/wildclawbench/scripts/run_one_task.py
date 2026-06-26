@@ -208,12 +208,21 @@ def main() -> int:
         )
         print("[wcb] pre-warmed numpy/scipy/pillow/opencv")
 
-        # 3. upload input/*
-        for f in sorted((data / "exec" / "input").rglob("*")):
-            if f.is_file():
-                rel = f.relative_to(data / "exec" / "input")
-                cube.upload(f, f"{WORK}/input/{rel}")
-        print(f"[wcb] uploaded input ({sum(1 for _ in (data/'exec'/'input').rglob('*'))} entries)")
+        # 3. upload the task's exec/ tree → /tmp_workspace (WildClawBench maps
+        #    <task>/exec/* to the agent's /tmp_workspace). If there's no exec/,
+        #    upload every task file except the gt/ ground truth.
+        exec_dir = data / "exec"
+        src_root = exec_dir if exec_dir.is_dir() else data
+        n_up = 0
+        for f in sorted(src_root.rglob("*")):
+            if not f.is_file():
+                continue
+            rel = f.relative_to(src_root)
+            if rel.parts and rel.parts[0] == "gt":
+                continue  # ground truth is injected later, after the agent finishes
+            cube.upload(f, f"{WORK}/{rel.as_posix()}")
+            n_up += 1
+        print(f"[wcb] uploaded {n_up} input file(s)")
 
         # 4. drive the agent
         print("[wcb] driving agent (this can take minutes)...")
