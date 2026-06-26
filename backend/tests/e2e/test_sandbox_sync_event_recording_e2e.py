@@ -6,7 +6,6 @@ stops bumping the UserSandbox snapshot, this fails.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,6 +24,7 @@ from cubebox.skills.service import SkillCatalogService
 async def test_cold_start_writes_success_event_and_updates_snapshot(
     fresh_workspace_and_sandbox: SimpleNamespace,
     session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
 ) -> None:
     """Install a probe skill, run sync → 1 success event + snapshot filled."""
     from tests.e2e.conftest import MemSandbox, install_skill_for_workspace
@@ -41,7 +41,7 @@ async def test_cold_start_writes_success_event_and_updates_snapshot(
         )
 
     mem = MemSandbox()
-    cache_dir = Path(tempfile.mkdtemp())
+    cache_dir = tmp_path / "cache"
     async with session_factory() as s:
         catalog = SkillCatalogService(session=s, cache=SkillCache(cache_root=cache_dir))
         result = await _sync_skills(
@@ -92,6 +92,7 @@ async def test_cold_start_writes_success_event_and_updates_snapshot(
 async def test_failed_writes_failed_event_without_snapshot_bump(
     fresh_workspace_and_sandbox: SimpleNamespace,
     session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
 ) -> None:
     """Force tar -xzf to raise → status='failed' → event written, snapshot unchanged."""
     from tests.e2e.conftest import MemSandbox, install_skill_for_workspace
@@ -118,7 +119,7 @@ async def test_failed_writes_failed_event_without_snapshot_bump(
 
     mem.execute = flaky_execute  # type: ignore[method-assign]
 
-    cache_dir = Path(tempfile.mkdtemp())
+    cache_dir = tmp_path / "cache"
     async with session_factory() as s:
         catalog = SkillCatalogService(session=s, cache=SkillCache(cache_root=cache_dir))
         result = await _sync_skills(
@@ -168,6 +169,7 @@ async def test_failed_writes_failed_event_without_snapshot_bump(
 async def test_hot_path_noop_writes_no_event(
     fresh_workspace_and_sandbox: SimpleNamespace,
     session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
 ) -> None:
     """Two consecutive syncs on the same MemSandbox: 1st = success, 2nd = noop.
 
@@ -191,7 +193,7 @@ async def test_hot_path_noop_writes_no_event(
 
     # One shared MemSandbox so the manifest written by the first sync persists.
     mem = MemSandbox()
-    cache_dir = Path(tempfile.mkdtemp())
+    cache_dir = tmp_path / "cache"
     assert ns.user_sandbox_id is not None
     svc = UserSandboxSyncEventService(session_factory)
 
@@ -244,3 +246,11 @@ async def test_hot_path_noop_writes_no_event(
             .all()
         )
         assert len(events) == 1
+        sb = (
+            await s.execute(select(UserSandbox).where(UserSandbox.id == ns.user_sandbox_id))
+        ).scalar_one()
+        assert sb.last_skill_sync_event_id == events[0].id, (
+            "noop must NOT bump snapshot — last_skill_sync_event_id should still point to r1's event"
+        )
+        # last_skill_sync_at should still be r1.finished_at, not r2.finished_at
+        assert sb.last_skill_sync_at == r1.finished_at, "noop must NOT bump last_skill_sync_at"

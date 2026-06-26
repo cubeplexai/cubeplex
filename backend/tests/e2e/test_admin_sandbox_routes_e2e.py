@@ -182,6 +182,8 @@ async def test_cross_sandbox_events_with_filters(
     body = r.json()
     assert len(body) >= 1
     assert all(e["status"] == "success" for e in body)
+    assert body[0]["org_id"] == ns.org_id
+    assert body[0]["workspace_id"] == ns.workspace_id
 
 
 @pytest.mark.asyncio
