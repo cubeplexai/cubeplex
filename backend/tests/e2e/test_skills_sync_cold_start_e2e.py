@@ -3,7 +3,7 @@
 If sync regresses to per-file upload OR fails to write manifest, this test fails.
 
 Two complementary assertion blocks:
-  1. Direct ``_sync_skills`` call into a ``_MemSandbox`` — asserts manifest +
+  1. Direct ``_sync_skills`` call into a ``MemSandbox`` — asserts manifest +
      file content without any LazySandbox overhead (fast, readable).
   2. ``LazySandbox.execute("true")`` gate — exercises ``_ensure_skills_synced``
      / ``_synced_for_this_run`` / ``_sync_lock`` end-to-end with a
@@ -12,9 +12,7 @@ Two complementary assertion blocks:
 
 from __future__ import annotations
 
-import io
 import json
-import tarfile
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,8 +20,6 @@ from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-
-from cubebox.sandbox.base import ExecuteResult, Sandbox
 
 # The private function under test — importing directly keeps the test focused
 # on the sync function itself (not the LazySandbox wrapper).
@@ -33,6 +29,7 @@ from cubebox.skills.cache import SkillCache
 from cubebox.skills.sandbox_paths import SKILLS_ROOT
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sync_manifest import MANIFEST_PATH
+from tests.e2e.conftest import MemSandbox
 
 # ---------------------------------------------------------------------------
 # _CountingCatalog: thin wrapper that counts list_enabled_for_workspace calls
@@ -53,82 +50,6 @@ class _CountingCatalog:
     # Forward every other attribute access to the real service.
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
-
-
-# ---------------------------------------------------------------------------
-# _MemSandbox: in-process sandbox with real tar extraction
-# ---------------------------------------------------------------------------
-
-
-class _MemSandbox(Sandbox):
-    """Minimal in-memory Sandbox for testing ``_sync_skills``.
-
-    ``upload`` stores bytes by path; ``download`` reads them back.
-    ``execute`` handles the ``tar -xzf /tmp/skills_delta.tgz -C <root>``
-    command that ``_sync_skills`` emits — it unpacks the tarball into the
-    in-memory FS so SKILL.md entries are readable afterwards.  All other
-    commands are accepted silently (mkdir -p, rm -f etc. are benign no-ops
-    in the test context).
-    """
-
-    _SKILLS_TGZ = "/tmp/skills_delta.tgz"
-
-    def __init__(self) -> None:
-        self._files: dict[str, bytes] = {}
-
-    @property
-    def id(self) -> str:
-        return "mem-sandbox"
-
-    @property
-    def workdir(self) -> str:
-        return "/workspace"
-
-    async def execute(
-        self,
-        command: str,
-        *,
-        timeout: int | None = None,
-        envs: dict[str, str] | None = None,
-    ) -> ExecuteResult:
-        del timeout, envs
-        # Handle the tar extract command that _sync_skills emits.
-        # Format: "mkdir -p ... && rm -rf ... && tar -xzf /tmp/skills_delta.tgz -C /workspace/.skills && ..."
-        if "tar -xzf" in command and self._SKILLS_TGZ in command:
-            tgz = self._files.get(self._SKILLS_TGZ)
-            if tgz:
-                # Extract into ``{SKILLS_ROOT}/<path>`` entries.
-                with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tf:
-                    for member in tf.getmembers():
-                        if member.isfile():
-                            f = tf.extractfile(member)
-                            if f is not None:
-                                dest = f"{SKILLS_ROOT}/{member.name}"
-                                self._files[dest] = f.read()
-                # Remove the tgz (mirrors the real command's ``rm -f``).
-                self._files.pop(self._SKILLS_TGZ, None)
-        # rm -rf / rm -f: drop matching keys.
-        for token in command.split("&&"):
-            stripped = token.strip()
-            if stripped.startswith("rm -rf ") or stripped.startswith("rm -f "):
-                path = stripped.split(None, 2)[-1].strip("'\"")
-                self._files.pop(path, None)
-        return ExecuteResult(output="", exit_code=0)
-
-    async def upload(self, files: list[tuple[str, bytes]]) -> None:
-        for path, content in files:
-            self._files[path] = content
-
-    async def download(self, paths: list[str]) -> list[tuple[str, bytes]]:
-        result: list[tuple[str, bytes]] = []
-        for path in paths:
-            if path not in self._files:
-                raise FileNotFoundError(path)
-            result.append((path, self._files[path]))
-        return result
-
-    async def close(self) -> None:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +89,7 @@ async def test_cold_start_writes_files_and_manifest(
         )
 
         # 3. Run the first sync into a fresh in-memory sandbox (cold start).
-        sandbox = _MemSandbox()
+        sandbox = MemSandbox()
         await _sync_skills(
             catalog=catalog,
             workspace_id=ns.workspace_id,
