@@ -19,6 +19,7 @@ import asyncio
 import hashlib
 import re
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -96,6 +97,18 @@ def build_legacy_user_pvc_name(prefix: str, user_id: str) -> str:
     this shape and proposes renaming each to ``build_user_pvc_name(...)``.
     """
     return f"{prefix}-{_sanitize_pvc_suffix(user_id, prefix)}"
+
+
+@dataclass(frozen=True)
+class SandboxAttachment:
+    """Bundles the live Sandbox handle with the persistent row it backs.
+
+    Returned by SandboxManager.get_or_create so callers (LazySandbox) can
+    record sync events without re-resolving the UserSandbox row by scope.
+    """
+
+    sandbox: Sandbox
+    user_sandbox_id: str
 
 
 class SandboxManager:
@@ -343,7 +356,7 @@ class SandboxManager:
         user_id: str,
         org_id: str,
         workspace_id: str,
-    ) -> Sandbox:
+    ) -> SandboxAttachment:
         """Get the active sandbox for this scope, or create a new one.
 
         Scope selection uses the polymorphic ``(scope_type, scope_id)``
@@ -423,7 +436,7 @@ class SandboxManager:
                     user_id=user_id,
                 )
                 if resumed is not None:
-                    return resumed
+                    return SandboxAttachment(sandbox=resumed, user_sandbox_id=record.id)
                 # _resume_record returned None. That can mean either a real
                 # resume failure (row now ``failed``) or the
                 # client-exception-while-provider-completed race (the
@@ -485,7 +498,7 @@ class SandboxManager:
                                 user_id=user_id,
                                 sandbox_id=record.sandbox_id,
                             )
-                        return backend
+                        return SandboxAttachment(sandbox=backend, user_sandbox_id=record.id)
                     else:
                         logger.warning(
                             "Sandbox {} is not healthy, will recreate",
@@ -555,7 +568,7 @@ class SandboxManager:
                             user_id=user_id,
                             sandbox_id=winner.sandbox_id,
                         )
-                    return loser_backend
+                    return SandboxAttachment(sandbox=loser_backend, user_sandbox_id=winner.id)
                 raise SandboxError(
                     "concurrent create lost the race with no usable winner"
                 ) from None
@@ -711,7 +724,7 @@ class SandboxManager:
                     await repo.mark_terminated(reserved.id)
                     await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
                     raise
-            return backend
+            return SandboxAttachment(sandbox=backend, user_sandbox_id=reserved.id)
 
     async def release(
         self,
