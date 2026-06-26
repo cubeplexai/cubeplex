@@ -2,15 +2,12 @@
 
 If sync regresses to per-file upload OR fails to write manifest, this test fails.
 
-Design note — why _MemSandbox instead of the LazySandbox from the fixture:
-  The ``fresh_workspace_and_sandbox`` fixture's ``lazy`` sandbox wraps
-  ``_FakeRaw`` via ``OpenSandbox``.  ``_FakeRaw`` only satisfies
-  ``opensandbox.Sandbox.create / .connect / .is_healthy / .close`` — it has no
-  ``.commands`` or ``.files`` sub-objects, so any ``execute`` / ``upload`` /
-  ``download`` call through ``OpenSandbox`` would raise ``AttributeError``.
-  Rather than paper over this with a silent no-op, we use a ``_MemSandbox``
-  that handles the tar extraction in memory, which lets us assert both the
-  manifest JSON *and* individual skill files are present after the first sync.
+Two complementary assertion blocks:
+  1. Direct ``_sync_skills`` call into a ``_MemSandbox`` — asserts manifest +
+     file content without any LazySandbox overhead (fast, readable).
+  2. ``LazySandbox.execute("true")`` gate — exercises ``_ensure_skills_synced``
+     / ``_synced_for_this_run`` / ``_sync_lock`` end-to-end with a
+     ``_CountingCatalog`` wrapper to verify the second execute call short-circuits.
 """
 
 from __future__ import annotations
@@ -30,11 +27,33 @@ from cubebox.sandbox.base import ExecuteResult, Sandbox
 
 # The private function under test — importing directly keeps the test focused
 # on the sync function itself (not the LazySandbox wrapper).
-from cubebox.sandbox.lazy import _sync_skills
+from cubebox.sandbox.lazy import LazySandbox, _sync_skills
+from cubebox.sandbox.manager import SandboxManager
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.sandbox_paths import SKILLS_ROOT
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sync_manifest import MANIFEST_PATH
+
+# ---------------------------------------------------------------------------
+# _CountingCatalog: thin wrapper that counts list_enabled_for_workspace calls
+# ---------------------------------------------------------------------------
+
+
+class _CountingCatalog:
+    """Delegates every call to the real SkillCatalogService and counts list calls."""
+
+    def __init__(self, inner: SkillCatalogService) -> None:
+        self._inner = inner
+        self.list_enabled_calls: int = 0
+
+    async def list_enabled_for_workspace(self, workspace_id: str, *, org_id: str) -> Any:
+        self.list_enabled_calls += 1
+        return await self._inner.list_enabled_for_workspace(workspace_id, org_id=org_id)
+
+    # Forward every other attribute access to the real service.
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
 
 # ---------------------------------------------------------------------------
 # _MemSandbox: in-process sandbox with real tar extraction
@@ -165,6 +184,7 @@ async def test_cold_start_writes_files_and_manifest(
         assert skills, "manifest.skills is empty after cold-start sync"
 
         # 5. At least one skill's SKILL.md must be present in the sandbox FS.
+        assert len(sandbox._files) > 0, "sandbox has no files after _sync_skills — tar no-op?"
         sample_name = next(iter(skills))
         sample_version: str = skills[sample_name]["version"]
         skill_md_path = f"{SKILLS_ROOT}/{sample_name}/{sample_version}/SKILL.md"
@@ -173,6 +193,55 @@ async def test_cold_start_writes_files_and_manifest(
         assert skill_md_bytes.startswith(b"---") or b"name:" in skill_md_bytes, (
             f"SKILL.md does not look like a valid skill file: {skill_md_bytes[:80]!r}"
         )
+
+    # -----------------------------------------------------------------------
+    # Block 2: Drive sync through the LazySandbox gate.
+    #
+    # Exercises _ensure_skills_synced / _synced_for_this_run / _sync_lock —
+    # code paths that the direct _sync_skills call above bypasses.
+    # -----------------------------------------------------------------------
+    from cryptography.fernet import Fernet
+
+    from cubebox.credentials.encryption import FernetBackend
+
+    cache_dir2 = Path(tempfile.mkdtemp())
+    enc_backend = FernetBackend([Fernet.generate_key()])
+    mgr = SandboxManager(session_factory, enc_backend)
+
+    async with session_factory() as gate_session:
+        inner_catalog = SkillCatalogService(
+            session=gate_session, cache=SkillCache(cache_root=cache_dir2)
+        )
+        counting_catalog = _CountingCatalog(inner_catalog)
+
+        lazy2 = LazySandbox(
+            manager=mgr,
+            scope_type="user",
+            scope_id=ns.user_id,
+            user_id=ns.user_id,
+            org_id=ns.org_id,
+            workspace_id=ns.workspace_id,
+            catalog=counting_catalog,  # type: ignore[arg-type]
+        )
+
+        # First execute: _ensure_skills_synced runs → list_enabled called once.
+        await lazy2.execute("true")
+        assert lazy2._synced_for_this_run is True, (
+            "_synced_for_this_run should be True after first execute"
+        )
+        assert counting_catalog.list_enabled_calls == 1, (
+            f"expected 1 list_enabled call after first execute, got {counting_catalog.list_enabled_calls}"
+        )
+
+        # Second execute: short-circuit — _synced_for_this_run already True.
+        await lazy2.execute("true")
+        assert lazy2._synced_for_this_run is True
+        assert counting_catalog.list_enabled_calls == 1, (
+            "second execute must NOT trigger another sync — "
+            f"list_enabled_calls={counting_catalog.list_enabled_calls}"
+        )
+
+        await lazy2.close()
 
     # Cleanup: remove the test skill row.
     async with session_factory() as cleanup_session:
