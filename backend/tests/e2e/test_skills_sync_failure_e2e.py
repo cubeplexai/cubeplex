@@ -12,7 +12,8 @@ Two complementary blocks:
   2. LazySandbox gate: drives the same failure through ``_ensure_skills_synced``
      so we verify the outer ``except Exception`` catch (F4 invariant) —
      ``_synced_for_this_run`` stays False on failure, then becomes True after
-     the healing retry.
+     the healing retry.  Uses the same outer-boundary ``MemSandbox.execute``
+     patch as Block 1 — no internal function patching.
 """
 
 from __future__ import annotations
@@ -148,18 +149,18 @@ async def test_sync_failure_does_not_write_manifest_and_next_sync_heals(
 async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
     fresh_workspace_and_sandbox: SimpleNamespace,
     session_factory: async_sessionmaker[AsyncSession],
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """F4 invariant: _ensure_skills_synced must NOT set _synced_for_this_run on failure.
 
-    Patches ``_sync_skills`` at the module level so the first call raises and
-    the second call heals.  This is independent of which tar command is emitted
-    and remains valid even after a hot-path optimization removes the extract step.
+    Patches ``MemSandbox.execute`` at the outer boundary to raise on the
+    tar-extract command (first occurrence only), which causes the real
+    ``_sync_skills`` to raise, which ``_ensure_skills_synced`` catches without
+    setting the flag.  The second ``lazy.execute`` retries the real sync path
+    and heals.
 
     Invariant: if F4 regresses (flag set on failure), the second execute would
     short-circuit and leave _synced_for_this_run True and skills stale.
     """
-    import cubebox.sandbox.lazy as lazy_mod
     from tests.e2e.conftest import install_skill_for_workspace, uninstall_skill_for_workspace
 
     ns = fresh_workspace_and_sandbox
@@ -179,21 +180,23 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
     enc_backend = FernetBackend([Fernet.generate_key()])
     mgr = SandboxManager(session_factory, enc_backend)
 
-    # Patch _sync_skills to fail once, then delegate to the real implementation.
-    real_sync = lazy_mod._sync_skills
+    # Fresh MemSandbox — patched at the outer boundary to fail once on tar.
+    sandbox = MemSandbox()
+    original_execute = sandbox.execute
     fail_once: dict[str, bool] = {"done": False}
 
-    async def _failing_sync(**kwargs: Any) -> None:
-        if not fail_once["done"]:
+    async def _flaky_execute(
+        command: str,
+        *,
+        timeout: int | None = None,
+        envs: dict[str, str] | None = None,
+    ) -> Any:
+        if "tar -xzf" in command and not fail_once["done"]:
             fail_once["done"] = True
-            raise RuntimeError("simulated sync failure")
-        await real_sync(**kwargs)
+            raise RuntimeError("simulated extract failure")
+        return await original_execute(command, timeout=timeout, envs=envs)
 
-    monkeypatch.setattr(lazy_mod, "_sync_skills", _failing_sync)
-
-    # Use a fresh MemSandbox so the self-heal assertion can inspect the manifest
-    # without going through the fake OpenSandbox layer.
-    sandbox = MemSandbox()
+    sandbox.execute = _flaky_execute  # type: ignore[method-assign]
 
     # Cleanup must run even if assertions fail so the workspace FK is satisfied
     # when fresh_workspace_and_sandbox tears down.
@@ -213,13 +216,12 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
                 workspace_id=ns.workspace_id,
                 catalog=catalog,
             )
-            # Inject the MemSandbox directly so we can inspect its file store
-            # after the test without going through the fake OpenSandbox layer.
+            # Inject the MemSandbox directly so we can inspect its file store.
             lazy._sandbox = sandbox
 
-            # First execute: _ensure_skills_synced → _sync_skills raises →
-            # caught by _ensure_skills_synced → _synced_for_this_run stays False.
-            # The execute itself must NOT raise.
+            # First execute: _ensure_skills_synced → real _sync_skills →
+            # sandbox.execute(tar cmd) raises → caught by _ensure_skills_synced
+            # → _synced_for_this_run stays False.  The execute itself must NOT raise.
             result = await lazy.execute("true")
             assert result.exit_code in (0, None), (
                 f"sandbox not usable after sync failure: exit={result.exit_code}"
@@ -240,7 +242,10 @@ async def test_lazy_sandbox_f4_synced_flag_stays_false_on_failure_then_heals(
             except FileNotFoundError:
                 pass  # expected
 
-            # Second execute: monkeypatch now delegates to real _sync_skills → heals.
+            # Restore execute so the second sync succeeds.
+            sandbox.execute = original_execute  # type: ignore[method-assign]
+
+            # Second execute: real _sync_skills runs without interference → heals.
             await lazy.execute("true")
 
             # Flag becomes True after the successful retry.
