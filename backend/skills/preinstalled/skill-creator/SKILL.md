@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Use when the user asks to create, build, write, or design a skill, or wants to package an agent behavior or workflow as a reusable skill. Also use when the user wants to publish, upload, or share a skill in the current workspace.
+description: Use when the user asks to create, build, write, or design a skill, or wants to package an agent behavior or workflow as a reusable skill. Also use when the user wants to edit, modify, update, improve, fix, rename, or bump the version of an existing skill (preinstalled or already published), or publish a new version of one. Also use when the user wants to publish, upload, or share a skill in the current workspace.
 version: 0.2.0
 keywords:
   - skill-authoring
