@@ -63,11 +63,12 @@ class MemSandbox(Sandbox):
     """Minimal in-memory Sandbox for testing ``_sync_skills``.
 
     ``upload`` stores bytes by path; ``download`` reads them back.
-    ``execute`` handles the ``tar -xzf /tmp/skills_delta.tgz -C <root>``
-    command that ``_sync_skills`` emits — it unpacks the tarball into the
-    in-memory FS so SKILL.md entries are readable afterwards.  All other
-    commands are accepted silently (mkdir -p, rm -f etc. are benign no-ops
-    in the test context).
+    ``execute`` processes the ``&&``-separated shell command chain that
+    ``_sync_skills`` emits — in the SAME ORDER as the real shell:
+    mkdir-p → rm-rf (wipe old) → tar-xzf (extract) → rm-f (drop tgz).
+    Unrecognised tokens (mkdir, echo, …) are accepted silently.
+    ``rm -rf <dir>`` removes all keys equal to or prefixed by ``<dir>/``
+    so uninstall tests can assert the directory is gone.
     """
 
     _SKILLS_TGZ = "/tmp/skills_delta.tgz"
@@ -91,29 +92,39 @@ class MemSandbox(Sandbox):
         envs: dict[str, str] | None = None,
     ) -> ExecuteResult:
         del timeout, envs
-        # Handle the tar extract command that _sync_skills emits.
-        # Format: "mkdir -p ... && rm -rf ... && tar -xzf /tmp/skills_delta.tgz -C /workspace/.skills && ..."
-        if "tar -xzf" in command and self._SKILLS_TGZ in command:
-            tgz = self._files.get(self._SKILLS_TGZ)
-            if tgz:
-                # Extract into ``{SKILLS_ROOT}/<path>`` entries.
-                import tarfile
+        # Process each ``&&``-separated token in ORDER so that:
+        #   mkdir -p ... → rm -rf <old> → tar -xzf ... → rm -f tgz
+        # mirrors what the real sandbox shell does.  Extracting the tar first
+        # then iterating rm-rf tokens would wipe the just-extracted files.
+        import tarfile
 
-                with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tf:
-                    for member in tf.getmembers():
-                        if member.isfile():
-                            f = tf.extractfile(member)
-                            if f is not None:
-                                dest = f"{SKILLS_ROOT}/{member.name}"
-                                self._files[dest] = f.read()
-                # Remove the tgz (mirrors the real command's ``rm -f``).
-                self._files.pop(self._SKILLS_TGZ, None)
-        # rm -rf / rm -f: drop matching keys.
         for token in command.split("&&"):
             stripped = token.strip()
-            if stripped.startswith("rm -rf ") or stripped.startswith("rm -f "):
+
+            # tar -xzf /tmp/skills_delta.tgz -C /workspace/.skills
+            if "tar -xzf" in stripped and self._SKILLS_TGZ in stripped:
+                tgz = self._files.get(self._SKILLS_TGZ)
+                if tgz:
+                    with tarfile.open(fileobj=io.BytesIO(tgz), mode="r:gz") as tf:
+                        for member in tf.getmembers():
+                            if member.isfile():
+                                f = tf.extractfile(member)
+                                if f is not None:
+                                    dest = f"{SKILLS_ROOT}/{member.name}"
+                                    self._files[dest] = f.read()
+
+            # rm -rf / rm -f: drop matching key(s).
+            # ``rm -rf /workspace/.skills/probe-1`` is a directory removal —
+            # remove all keys equal to the path OR starting with ``path/``.
+            elif stripped.startswith("rm -rf ") or stripped.startswith("rm -f "):
                 path = stripped.split(None, 2)[-1].strip("'\"")
-                self._files.pop(path, None)
+                prefix = path.rstrip("/") + "/"
+                to_drop = [k for k in self._files if k == path or k.startswith(prefix)]
+                for k in to_drop:
+                    self._files.pop(k, None)
+
+            # mkdir -p and other commands: benign no-ops in the in-memory FS.
+
         return ExecuteResult(output="", exit_code=0)
 
     async def upload(self, files: list[tuple[str, bytes]]) -> None:
