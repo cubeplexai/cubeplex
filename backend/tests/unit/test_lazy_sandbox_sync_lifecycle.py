@@ -113,3 +113,46 @@ async def test_sandbox_recreate_resets_sync_flag() -> None:
     await lazy.execute("recreate-path")  # 2nd execute fails, recreate, sync again (count=2)
 
     assert catalog.list_enabled_for_workspace.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_no_manifest_write_when_collect_files_empty() -> None:
+    """If to_push is non-empty but list_files_for_sandbox_sync returns [],
+    _sync_skills must NOT write the manifest — leaving it stale so the next
+    sync retries the push (Finding 3 guard).
+    """
+    from cubebox.sandbox.lazy import _sync_skills
+    from cubebox.skills.sync_manifest import MANIFEST_PATH
+
+    # Build a minimal ResolvedSkill-like stub that satisfies ResolvedLike.
+    skill_stub = MagicMock()
+    skill_stub.name = "probe"
+    skill_stub.version = "1.0.0"
+    skill_stub.skill_version_id = "sv-1"
+    skill_stub.storage_prefix = "skills/probe/1.0.0/"
+    skill_stub.content_hash = "abc123"
+
+    catalog = MagicMock()
+    # Catalog reports one enabled skill
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[skill_stub])
+    # But fetching files returns nothing (storage inconsistency)
+    catalog.list_files_for_sandbox_sync = AsyncMock(return_value=[])
+
+    sandbox = _make_sandbox()
+    # No manifest on disk → cold path
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError(MANIFEST_PATH))
+
+    await _sync_skills(
+        catalog=catalog,
+        workspace_id="w1",
+        org_id="o1",
+        sandbox=sandbox,
+    )
+
+    # upload must NOT have been called with the manifest path
+    manifest_uploads = [
+        c for c in sandbox.upload.call_args_list if any(MANIFEST_PATH in p for p, _ in c.args[0])
+    ]
+    assert manifest_uploads == [], (
+        "manifest must not be written when to_push > 0 but no files were collected"
+    )

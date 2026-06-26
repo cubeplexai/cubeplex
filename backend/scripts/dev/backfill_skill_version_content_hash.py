@@ -45,6 +45,7 @@ async def main() -> None:
         logger.info("backfill: {} SkillVersion row(s) need content_hash", len(rows))
 
         updated = 0
+        skipped: list[str] = []
         for sv in rows:
             try:
                 files_list = await cache.list_files(sv.id, storage_prefix=sv.storage_prefix)
@@ -55,14 +56,16 @@ async def main() -> None:
                     sv.version,
                     exc,
                 )
+                skipped.append(sv.id)
                 continue
 
             if not files_list:
                 logger.warning(
-                    "backfill: skipping {} ({}): no files found in objectstore",
+                    "backfill: skipping {} ({}): zero files — objectstore prefix may be stale",
                     sv.id,
                     sv.version,
                 )
+                skipped.append(sv.id)
                 continue
 
             files: dict[str, bytes] = dict(files_list)
@@ -76,7 +79,11 @@ async def main() -> None:
             updated += 1
 
         await db.commit()
-        logger.info("backfill: done; {} updated", updated)
+        logger.info("backfill: done; {} updated, {} skipped", updated, len(skipped))
+        if skipped:
+            logger.warning(
+                "backfill: {} SkillVersion(s) could not be hashed: {}", len(skipped), skipped
+            )
 
 
 if __name__ == "__main__":

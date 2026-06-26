@@ -7,6 +7,11 @@ import io
 import shlex
 import tarfile
 
+# Shared constant so lazy.py (upload), sync_tar.py (extract cmd), and the
+# MemSandbox test stub all reference the same path — a mismatch would silently
+# no-op the cold-start extract.
+SKILLS_DELTA_TGZ_PATH = "/tmp/skills_delta.tgz"
+
 
 def build_tarball(files: list[tuple[str, bytes]]) -> bytes:
     """Pack ``files`` into a gzip'd tar blob.
@@ -56,8 +61,8 @@ def build_extract_and_remove_cmd(
         for name in to_repush_names:
             target = shlex.quote(f"{skills_root}/{name}")
             segments.append(f"rm -rf {target}")
-        segments.append(f"tar -xzf /tmp/skills_delta.tgz -C {quoted_root}")
-        segments.append("rm -f /tmp/skills_delta.tgz")
+        segments.append(f"tar -xzf {SKILLS_DELTA_TGZ_PATH} -C {quoted_root}")
+        segments.append(f"rm -f {SKILLS_DELTA_TGZ_PATH}")
     for name in to_remove:
         target = shlex.quote(f"{skills_root}/{name}")
         segments.append(f"rm -rf {target}")
