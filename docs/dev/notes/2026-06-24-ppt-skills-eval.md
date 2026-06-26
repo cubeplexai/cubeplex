@@ -132,3 +132,110 @@ the listener off when certs are absent.
 > periodically `pkill -f main.py`-ing (matching the worktree's same-named
 > process) and holding egress port 9443. Worked around by running the eval
 > backend as `eval_server_8024.py` with the egress listener on 9444.
+
+---
+
+# Addendum (2026-06-25): docx eval + PPT revisit with kimi_skills
+
+After the PPT pass, evaluated **docx**, and revisited PPT against the local
+`~/kimi_skills` set (`docx`, `pptx`, `pptx-swarm`, …).
+
+## docx — winner: `kimi-docx`
+
+docx doesn't split into two camps like PPT — serious contenders are all
+native-programmatic; the real axis is toolchain. Head-to-head (same SLM brief
+task, `pro` model), rendered via LibreOffice (note: needed `libreoffice-writer`,
+not just `-impress`):
+
+| Skill | Toolchain | Runtime | Output |
+|---|---|---|---|
+| **kimi-docx** (`~/kimi_skills/docx`) | Node `docx-js` + python-docx edits | **~283s** | finished doc: **populated TOC** (page numbers + leaders), proper `styles.xml`+`numbering.xml`, H1/H2 styles, shaded 6×3 table |
+| minimax-docx (= **current preinstalled `docx`**) | .NET / OpenXML SDK | **~901s** (hit 15-min cap) | content-rich but **TOC unpopulated** placeholder, package **missing `styles.xml`** |
+
+The sandbox image ships Node + the `docx` npm package pre-baked; there is no warm
+.NET/nuget, so kimi-docx's path is ~3× faster and produces a better-formed file.
+**Recommend replacing the current MiniMax-based preinstalled `docx` with
+`kimi-docx`.** Other registry docx candidates were thin (`docx-manipulation`,
+MCP-coupled), prose-only (`ivangdavila`), or off-topic (`ljg-word*` are vocabulary
+tools).
+
+## PPT revisit — kimi `pptx` changes the *native* pick (conditionally)
+
+kimi `pptx` is a native-pptx skill using a custom **`.pptd` YAML DSL → .pptx**
+compiler (`kimi_ppt_dsl.pyz`), with a centralized theme system, tables, **native
+charts**, and a built-in **format/overflow checker**. Local engine probe (agent
+authored a `.pptd` for the same SLM deck → `check` clean after 1 fix → `convert`):
+the rendered deck is **the best native output of the whole eval** — cohesive
+theming, styled comparison table, and a metrics slide with a real bar chart.
+
+It does **not** affect the HTML camp — `openclaw-slides` stands.
+
+The catch: the engine is a **250 MB** `kimi_ppt_dsl.pyz` (the skill *docs* are only
+~260 KB). Over the registry 50 MB cap, and too heavy to sync per-sandbox. So:
+
+- **If the engine is baked into the sandbox image** (like node/libreoffice already
+  are) and only the thin skill docs ship as the bundle → **kimi `pptx` is the
+  native winner** (best quality + checker). `pptx-swarm` (same engine, multi-agent)
+  covers long/batch decks.
+- **If it must ship as a synced skill bundle** (250 MB/sandbox) → impractical as a
+  default; keep **`create-pptx`** as the lightweight native default and offer kimi
+  `pptx` as an admin/opt-in premium skill.
+
+### Revised recommendation
+- **HTML deck**: `openclaw-slides` (unchanged).
+- **Native pptx**: `kimi pptx` if its engine can live in the sandbox image; else
+  `create-pptx` (lightweight) as default + kimi `pptx` opt-in.
+- **docx**: `kimi-docx` (replaces the current MiniMax preinstall).
+
+---
+
+# Addendum 2 (2026-06-25): IP decision + our own `deckcraft` pptx skill
+
+**IP:** the kimi skills are extracted from the Kimi desktop client (no OSS
+license) — not shippable. Decision: learn from their *public SKILL.md
+methodology* only, build clean-room on open libs + free fonts. Also: the kimi
+pptx engine's 250MB is **bundled fonts**, 141MB of which are **proprietary**
+(Monotype Arial/Times/Impact, MS Tahoma/YaHei, SinoType STHeiti) — would be a
+license violation to ship; the staging script drops them, keeping 24 OFL/free
+fonts (87MB).
+
+**Pilot — `backend/skills/preinstalled/eval-deckcraft/` (native pptx):**
+clean-room skill = python-pptx builder (`scripts/deckbuilder.py`, themed
+cover/agenda/cards/comparison/metrics/closing on the MIT-0 pptx-generator +
+create-pptx patterns) + an overflow/contrast/off-canvas **self-checker**
+(`scripts/check_deck.py`, PIL metrics on free fonts; borrowed kimi discipline).
+Free fonts only (DejaVu/Noto CJK), no emoji glyphs, no proprietary engine.
+
+End-to-end agent run (SLM deck task, `pro` model): the agent loaded the skill,
+built the deck, ran the checker → **1 error → fixed → re-checked to 0/0**, and
+delivered a cohesive, defect-free 6-slide deck (dark/teal theme, accent cards,
+highlight-column comparison table, big metrics) — visually on par with kimi
+pptx / create-pptx, but fully open + self-owned. The "generate → self-check →
+fix → deliver" loop ran autonomously, which is the key quality mechanism.
+
+v0.1 gaps / next: add a native `chart` archetype (kimi had one), more themes,
+CJK test; then promote `deckcraft` → preinstalled `pptx`, and apply the same
+pattern to docx; adopt openclaw-slides (lightly enriched) for HTML.
+
+## Addendum 3 (2026-06-25): `deckcraft` → promoted to preinstalled `pptx` v1.1.0
+
+v1 polish done and the skill promoted to replace the (Anthropic html2pptx)
+preinstalled `pptx`:
+- **Native chart** archetype (`Deck.chart`) — themed column chart, data labels,
+  transparent background (shows through dark themes), value axis hidden.
+- **CJK** — runs set the East-Asian (`<a:ea>`) typeface (Noto CJK), so Chinese
+  renders instead of tofu. Verified with a full Chinese deck.
+- **5 themes** — midnight / ember / orchid (dark) + daylight / paper (light);
+  daylight `muted` darkened to clear WCAG 4.5:1.
+- **Fonts**: Liberation Sans/Serif + Noto CJK — all already in the sandbox
+  image, so nothing new is needed there (the earlier kimi-font / .NET-removal
+  image edits were reverted; `.NET` stays until the MiniMax docx is replaced).
+
+End-to-end agent run as `pptx` (model `pro`): loaded the skill, built a 6-slide
+deck **including a working native chart**, ran the checker → fixed → 0/0,
+delivered. Output is cohesive and defect-free — matches kimi/create-pptx quality
+with only open libs + free fonts + clean-room code we own.
+
+Skill lives at `backend/skills/preinstalled/pptx/` (SKILL.md +
+scripts/deckbuilder.py + scripts/check_deck.py). Next: same pattern for docx
+(then drop .NET), and adopt+enrich openclaw-slides for the HTML camp.
