@@ -338,10 +338,14 @@ def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent 
 
     t = d.get("type")
     if t == "injected_message":
-        return InjectedMessageEvent(
-            timestamp=timestamp,
-            data={"content": d.get("content", ""), "steer_id": d.get("steer_id", "")},
-        )
+        injected_data: dict[str, Any] = {
+            "content": d.get("content", ""),
+            "steer_id": d.get("steer_id", ""),
+        }
+        if d.get("sender_user_id") and d.get("sender_display_name"):
+            injected_data["sender_user_id"] = d["sender_user_id"]
+            injected_data["sender_display_name"] = d["sender_display_name"]
+        return InjectedMessageEvent(timestamp=timestamp, data=injected_data)
     if t == "text_delta":
         return TextDeltaEvent(
             timestamp=timestamp,

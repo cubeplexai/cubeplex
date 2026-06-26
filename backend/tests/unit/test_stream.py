@@ -340,6 +340,36 @@ def test_injected_user_message_without_steer_id_is_dropped() -> None:
     assert convert_agent_event_to_sse(MessageEndEvent(message=msg)) == []
 
 
+def test_injected_group_chat_message_carries_sender_identity() -> None:
+    # Group-chat steers persist sender_user_id/sender_display_name in metadata;
+    # the SSE event must forward them so live viewers render the SenderBadge.
+    msg = UserMessage(
+        content=[TextContent(text="hi team")],
+        metadata={
+            "steer_id": "s1",
+            "sender_user_id": "user_abc",
+            "sender_display_name": "Alice",
+        },
+    )
+    out = convert_agent_event_to_sse(MessageEndEvent(message=msg))
+    assert out == [
+        {
+            "type": "injected_message",
+            "content": "hi team",
+            "steer_id": "s1",
+            "sender_user_id": "user_abc",
+            "sender_display_name": "Alice",
+        }
+    ]
+
+
+def test_injected_message_omits_sender_identity_when_absent() -> None:
+    # 1:1 chats persist no sender fields; the event stays minimal.
+    msg = UserMessage(content=[TextContent(text="solo steer")], metadata={"steer_id": "s2"})
+    out = convert_agent_event_to_sse(MessageEndEvent(message=msg))
+    assert out == [{"type": "injected_message", "content": "solo steer", "steer_id": "s2"}]
+
+
 # ---------------------------------------------------------------------------
 # convert_agent_event_to_sse — HitlRequestEvent → sandbox_confirm_request
 

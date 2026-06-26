@@ -36,10 +36,20 @@ import {
   streamMessages,
   streamRun,
 } from '../api'
+import { useAuthStore } from './authStore'
 import { useCitationStore } from './citationStore'
 import { useConversationStore } from './conversationStore'
 
 const YIELD_EVERY = 200
+
+// Payload carried by the `injected_message` SSE event. `sender_*` are present
+// only for group-chat messages and drive the live SenderBadge.
+type InjectedMessageData = {
+  content: string
+  steer_id: string
+  sender_user_id?: string
+  sender_display_name?: string
+}
 
 function yieldToEventLoop(): Promise<void> {
   const sched = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler
@@ -157,7 +167,7 @@ export interface MessageStore {
   cancelStream(client: ApiClient, conversationId: string): Promise<void>
   steer(client: ApiClient, conversationId: string, content: string): Promise<void>
   cancelSteer(client: ApiClient, conversationId: string, steerId: string): Promise<void>
-  __commitTurnAndInject(conversationId: string, data: { content: string; steer_id: string }): void
+  __commitTurnAndInject(conversationId: string, data: InjectedMessageData): void
   clearStream(): void
   clearLastRunStatus(): void
   /** Test hook: apply a single AgentEvent synchronously */
@@ -1056,7 +1066,7 @@ async function consumeRunStream(
         }
         break
       } else if (event.type === 'injected_message') {
-        const d = event.data as { content: string; steer_id: string }
+        const d = event.data as InjectedMessageData
         // Flush batched stream mutations so the commit reads fully-applied
         // streamAgents, not a stale snapshot.
         flush()
@@ -1470,12 +1480,25 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       void useConversationStore.getState().generateTitle(client, conversationId, content)
     }
 
+    // In a group chat, stamp the local sender's identity onto the optimistic
+    // bubble so their own SenderBadge shows immediately (history returns these
+    // fields on refresh; without them the badge would only appear after reload).
+    const isGroupChat =
+      useConversationStore.getState().conversations.find((c) => c.id === conversationId)
+        ?.is_group_chat ?? false
+    const me = isGroupChat ? useAuthStore.getState().user : null
+    const senderMeta =
+      me != null ? { sender_user_id: me.id, sender_display_name: me.display_name ?? me.email } : {}
+
     const userMessage: UserMessageType = {
       id: nextMessageId('user-temp'),
       role: 'user',
       content: [{ type: 'text', text: content }],
       timestamp: Date.now() / 1000,
-      metadata: attachments && attachments.length > 0 ? { attachments } : {},
+      metadata: {
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        ...senderMeta,
+      },
     }
 
     set((state) => ({
@@ -1628,7 +1651,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             }
             break outer
           } else if (event.type === 'injected_message') {
-            const d = event.data as { content: string; steer_id: string }
+            const d = event.data as InjectedMessageData
             // Flush batched stream mutations so the commit reads fully-applied
             // streamAgents, not a stale snapshot.
             flush()
@@ -1763,7 +1786,17 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       role: 'user',
       content: [{ type: 'text', text: data.content }],
       timestamp: Date.now() / 1000,
-      metadata: { steer_id: data.steer_id },
+      metadata: {
+        steer_id: data.steer_id,
+        // Group-chat sender identity (present only for group chats) so the
+        // SenderBadge renders live, matching what history returns on refresh.
+        ...(data.sender_user_id && data.sender_display_name
+          ? {
+              sender_user_id: data.sender_user_id,
+              sender_display_name: data.sender_display_name,
+            }
+          : {}),
+      },
     }
 
     set((s) => ({
