@@ -7,7 +7,8 @@ cubebox's harness extracts ≥ their capability.
 
 Full design + rationale (why WildClawBench over Claw-SWE-Bench / ClawBench, the
 OpenClaw-ecosystem caveat, phased plan, risks):
-**`~/benchmarks/wildclawbench/INTEGRATION-DESIGN.md`** (kept outside the worktree).
+**`docs/dev/specs/2026-06-26-wildclawbench-integration-design.md`** (also snapshotted
+to `~/benchmarks/wildclawbench/INTEGRATION-DESIGN.md` alongside the downloaded images).
 
 ## Status — Phase 0 done (2026-06-25), image-gated phases pending
 
