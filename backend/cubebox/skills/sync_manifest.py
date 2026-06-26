@@ -11,23 +11,13 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
 
 from cubebox.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
+from cubebox.skills.sync_diff import ResolvedLike
 
 MANIFEST_SCHEMA_VERSION = 1
 MANIFEST_PATH = f"{SKILLS_ROOT}/manifest.json"
-
-
-class ResolvedLike(Protocol):
-    @property
-    def name(self) -> str: ...
-    @property
-    def version(self) -> str: ...
-    @property
-    def skill_version_id(self) -> str: ...
-    @property
-    def content_hash(self) -> str: ...
 
 
 def build_manifest(enabled: Sequence[ResolvedLike]) -> dict[str, Any]:
