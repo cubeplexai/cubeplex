@@ -115,10 +115,15 @@ def _content_checks(para, default_ea, errors, warnings, bg=None):
     if any(ph in txt.lower() for ph in PLACEHOLDERS) and not _is_field_placeholder(para):
         errors.append(f"placeholder text left in document: {txt[:50]!r}")
     if _has_cjk(txt):
-        ea = _run_eastasia(para.runs[0]) if para.runs else None
-        ea = ea or _style_eastasia(para.style) or default_ea
-        if not ea:
-            errors.append(f"CJK without an East-Asian font (will tofu): {txt[:40]!r}")
+        style_ea = _style_eastasia(para.style) or default_ea
+        # check every run that actually carries CJK, not just runs[0]
+        cjk_runs = [r for r in para.runs if _has_cjk(r.text)] or [None]
+        for r in cjk_runs:
+            ea = (_run_eastasia(r) if r is not None else None) or style_ea
+            if not ea:
+                bad = r.text.strip()[:40] if r is not None else txt[:40]
+                errors.append(f"CJK without an East-Asian font (will tofu): {bad!r}")
+                break
     for r in para.runs:
         col = r.font.color
         if col is not None and col.rgb is not None and col.type is not None and r.text.strip():
@@ -135,8 +140,9 @@ def check(path: str):
     errors: list[str] = []
     warnings: list[str] = []
 
-    sec = doc.sections[0]
-    text_w = sec.page_width - sec.left_margin - sec.right_margin
+    # Widest section's text area — a doc may mix portrait + landscape sections,
+    # and a wide table belongs to its own (possibly landscape) section.
+    text_w = max(s.page_width - s.left_margin - s.right_margin for s in doc.sections)
     default_ea = _doc_default_eastasia(doc)
 
     # ---- paragraphs: styles, hierarchy, CJK, contrast, placeholders ----

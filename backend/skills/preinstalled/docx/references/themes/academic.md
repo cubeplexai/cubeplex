@@ -43,7 +43,7 @@ from docbuilder import Doc
 d = Doc(theme="academic")
 d.cover("Effective Context Length in Long-Context Models",
         subtitle="A measurement study", meta="NLP Lab · Draft, 2026")
-d.heading("Abstract")
+d.heading("Abstract", numbered=False)   # front matter: unnumbered
 d.body("We measure how retrieval accuracy degrades as context length grows, "
        "and propose a training signal that extends the usable window.")
 d.heading("Introduction")             # → "1 Introduction"

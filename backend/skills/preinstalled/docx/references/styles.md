@@ -34,7 +34,7 @@ d = Doc(theme="corporate", lang="en-US")    # lang="zh-CN" for Chinese docs
 | Method | For |
 |---|---|
 | `cover(title, subtitle="", meta="")` | Title block (centered title + subtitle + meta line). |
-| `heading(text, level=1)` | Section heading, level 1–3. In `academic`/`official` it auto-numbers. |
+| `heading(text, level=1, numbered=True)` | Section heading, level 1–3. In `academic`/`official` it auto-numbers; pass `numbered=False` for unnumbered front/back matter (Abstract, References). |
 | `body(text)` | A prose paragraph in the body style. |
 | `bullets(items)` | Unordered list. |
 | `numbered(items)` | Ordered list. |
