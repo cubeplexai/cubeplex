@@ -67,13 +67,14 @@ async def get_live_view(
         session, ctx, conversation_id
     )
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
         await sandbox.start_browser()
         # Live-view / takeover traffic goes straight to Neko and bypasses the normal
         # per-tool activity updates, so mark the sandbox active here too (the
