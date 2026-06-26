@@ -104,6 +104,15 @@ async def process_one_queue_item(
             ).scalar_one_or_none()
             if link is not None:
                 effective_user_id = link.user_id
+        # Resolve the sender's display name from the run's effective user so the
+        # group-chat SenderBadge + cubepi sender attribution fire for IM
+        # messages, mirroring the in-app send path (display_name or email).
+        from cubebox.models.user import User
+
+        sender_user = await session.get(User, effective_user_id)
+        sender_display_name: str | None = (
+            (sender_user.display_name or sender_user.email) if sender_user is not None else None
+        )
         # Refuse to dispatch IM messages against topic or standalone group
         # chat conversations — the group-chat / topic-aware path is not
         # implemented for IM in v1, so silently running with
@@ -156,6 +165,7 @@ async def process_one_queue_item(
             "org_id": account.org_id,
             "workspace_id": account.workspace_id,
             "acting_user_id": effective_user_id,
+            "sender_display_name": sender_display_name,
             "topic_id": (conv_row.topic_id if conv_row is not None else None),
             "is_group_chat": (conv_row.is_group_chat if conv_row is not None else False),
             "sandbox_mode": sandbox_mode,
@@ -204,6 +214,7 @@ async def process_one_queue_item(
                 is_group_chat=captured["is_group_chat"],
                 sandbox_mode=captured["sandbox_mode"],
                 topic_creator_user_id=(captured["topic_creator_user_id"]),
+                sender_display_name=captured["sender_display_name"],
             ),
             cancel_pending_hitl=True,
         )
