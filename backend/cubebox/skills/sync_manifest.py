@@ -8,6 +8,7 @@ without re-uploading anything.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -48,3 +49,16 @@ def parse_manifest(raw: bytes) -> dict[str, Any]:
     if not isinstance(obj.get("skills"), dict):
         return {"skills": {}}
     return obj
+
+
+def hash_manifest(manifest: dict[str, Any]) -> str:
+    """Stable sha256 over the manifest's logical content.
+
+    Canonical: ``json.dumps`` with sorted keys and tight separators so the
+    same logical content always produces the same hash, regardless of dict
+    construction order or pretty-printing options.
+    """
+    blob = json.dumps(
+        manifest, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(blob).hexdigest()
