@@ -22,6 +22,7 @@ from functools import lru_cache
 from matplotlib import font_manager
 from PIL import ImageFont
 from pptx import Presentation
+from pptx.oxml.ns import qn
 
 EMU_PER_PT = 12700
 LINE_HEIGHT = 1.3  # matches typical PPTX single-line spacing
@@ -45,6 +46,23 @@ def _text_width_pt(text: str, name: str, size_pt: float) -> float:
         return 0.0
     f = _font(name, size_pt)
     return f.getlength(text)
+
+
+def _has_cjk(s: str) -> bool:
+    # CJK ideographs + Japanese kana + fullwidth/CJK punctuation
+    return any("　" <= c <= "鿿" or "＀" <= c <= "￯" for c in s)
+
+
+def _ea_typeface(run) -> str | None:
+    """The run's East-Asian (<a:ea>) typeface, used to measure CJK text — the
+    Latin font has no CJK glyphs, so measuring CJX with it under-counts width
+    and can hide real overflow."""
+    try:
+        rPr = run._r.find(qn("a:rPr"))
+        ea = rPr.find(qn("a:ea")) if rPr is not None else None
+        return ea.get("typeface") if ea is not None else None
+    except Exception:
+        return None
 
 
 def _lum(hexstr: str) -> float:
@@ -156,6 +174,10 @@ def check(path: str) -> int:
                 ptxt = "".join(r.text for r in runs)
                 size = next((r.font.size.pt for r in runs if r.font.size), 18.0)
                 name = next((r.font.name for r in runs if r.font.name), "DejaVu Sans")
+                # CJK is ~full-width and the Latin font can't measure it — use
+                # the run's East-Asian typeface when the text contains CJK.
+                if _has_cjk(ptxt):
+                    name = next((_ea_typeface(r) for r in runs if _ea_typeface(r)), name)
                 wpt = _text_width_pt(ptxt, name, size)
                 lines = (
                     max(1, -(-int(wpt) // max(1, int(box_w)))) if shp.text_frame.word_wrap else 1

@@ -41,34 +41,61 @@ def _set_run_fonts(run, latin: str, cjk: str) -> None:
     CJK glyphs use the ``<a:ea>`` face. Without setting ``ea``, Chinese text
     falls back to the Latin font (which has no CJK glyphs) and renders as tofu.
     """
-    run.font.name = latin
+    run.font.name = latin  # adds <a:latin>
     rPr = run._r.get_or_add_rPr()
     for tag in ("a:ea", "a:cs"):
         existing = rPr.find(qn(tag))
         if existing is not None:
             rPr.remove(existing)
     ea = rPr.makeelement(qn("a:ea"), {"typeface": cjk})
-    rPr.append(ea)
+    # In CT_TextCharacterProperties, <a:ea> must follow <a:latin>; appending at
+    # the end can land it after later-ordered children and trip strict readers.
+    latin_el = rPr.find(qn("a:latin"))
+    if latin_el is not None:
+        latin_el.addnext(ea)
+    else:
+        rPr.append(ea)
+
+
+def _no_fill_spPr(parent):
+    spPr = parent.makeelement(qn("c:spPr"), {})
+    spPr.append(spPr.makeelement(qn("a:noFill"), {}))
+    ln = spPr.makeelement(qn("a:ln"), {})
+    ln.append(ln.makeelement(qn("a:noFill"), {}))
+    spPr.append(ln)
+    return spPr
 
 
 def _transparent_chart(chart) -> None:
     """Give the chart-space and plot-area a no-fill background so the slide's
     theme color shows through instead of an opaque white box (which looks
-    broken on dark themes)."""
+    broken on dark themes).
+
+    Schema order matters: in CT_ChartSpace ``<c:spPr>`` must come immediately
+    after ``<c:chart>`` (before ``txPr``/``externalData``); in CT_PlotArea it is
+    the last styling child (before any ``extLst``). Placing it elsewhere makes
+    PowerPoint flag the chart as corrupt even though LibreOffice tolerates it.
+    """
     cs = chart._chartSpace
-    for parent_tag in ("c:chartSpace", "c:plotArea"):
-        node = cs if parent_tag == "c:chartSpace" else cs.find(f".//{qn('c:plotArea')}")
-        if node is None:
-            continue
-        existing = node.find(qn("c:spPr"))
-        if existing is not None:
-            node.remove(existing)
-        spPr = node.makeelement(qn("c:spPr"), {})
-        spPr.append(spPr.makeelement(qn("a:noFill"), {}))
-        ln = spPr.makeelement(qn("a:ln"), {})
-        ln.append(ln.makeelement(qn("a:noFill"), {}))
-        spPr.append(ln)
-        node.append(spPr)
+    # chartSpace: spPr right after <c:chart>
+    old = cs.find(qn("c:spPr"))
+    if old is not None:
+        cs.remove(old)
+    chart_el = cs.find(qn("c:chart"))
+    if chart_el is not None:
+        chart_el.addnext(_no_fill_spPr(cs))
+    # plotArea: spPr last, before any extLst
+    pa = cs.find(f".//{qn('c:plotArea')}")
+    if pa is not None:
+        old = pa.find(qn("c:spPr"))
+        if old is not None:
+            pa.remove(old)
+        ext = pa.find(qn("c:extLst"))
+        sp = _no_fill_spPr(pa)
+        if ext is not None:
+            ext.addprevious(sp)
+        else:
+            pa.append(sp)
 
 
 @dataclass
