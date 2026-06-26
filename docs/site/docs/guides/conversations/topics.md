@@ -91,6 +91,8 @@ In "reuse the creator's sandbox" mode, other members' actions execute inside you
 
 A topic starts with one conversation, but any participant can open more — for example, one conversation per sub-task. All of them are visible to every participant and appear nested under the topic in the sidebar. There is no separate "topic page"; you work inside the topic's conversations just like any other chat.
 
+**Who sent each message.** In a shared topic, every message is tagged with the participant who sent it, so you can tell contributors apart at a glance, and the agent is told who is speaking so it can keep track. In a plain 1:1 chat this tag is hidden — there's only you. When you **upgrade** a 1:1 conversation into a topic, messages you send from then on carry your name, so the new participants can see who said what.
+
 ## Ordering, pinning, and archiving
 
 - **Ordering.** Topics and standalone conversations share one sidebar list, ordered by most recent activity. A topic floats up whenever any conversation inside it gets a new message.

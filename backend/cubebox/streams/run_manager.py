@@ -1685,7 +1685,9 @@ class RunManager:
                 except Exception as _att_exc:
                     logger.warning("Failed to build attachment blocks for cubepi run: {}", _att_exc)
 
-            if ctx.is_group_chat and ctx.sender_display_name:
+            # Stamp on every message (1:1 included) so a later 1:1→group
+            # conversion attributes past messages; UI gates display on group.
+            if ctx.sender_display_name:
                 _user_msg_metadata["sender_user_id"] = ctx.user_id
                 _user_msg_metadata["sender_display_name"] = ctx.sender_display_name
 

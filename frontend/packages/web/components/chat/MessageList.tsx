@@ -579,12 +579,17 @@ export function MessageList({ conversationId }: MessageListProps) {
           <div key={msg.id} id={msg.seq != null ? `msg-${msg.seq}` : undefined}>
             {msg.role === 'user' && msg.metadata?.synthetic !== true && (
               <>
-                {msg.metadata?.sender_display_name && msg.metadata?.sender_user_id && (
-                  <SenderBadge
-                    userId={msg.metadata.sender_user_id}
-                    displayName={msg.metadata.sender_display_name}
-                  />
-                )}
+                {/* Sender identity is stamped on every user message (incl. 1:1)
+                    so a 1:1→group conversion attributes past messages, but the
+                    badge only shows in group chats. */}
+                {isGroupChat &&
+                  msg.metadata?.sender_display_name &&
+                  msg.metadata?.sender_user_id && (
+                    <SenderBadge
+                      userId={msg.metadata.sender_user_id}
+                      displayName={msg.metadata.sender_display_name}
+                    />
+                  )}
                 {msg.metadata?.attachments && msg.metadata.attachments.length > 0 && (
                   <MessageAttachments
                     attachments={msg.metadata.attachments}

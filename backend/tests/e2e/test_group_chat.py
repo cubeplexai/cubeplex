@@ -222,8 +222,10 @@ class TestGroupChatRunContextResolution:
         self, four_layer_admin_and_member: FourLayerFixture
     ) -> None:
         """Personal (non-topic) conversations: resolver returns no group-chat
-        signal — guaranteeing the memory-snapshot branch fires and sender
-        attribution is NOT applied.
+        signal (so the memory-snapshot branch fires) but still resolves a
+        sender_display_name. Sender identity is now stamped on every message
+        (1:1 included) so a later 1:1->group conversion can attribute past
+        messages; the frontend gates the badge on is_group_chat.
         """
         from cubebox.api.routes.v1.conversations import _resolve_topic_run_context
         from cubebox.auth.context import RequestContext
@@ -266,7 +268,9 @@ class TestGroupChatRunContextResolution:
 
         assert topic_id is None
         assert is_group_chat is False
-        assert sender_display_name is None
+        # Stamped on 1:1 too now (drives post-conversion attribution); the
+        # resolver falls back to email when display_name is unset.
+        assert sender_display_name is not None
         assert sandbox_mode is None
         assert topic_creator_user_id is None
 
