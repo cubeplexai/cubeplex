@@ -104,6 +104,9 @@ async def test_list_enabled_for_workspace(tmp_path, db_session) -> None:
     assert len(resolved) == 1
     assert resolved[0].name == skill_name
     assert resolved[0].version == "1.0.0"
+    # Guard the SELECT → ResolvedSkill projection: if content_hash is dropped
+    # from the constructor call in service.py this assertion catches it.
+    assert resolved[0].content_hash == ""
 
 
 @pytest.mark.asyncio

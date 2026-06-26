@@ -21,7 +21,11 @@ from cubebox.sandbox.base import ExecuteResult, Sandbox, SandboxError
 from cubebox.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
 from cubebox.skills.sync_diff import ResolvedLike, compute_skill_sync_diff
 from cubebox.skills.sync_manifest import MANIFEST_PATH, build_manifest, parse_manifest
-from cubebox.skills.sync_tar import build_extract_and_remove_cmd, build_tarball
+from cubebox.skills.sync_tar import (
+    SKILLS_DELTA_TGZ_PATH,
+    build_extract_and_remove_cmd,
+    build_tarball,
+)
 
 if TYPE_CHECKING:
     from cubebox.sandbox.manager import SandboxManager
@@ -93,13 +97,14 @@ async def _sync_skills(
     # files for a skill_version_id — bad storage_prefix, race with delete...).
     # has_push must reflect "we actually uploaded a tarball", not "diff said to
     # push", or tar -xzf will fail looking for a file we never sent (F2).
+    desired_push_count = len(diff.to_push)
     files: list[tuple[str, bytes]] = []
     if diff.to_push:
         files = await _collect_files_for_push(catalog, diff.to_push)
     files_uploaded = bool(files)
     if files_uploaded:
         tarball = await asyncio.to_thread(build_tarball, files)
-        await sandbox.upload([("/tmp/skills_delta.tgz", tarball)])
+        await sandbox.upload([(SKILLS_DELTA_TGZ_PATH, tarball)])
 
     repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
     cmd = build_extract_and_remove_cmd(
@@ -111,7 +116,17 @@ async def _sync_skills(
     if cmd:
         await sandbox.execute(cmd)
 
-    # 5. manifest last (so partial failures are healed by next sync)
+    # 5. manifest last (so partial failures are healed by next sync).
+    # If to_push was non-empty but no files came back (storage inconsistency),
+    # skip the manifest write so the next sync will retry the push — writing
+    # the manifest here would mark those skills as synced and suppress retries.
+    if desired_push_count > 0 and not files_uploaded:
+        logger.warning(
+            "Skill sync: {} skill(s) queued to push but no files returned; "
+            "skipping manifest write so next sync retries",
+            desired_push_count,
+        )
+        return
     new_manifest = build_manifest(enabled)
     blob = json.dumps(new_manifest, ensure_ascii=False).encode("utf-8")
     await sandbox.upload([(MANIFEST_PATH, blob)])

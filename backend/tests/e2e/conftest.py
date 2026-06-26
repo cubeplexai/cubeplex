@@ -46,6 +46,7 @@ from cubebox.sandbox.base import ExecuteResult, Sandbox
 from cubebox.sandbox.lazy import LazySandbox
 from cubebox.sandbox.manager import SandboxManager
 from cubebox.skills.sandbox_paths import SKILLS_ROOT
+from cubebox.skills.sync_tar import SKILLS_DELTA_TGZ_PATH
 from tests.e2e.helpers import csrf_cookie_name
 
 
@@ -71,7 +72,7 @@ class MemSandbox(Sandbox):
     so uninstall tests can assert the directory is gone.
     """
 
-    _SKILLS_TGZ = "/tmp/skills_delta.tgz"
+    _SKILLS_TGZ = SKILLS_DELTA_TGZ_PATH
 
     def __init__(self) -> None:
         self._files: dict[str, bytes] = {}
