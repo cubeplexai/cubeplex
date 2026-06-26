@@ -13,14 +13,21 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from cubebox.sandbox.base import ExecuteResult, Sandbox, SandboxError
+from cubebox.sandbox.sync_result import SyncResult
 from cubebox.skills.sandbox_paths import SKILLS_ROOT, safe_skill_name
 from cubebox.skills.sync_diff import ResolvedLike, compute_skill_sync_diff
-from cubebox.skills.sync_manifest import MANIFEST_PATH, build_manifest, parse_manifest
+from cubebox.skills.sync_manifest import (
+    MANIFEST_PATH,
+    build_manifest,
+    hash_manifest,
+    parse_manifest,
+)
 from cubebox.skills.sync_tar import (
     SKILLS_DELTA_TGZ_PATH,
     build_extract_and_remove_cmd,
@@ -59,78 +66,90 @@ async def _sync_skills(
     workspace_id: str,
     org_id: str,
     sandbox: Sandbox,
-) -> None:
-    """Sync enabled skills into the sandbox via persistent PVC manifest + diff.
+) -> SyncResult:
+    """Sync skills via PVC-persistent manifest + tar.gz batch transport.
 
-    Hot path (manifest matches desired): one ``download`` + one DB query, no
-    file transfer. Cold path: one tar.gz upload + one extract command.
-    The final manifest write happens after extract; if any step before it
-    fails, the manifest is not updated, and the next sync re-runs the diff
-    from whatever state the PVC is in (cold or prior-warm).
+    Returns a SyncResult describing what happened so the controller can
+    decide whether to emit an event. Three outcomes:
+      - noop: manifest already matches desired → no transfer
+      - success: pushed / removed / both
+      - failed: any exception during the flow
     """
-    # 1. read manifest. OpenSandbox.download maps "not found" to
-    # FileNotFoundError, but other backends (LocalSandbox) and non-404 errors
-    # bubble up as SandboxError. Both → treat as "no usable manifest, cold".
-    # Defensive unpack: if a backend returns [] instead of raising on missing
-    # file, the single-element destructure would raise ValueError uncaught.
+    started = datetime.now(UTC)
     try:
-        download_result = await sandbox.download([MANIFEST_PATH])
-        if not download_result:
-            manifest: dict[str, Any] = {"skills": {}}
-        else:
-            _, raw = download_result[0]
-            manifest = parse_manifest(raw)
-    except FileNotFoundError:
-        manifest = {"skills": {}}
-    except SandboxError:
-        manifest = {"skills": {}}
+        # 1) Read manifest (PVC truth)
+        try:
+            download_result = await sandbox.download([MANIFEST_PATH])
+            if not download_result:
+                manifest: dict[str, Any] = {"skills": {}}
+            else:
+                _, raw = download_result[0]
+                manifest = parse_manifest(raw)
+        except FileNotFoundError:
+            manifest = {"skills": {}}
+        except SandboxError:
+            manifest = {"skills": {}}
 
-    # 2. desired
-    enabled = await catalog.list_enabled_for_workspace(workspace_id, org_id=org_id)
+        # 2) Desired
+        enabled = await catalog.list_enabled_for_workspace(workspace_id, org_id=org_id)
 
-    # 3. diff
-    diff = compute_skill_sync_diff(manifest, enabled)
-    if diff.is_empty():
-        return
+        # 3) Diff
+        diff = compute_skill_sync_diff(manifest, enabled)
+        if diff.is_empty():
+            return SyncResult(
+                started_at=started,
+                finished_at=datetime.now(UTC),
+                status="noop",
+                manifest=manifest,
+                manifest_hash=hash_manifest(manifest),
+                skills_count=len(manifest.get("skills", {})),
+            )
 
-    # 4. push + remove
-    # files=[] is possible even when to_push is non-empty (catalog returned no
-    # files for a skill_version_id — bad storage_prefix, race with delete...).
-    # has_push must reflect "we actually uploaded a tarball", not "diff said to
-    # push", or tar -xzf will fail looking for a file we never sent (F2).
-    desired_push_count = len(diff.to_push)
-    files: list[tuple[str, bytes]] = []
-    if diff.to_push:
-        files = await _collect_files_for_push(catalog, diff.to_push)
-    files_uploaded = bool(files)
-    if files_uploaded:
-        tarball = await asyncio.to_thread(build_tarball, files)
-        await sandbox.upload([(SKILLS_DELTA_TGZ_PATH, tarball)])
+        # 4) Push + remove
+        files: list[tuple[str, bytes]] = []
+        if diff.to_push:
+            files = await _collect_files_for_push(catalog, diff.to_push)
+        files_uploaded = bool(files)
+        tarball_size: int | None = None
+        if files_uploaded:
+            tarball = await asyncio.to_thread(build_tarball, files)
+            tarball_size = len(tarball)
+            await sandbox.upload([(SKILLS_DELTA_TGZ_PATH, tarball)])
 
-    repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
-    cmd = build_extract_and_remove_cmd(
-        skills_root=SKILLS_ROOT,
-        has_push=files_uploaded,
-        to_repush_names=repush_names,
-        to_remove=diff.to_remove,
-    )
-    if cmd:
-        await sandbox.execute(cmd)
-
-    # 5. manifest last (so partial failures are healed by next sync).
-    # If to_push was non-empty but no files came back (storage inconsistency),
-    # skip the manifest write so the next sync will retry the push — writing
-    # the manifest here would mark those skills as synced and suppress retries.
-    if desired_push_count > 0 and not files_uploaded:
-        logger.warning(
-            "Skill sync: {} skill(s) queued to push but no files returned; "
-            "skipping manifest write so next sync retries",
-            desired_push_count,
+        repush_names = [safe_skill_name(s.name) for s in diff.to_push] if files_uploaded else []
+        cmd = build_extract_and_remove_cmd(
+            skills_root=SKILLS_ROOT,
+            has_push=files_uploaded,
+            to_repush_names=repush_names,
+            to_remove=diff.to_remove,
         )
-        return
-    new_manifest = build_manifest(enabled)
-    blob = json.dumps(new_manifest, ensure_ascii=False).encode("utf-8")
-    await sandbox.upload([(MANIFEST_PATH, blob)])
+        if cmd:
+            await sandbox.execute(cmd)
+
+        # 5) Manifest last
+        new_manifest = build_manifest(enabled)
+        blob = json.dumps(new_manifest, ensure_ascii=False).encode("utf-8")
+        await sandbox.upload([(MANIFEST_PATH, blob)])
+
+        return SyncResult(
+            started_at=started,
+            finished_at=datetime.now(UTC),
+            status="success",
+            n_pushed=len(diff.to_push),
+            n_removed=len(diff.to_remove),
+            tar_size_bytes=tarball_size,
+            manifest=new_manifest,
+            manifest_hash=hash_manifest(new_manifest),
+            skills_count=len(new_manifest.get("skills", {})),
+        )
+    except Exception as exc:
+        return SyncResult(
+            started_at=started,
+            finished_at=datetime.now(UTC),
+            status="failed",
+            error_type=type(exc).__name__,
+            error_message=str(exc)[:1024],
+        )
 
 
 class LazySandbox(Sandbox):
