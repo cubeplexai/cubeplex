@@ -693,6 +693,22 @@ async def member_client() -> AsyncIterator[tuple[httpx.AsyncClient, str]]:
 
 
 @pytest_asyncio.fixture
+async def non_admin_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Fresh client logged in as a brand-new member (not admin).
+
+    Yields just the ``httpx.AsyncClient`` (no workspace_id) for tests that
+    only need to assert RBAC rejection on admin routes.
+    """
+    app, email, password, _workspace_id = await _make_isolated_user(Role.MEMBER)
+    app.state.deployment_mode = "multi_tenant"
+    async with _lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            await _login_and_attach(c, email, password)
+            yield c
+
+
+@pytest_asyncio.fixture
 async def member_client_two_workspaces() -> AsyncIterator[tuple[httpx.AsyncClient, str, str]]:
     """Fresh member user with two workspaces in the same org.
 
@@ -1915,6 +1931,87 @@ async def fresh_workspace_and_sandbox(
             if ws_row is not None:
                 await cleanup_session.delete(ws_row)
             await cleanup_session.commit()
+
+
+@pytest_asyncio.fixture
+async def admin_client_and_sandbox(
+    fresh_workspace_and_sandbox: SimpleNamespace,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[tuple[httpx.AsyncClient, SimpleNamespace]]:
+    """Admin HTTP client authenticated in the same org as ``fresh_workspace_and_sandbox``.
+
+    Seeds a fresh admin user whose ``OrganizationMembership`` points to
+    ``ns.org_id``.  This ensures ``resolve_current_org_id`` returns the sandbox's
+    org so the admin route's org-scope filter matches the seeded rows.
+
+    Yields ``(client, ns)`` where ``ns`` is the ``fresh_workspace_and_sandbox``
+    namespace.
+    """
+    ns = fresh_workspace_and_sandbox
+    suffix = secrets.token_hex(4)
+    email = f"admin-obs-{suffix}@example.com"
+    password = secrets.token_urlsafe(12)
+
+    from sqlalchemy import delete as sa_delete
+
+    from cubebox.models import OrganizationMembership, OrgRole
+    from cubebox.repositories import OrganizationMembershipRepository
+
+    async with session_factory() as session:
+        user_db_inst = SQLAlchemyUserDatabase(session, User)
+        mgr = UserManager(user_db_inst)
+        user_obj = await mgr.create(BaseUserCreate(email=email, password=password), safe=False)
+        user_id = str(user_obj.id)
+
+        # Grant workspace membership.
+        mem_repo = MembershipRepository(session)
+        await mem_repo.grant(user_id=user_id, workspace_id=ns.workspace_id, role=Role.ADMIN)
+
+        # Grant org-level OWNER so require_org_admin passes.
+        await OrganizationMembershipRepository(session).grant(
+            user_id=user_id, org_id=ns.org_id, role=OrgRole.OWNER
+        )
+
+        # Strip any bootstrap-created personal org memberships; on_after_register
+        # fires and creates a personal org — remove it so resolve_current_org_id
+        # picks ns.org_id (highest priority) rather than the personal org.
+        await session.execute(
+            sa_delete(OrganizationMembership).where(
+                OrganizationMembership.user_id == user_id,  # type: ignore[arg-type]
+                OrganizationMembership.org_id != ns.org_id,  # type: ignore[arg-type]
+            )
+        )
+        await session.commit()
+
+    app = _make_memory_test_app()
+    app.state.deployment_mode = "multi_tenant"
+    try:
+        async with _lifespan_context(app):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+                await _login_and_attach(c, email, password)
+                yield c, ns
+    finally:
+        # Remove admin user's workspace membership so fresh_workspace_and_sandbox's
+        # cleanup can delete the workspace without FK violations.
+        from sqlalchemy import delete as sa_delete2
+
+        from cubebox.models import Membership as MembershipModel
+        from cubebox.models import OrganizationMembership
+
+        async with session_factory() as cleanup:
+            await cleanup.execute(
+                sa_delete2(MembershipModel).where(
+                    MembershipModel.workspace_id == ns.workspace_id,  # type: ignore[arg-type]
+                    MembershipModel.user_id == user_id,  # type: ignore[arg-type]
+                )
+            )
+            await cleanup.execute(
+                sa_delete2(OrganizationMembership).where(
+                    OrganizationMembership.user_id == user_id,  # type: ignore[arg-type]
+                )
+            )
+            await cleanup.commit()
 
 
 def _minimal_skill_zip(slug: str, version: str = "1.0.0") -> bytes:
