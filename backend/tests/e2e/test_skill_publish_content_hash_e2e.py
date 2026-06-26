@@ -1,9 +1,6 @@
 """E2E: publishing a skill writes a non-empty content_hash to SkillVersion.
 
 If publish path stops computing or stops persisting content_hash, this fails.
-
-Object storage is mocked at the outermost external boundary (the S3 put_object
-call) because this test is about the DB invariant, not the upload path.
 """
 
 from __future__ import annotations
@@ -11,7 +8,6 @@ from __future__ import annotations
 import io
 import secrets
 import zipfile
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select, text
@@ -61,17 +57,12 @@ async def test_publish_writes_content_hash(tmp_path, db_session: AsyncSession) -
         session=db_session, cache=SkillCache(cache_root=tmp_path / "cache")
     )
 
-    # Mock S3 at its external boundary — this test is about the DB invariant,
-    # not the object-store upload path.
-    mock_client = AsyncMock()
-    mock_client.upload_file = AsyncMock(return_value=None)
-    with patch("cubebox.skills.service.get_objectstore_client", return_value=mock_client):
-        sv = await publisher.publish_from_zip(
-            org_id=org_id,
-            org_slug=org_slug,
-            actor_user_id=user_id,
-            zip_bytes=_make_zip(skill_name),
-        )
+    sv = await publisher.publish_from_zip(
+        org_id=org_id,
+        org_slug=org_slug,
+        actor_user_id=user_id,
+        zip_bytes=_make_zip(skill_name),
+    )
 
     row = (
         await db_session.execute(select(SkillVersion).where(SkillVersion.id == sv.id))

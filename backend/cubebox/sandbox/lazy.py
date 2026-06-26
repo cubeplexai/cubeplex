@@ -64,8 +64,9 @@ async def _sync_skills(
 
     Hot path (manifest matches desired): one ``download`` + one DB query, no
     file transfer. Cold path: one tar.gz upload + one extract command.
-    Always-final step is a separate manifest write so a partial failure leaves
-    files-already-present + stale-manifest, which the next sync will heal.
+    The final manifest write happens after extract; if any step before it
+    fails, the manifest is not updated, and the next sync re-runs the diff
+    from whatever state the PVC is in (cold or prior-warm).
     """
     # 1. read manifest. OpenSandbox.download maps "not found" to
     # FileNotFoundError, but other backends (LocalSandbox) and non-404 errors
