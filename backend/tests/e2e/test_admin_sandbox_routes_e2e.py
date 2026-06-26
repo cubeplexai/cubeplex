@@ -74,12 +74,70 @@ async def test_list_sandboxes_returns_snapshot_cols(
 
 
 @pytest.mark.asyncio
-async def test_get_sandbox_404_for_wrong_org(
+async def test_get_sandbox_404_for_cross_org(
     admin_client_and_sandbox: tuple[httpx.AsyncClient, SimpleNamespace],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
+    """Real sandbox in a different org must look like 404, not 200.
+
+    If the route ever drops the org_id filter from its WHERE clause, an admin
+    could fetch arbitrary sandboxes across orgs. This guard catches that.
+    """
+    import secrets as _secrets
+
+    from sqlalchemy import delete as sa_delete
+
+    from cubebox.models import Organization, UserSandbox
+    from cubebox.models.user import User
+    from cubebox.models.workspace import Workspace
+
     client, _ns = admin_client_and_sandbox
-    r = await client.get("/api/v1/admin/sandboxes/uss-does-not-exist")
-    assert r.status_code == 404
+
+    suffix = _secrets.token_hex(6)
+
+    foreign_org = Organization(name="cross-org-probe", slug=f"xorg-{suffix}")
+    foreign_ws = Workspace(org_id="", name="foreign-ws")  # org_id patched after org insert
+    foreign_user = User(
+        email=f"xorguser-{suffix}@example.com",
+        hashed_password="$2b$12$placeholder",
+    )
+    foreign_sbx: UserSandbox | None = None
+
+    async with session_factory() as s:
+        s.add(foreign_org)
+        await s.flush()  # foreign_org.id populated
+        foreign_ws.org_id = foreign_org.id
+        s.add(foreign_ws)
+        s.add(foreign_user)
+        await s.flush()  # foreign_ws.id and foreign_user.id populated
+        foreign_sbx = UserSandbox(
+            org_id=foreign_org.id,
+            workspace_id=foreign_ws.id,
+            user_id=foreign_user.id,
+            scope_type="user",
+            scope_id=foreign_user.id,
+            sandbox_id=f"sb-xorg-{suffix}",
+            status="running",
+            image="img",
+        )
+        s.add(foreign_sbx)
+        await s.commit()
+
+    assert foreign_sbx is not None
+    foreign_sandbox_id = foreign_sbx.id
+
+    try:
+        r = await client.get(f"/api/v1/admin/sandboxes/{foreign_sandbox_id}")
+        assert r.status_code == 404, (
+            f"cross-org admin should get 404, got {r.status_code} body={r.text}"
+        )
+    finally:
+        async with session_factory() as s:
+            await s.execute(sa_delete(UserSandbox).where(UserSandbox.id == foreign_sandbox_id))
+            await s.execute(sa_delete(Workspace).where(Workspace.id == foreign_ws.id))
+            await s.execute(sa_delete(User).where(User.id == foreign_user.id))
+            await s.execute(sa_delete(Organization).where(Organization.id == foreign_org.id))
+            await s.commit()
 
 
 @pytest.mark.asyncio
