@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""Phase-2 end-to-end: run ONE WildClawBench task through cubebox and grade it.
+
+Pure cubebox HTTP — uses the new POST /ws/{ws}/sandbox/exec and
+POST /ws/{ws}/sandbox/files/upload endpoints (authenticated by the workspace
+API key), so no kubectl / opensandbox coupling.
+
+Pipeline:
+  1. set org default_image = wcb image (admin API; reverted at the end)
+  2. exec: create persistent /workspace/.wcb/{input,results,gt}; symlink
+     /tmp_workspace -> /workspace/.wcb  (the tasks hardcode /tmp_workspace paths,
+     but /workspace is the only PVC-backed, recycle-surviving dir)
+  3. upload task input/* into the sandbox
+  4. drive the agent (SSE) with the task prompt; save cubebox SSE + convert to
+     an OpenClaw-JSONL transcript
+  5. upload gt/* + the transcript + transcript_loader.py + a grade runner
+  6. exec: install grade deps, run the task's grade() with the OpenRouter judge
+     env -> parse score.json
+  7. revert default_image
+
+Env (source a shard-*.env): CUBEBOX_BASE_URL, CUBEBOX_TOKEN, CUBEBOX_WS.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+from pathlib import Path
+
+import requests
+
+HERE = Path(__file__).resolve().parent
+WCB = HERE.parent
+sys.path.insert(0, str(WCB))
+from wcb_harness.dataset import parse_task_md  # noqa: E402
+from wcb_harness.transcript import sse_to_openclaw_records, write_openclaw_jsonl  # noqa: E402
+
+WORK = "/workspace/.wcb"  # persistent (PVC) task dir; /tmp_workspace -> here
+PROXY = "http://192.168.1.215:7892"  # egress proxy so the sandbox's pip reaches PyPI
+
+
+def _openrouter_key(config_path: Path) -> str:
+    import yaml
+
+    c = yaml.safe_load(config_path.read_text())
+
+    def find(d):
+        if isinstance(d, dict):
+            if isinstance(d.get("openrouter"), dict):
+                return d["openrouter"]
+            for v in d.values():
+                r = find(v)
+                if r:
+                    return r
+        return None
+
+    blk = find(c) or {}
+    return blk.get("api_key", "")
+
+
+class Cube:
+    def __init__(self) -> None:
+        self.base = os.environ["CUBEBOX_BASE_URL"].rstrip("/")
+        self.ws = os.environ["CUBEBOX_WS"]
+        self.h = {"Authorization": f"Bearer {os.environ['CUBEBOX_TOKEN']}"}
+
+    def get_policy(self) -> dict:
+        return requests.get(f"{self.base}/api/v1/admin/sandbox-policy", headers=self.h, timeout=20).json()
+
+    def set_image(self, img: str, pol: dict) -> None:
+        body = {
+            "default_image": img,
+            "network_default_action": pol.get("network_default_action", "allow"),
+            "network_rules": pol.get("network_rules"),
+            "command_rules": pol.get("command_rules") or None,
+            "egress_proxy": pol.get("egress_proxy"),
+        }
+        r = requests.put(f"{self.base}/api/v1/admin/sandbox-policy", headers=self.h, json=body, timeout=20)
+        r.raise_for_status()
+
+    def exec(self, command: str, *, envs: dict | None = None, timeout: int = 300) -> dict:
+        r = requests.post(
+            f"{self.base}/api/v1/ws/{self.ws}/sandbox/exec",
+            headers=self.h,
+            json={"command": command, "timeout": timeout, "envs": envs},
+            timeout=timeout + 30,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def upload(self, local: Path, dest: str) -> dict:
+        with local.open("rb") as f:
+            r = requests.post(
+                f"{self.base}/api/v1/ws/{self.ws}/sandbox/files/upload",
+                headers=self.h,
+                params={"path": dest},
+                files={"file": (local.name, f)},
+                timeout=120,
+            )
+        r.raise_for_status()
+        return r.json()
+
+    def upload_bytes(self, content: bytes, name: str, dest: str) -> dict:
+        r = requests.post(
+            f"{self.base}/api/v1/ws/{self.ws}/sandbox/files/upload",
+            headers=self.h,
+            params={"path": dest},
+            files={"file": (name, content)},
+            timeout=120,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    def drive_agent(
+        self, prompt: str, model_key: str, sse_out: Path, *, max_seconds: float = 900.0
+    ) -> list[dict]:
+        cid = requests.post(
+            f"{self.base}/api/v1/ws/{self.ws}/conversations",
+            headers=self.h,
+            json={"title": "wcb-task"},
+            timeout=20,
+        ).json()["id"]
+        events: list[dict] = []
+        start = time.time()
+        with requests.post(
+            f"{self.base}/api/v1/ws/{self.ws}/conversations/{cid}/messages",
+            headers={**self.h, "Accept": "text/event-stream"},
+            json={"content": prompt, "thinking": "off", "model_key": model_key},
+            stream=True,
+            timeout=max_seconds + 120,
+        ) as resp:
+            resp.raise_for_status()
+            with sse_out.open("w") as fout:
+                for line in resp.iter_lines(decode_unicode=True):
+                    if line and line.startswith("data: "):
+                        fout.write(line[6:] + "\n")
+                        try:
+                            ev = json.loads(line[6:])
+                        except json.JSONDecodeError:
+                            ev = None
+                        if ev is not None:
+                            events.append(ev)
+                            if ev.get("type") in ("done", "error"):
+                                break
+                    # Wall-clock cap: stop a thrashing agent and grade what it left.
+                    if time.time() - start > max_seconds:
+                        print(f"[wcb] agent wall-clock cap ({max_seconds:.0f}s) hit — stopping", flush=True)
+                        break
+        return events
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--task", required=True, help="path to the task .md")
+    ap.add_argument("--repo", required=True, help="WildClawBench repo root (for skills/workspace resolution)")
+    ap.add_argument("--data", required=True, help="dir with this task's exec/ and gt/ data")
+    ap.add_argument("--image", default="hub.sensedeal.vip/library/wildclawbench-ubuntu:v1.3")
+    ap.add_argument("--model-key", default="max")
+    ap.add_argument("--max-agent-seconds", type=float, default=900.0)
+    ap.add_argument("--config", default=str(WCB.parents[1] / "backend/config.development.local.yaml"))
+    ap.add_argument("--out", default=str(WCB / "runs"))
+    args = ap.parse_args()
+
+    task = parse_task_md(Path(args.task), repo_root=Path(args.repo))
+    data = Path(args.data)
+    out_dir = Path(args.out) / task.task_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    or_key = _openrouter_key(Path(args.config))
+    judge_env = {
+        "OPENROUTER_API_KEY": or_key,
+        "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+        "JUDGE_MODEL": "openai/gpt-5.4",
+        "TMP_WORKSPACE": WORK,
+    }
+    print(f"[wcb] task={task.task_id} model={args.model_key} judge_key={'set' if or_key else 'MISSING'}")
+
+    cube = Cube()
+    pol = cube.get_policy()
+    saved_image = pol["default_image"]
+    score: dict = {}
+    try:
+        # 1. image
+        cube.set_image(args.image, pol)
+        print(f"[wcb] default_image -> {args.image}")
+
+        # 2. persistent workspace + /tmp_workspace symlink (exec also spins sandbox up).
+        #    Also point pip at the egress proxy (the sandbox has no proxy env, so the
+        #    agent's pip can't reach PyPI otherwise — it thrashes retrying). pip reads
+        #    /etc/pip.conf regardless of shell, so this fixes the agent's pip too.
+        proxy = PROXY
+        cube.exec(
+            f"rm -rf {WORK} && mkdir -p {WORK}/input {WORK}/results {WORK}/gt && "
+            f"ln -sfn {WORK} /tmp_workspace && "
+            f"printf '[global]\\nproxy = {proxy}\\n' > /etc/pip.conf && echo ready",
+            timeout=180,
+        )
+        print("[wcb] workspace prepared + /tmp_workspace symlink + pip proxy")
+
+        # 2b. pre-warm the packages this task family typically needs, so the agent
+        #     doesn't burn its budget pip-installing (belt-and-suspenders w/ pip.conf).
+        cube.exec(
+            "pip install -q numpy scipy pillow opencv-python-headless 2>&1 | tail -1 || true",
+            envs={"HTTP_PROXY": proxy, "HTTPS_PROXY": proxy},
+            timeout=420,
+        )
+        print("[wcb] pre-warmed numpy/scipy/pillow/opencv")
+
+        # 3. upload input/*
+        for f in sorted((data / "exec" / "input").rglob("*")):
+            if f.is_file():
+                rel = f.relative_to(data / "exec" / "input")
+                cube.upload(f, f"{WORK}/input/{rel}")
+        print(f"[wcb] uploaded input ({sum(1 for _ in (data/'exec'/'input').rglob('*'))} entries)")
+
+        # 4. drive the agent
+        print("[wcb] driving agent (this can take minutes)...")
+        t0 = time.time()
+        events = cube.drive_agent(
+            task.prompt, args.model_key, out_dir / "sse.jsonl", max_seconds=args.max_agent_seconds
+        )
+        n_tools = sum(1 for e in events if e.get("type") == "tool_call")
+        print(f"[wcb] agent done in {time.time()-t0:.0f}s, {len(events)} events, {n_tools} tool calls")
+
+        # 5. transcript + gt + grade scaffolding
+        records = sse_to_openclaw_records(events, prompt=task.prompt)
+        tpath = out_dir / "transcript.jsonl"
+        write_openclaw_jsonl(records, tpath)
+        cube.upload(tpath, f"{WORK}/transcript.jsonl")
+        for f in sorted((data / "gt").rglob("*")):
+            if f.is_file():
+                rel = f.relative_to(data / "gt")
+                cube.upload(f, f"{WORK}/gt/{rel}")
+        loader = (Path(args.repo) / "src/utils/transcript_loader.py").read_text()
+        cube.upload_bytes(loader.encode(), "_transcript_loader.py", f"{WORK}/_transcript_loader.py")
+        grade_runner = (
+            "import json\n"
+            "from _transcript_loader import load_transcript\n"
+            f"_transcript = load_transcript({json.dumps(f'{WORK}/transcript.jsonl')})\n\n"
+            f"{task.automated_checks}\n\n"
+            f"result = grade(transcript=_transcript, workspace_path={json.dumps(WORK)})\n"
+            "print(json.dumps(result))\n"
+        )
+        cube.upload_bytes(grade_runner.encode(), "_grade_runner.py", f"{WORK}/_grade_runner.py")
+        print("[wcb] uploaded gt + transcript + grade runner")
+
+        # 6. install grade deps + run grade()
+        print("[wcb] installing grade deps + grading...")
+        cube.exec(
+            "pip install -q openai pillow numpy 2>&1 | tail -1 || true",
+            envs={"HTTP_PROXY": PROXY, "HTTPS_PROXY": PROXY},
+            timeout=300,
+        )
+        r = cube.exec(
+            f"cd {WORK} && python3 _grade_runner.py",
+            envs=judge_env,
+            timeout=600,
+        )
+        raw = r.get("output", "")
+        (out_dir / "grade_stdout.txt").write_text(raw)
+        for line in reversed(raw.strip().splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    score = json.loads(line)
+                    break
+                except json.JSONDecodeError:
+                    continue
+        if not score:
+            print(f"[wcb] WARN: no JSON score parsed. grade stdout tail:\n{raw[-800:]}")
+    finally:
+        cube.set_image(saved_image, pol)
+        print(f"[wcb] reverted default_image -> {saved_image}")
+
+    (out_dir / "score.json").write_text(json.dumps(score, indent=2, ensure_ascii=False))
+    print("\n========== SCORE ==========")
+    print(json.dumps(score, indent=2, ensure_ascii=False))
+    print("===========================")
+    print(f"overall_score = {score.get('overall_score')}")
+    return 0 if score else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
