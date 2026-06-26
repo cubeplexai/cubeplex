@@ -74,10 +74,11 @@ data with "Figure N:" / "Table N:" captions.
 ```python
 d = Doc("academic")
 d.cover("Effective Context Length in Long-Context Models", meta="NLP Lab · 2026")
-d.heading("Abstract"); d.body("We measure how recall degrades with context...")
+d.heading("Abstract", numbered=False); d.body("We measure recall vs context...")
 d.heading("Introduction"); d.body("...")           # auto-numbered "1 Introduction"
-d.heading("Method"); d.body("...")
+d.heading("Method"); d.body("...")                 # "2 Method"
 d.figure("/workspace/doc/images/recall.png", "Figure 1: Recall vs context length")
+d.heading("References", numbered=False)            # front/back matter: unnumbered
 ```
 
 ### Proposal

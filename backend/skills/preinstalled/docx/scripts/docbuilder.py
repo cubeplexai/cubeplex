@@ -315,11 +315,14 @@ class Doc:
             p.runs[0].font.size = Pt(self.t.sz_body)
         return self
 
-    def heading(self, text, level=1):
+    def heading(self, text, level=1, numbered=True):
+        """A heading. For numbered style sets (academic / 公文) the number is
+        auto-applied; pass ``numbered=False`` for unnumbered front matter
+        (Abstract, Acknowledgements, References)."""
         level = min(max(level, 1), 3)
-        if self.t.profile == "official":
+        if numbered and self.t.profile == "official":
             text = self._gw_number(level) + text
-        elif self.t.number_headings:
+        elif numbered and self.t.number_headings:
             text = self._west_number(level) + text
         self.doc.add_paragraph(text, style=f"Heading {level}")
         return self
@@ -525,12 +528,22 @@ class Doc:
             settings.append(uf)
 
     def section_break(self, landscape=False):
-        sec = self.doc.add_section(WD_SECTION.NEW_PAGE)
-        if landscape:
-            from docx.enum.section import WD_ORIENT
+        """Start a new page section. python-docx inherits the previous section's
+        geometry, so set orientation AND ensure the page dims match it in both
+        directions (a non-landscape break after a landscape one returns to
+        portrait)."""
+        from docx.enum.section import WD_ORIENT
 
+        sec = self.doc.add_section(WD_SECTION.NEW_PAGE)
+        w, h = sec.page_width, sec.page_height
+        if landscape:
             sec.orientation = WD_ORIENT.LANDSCAPE
-            sec.page_width, sec.page_height = sec.page_height, sec.page_width
+            if w < h:
+                sec.page_width, sec.page_height = h, w
+        else:
+            sec.orientation = WD_ORIENT.PORTRAIT
+            if w > h:
+                sec.page_width, sec.page_height = h, w
         # tables/figures added after this use the new section's text width
         self._text_width_emu = sec.page_width - sec.left_margin - sec.right_margin
         return self
