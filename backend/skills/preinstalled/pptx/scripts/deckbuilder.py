@@ -8,10 +8,9 @@ and (c) expose richer layouts (cover / agenda / cards / comparison / metrics /
 closing). Pair with check_deck.py, which flags overflow / off-canvas / low
 contrast before delivery.
 
-Themes use widely-available libre fonts so text measures and renders the same
-in the sandbox and in LibreOffice export:
-  - Latin: "DejaVu Sans" / "Liberation Sans"
-  - CJK:   "Noto Sans CJK SC" / "WenQuanYi Zen Hei"
+Themes use premium libre fonts installed in the sandbox image (Inter, Sorts
+Mill Goudy, LXGW WenKai, …) with Noto Sans CJK as the CJK default, so text
+measures and renders the same in the sandbox and on export.
 """
 
 from __future__ import annotations
@@ -122,7 +121,7 @@ THEMES: dict[str, Theme] = {
         muted="9AA7BD",
         accent="00D2A0",
         on_accent="06231C",
-        font_latin="Liberation Sans",
+        font_latin="Inter",
         font_cjk="Noto Sans CJK SC",
         dark=True,
     ),
@@ -135,7 +134,7 @@ THEMES: dict[str, Theme] = {
         muted="B7A98F",
         accent="E8A13A",
         on_accent="241600",
-        font_latin="Liberation Sans",
+        font_latin="Inter",
         font_cjk="Noto Sans CJK SC",
         dark=True,
     ),
@@ -148,7 +147,7 @@ THEMES: dict[str, Theme] = {
         muted="52607A",
         accent="2563EB",
         on_accent="FFFFFF",
-        font_latin="Liberation Sans",
+        font_latin="Inter",
         font_cjk="Noto Sans CJK SC",
         dark=False,
     ),
@@ -161,7 +160,7 @@ THEMES: dict[str, Theme] = {
         muted="B49FCB",
         accent="C264FF",
         on_accent="1B0A2E",
-        font_latin="Liberation Sans",
+        font_latin="Inter",
         font_cjk="Noto Sans CJK SC",
         dark=True,
     ),
@@ -174,8 +173,8 @@ THEMES: dict[str, Theme] = {
         muted="6B6253",
         accent="B4622D",
         on_accent="FFFFFF",
-        font_latin="Liberation Serif",
-        font_cjk="Noto Serif CJK SC",
+        font_latin="Sorts Mill Goudy",
+        font_cjk="LXGW WenKai",
         dark=False,
     ),
 }

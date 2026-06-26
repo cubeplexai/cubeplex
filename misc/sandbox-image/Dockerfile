@@ -151,6 +151,15 @@ RUN python3 -m venv /opt/venv \
         playwright==1.59.0 \
     && /opt/venv/bin/playwright install --with-deps chromium
 
+# Curated premium libre fonts used by the preinstalled `pptx` (deckcraft) skill
+# and available to any deck/doc the agent builds: Inter + serif/display Latin
+# (OFL), LXGW WenKai + Smiley Sans + ZCOOL family (OFL CJK). All SIL OFL,
+# downloaded from their official upstreams by stage-fonts.sh into ./fonts/
+# (gitignored; ~54MB). Run that before building. fc-cache so LibreOffice +
+# matplotlib (the skill's overflow checker) resolve them by family name.
+COPY fonts/ /usr/share/fonts/truetype/cubebox/
+RUN fc-cache -f
+
 # Create app directory
 RUN mkdir -p /workspace
 ENV HOME=/workspace
