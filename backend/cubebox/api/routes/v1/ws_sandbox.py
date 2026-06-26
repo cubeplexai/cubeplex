@@ -219,13 +219,14 @@ async def list_sandbox_files(
         session, ctx, conversation_id
     )
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
         await manager.touch(
             sandbox.id,
             org_id=ctx.org_id,
@@ -296,13 +297,14 @@ async def get_sandbox_file_content(
         session, ctx, conversation_id
     )
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("filesystem operations require OpenSandbox backend")
         raw = sandbox._sandbox  # noqa: SLF001
@@ -350,13 +352,14 @@ async def download_sandbox_file(
         session, ctx, conversation_id
     )
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
         if not isinstance(sandbox, OpenSandbox):
             raise SandboxError("filesystem operations require OpenSandbox backend")
         raw = sandbox._sandbox  # noqa: SLF001
@@ -420,13 +423,14 @@ async def create_sandbox_preview_token(
         session, ctx, conversation_id
     )
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
     except SandboxError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -474,13 +478,14 @@ async def get_terminal(
         session, ctx, conversation_id
     )
     try:
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type=scope_type,
             scope_id=scope_id,
             user_id=owner_user_id,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
         )
+        sandbox = attachment.sandbox
         await sandbox.start_terminal()
         await manager.touch(
             sandbox.id,

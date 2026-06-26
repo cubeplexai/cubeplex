@@ -12,17 +12,21 @@ F5: sandbox recreate (execute / upload failure path) must reset
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from cubebox.sandbox.lazy import LazySandbox
+from cubebox.sandbox.manager import SandboxAttachment
 
 
-def _make_lazy(catalog: object, sandbox: object) -> LazySandbox:
+def _make_lazy(catalog: object, sandbox: object, event_service: object = None) -> LazySandbox:
     """Construct a LazySandbox whose _ensure already returns the given sandbox."""
     manager = MagicMock()
-    manager.get_or_create = AsyncMock(return_value=sandbox)
+    manager.get_or_create = AsyncMock(
+        return_value=SandboxAttachment(sandbox=sandbox, user_sandbox_id="uss-test"),  # type: ignore[arg-type]
+    )
     manager.touch = AsyncMock()
     manager.renew_lease = AsyncMock()
     return LazySandbox(
@@ -33,6 +37,7 @@ def _make_lazy(catalog: object, sandbox: object) -> LazySandbox:
         org_id="o1",
         workspace_id="w1",
         catalog=catalog,  # type: ignore[arg-type]
+        event_service=event_service,  # type: ignore[arg-type]
     )
 
 
@@ -156,3 +161,96 @@ async def test_no_manifest_write_when_collect_files_empty() -> None:
     assert manifest_uploads == [], (
         "manifest must not be written when to_push > 0 but no files were collected"
     )
+
+
+@pytest.mark.asyncio
+async def test_event_service_called_on_success() -> None:
+    catalog = MagicMock()
+    # Returning enabled list with one skill triggers a "success" sync
+    fake_skill = SimpleNamespace(
+        name="probe",
+        version="1.0.0",
+        skill_version_id="skv_a",
+        content_hash="sha256:abc",
+        storage_prefix="x/",
+    )
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[fake_skill])
+    catalog.list_files_for_sandbox_sync = AsyncMock(return_value=[("SKILL.md", b"hi")])
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)  # cold
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
+    event_service = MagicMock()
+    event_service.record = AsyncMock()
+
+    lazy = _make_lazy(catalog, sandbox, event_service=event_service)
+    await lazy.execute("true")
+
+    assert event_service.record.await_count == 1
+    call = event_service.record.await_args
+    assert call.kwargs["result"].status == "success"
+    assert call.kwargs["user_sandbox_id"] == "uss-test"
+
+
+@pytest.mark.asyncio
+async def test_event_service_not_called_on_noop() -> None:
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[])  # empty desired
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)  # empty manifest
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
+    event_service = MagicMock()
+    event_service.record = AsyncMock()
+
+    lazy = _make_lazy(catalog, sandbox, event_service=event_service)
+    await lazy.execute("true")
+
+    # Empty manifest + empty desired = noop → no event
+    assert event_service.record.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_event_service_called_on_failed_but_flag_not_set() -> None:
+    catalog = MagicMock()
+    catalog.list_enabled_for_workspace = AsyncMock(side_effect=RuntimeError("boom"))
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
+    event_service = MagicMock()
+    event_service.record = AsyncMock()
+
+    lazy = _make_lazy(catalog, sandbox, event_service=event_service)
+    await lazy.execute("first")
+    await lazy.execute("second")
+
+    # Both attempts call event service (F4: failed doesn't set flag)
+    assert event_service.record.await_count == 2
+    for call in event_service.record.await_args_list:
+        assert call.kwargs["result"].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_event_service_swallow_exception() -> None:
+    catalog = MagicMock()
+    fake_skill = SimpleNamespace(
+        name="probe",
+        version="1.0.0",
+        skill_version_id="skv_a",
+        content_hash="sha256:abc",
+        storage_prefix="x/",
+    )
+    catalog.list_enabled_for_workspace = AsyncMock(return_value=[fake_skill])
+    catalog.list_files_for_sandbox_sync = AsyncMock(return_value=[("SKILL.md", b"hi")])
+    sandbox = MagicMock()
+    sandbox.download = AsyncMock(side_effect=FileNotFoundError)
+    sandbox.upload = AsyncMock()
+    sandbox.execute = AsyncMock(return_value=MagicMock(output="", exit_code=0))
+    event_service = MagicMock()
+    event_service.record = AsyncMock(side_effect=RuntimeError("db down"))
+
+    lazy = _make_lazy(catalog, sandbox, event_service=event_service)
+    result = await lazy.execute("true")
+    # Execute completes successfully even though event write blew up
+    assert result.output == ""

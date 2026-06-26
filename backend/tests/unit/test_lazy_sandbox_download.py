@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from cubebox.sandbox.lazy import LazySandbox
+from cubebox.sandbox.manager import SandboxAttachment
 
 
 class _FakeSandbox:
@@ -30,9 +31,10 @@ class _CountingManager:
     def __init__(self) -> None:
         self.create_count = 0
 
-    async def get_or_create(self, **_kwargs: object) -> _FakeSandbox:
+    async def get_or_create(self, **_kwargs: object) -> SandboxAttachment:
         self.create_count += 1
-        return _FakeSandbox(f"sbx-{self.create_count}")
+        fake = _FakeSandbox(f"sbx-{self.create_count}")
+        return SandboxAttachment(sandbox=fake, user_sandbox_id=f"uss-{self.create_count}")  # type: ignore[arg-type]
 
     async def touch(self, *_a: object, **_k: object) -> None:
         return None

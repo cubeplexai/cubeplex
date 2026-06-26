@@ -3396,8 +3396,10 @@ class RunManager:
                 sandbox_enabled = config.get("sandbox.enabled", False)
                 if sandbox_enabled:
                     try:
+                        from cubebox.db.engine import async_session_maker as _sb_session_maker
                         from cubebox.sandbox.lazy import LazySandbox
                         from cubebox.sandbox.manager import get_sandbox_manager
+                        from cubebox.sandbox.sync_events import UserSandboxSyncEventService
 
                         sandbox_manager = get_sandbox_manager()
                         (
@@ -3414,6 +3416,7 @@ class RunManager:
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
                             catalog=skill_catalog,
+                            event_service=UserSandboxSyncEventService(_sb_session_maker),
                         )
                     except Exception as exc:
                         logger.warning("Sandbox unavailable, continuing without: {}", exc)
@@ -3944,8 +3947,10 @@ class RunManager:
                 sandbox_enabled = config.get("sandbox.enabled", False)
                 if sandbox_enabled:
                     try:
+                        from cubebox.db.engine import async_session_maker as _sb_session_maker
                         from cubebox.sandbox.lazy import LazySandbox
                         from cubebox.sandbox.manager import get_sandbox_manager
+                        from cubebox.sandbox.sync_events import UserSandboxSyncEventService
 
                         sandbox_manager = get_sandbox_manager()
                         (
@@ -3962,6 +3967,7 @@ class RunManager:
                             workspace_id=ctx.workspace_id,
                             workdir=config.get("sandbox.workdir", "/workspace"),
                             catalog=skill_catalog,
+                            event_service=UserSandboxSyncEventService(_sb_session_maker),
                         )
                     except Exception as exc:
                         logger.warning("Sandbox unavailable, continuing without: {}", exc)
