@@ -1870,6 +1870,9 @@ async def fresh_workspace_and_sandbox(
             org_id=org_id,
             org_slug=org_slug,
             user_id=user_id,
+            # Exposed so event-recording tests can pass user_sandbox_id to
+            # UserSandboxSyncEventService.record without touching the DB.
+            user_sandbox_id=lazy._user_sandbox_id,
             sandbox=lazy._sandbox,  # underlying Sandbox handle
             lazy=lazy,
         )
@@ -1877,15 +1880,35 @@ async def fresh_workspace_and_sandbox(
         with contextlib.suppress(Exception):
             await lazy.close()
         async with session_factory() as cleanup_session:
-            # Delete user_sandboxes rows before the workspace to satisfy
-            # the user_sandboxes.workspace_id → workspaces FK.
-            from sqlalchemy import delete
+            # Circular FK between user_sandboxes and user_sandbox_sync_events:
+            #   user_sandbox_sync_events.user_sandbox_id → user_sandboxes.id
+            #   user_sandboxes.last_skill_sync_event_id → user_sandbox_sync_events.id
+            # Break the cycle by NULLing the back-pointer first, then delete
+            # both tables, then clean up skill installs before dropping the ws.
+            from sqlalchemy import delete, update
 
+            from cubebox.models.skill import OrgSkillInstall
             from cubebox.models.user_sandbox import UserSandbox
+            from cubebox.models.user_sandbox_sync_event import UserSandboxSyncEvent
 
+            await cleanup_session.execute(
+                update(UserSandbox)
+                .where(UserSandbox.workspace_id == ws_id)  # type: ignore[arg-type]
+                .values(last_skill_sync_event_id=None)
+            )
+            await cleanup_session.execute(
+                delete(UserSandboxSyncEvent).where(
+                    UserSandboxSyncEvent.workspace_id == ws_id  # type: ignore[arg-type]
+                )
+            )
             await cleanup_session.execute(
                 delete(UserSandbox).where(
                     UserSandbox.workspace_id == ws_id  # type: ignore[arg-type]
+                )
+            )
+            await cleanup_session.execute(
+                delete(OrgSkillInstall).where(
+                    OrgSkillInstall.workspace_id == ws_id  # type: ignore[arg-type]
                 )
             )
             ws_row = await cleanup_session.get(Workspace, ws_id)

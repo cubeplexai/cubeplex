@@ -93,15 +93,17 @@ async def test_sync_failure_does_not_write_manifest_and_next_sync_heals(
 
         sandbox.execute = _flaky_execute  # type: ignore[method-assign]
 
-        # First sync: extract fails → _sync_skills must raise (the caller,
-        # _ensure_skills_synced, is the catcher; here we catch in the test).
-        with pytest.raises(RuntimeError, match="simulated extract failure"):
-            await _sync_skills(
-                catalog=catalog,
-                workspace_id=ns.workspace_id,
-                org_id=ns.org_id,
-                sandbox=sandbox,
-            )
+        # First sync: extract fails → _sync_skills returns failed SyncResult.
+        # (_sync_skills captures exceptions into SyncResult.status=="failed"
+        # so the caller can persist the event without losing the error detail.)
+        r1 = await _sync_skills(
+            catalog=catalog,
+            workspace_id=ns.workspace_id,
+            org_id=ns.org_id,
+            sandbox=sandbox,
+        )
+        assert r1.status == "failed", f"expected failed status, got {r1.status!r}"
+        assert r1.error_type is not None
 
         # Manifest must NOT be present — it is written AFTER extract succeeds.
         try:
