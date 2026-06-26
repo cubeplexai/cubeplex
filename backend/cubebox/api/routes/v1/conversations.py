@@ -121,8 +121,10 @@ async def _resolve_topic_run_context(
             async with async_session_maker() as topic_session:
                 sandbox_mode, topic_creator_user_id = await _read(topic_session)
 
-    if is_group_chat:
-        sender_display_name = ctx.user.display_name or ctx.user.email
+    # Stamp the sender on every message (1:1 included) so a later 1:1→group
+    # conversion can attribute past messages. Display is gated on is_group_chat
+    # in the frontend, not on the presence of this field.
+    sender_display_name = ctx.user.display_name or ctx.user.email
 
     return (
         topic_id,
@@ -2006,7 +2008,7 @@ async def steer_active_run(
         return {"status": "no_active_run", "run_id": None}
 
     steer_metadata: dict[str, Any] = {}
-    if _is_group_chat and _sender_display_name:
+    if _sender_display_name:
         steer_metadata["sender_user_id"] = ctx.user.id
         steer_metadata["sender_display_name"] = _sender_display_name
 

@@ -1480,13 +1480,10 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
       void useConversationStore.getState().generateTitle(client, conversationId, content)
     }
 
-    // In a group chat, stamp the local sender's identity onto the optimistic
-    // bubble so their own SenderBadge shows immediately (history returns these
-    // fields on refresh; without them the badge would only appear after reload).
-    const isGroupChat =
-      useConversationStore.getState().conversations.find((c) => c.id === conversationId)
-        ?.is_group_chat ?? false
-    const me = isGroupChat ? useAuthStore.getState().user : null
+    // Stamp the local sender's identity onto every optimistic bubble (1:1
+    // included) so a later 1:1→group conversion can attribute the message and
+    // the badge shows live in group chats. The UI gates display on is_group_chat.
+    const me = useAuthStore.getState().user
     const senderMeta =
       me != null ? { sender_user_id: me.id, sender_display_name: me.display_name ?? me.email } : {}
 

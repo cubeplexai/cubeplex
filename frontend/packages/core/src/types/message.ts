@@ -81,8 +81,9 @@ interface MessageBase {
     // Never rendered as a user bubble; synthetic_source is trace-only.
     synthetic?: boolean
     synthetic_source?: string
-    // Set on user messages sent into a group-chat conversation (is_group_chat=True).
-    // Frontend uses presence of `sender_display_name` to render the SenderBadge.
+    // Stamped on every user message (1:1 included) so a 1:1→group conversion
+    // can attribute past messages. The SenderBadge is gated on the conversation
+    // being a group chat (is_group_chat), not on the mere presence of these.
     sender_user_id?: string
     sender_display_name?: string
   }
