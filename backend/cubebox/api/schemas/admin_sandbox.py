@@ -28,6 +28,8 @@ class UserSandboxSnapshotOut(BaseModel):
 
 class SyncEventOut(BaseModel):
     id: str
+    org_id: str
+    workspace_id: str
     user_sandbox_id: str
     started_at: datetime
     finished_at: datetime
