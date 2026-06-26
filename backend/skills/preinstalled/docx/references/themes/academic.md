@@ -25,10 +25,11 @@ accent color — rigor carries the page, not decoration.
 - It's a **Chinese paper** wanting Song/Hei → `chinese`.
 
 ## Recommended structure
-`cover → heading("Abstract") + body → numbered sections (Introduction → Method →
-Results → Discussion → Conclusion) → figures/tables inside Results →
-heading("References") → numbered`. Headings auto-number ("1 Introduction",
-"2 Method", ...), so just call `heading()` in order. Cite as you go; let
+`cover → heading("Abstract", numbered=False) + body → numbered sections
+(Introduction → Method → Results → Discussion → Conclusion) → figures/tables
+inside Results → heading("References", numbered=False)`. Body headings
+auto-number ("1 Introduction", "2 Method", ...); front/back matter (Abstract,
+References) passes `numbered=False`. Cite as you go; let
 `figure()`/`table()` carry the data with "Figure N:" / "Table N:" captions.
 
 ## Copy tone
@@ -52,7 +53,7 @@ d.body("Recent models advertise long context, yet recall often falls well "
 d.heading("Method")                   # → "2 Method"
 d.figure("/workspace/paper/images/recall.png",
          caption="Figure 1: Recall vs context length, baseline vs ours")
-d.heading("References")
+d.heading("References", numbered=False)
 d.numbered(["Vaswani et al., Attention Is All You Need, 2017.",
             "Press et al., Train Short, Test Long, 2022."])
 d.save("/workspace/paper/out.docx")

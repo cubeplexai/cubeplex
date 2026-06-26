@@ -36,7 +36,12 @@ PLACEHOLDERS = ("lorem ipsum", "todo", "tbd", "xxx", "output.docx", "placeholder
 
 
 def _has_cjk(s: str) -> bool:
-    return any("　" <= c <= "鿿" or "＀" <= c <= "￯" for c in s)
+    return any(
+        "　" <= c <= "鿿"  # CJK ideographs, Japanese kana, CJK symbols
+        or "가" <= c <= "힣"  # Korean Hangul syllables
+        or "＀" <= c <= "￯"  # full/half-width forms
+        for c in s
+    )
 
 
 def _lum(rgb: RGBColor) -> float:
@@ -135,14 +140,34 @@ def _content_checks(para, default_ea, errors, warnings, bg=None):
                 break
 
 
+def _block_section_widths(doc):
+    """Text-area width of the section each table / inline image belongs to, as
+    two lists parallel to doc.tables and doc.inline_shapes (document order). A
+    doc may mix portrait + landscape sections; each block is checked against its
+    OWN section, not a global max."""
+    sec_w = [s.page_width - s.left_margin - s.right_margin for s in doc.sections]
+    last = len(sec_w) - 1
+    idx = 0
+    table_w, image_w = [], []
+    for child in doc.element.body.iterchildren():
+        cur = sec_w[min(idx, last)]
+        if child.tag == qn("w:tbl"):
+            table_w.append(cur)
+        elif child.tag == qn("w:p"):
+            for _ in child.iter(qn("wp:inline")):
+                image_w.append(cur)
+            ppr = child.find(qn("w:pPr"))
+            if ppr is not None and ppr.find(qn("w:sectPr")) is not None:
+                idx += 1  # this paragraph closes the current section
+    return table_w, image_w
+
+
 def check(path: str):
     doc = Document(path)
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Widest section's text area — a doc may mix portrait + landscape sections,
-    # and a wide table belongs to its own (possibly landscape) section.
-    text_w = max(s.page_width - s.left_margin - s.right_margin for s in doc.sections)
+    table_w, image_w = _block_section_widths(doc)
     default_ea = _doc_default_eastasia(doc)
 
     # ---- paragraphs: styles, hierarchy, CJK, contrast, placeholders ----
@@ -163,7 +188,7 @@ def check(path: str):
             except ValueError:
                 lvl = 1
             if not txt:
-                warnings.append(f"empty heading ({sname})")
+                errors.append(f"empty heading ({sname}) — blank outline/TOC entry")
             if last_heading_lvl and lvl > last_heading_lvl + 1:
                 warnings.append(
                     f"heading hierarchy skips H{last_heading_lvl}->H{lvl}: {txt[:40]!r}"
@@ -177,17 +202,18 @@ def check(path: str):
             "(no headings/structure?)"
         )
 
-    # ---- tables: width within text area, non-empty ----
+    # ---- tables: width within ITS section's text area, non-empty ----
     for ti, tbl in enumerate(doc.tables, 1):
+        limit = table_w[ti - 1] if ti - 1 < len(table_w) else max(table_w or [0])
         widths = []
         for cell in tbl.rows[0].cells:
             w = cell.width
             widths.append(int(w) if w is not None else 0)
         tw = sum(widths)
-        if tw and tw > text_w * 1.02:
+        if tw and limit and tw > limit * 1.02:
             errors.append(
-                f"table {ti} width {tw / EMU_PER_INCH:.1f}in exceeds text area "
-                f"{text_w / EMU_PER_INCH:.1f}in"
+                f"table {ti} width {tw / EMU_PER_INCH:.1f}in exceeds its section's "
+                f"text area {limit / EMU_PER_INCH:.1f}in"
             )
         empties = sum(1 for row in tbl.rows for c in row.cells if not c.text.strip())
         if empties:
@@ -199,12 +225,13 @@ def check(path: str):
                 for cp in c.paragraphs:
                     _content_checks(cp, default_ea, errors, warnings, bg=bg)
 
-    # ---- images within the text area ----
+    # ---- images within ITS section's text area ----
     for i, shp in enumerate(doc.inline_shapes, 1):
-        if shp.width and shp.width > text_w * 1.02:
+        limit = image_w[i - 1] if i - 1 < len(image_w) else max(image_w or [0])
+        if shp.width and limit and shp.width > limit * 1.02:
             errors.append(
-                f"image {i} width {shp.width / EMU_PER_INCH:.1f}in exceeds text area "
-                f"{text_w / EMU_PER_INCH:.1f}in"
+                f"image {i} width {shp.width / EMU_PER_INCH:.1f}in exceeds its section's "
+                f"text area {limit / EMU_PER_INCH:.1f}in"
             )
 
     return errors, warnings

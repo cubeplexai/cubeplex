@@ -65,10 +65,10 @@ d.heading("Revenue"); d.table(["Metric", "Plan", "Actual"],
 ```
 
 ### Academic paper
-`cover → heading("Abstract") → body → numbered sections (1 Introduction,
-2 Method, 3 Results, 4 Discussion) → figures/tables inside Results →
-heading("References") → numbered`. Use the `academic` set (serif, numbered
-headings, first-line indent). Cite as you go; let `figure()`/`table()` carry the
+`cover → heading("Abstract", numbered=False) → body → numbered sections
+(1 Introduction, 2 Method, 3 Results, 4 Discussion) → figures/tables inside
+Results → heading("References", numbered=False)`. Use the `academic` set (serif,
+numbered headings, first-line indent). Cite as you go; let `figure()`/`table()` carry the
 data with "Figure N:" / "Table N:" captions.
 
 ```python
