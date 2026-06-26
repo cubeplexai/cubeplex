@@ -147,7 +147,8 @@ class SandboxManager:
         self._resource_memory: str = config.get("sandbox.resource.memory", "100Mi")
 
         # Volume config
-        self._volume_enabled: bool = config.get("sandbox.volume.enabled", False)
+        # PR2's skill sync requires PVC persistence, so default to True
+        self._volume_enabled: bool = config.get("sandbox.volume.enabled", True)
         self._volume_mount_path: str = config.get("sandbox.volume.mount_path", "/workspace")
         self._volume_pvc_prefix: str = config.get("sandbox.volume.pvc_prefix", "cubebox-user")
 
