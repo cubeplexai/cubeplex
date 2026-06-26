@@ -281,14 +281,14 @@ class Doc:
         fonts.set(qn("w:ascii"), latin)
         fonts.set(qn("w:hAnsi"), latin)
         fonts.set(qn("w:eastAsia"), cjk)
+        # Use python-docx's order-aware accessors so restyling a built-in style
+        # (which already has these singletons) neither duplicates them NOR puts
+        # them in the wrong w:pPr order (e.g. keepNext must precede spacing).
         ppr = st.element.get_or_add_pPr()
-
-        def _reset(tag):  # built-in styles already have these singletons
-            for old in ppr.findall(qn(tag)):
-                ppr.remove(old)
-
-        _reset("w:spacing")
-        sp = OxmlElement("w:spacing")
+        pf = st.paragraph_format
+        if keep_next:
+            pf.keep_with_next = True
+        sp = ppr.get_or_add_spacing()
         sp.set(qn("w:before"), _twips(before))
         sp.set(qn("w:after"), _twips(after))
         if line_exact_pt:
@@ -297,27 +297,21 @@ class Doc:
         elif line and line != 1.0:
             sp.set(qn("w:line"), str(int(line * 240)))
             sp.set(qn("w:lineRule"), "auto")
-        ppr.append(sp)
         if align == "center":
-            st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            pf.alignment = WD_ALIGN_PARAGRAPH.CENTER
         elif justify:
-            st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            pf.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         if indent_first or indent_left:
-            _reset("w:ind")
-            ind = OxmlElement("w:ind")
+            ind = ppr.get_or_add_ind()
             if indent_first:
                 ind.set(qn("w:firstLineChars"), "200")
             if indent_left:
                 ind.set(qn("w:left"), _twips(indent_left))
-            ppr.append(ind)
         if outline is not None:
-            _reset("w:outlineLvl")
-            ol = OxmlElement("w:outlineLvl")
-            ol.set(qn("w:val"), str(outline))
-            ppr.append(ol)
-        if keep_next:
-            _reset("w:keepNext")
-            ppr.append(OxmlElement("w:keepNext"))
+            for old in ppr.findall(qn("w:outlineLvl")):
+                ppr.remove(old)
+            ol = ppr.makeelement(qn("w:outlineLvl"), {qn("w:val"): str(outline)})
+            ppr.append(ol)  # outlineLvl is the last pPr child we set — order ok
         return st
 
     # ---- building blocks ---------------------------------------------------
