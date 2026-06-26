@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from cubebox.models import EgressRef
-from cubebox.sandbox.manager import SandboxManager
+from cubebox.sandbox.manager import SandboxAttachment, SandboxManager
 from cubebox.sandbox_env.placeholder import PLACEHOLDER_RE, hash_placeholder, mint_placeholder
 from cubebox.services.sandbox_env import ResolvedEnv
 
@@ -113,7 +113,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
         # egress-injection-focused tests.
         patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
     ):
-        sandbox = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type="user",
             scope_id="u-1",
             user_id="u-1",
@@ -141,6 +141,8 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
     # --- run env was set on the returned backend ---
     from cubebox.sandbox.opensandbox import OpenSandbox
 
+    assert isinstance(attachment, SandboxAttachment)
+    sandbox = attachment.sandbox
     assert isinstance(sandbox, OpenSandbox)
     run_env = sandbox._run_env
 
@@ -228,13 +230,15 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
         # _RESOLVED_ENVS already has value= populated; skip DB decrypt.
         patch.object(manager, "_decrypt_env_values", new=AsyncMock()),
     ):
-        backend = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type="user", scope_id="u-1", user_id="u-1", org_id="org-1", workspace_id="ws-1"
         )
 
     # run env must have been set on the returned backend
     from cubebox.sandbox.opensandbox import OpenSandbox
 
+    assert isinstance(attachment, SandboxAttachment)
+    backend = attachment.sandbox
     assert isinstance(backend, OpenSandbox)
     run_env = backend._run_env
     github_val = run_env.get("GITHUB_TOKEN", "")
@@ -280,7 +284,7 @@ async def test_create_without_exchange_host_skips_injection(
             return_value=None,
         ),
     ):
-        backend = await manager.get_or_create(
+        attachment = await manager.get_or_create(
             scope_type="user", scope_id="u-1", user_id="u-1", org_id="org-1", workspace_id="ws-1"
         )
 
@@ -302,6 +306,8 @@ async def test_create_without_exchange_host_skips_injection(
     # Backend has an empty run env (no egress injection)
     from cubebox.sandbox.opensandbox import OpenSandbox
 
+    assert isinstance(attachment, SandboxAttachment)
+    backend = attachment.sandbox
     assert isinstance(backend, OpenSandbox)
     assert backend._run_env == {}, f"Expected empty run env, got {backend._run_env!r}"
 
