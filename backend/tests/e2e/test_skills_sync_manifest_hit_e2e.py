@@ -21,10 +21,7 @@ from cubebox.sandbox.lazy import _sync_skills
 from cubebox.skills.cache import SkillCache
 from cubebox.skills.service import SkillCatalogService
 from cubebox.skills.sync_manifest import MANIFEST_PATH
-
-# Re-use the in-memory sandbox from the cold-start test — it's the canonical
-# _MemSandbox that knows how to unpack the skills tar command.
-from tests.e2e.test_skills_sync_cold_start_e2e import _MemSandbox  # noqa: PLC0415
+from tests.e2e.conftest import MemSandbox
 
 # ---------------------------------------------------------------------------
 # Test
@@ -69,7 +66,7 @@ async def test_warm_sandbox_no_upload(
             session=catalog_session, cache=SkillCache(cache_root=cache_dir)
         )
 
-        sandbox = _MemSandbox()
+        sandbox = MemSandbox()
 
         # Cold sync — populates the sandbox FS and writes the manifest.
         await _sync_skills(
