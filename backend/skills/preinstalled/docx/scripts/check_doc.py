@@ -90,6 +90,46 @@ def _is_field_placeholder(para) -> bool:
     ) is not None
 
 
+def _cell_bg(cell) -> RGBColor:
+    """The cell's shading fill (so white text on an accent header isn't flagged
+    as low-contrast); defaults to white when the cell has no fill."""
+    tcpr = cell._tc.find(qn("w:tcPr"))
+    shd = tcpr.find(qn("w:shd")) if tcpr is not None else None
+    fill = shd.get(qn("w:fill")) if shd is not None else None
+    if fill and fill != "auto" and len(fill) == 6:
+        try:
+            return RGBColor.from_string(fill)
+        except ValueError:
+            pass
+    return RGBColor(0xFF, 0xFF, 0xFF)
+
+
+def _content_checks(para, default_ea, errors, warnings, bg=None):
+    """Placeholder / CJK-font / contrast checks for one paragraph (used for body
+    paragraphs AND table-cell paragraphs — Document.paragraphs skips cells).
+    ``bg`` is the paragraph's background color for contrast (white by default)."""
+    bg = bg or RGBColor(0xFF, 0xFF, 0xFF)
+    txt = para.text.strip()
+    if not txt:
+        return
+    if any(ph in txt.lower() for ph in PLACEHOLDERS) and not _is_field_placeholder(para):
+        errors.append(f"placeholder text left in document: {txt[:50]!r}")
+    if _has_cjk(txt):
+        ea = _run_eastasia(para.runs[0]) if para.runs else None
+        ea = ea or _style_eastasia(para.style) or default_ea
+        if not ea:
+            errors.append(f"CJK without an East-Asian font (will tofu): {txt[:40]!r}")
+    for r in para.runs:
+        col = r.font.color
+        if col is not None and col.rgb is not None and col.type is not None and r.text.strip():
+            c = _contrast(col.rgb, bg)
+            if c < CONTRAST_MIN:
+                warnings.append(
+                    f"low contrast {c:.1f}:1 text #{col.rgb} on #{bg}: {r.text.strip()[:30]!r}"
+                )
+                break
+
+
 def check(path: str):
     doc = Document(path)
     errors: list[str] = []
@@ -123,26 +163,7 @@ def check(path: str):
                     f"heading hierarchy skips H{last_heading_lvl}->H{lvl}: {txt[:40]!r}"
                 )
             last_heading_lvl = lvl
-        # placeholder text (ignore real fields)
-        low = txt.lower()
-        if any(ph in low for ph in PLACEHOLDERS) and not _is_field_placeholder(p):
-            errors.append(f"placeholder text left in document: {txt[:50]!r}")
-        # CJK east-asia font resolvable?
-        if _has_cjk(txt):
-            ea = _run_eastasia(p.runs[0]) if p.runs else None
-            ea = ea or _style_eastasia(p.style) or default_ea
-            if not ea:
-                errors.append(f"CJK without an East-Asian font (will tofu): {txt[:40]!r}")
-        # contrast of colored runs
-        for r in p.runs:
-            col = r.font.color
-            if col is not None and col.rgb is not None and col.type is not None:
-                if _contrast(col.rgb, RGBColor(0xFF, 0xFF, 0xFF)) < CONTRAST_MIN and r.text.strip():
-                    warnings.append(
-                        f"low contrast {_contrast(col.rgb, RGBColor(255, 255, 255)):.1f}:1 "
-                        f"text #{col.rgb} on white: {r.text.strip()[:30]!r}"
-                    )
-                    break
+        _content_checks(p, default_ea, errors, warnings)
 
     if total >= 5 and styled / max(total, 1) < 0.25:
         warnings.append(
@@ -165,6 +186,12 @@ def check(path: str):
         empties = sum(1 for row in tbl.rows for c in row.cells if not c.text.strip())
         if empties:
             warnings.append(f"table {ti} has {empties} empty cell(s)")
+        # placeholder / CJK / contrast inside cells (Document.paragraphs skips them)
+        for row in tbl.rows:
+            for c in row.cells:
+                bg = _cell_bg(c)
+                for cp in c.paragraphs:
+                    _content_checks(cp, default_ea, errors, warnings, bg=bg)
 
     # ---- images within the text area ----
     for i, shp in enumerate(doc.inline_shapes, 1):

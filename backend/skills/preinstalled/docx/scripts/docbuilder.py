@@ -60,14 +60,6 @@ def _cn_num(n: int) -> str:
     return str(n)
 
 
-def _sub(parent, tag: str, **attrs):
-    el = OxmlElement(tag)
-    for k, v in attrs.items():
-        el.set(qn(k.replace("_", ":", 1)) if "_" in k else qn(f"w:{k}"), v)
-    parent.append(el)
-    return el
-
-
 # ---- style set (theme) -----------------------------------------------------
 @dataclass
 class StyleSet:
@@ -253,6 +245,10 @@ class Doc:
                          "666666", after=10, before=4, align="center", italic=True)
         self._style_para("Quote", t.font_body, t.font_cjk_b, t.sz_body, False,
                          "555555", after=10, before=10, indent_left=28, italic=True)
+        # Heading-look label for the TOC itself — NO outlineLvl, so the TOC field
+        # does not list "Contents" as its own first entry.
+        self._style_para("TOC Label", t.font_heading, t.font_cjk_h, t.sz_h1, True,
+                         t.color_heading, after=8, before=10)
 
     def _style_para(self, name, latin, cjk, sz, bold, color, *, after=8, before=0,
                     line=1.0, align=None, italic=False, outline=None, keep_next=False,
@@ -323,8 +319,19 @@ class Doc:
         level = min(max(level, 1), 3)
         if self.t.profile == "official":
             text = self._gw_number(level) + text
+        elif self.t.number_headings:
+            text = self._west_number(level) + text
         self.doc.add_paragraph(text, style=f"Heading {level}")
         return self
+
+    def _west_number(self, level: int) -> str:
+        """Decimal heading numbering 1 / 1.1 / 1.1.1 for numbered style sets."""
+        if not hasattr(self, "_wc"):
+            self._wc = [0, 0, 0]
+        self._wc[level - 1] += 1
+        for i in range(level, 3):
+            self._wc[i] = 0
+        return ".".join(str(self._wc[i]) for i in range(level)) + " "
 
     def _gw_number(self, level: int) -> str:
         """公文 heading ladder: 一、 / （一） / 1． (auto-incrementing per level)."""
@@ -459,9 +466,10 @@ class Doc:
         return self
 
     def toc(self, title="Contents"):
-        """Insert an updatable Table of Contents field (Word refreshes on open)."""
+        """Insert an updatable Table of Contents field (Word refreshes on open).
+        The title uses a non-outline style so it does not list itself in the TOC."""
         if title:
-            self.doc.add_paragraph(title, style="Heading 1")
+            self.doc.add_paragraph(title, style="TOC Label")
         p = self.doc.add_paragraph()
         run = p.add_run()
         self._field(run, r'TOC \o "1-3" \h \z \u', cached="Right-click → Update Field")
@@ -470,16 +478,27 @@ class Doc:
         return self
 
     def page_numbers(self, fmt="{PAGE}"):
-        """Centered page number in the footer of the primary section."""
+        """Centered page number in the footer. ``fmt`` may wrap the number with
+        text, e.g. ``"Page {PAGE}"`` or ``"第 {PAGE} 页"`` ; the ``{PAGE}`` token
+        becomes the live field."""
         footer = self.doc.sections[0].footer
         footer.is_linked_to_previous = False
         p = footer.paragraphs[0]
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        def _styled(run):
+            self._set_run_fonts(run, self.t.font_body, self.t.font_cjk_b)
+            run.font.size = Pt(self.t.sz_caption)
+            run.font.color.rgb = _rgb("808080")
+
+        before, sep, after = fmt.partition("{PAGE}")
+        if before:
+            _styled(p.add_run(before))
         run = p.add_run()
         self._field(run, "PAGE", cached="1")
-        self._set_run_fonts(run, self.t.font_body, self.t.font_cjk_b)
-        run.font.size = Pt(self.t.sz_caption)
-        run.font.color.rgb = _rgb("808080")
+        _styled(run)
+        if sep and after:
+            _styled(p.add_run(after))
         return self
 
     def _field(self, run, instr, cached=""):
@@ -512,9 +531,16 @@ class Doc:
 
             sec.orientation = WD_ORIENT.LANDSCAPE
             sec.page_width, sec.page_height = sec.page_height, sec.page_width
+        # tables/figures added after this use the new section's text width
+        self._text_width_emu = sec.page_width - sec.left_margin - sec.right_margin
         return self
 
     def save(self, path):
+        import os
+
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         self.doc.save(path)
         return path
 
