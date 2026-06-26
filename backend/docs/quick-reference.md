@@ -78,6 +78,16 @@ Test env (`config.test.yaml`):
 
 Env vars override YAML config (use the `CUBEBOX_` prefix).
 
+## Sandbox Skills Storage (PVC Requirement)
+
+Skills persist under `/workspace/.skills/` in the sandbox, backed by a PVC mount.
+The `sandbox.volume.enabled` setting (default `true` as of 2026-06-25) enables
+persistent volumes scoped by `(workspace_id, user_id)` — each active user–workspace
+pair gets one volume. Deployers must provision PVC storage; at scale, monitor
+usage and configure reclaim policies. The fallback `sandbox.volume.enabled: false`
+still works but re-syncs skills on every sandbox kill+recreate (defeats caching).
+Not recommended for production.
+
 ## Running E2E Tests Locally
 
 Local E2E runs the `development` env. Required files (both gitignored):
