@@ -241,10 +241,18 @@ class Doc:
                          t.color_body, after=t.after, before=0,
                          line=t.line, indent_first=t.indent_first, justify=t.t_cjk(),
                          line_exact_pt=t.line_exact_pt)
+        # CJK has no true italic — Word fakes an ugly slant — so skip it there.
+        ital = t.profile not in ("cjk", "official")
         self._style_para("Caption", t.font_body, t.font_cjk_b, t.sz_caption, False,
-                         "666666", after=10, before=4, align="center", italic=True)
+                         "666666", after=10, before=4, align="center", italic=ital)
         self._style_para("Quote", t.font_body, t.font_cjk_b, t.sz_body, False,
-                         "555555", after=10, before=10, indent_left=28, italic=True)
+                         "555555", after=10, before=10, indent_left=28, italic=ital)
+        # Match the bullet/number list styles to the body (size/color/spacing/CJK
+        # font) — otherwise list items keep Word's default List Bullet look.
+        for lname in ("List Bullet", "List Number"):
+            self._style_para(lname, t.font_body, t.font_cjk_b, t.sz_body, False,
+                             t.color_body, after=2, before=0, line=t.line,
+                             line_exact_pt=t.line_exact_pt)
         # Heading-look label for the TOC itself — NO outlineLvl, so the TOC field
         # does not list "Contents" as its own first entry.
         self._style_para("TOC Label", t.font_heading, t.font_cjk_h, t.sz_h1, True,
@@ -274,6 +282,12 @@ class Doc:
         fonts.set(qn("w:hAnsi"), latin)
         fonts.set(qn("w:eastAsia"), cjk)
         ppr = st.element.get_or_add_pPr()
+
+        def _reset(tag):  # built-in styles already have these singletons
+            for old in ppr.findall(qn(tag)):
+                ppr.remove(old)
+
+        _reset("w:spacing")
         sp = OxmlElement("w:spacing")
         sp.set(qn("w:before"), _twips(before))
         sp.set(qn("w:after"), _twips(after))
@@ -288,19 +302,21 @@ class Doc:
             st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
         elif justify:
             st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        if indent_first:
+        if indent_first or indent_left:
+            _reset("w:ind")
             ind = OxmlElement("w:ind")
-            ind.set(qn("w:firstLineChars"), "200")
-            ppr.append(ind)
-        if indent_left:
-            ind = OxmlElement("w:ind")
-            ind.set(qn("w:left"), _twips(indent_left))
+            if indent_first:
+                ind.set(qn("w:firstLineChars"), "200")
+            if indent_left:
+                ind.set(qn("w:left"), _twips(indent_left))
             ppr.append(ind)
         if outline is not None:
+            _reset("w:outlineLvl")
             ol = OxmlElement("w:outlineLvl")
             ol.set(qn("w:val"), str(outline))
             ppr.append(ol)
         if keep_next:
+            _reset("w:keepNext")
             ppr.append(OxmlElement("w:keepNext"))
         return st
 
