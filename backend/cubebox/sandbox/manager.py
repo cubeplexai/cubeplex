@@ -90,6 +90,17 @@ def build_user_pvc_name(prefix: str, workspace_id: str, user_id: str) -> str:
     return f"{prefix}-{_sanitize_pvc_suffix(raw, prefix)}"
 
 
+def build_sandbox_pvc_name(prefix: str, workspace_id: str, scope_type: str, scope_id: str) -> str:
+    """PVC claim name for one UserSandbox entity. user-scope keeps the
+    legacy (workspace_id, user_id) shape so existing PVCs keep mounting
+    (authorized backwards-compat carve-out, spec §4.8); topic/conversation
+    scope get their own PVC, fixing the cross-scope storage leak."""
+    if scope_type == "user":
+        return build_user_pvc_name(prefix, workspace_id, scope_id)
+    raw = f"ws-{workspace_id}-{scope_type}-{scope_id}"
+    return f"{prefix}-{_sanitize_pvc_suffix(raw, prefix)}"
+
+
 def build_legacy_user_pvc_name(prefix: str, user_id: str) -> str:
     """The PRE-#144 PVC claim name (workspace-blind).
 
@@ -252,20 +263,28 @@ class SandboxManager:
                     pass
 
     def _build_user_volume(
-        self, workspace_id: str, user_id: str, *, storage: str | None = None
+        self,
+        workspace_id: str,
+        scope_type: str,
+        scope_id: str,
+        *,
+        storage: str | None = None,
     ) -> Volume:
-        """Build a PVC Volume keyed on (workspace_id, user_id).
+        """Build a PVC Volume keyed on (workspace_id, scope_type, scope_id).
 
-        Keying on the workspace too is the storage half of the ownership
-        boundary the unique index enforces in the DB: the same user in two
-        workspaces must never mount the same /workspace PVC.
+        PVC name comes from ``build_sandbox_pvc_name``: user-scope keeps the
+        legacy (workspace_id, user_id) shape so existing PVCs keep mounting;
+        topic/conversation scope get their own PVC, fixing the cross-scope
+        storage leak (spec §4.8).
 
         ``storage`` is the admin-policy capacity request (Kubernetes quantity
         like "10Gi"); None leaves the cluster/StorageClass default in place.
         Only honoured when the PVC is auto-created — an existing PVC keeps its
         provisioned size.
         """
-        pvc_name = build_user_pvc_name(self._volume_pvc_prefix, workspace_id, user_id)
+        pvc_name = build_sandbox_pvc_name(
+            self._volume_pvc_prefix, workspace_id, scope_type, scope_id
+        )
         return Volume(
             name="user-workspace",
             pvc=PVC(claimName=pvc_name, storage=storage),
@@ -589,7 +608,9 @@ class SandboxManager:
             try:
                 volumes: list[Volume] | None = None
                 if self._volume_enabled:
-                    volume = self._build_user_volume(workspace_id, user_id, storage=policy.storage)
+                    volume = self._build_user_volume(
+                        workspace_id, scope_type, scope_id, storage=policy.storage
+                    )
                     volumes = [volume]
                     logger.info(
                         "Creating new sandbox for user {} with PVC {}",
