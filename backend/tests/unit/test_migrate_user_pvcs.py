@@ -51,7 +51,8 @@ def test_planned_new_name_matches_what_sandbox_manager_actually_mounts(
     through SandboxManager._build_user_volume directly."""
     manager = SandboxManager(MagicMock(), mock_encryption_backend)
     proposed = build_user_pvc_name(manager._volume_pvc_prefix, "ws-A", "user-1")
-    actual = manager._build_user_volume("ws-A", "user-1").pvc.claim_name  # type: ignore[union-attr]
+    volume = manager._build_user_volume("ws-A", "user", "user-1")
+    actual = volume.pvc.claim_name  # type: ignore[union-attr]
     assert proposed == actual
 
 

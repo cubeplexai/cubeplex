@@ -106,7 +106,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
         ),
         # Stub get_active_by_scope → None so we always take the create-new path
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=None,
         ),
         # _RESOLVED_ENVS already has value= populated; skip DB decrypt in these
@@ -199,6 +199,10 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
     # rows fall through to the race-loss poll path).
     old_record.status = "running"
     old_record.image = "ubuntu:22.04"
+    # _connect_existing reads org_id/workspace_id off the record for egress
+    # ref persistence (the row's scope, not the caller's).
+    old_record.org_id = "org-1"
+    old_record.workspace_id = "ws-1"
 
     async def fake_connect(sandbox_id: str, **kwargs: Any) -> Any:
         fake = MagicMock()
@@ -216,7 +220,7 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
     with (
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=old_record,
         ),
         patch(
@@ -280,7 +284,7 @@ async def test_create_without_exchange_host_skips_injection(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=None,
         ),
     ):
@@ -343,12 +347,19 @@ async def test_unhealthy_sandbox_revokes_refs(
     async def fake_create(image: str, **kwargs: Any) -> Any:
         return _make_fake_sandbox("sbx-new2")
 
-    # Stub a "running" record for the old sandbox that fails health check
+    # Stub a "running" record for the old sandbox that fails health check.
+    # Scope attrs are read by _provision_new_container on the revive path
+    # (the unhealthy running row is revived in place rather than replaced).
     old_record = MagicMock()
     old_record.id = "rec-old"
     old_record.sandbox_id = "sbx-old"
     old_record.status = "running"
     old_record.image = "ubuntu:22.04"
+    old_record.scope_type = "user"
+    old_record.scope_id = "u-1"
+    old_record.workspace_id = "ws-1"
+    old_record.org_id = "org-1"
+    old_record.user_id = "u-1"
 
     async def fake_connect(sandbox_id: str, **kwargs: Any) -> Any:
         fake = MagicMock()
@@ -360,6 +371,12 @@ async def test_unhealthy_sandbox_revokes_refs(
         fake.is_healthy = not_healthy
         return fake
 
+    async def flip_terminated(record_id: str, **kwargs: Any) -> None:
+        # _connect_existing marks the row terminated; flip the stub so the
+        # re-fetch sees a terminal row and falls through to the revive branch.
+        old_record.status = "terminated"
+        old_record.sandbox_id = None
+
     manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
 
@@ -367,11 +384,21 @@ async def test_unhealthy_sandbox_revokes_refs(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_resumable_by_scope",
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=old_record,
         ),
         patch(
             "cubebox.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
+            side_effect=flip_terminated,
+        ),
+        # Revive path: atomic claim wins, then provision a fresh container on
+        # the same row.
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.claim_for_provisioning",
+            return_value=True,
+        ),
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.promote_to_running",
             return_value=None,
         ),
         patch(

@@ -6,10 +6,10 @@ from cubebox.sandbox.manager import SandboxManager
 def test_build_user_volume_uses_stable_non_colliding_name(mock_encryption_backend):
     manager = SandboxManager(MagicMock(), mock_encryption_backend)
 
-    first = manager._build_user_volume("ws-A", "019d85a5-5bb7-7130-a4d2-a73734fa2dc6")
-    second = manager._build_user_volume("ws-A", "019d85a5-be69-76e2-b8cb-814a9440e4b0")
-    repeated = manager._build_user_volume("ws-A", "019d85a5-5bb7-7130-a4d2-a73734fa2dc6")
-    other_ws = manager._build_user_volume("ws-B", "019d85a5-5bb7-7130-a4d2-a73734fa2dc6")
+    first = manager._build_user_volume("ws-A", "user", "019d85a5-5bb7-7130-a4d2-a73734fa2dc6")
+    second = manager._build_user_volume("ws-A", "user", "019d85a5-be69-76e2-b8cb-814a9440e4b0")
+    repeated = manager._build_user_volume("ws-A", "user", "019d85a5-5bb7-7130-a4d2-a73734fa2dc6")
+    other_ws = manager._build_user_volume("ws-B", "user", "019d85a5-5bb7-7130-a4d2-a73734fa2dc6")
 
     assert first.pvc is not None
     assert second.pvc is not None
