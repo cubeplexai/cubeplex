@@ -50,7 +50,7 @@ from cubebox.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubebox.sandbox_policy.rules import build_network_policy
 from cubebox.services.credential import CredentialService
 from cubebox.services.sandbox_env import SANDBOX_ENV_KIND, ResolvedEnv, SandboxEnvResolver
-from cubebox.services.sandbox_policy import SandboxPolicyResolver
+from cubebox.services.sandbox_policy import EffectivePolicy, SandboxPolicyResolver
 
 # ---------------------------------------------------------------------------
 # PVC naming — shared between SandboxManager and the one-time PVC migrator
@@ -376,26 +376,22 @@ class SandboxManager:
         org_id: str,
         workspace_id: str,
     ) -> SandboxAttachment:
-        """Get the active sandbox for this scope, or create a new one.
+        """Get the active sandbox for this scope, or create/revive one.
 
         Scope selection uses the polymorphic ``(scope_type, scope_id)``
-        tuple:
-        - ``scope_type='user'``: personal scope, keyed by ``user_id``.
-        - ``scope_type='conversation'``: standalone group chat scope,
-          keyed by ``conversation_id`` and shared by all conversation
-          participants.
-        - ``scope_type='topic'``: dedicated-mode topic scope, keyed by
-          ``topic_id`` and shared by all topic participants.
+        tuple (``user``/``conversation``/``topic``).
+        ``uq_user_sandbox_active_scope`` guarantees at most one non-deleted
+        row per ``(org_id, workspace_id, scope_type, scope_id)``, so a
+        terminated/failed row is revived in place rather than replaced.
 
-        ``uq_user_sandbox_active_scope`` guarantees at most one active
-        row per ``(org_id, workspace_id, scope_type, scope_id)``.
-
-        Flow (all scopes):
-        1. Query DB for an existing RUNNING sandbox in the chosen scope.
-        2. If found, try to connect and health-check it.
-        3. If healthy, return it (after refreshing egress env + refs);
-           otherwise mark terminated and create new.
-        4. Skill sync is the LazySandbox's responsibility post-M3.
+        Branches (every branch returns or raises):
+        - no row            -> reserve + ``_provision_new_container``
+        - running/paused/... -> pause/resume reconcile + ``_connect_existing``;
+                                unhealthy falls through to revive
+        - terminated/failed -> atomic ``claim_for_provisioning`` then
+                                ``_provision_new_container`` (race-loser polls)
+        - provisioning      -> ``_await_provisioning_winner`` then connect
+        - kill_pending      -> fast-fail (reaper will advance the row)
         """
         conn_config = self._build_connection_config()
 
@@ -407,42 +403,35 @@ class SandboxManager:
                 SandboxPolicyRepository(session, org_id=org_id),
                 default_image=self._image,
             ).resolve()
-            record = await repo.get_resumable_by_scope(scope_type=scope_type, scope_id=scope_id)
+            record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
 
             # Late arrival on a transient row (another caller is pausing or
-            # resuming this sandbox). Trigger an inline reconciler sweep
-            # first: on G11-style backends where pause is a server-side
-            # no-op, the cleanup loop's reconcile pass at most every 60 s
-            # would otherwise force the user to wait the full
-            # ``_resume_timeout`` only to fail. The inline sweep advances
-            # the row from provider state in a single probe (1-2 s) —
-            # ``pausing`` + provider ``Running`` reverts to ``running`` and
-            # we reuse it; ``pausing`` + provider ``Paused`` advances to
-            # ``paused`` and we resume; terminal states get killed and we
-            # create-new. ``claim_timeout=0`` forces the probe regardless
-            # of ``last_provider_check`` freshness.
+            # resuming this sandbox). Trigger an inline reconciler sweep first:
+            # on G11-style backends where pause is a server-side no-op, the
+            # cleanup loop's reconcile pass at most every 60 s would otherwise
+            # force the user to wait the full ``_resume_timeout`` only to fail.
+            # The inline sweep advances the row from provider state in one
+            # probe (1-2 s). ``claim_timeout=0`` forces the probe regardless of
+            # ``last_provider_check`` freshness.
             if record and record.status in ("pausing", "resuming"):
                 try:
                     await self.reconcile_transients(claim_timeout=0)
                 except Exception as exc:
                     # Don't let an unrelated reconcile failure (a different
-                    # transient row blowing up) block the current request —
-                    # the wait-helper fallback still catches the steady-state
-                    # transition or raises a retryable SandboxError on timeout.
-                    logger.warning(
-                        "Inline reconcile during get_or_create failed: {}",
-                        exc,
-                    )
-                record = await repo.get_resumable_by_scope(scope_type=scope_type, scope_id=scope_id)
+                    # transient row blowing up) block the current request.
+                    logger.warning("Inline reconcile during get_or_create failed: {}", exc)
+                record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
 
             if record and record.status in ("pausing", "resuming"):
                 stable = await self._await_stable_status(
                     record.id, org_id=org_id, workspace_id=workspace_id
                 )
-                if stable is None or stable.status in ("failed", "terminated"):
-                    record = None
-                else:
-                    record = stable
+                # ``stable`` is None only when the row was deleted while we
+                # waited (truly absent). A failed/terminated stable row is
+                # kept so the revive branch below reuses it instead of
+                # reserve()ing a duplicate (the partial unique index would
+                # reject a second row anyway).
+                record = stable
 
             if record and record.status == "paused":
                 resumed = await self._resume_record(
@@ -456,40 +445,41 @@ class SandboxManager:
                 )
                 if resumed is not None:
                     return SandboxAttachment(sandbox=resumed, user_sandbox_id=record.id)
-                # _resume_record returned None. That can mean either a real
-                # resume failure (row now ``failed``) or the
-                # client-exception-while-provider-completed race (the
-                # reconciler may have moved the row to ``running``). Re-fetch
-                # on a fresh session before deciding: if the row is
-                # ``running`` now, fall into the normal connect path and
-                # reuse it instead of provisioning a duplicate.
+                # _resume_record returned None. Re-fetch on a fresh session
+                # before deciding: a ``running`` row falls into the connect
+                # path; ``terminated``/``failed`` into revive; anything else
+                # is handled by the status branches below.
                 async with self._session_factory() as recheck_session:
                     recheck_repo = UserSandboxRepository(
                         recheck_session, org_id=org_id, workspace_id=workspace_id
                     )
-                    record = await recheck_repo.get_resumable_by_scope(
+                    record = await recheck_repo.get_active_by_scope(
                         scope_type=scope_type, scope_id=scope_id
                     )
-                if record is None or record.status != "running":
-                    record = None
 
-            # `get_resumable_by_scope` doesn't include `provisioning` rows; if a
-            # sibling task is mid-reserve, the next branch (`record.status ==
-            # 'running'`) won't fire and we'll fall through to the create
-            # branch below, where `repo.reserve()` will collide on the partial
-            # unique active index and the race-loss poller will pick up the
-            # winner. That is intentional — keeps the provisioning-row dance
-            # behind a single chokepoint (#144 reserve-row-first).
+            # --- Branch on record status (every branch returns or raises) ---
 
-            if record and record.status == "running":
-                logger.info(
-                    "Found existing sandbox {} for user {}",
-                    record.sandbox_id,
-                    user_id,
+            if record is None:
+                reserved = await repo.reserve(
+                    user_id=user_id,
+                    image=policy.default_image,
+                    ttl_seconds=self._ttl,
+                    scope_type=scope_type,
+                    scope_id=scope_id,
                 )
-                # LAZY image drift (OQ-5): just log; existing running sandboxes keep
-                # their original image until they terminate normally. The new image
-                # only takes effect on the next new-conversation create.
+                backend = await self._provision_new_container(
+                    session,
+                    reserved,
+                    conn_config=conn_config,
+                    policy=policy,
+                    user_id=user_id,
+                )
+                return SandboxAttachment(sandbox=backend, user_sandbox_id=reserved.id)
+
+            if record.status == "running":
+                # LAZY image drift (OQ-5): just log; existing running sandboxes
+                # keep their original image until they terminate normally. The
+                # new image only takes effect on the next new-conversation create.
                 if record.image != policy.default_image:
                     logger.info(
                         "Image drift detected (sandbox={} on={}, policy now={}); "
@@ -500,252 +490,340 @@ class SandboxManager:
                         policy.default_image,
                     )
                 try:
-                    raw_sandbox = await opensandbox.Sandbox.connect(
-                        record.sandbox_id,
-                        connection_config=conn_config,
+                    backend = await self._connect_existing(
+                        session, repo, record, conn_config=conn_config, user_id=user_id
                     )
-                    if await raw_sandbox.is_healthy():
-                        await repo.update_activity(record.id)
-                        logger.info("Reusing healthy sandbox {}", record.sandbox_id)
-                        backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
-                        if self._exchange_host:
-                            await self._apply_egress(
-                                session,
-                                backend,
-                                org_id=org_id,
-                                workspace_id=workspace_id,
-                                user_id=user_id,
-                                sandbox_id=record.sandbox_id,
-                            )
-                        return SandboxAttachment(sandbox=backend, user_sandbox_id=record.id)
-                    else:
-                        logger.warning(
-                            "Sandbox {} is not healthy, will recreate",
-                            record.sandbox_id,
-                        )
-                except Exception as e:
-                    logger.warning(
-                        "Failed to connect to sandbox {}: {}",
-                        record.sandbox_id,
-                        e,
-                    )
-                # Mark the unhealthy/unreachable sandbox as terminated and revoke
-                # any egress refs tied to it so its placeholders stop being redeemable.
-                await repo.mark_terminated(record.id)
-                if self._exchange_host:
-                    await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
-
-            # Reserve the row BEFORE provider create. A concurrent loser's reserve
-            # raises IntegrityError; it never provisions a provider sandbox.
-            try:
-                reserved = await repo.reserve(
-                    user_id=user_id,
-                    image=policy.default_image,
-                    ttl_seconds=self._ttl,
-                    scope_type=scope_type,
-                    scope_id=scope_id,
-                )
-            except Exception:
-                await session.rollback()
-                # Lost the race. Winner may still be `provisioning` (hasn't called
-                # promote_to_running yet), so poll until it reaches `running` or a
-                # bounded timeout elapses — do NOT raise on a provisioning winner.
-                # Re-query in a fresh transaction each loop so we see the winner's
-                # committed promotion. In shared scopes (conversation, topic) the
-                # winner row may have a different ``user_id`` (another
-                # participant), so the lookup MUST go through ``get_active_by_scope``
-                # using the same ``(scope_type, scope_id)`` we tried to reserve —
-                # otherwise the loser would never find the winner row and would
-                # time out with a spurious SandboxError.
-                deadline = time.monotonic() + self._reserve_wait_timeout
-                winner = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
-                while (
-                    winner is not None
-                    and winner.status == "provisioning"
-                    and time.monotonic() < deadline
-                ):
-                    await asyncio.sleep(self._reserve_poll_interval)
-                    await session.rollback()  # drop the snapshot before re-reading
-                    winner = await repo.get_active_by_scope(
+                    return SandboxAttachment(sandbox=backend, user_sandbox_id=record.id)
+                except SandboxError:
+                    # _connect_existing marked the row terminated + revoked
+                    # egress. Re-fetch and fall through to the revive branch
+                    # (provision a fresh container on the same PVC-backed row).
+                    revived = await repo.get_active_by_scope(
                         scope_type=scope_type, scope_id=scope_id
                     )
-                if winner is not None and winner.status == "running":
-                    raw_sandbox = await opensandbox.Sandbox.connect(
-                        winner.sandbox_id, connection_config=conn_config
-                    )
-                    loser_backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
-                    # Egress placeholders live on the OpenSandbox instance via
-                    # set_run_env; the create/reuse paths refresh them before
-                    # returning, so the race-loser must too — otherwise secret-
-                    # backed env vars are missing for the loser's tool calls.
-                    if self._exchange_host:
-                        await self._apply_egress(
+                    if revived is None or revived.status not in (
+                        "terminated",
+                        "failed",
+                    ):
+                        raise
+                    record = revived
+
+            if record.status in ("terminated", "failed"):
+                # Row alive, container dead/bad. Atomic claim prevents double-
+                # provision when two concurrent get_or_create calls race on the
+                # same terminated row; the loser polls for the winner.
+                claimed = await repo.claim_for_provisioning(record.id)
+                if not claimed:
+                    winner = await self._await_provisioning_winner(repo, scope_type, scope_id)
+                    if winner is not None and winner.status == "running":
+                        backend = await self._connect_existing(
                             session,
-                            loser_backend,
-                            org_id=org_id,
-                            workspace_id=workspace_id,
+                            repo,
+                            winner,
+                            conn_config=conn_config,
                             user_id=user_id,
-                            sandbox_id=winner.sandbox_id,
                         )
-                    return SandboxAttachment(sandbox=loser_backend, user_sandbox_id=winner.id)
-                raise SandboxError(
-                    "concurrent create lost the race with no usable winner"
-                ) from None
-
-            # Everything from here until `promote_to_running` runs while the
-            # reserved row is still `provisioning`. ANY failure in this band —
-            # whether the env resolver raises on a malformed vault row, the
-            # network-policy merge throws, or `Sandbox.create` returns a
-            # provider error — must free the reservation so the unique index
-            # doesn't pin a phantom slot for this user/workspace until TTL
-            # cleanup notices. Once `promote_to_running` commits, the row owns
-            # a real provider sandbox; from that point on we deliberately do
-            # NOT delete the row on later failure (e.g. the transient reconnect
-            # below) — the reaper + reuse path own its lifecycle, and deleting
-            # the row would orphan the provider sandbox.
-            sandbox_id: str | None = None
-            promoted = False
-            try:
-                volumes: list[Volume] | None = None
-                if self._volume_enabled:
-                    volume = self._build_user_volume(
-                        workspace_id, scope_type, scope_id, storage=policy.storage
-                    )
-                    volumes = [volume]
-                    logger.info(
-                        "Creating new sandbox for user {} with PVC {}",
-                        user_id,
-                        volume.pvc.claim_name,  # type: ignore[union-attr]
-                    )
-                else:
-                    logger.info("Creating new sandbox for user {}", user_id)
-
-                # Give only the create call the longer budget: the create POST
-                # is held open server-side until the pod is ready, so it must
-                # survive a cold image pull. ``create_conn_config`` is otherwise
-                # identical to the default.
-                create_conn_config = self._build_connection_config(
-                    request_timeout=self._create_timeout
+                        return SandboxAttachment(sandbox=backend, user_sandbox_id=winner.id)
+                    raise SandboxError(f"provisioning race lost for scope {scope_type}/{scope_id}")
+                backend = await self._provision_new_container(
+                    session,
+                    record,
+                    conn_config=conn_config,
+                    policy=policy,
+                    user_id=user_id,
+                    is_revive=True,
                 )
+                return SandboxAttachment(sandbox=backend, user_sandbox_id=record.id)
 
-                # Resolve the credential vault BEFORE Sandbox.create so a
-                # malformed vault row fails fast and the `except` below releases
-                # the reservation — rather than creating a running sandbox we
-                # can't inject secrets into. The resolved injection is reused by
-                # _apply_egress after create (no second resolve). Vault hosts do
-                # NOT feed the network policy.
-                injection: InjectionResult | None = None
-                if self._exchange_host:
-                    resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=org_id))
-                    resolved = await resolver.resolve(workspace_id=workspace_id, user_id=user_id)
-                    await self._decrypt_env_values(session, org_id=org_id, resolved=resolved)
-                    injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(
-                        resolved
-                    )
-
-                # Egress network policy: assembled from the admin-authored rules
-                # + default action (independent of the vault). The exchange host
-                # is force-allowed so the substitution proxy stays reachable.
-                network_policy = build_network_policy(
-                    admin_rules=policy.network_rules,
-                    default_action=policy.network_default_action,
-                    force_allow_hosts=[self._exchange_host] if self._exchange_host else [],
-                )
-
-                raw_sandbox = await opensandbox.Sandbox.create(
-                    policy.default_image,
-                    connection_config=create_conn_config,
-                    timeout=timedelta(seconds=self._ttl),
-                    ready_timeout=timedelta(seconds=self._ready_timeout),
-                    volumes=volumes,
-                    resource={
-                        "cpu": policy.resource_cpu or self._resource_cpu,
-                        "memory": policy.resource_memory or self._resource_memory,
-                    },
-                    secure_access=self._secure_access,
-                    network_policy=network_policy,
-                )
-                sandbox_id = raw_sandbox.id
-                logger.info("Sandbox created: {}", sandbox_id)
-
-                # Promote the reserved row from `provisioning` to `running`
-                # with the real sandbox_id. Any losing race-poller now sees a
-                # usable winner. ``paused_ttl_seconds`` is set on the row at
-                # reserve time (see UserSandboxRepository.reserve).
-                await repo.promote_to_running(reserved.id, sandbox_id=sandbox_id)
-                promoted = True
-            except ProviderSandboxError as exc:
-                # Provider failed at Sandbox.create() — no provider sandbox
-                # exists, so free the reservation immediately.
-                await repo.delete_record(reserved.id)
-                raise SandboxError(str(exc)) from exc
-            except Exception:
-                # Pre-create setup blew up (e.g. SandboxEnvInjector.build on a
-                # malformed vault row, network-policy merge, anything before
-                # the create succeeded). The reservation must be released or
-                # the partial unique index pins the user/workspace until TTL.
-                if not promoted:
-                    await repo.delete_record(reserved.id)
-                raise
-
-            try:
-                # Rebind to the default per-command timeout: the create call's
-                # adapters captured the longer create_timeout, but ordinary
-                # commands on this sandbox must use request_timeout, not
-                # create_timeout. Reconnecting rebuilds the HTTP clients with
-                # the default budget. Skip the health check — create already
-                # gated on readiness (ready_timeout), so a second readiness
-                # probe here would only add a redundant failure path.
-                #
-                # IMPORTANT: do NOT delete the DB row on reconnect failure —
-                # the row is already `running` and references a real provider
-                # sandbox. Deleting it here would orphan the provider sandbox
-                # (no reaper would ever find it) and the next request would
-                # leak a second one. Surface the error and let the next request
-                # find the row via the reuse path or let TTL clean it up.
-                raw_sandbox = await opensandbox.Sandbox.connect(
-                    sandbox_id,
-                    connection_config=conn_config,
-                    skip_health_check=True,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Reconnect after create failed for sandbox {} "
-                    "(row stays `running`; next request reuses or reaper "
-                    "expires it): {}",
-                    sandbox_id,
-                    exc,
-                )
-                raise SandboxError(
-                    f"sandbox {sandbox_id} created but reconnect failed: {exc}"
-                ) from exc
-
-            backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
-            # Execute-time egress: set run env on the backend + persist EgressRefs.
-            # Env flows via execute (RunCommandOpts), not Sandbox.create.
-            if self._exchange_host:
-                try:
-                    await self._apply_egress(
+            if record.status == "provisioning":
+                # Another worker is mid-provision on this row. Poll for the
+                # winner, then connect to its container.
+                winner = await self._await_provisioning_winner(repo, scope_type, scope_id)
+                if winner is not None and winner.status == "running":
+                    backend = await self._connect_existing(
                         session,
-                        backend,
-                        org_id=org_id,
-                        workspace_id=workspace_id,
+                        repo,
+                        winner,
+                        conn_config=conn_config,
                         user_id=user_id,
-                        sandbox_id=sandbox_id,
-                        injection=injection,
                     )
-                except Exception:
-                    # Egress setup failed after the row is already `running`.
-                    # Terminate so the next get_or_create provisions a fresh
-                    # sandbox rather than looping on a live-but-unaccessible row.
-                    logger.error(
-                        "Egress setup failed for newly created sandbox {}; terminating row",
-                        sandbox_id,
-                    )
-                    await repo.mark_terminated(reserved.id)
-                    await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
-                    raise
-            return SandboxAttachment(sandbox=backend, user_sandbox_id=reserved.id)
+                    return SandboxAttachment(sandbox=backend, user_sandbox_id=winner.id)
+                # Winner failed/timed out -> row is failed/terminated; the next
+                # get_or_create revives it. Surface a retryable error here.
+                raise SandboxError(f"provisioning timed out for scope {scope_type}/{scope_id}")
+
+            if record.status == "kill_pending":
+                # Container still being torn down provider-side. Fast-fail; the
+                # reaper's next cleanup_expired advances kill_pending ->
+                # terminated, after which get_or_create revives the row.
+                raise SandboxError(
+                    f"sandbox {record.id} is kill_pending; retry after reaper cleans up"
+                )
+
+            if record.status == "paused":
+                # Reached only when _resume_record failed and the re-fetch still
+                # shows paused (e.g. reconciler kept reverting past the retry
+                # ceiling). Don't loop on resume here; surface a retryable error.
+                raise SandboxError(
+                    f"sandbox {record.id} resume failed; row still paused, retry later"
+                )
+
+            raise SandboxError(f"unreachable status {record.status!r}")
+
+    async def _provision_new_container(
+        self,
+        session: AsyncSession,
+        record: UserSandbox,
+        *,
+        conn_config: ConnectionConfig,
+        policy: EffectivePolicy,
+        user_id: str,
+        is_revive: bool = False,
+    ) -> OpenSandbox:
+        """Create a fresh opensandbox container for an existing UserSandbox row
+        (either freshly reserved or revived from terminated/failed). Updates
+        sandbox_id + status='running' on the row. The PVC stays mounted (keyed
+        by the row's scope, not by container) so revived containers see the
+        prior workspace contents.
+
+        Failure handling:
+        - Pre-``promote_to_running`` failure: a fresh-reserve placeholder is
+          hard-deleted (``delete_record``) so the unique index doesn't pin a
+          phantom slot; a revived row is marked ``failed`` so the entity
+          persists for the next revive attempt (spec §5.3 — "行不消失").
+        - Post-promote reconnect/egress failure: the row is already ``running``
+          with a real provider sandbox, so it is NOT deleted — the reaper / next
+          reuse owns its lifecycle (deleting would orphan the provider sandbox).
+        """
+        repo = UserSandboxRepository(
+            session, org_id=record.org_id, workspace_id=record.workspace_id
+        )
+        sandbox_id: str | None = None
+        promoted = False
+        injection: InjectionResult | None = None
+        try:
+            volumes: list[Volume] | None = None
+            if self._volume_enabled:
+                volume = self._build_user_volume(
+                    record.workspace_id,
+                    record.scope_type,
+                    record.scope_id,
+                    storage=policy.storage,
+                )
+                volumes = [volume]
+                logger.info(
+                    "Creating new sandbox for user {} with PVC {}",
+                    record.user_id,
+                    volume.pvc.claim_name,  # type: ignore[union-attr]
+                )
+            else:
+                logger.info("Creating new sandbox for user {}", record.user_id)
+
+            # Give only the create call the longer budget: the create POST is
+            # held open server-side until the pod is ready, so it must survive
+            # a cold image pull. ``create_conn_config`` is otherwise identical
+            # to the default.
+            create_conn_config = self._build_connection_config(request_timeout=self._create_timeout)
+
+            # Resolve the credential vault BEFORE Sandbox.create so a malformed
+            # vault row fails fast and the `except` below releases the
+            # reservation — rather than creating a running sandbox we can't
+            # inject secrets into. The resolved injection is reused by
+            # _apply_egress after create (no second resolve).
+            if self._exchange_host:
+                resolver = SandboxEnvResolver(SandboxEnvRepository(session, org_id=record.org_id))
+                resolved = await resolver.resolve(workspace_id=record.workspace_id, user_id=user_id)
+                await self._decrypt_env_values(session, org_id=record.org_id, resolved=resolved)
+                injection = SandboxEnvInjector(exchange_host=self._exchange_host).build(resolved)
+
+            # Egress network policy: assembled from the admin-authored rules +
+            # default action (independent of the vault). The exchange host is
+            # force-allowed so the substitution proxy stays reachable.
+            network_policy = build_network_policy(
+                admin_rules=policy.network_rules,
+                default_action=policy.network_default_action,
+                force_allow_hosts=([self._exchange_host] if self._exchange_host else []),
+            )
+
+            raw_sandbox = await opensandbox.Sandbox.create(
+                record.image,
+                connection_config=create_conn_config,
+                timeout=timedelta(seconds=self._ttl),
+                ready_timeout=timedelta(seconds=self._ready_timeout),
+                volumes=volumes,
+                resource={
+                    "cpu": policy.resource_cpu or self._resource_cpu,
+                    "memory": policy.resource_memory or self._resource_memory,
+                },
+                secure_access=self._secure_access,
+                network_policy=network_policy,
+            )
+            sandbox_id = raw_sandbox.id
+            logger.info("Sandbox created: {}", sandbox_id)
+
+            # Promote the row from `provisioning` to `running` with the real
+            # sandbox_id. Any losing race-poller now sees a usable winner.
+            await repo.promote_to_running(record.id, sandbox_id=sandbox_id)
+            promoted = True
+        except ProviderSandboxError as exc:
+            # Provider failed at Sandbox.create() — no provider sandbox exists,
+            # so free the slot (delete for fresh reserve, mark failed for revive).
+            await self._release_failed_provisioning(repo, record.id, is_revive)
+            raise SandboxError(str(exc)) from exc
+        except Exception:
+            # Pre-create setup blew up (e.g. SandboxEnvInjector.build on a
+            # malformed vault row, network-policy merge, anything before the
+            # create succeeded). The slot must be released or the partial
+            # unique index pins the scope until TTL.
+            if not promoted:
+                await self._release_failed_provisioning(repo, record.id, is_revive)
+            raise
+
+        try:
+            # Rebind to the default per-command timeout: the create call's
+            # adapters captured the longer create_timeout, but ordinary commands
+            # on this sandbox must use request_timeout, not create_timeout.
+            # Reconnecting rebuilds the HTTP clients with the default budget.
+            # Skip the health check — create already gated on readiness
+            # (ready_timeout), so a second readiness probe here would only add
+            # a redundant failure path.
+            #
+            # IMPORTANT: do NOT delete the DB row on reconnect failure — the row
+            # is already `running` and references a real provider sandbox.
+            # Deleting it here would orphan the provider sandbox (no reaper
+            # would ever find it) and the next request would leak a second one.
+            raw_sandbox = await opensandbox.Sandbox.connect(
+                sandbox_id,
+                connection_config=conn_config,
+                skip_health_check=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Reconnect after create failed for sandbox {} "
+                "(row stays `running`; next request reuses or reaper "
+                "expires it): {}",
+                sandbox_id,
+                exc,
+            )
+            raise SandboxError(f"sandbox {sandbox_id} created but reconnect failed: {exc}") from exc
+
+        backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+        # Execute-time egress: set run env on the backend + persist EgressRefs.
+        # Env flows via execute (RunCommandOpts), not Sandbox.create.
+        if self._exchange_host:
+            try:
+                await self._apply_egress(
+                    session,
+                    backend,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                    user_id=user_id,
+                    sandbox_id=sandbox_id,
+                    injection=injection,
+                )
+            except Exception:
+                # Egress setup failed after the row is already `running`.
+                # Terminate so the next get_or_create provisions a fresh
+                # sandbox rather than looping on a live-but-unaccessible row.
+                logger.error(
+                    "Egress setup failed for newly created sandbox {}; terminating row",
+                    sandbox_id,
+                )
+                await repo.mark_terminated(record.id)
+                await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+                raise
+        return backend
+
+    async def _release_failed_provisioning(
+        self, repo: UserSandboxRepository, record_id: str, is_revive: bool
+    ) -> None:
+        """Release a slot whose provisioning never reached ``running``.
+
+        Fresh-reserve placeholders are hard-deleted (placeholder cleanup). A
+        revived entity is marked ``failed`` so it persists for the next revive
+        attempt (spec §5.3 — "行不消失"); ``sandbox_id`` is already None on a
+        revived row (cleared when it went terminal), and stays None.
+        """
+        if is_revive:
+            await repo.mark_failed(record_id)
+        else:
+            await repo.delete_record(record_id)
+
+    async def _connect_existing(
+        self,
+        session: AsyncSession,
+        repo: UserSandboxRepository,
+        record: UserSandbox,
+        *,
+        conn_config: ConnectionConfig,
+        user_id: str,
+    ) -> OpenSandbox:
+        """Connect + health-check an existing running sandbox, then refresh its
+        egress env/refs. On unhealthy/unreachable: mark the row terminated
+        (clearing the dead ``sandbox_id``) and revoke egress refs, then raise
+        ``SandboxError`` so the caller falls through to the revive path.
+        """
+        sandbox_id = record.sandbox_id
+        if sandbox_id is None:
+            raise SandboxError(f"sandbox {record.id} has no sandbox_id; cannot connect")
+        logger.info("Found existing sandbox {} for user {}", sandbox_id, user_id)
+        try:
+            raw_sandbox = await opensandbox.Sandbox.connect(
+                sandbox_id, connection_config=conn_config
+            )
+            healthy = await raw_sandbox.is_healthy()
+        except Exception as e:
+            logger.warning("Failed to connect to sandbox {}: {}", sandbox_id, e)
+            healthy = False
+            raw_sandbox = None
+        if healthy and raw_sandbox is not None:
+            await repo.update_activity(record.id)
+            logger.info("Reusing healthy sandbox {}", sandbox_id)
+            backend = OpenSandbox(sandbox=raw_sandbox, workdir=self._workdir)
+            if self._exchange_host:
+                await self._apply_egress(
+                    session,
+                    backend,
+                    org_id=record.org_id,
+                    workspace_id=record.workspace_id,
+                    user_id=user_id,
+                    sandbox_id=sandbox_id,
+                )
+            return backend
+        # Unhealthy/unreachable: terminate + revoke so the dead container's
+        # egress placeholders stop being redeemable, then surface a retryable
+        # error. ``clear_sandbox_id=True`` frees the provider id for reuse and
+        # matches the spec invariant (terminal rows carry sandbox_id=None);
+        # the subsequent revive path's ``promote_to_running`` overwrites it.
+        await repo.mark_terminated(record.id, clear_sandbox_id=True)
+        if self._exchange_host:
+            await EgressRefRepository(session).revoke_for_sandbox(sandbox_id)
+        raise SandboxError(f"sandbox {sandbox_id} unhealthy, will revive")
+
+    async def _await_provisioning_winner(
+        self,
+        repo: UserSandboxRepository,
+        scope_type: str,
+        scope_id: str,
+    ) -> UserSandbox | None:
+        """Poll for a provisioning row to reach a non-provisioning status.
+        Used by race-losers (both fresh-reserve and revive paths) to wait for
+        the winner's container to come up, then attach to it.
+
+        Re-reads in the caller's transaction with a ``rollback`` between polls
+        to drop the identity-map snapshot so the winner's committed
+        ``running``/``terminated`` transition is visible. Returns the row
+        (whatever its final status) or ``None`` on timeout.
+        """
+        deadline = time.monotonic() + self._reserve_wait_timeout
+        winner = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
+        while (
+            winner is not None and winner.status == "provisioning" and time.monotonic() < deadline
+        ):
+            await asyncio.sleep(self._reserve_poll_interval)
+            await repo.session.rollback()  # drop snapshot before re-reading
+            winner = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
+        return winner
 
     async def release(
         self,
