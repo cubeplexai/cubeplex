@@ -32,6 +32,8 @@ class WsMemberOut(BaseModel):
     user_id: str
     email: str
     display_name: str | None = None
+    avatar_url: str | None = None
+    avatar_seed: str | None = None
     role: str
     created_at: str
 
@@ -80,6 +82,8 @@ async def list_workspace_members(
             user_id=m.user_id,
             email=users[m.user_id].email if m.user_id in users else "",
             display_name=users[m.user_id].display_name if m.user_id in users else None,
+            avatar_url=users[m.user_id].avatar_url if m.user_id in users else None,
+            avatar_seed=users[m.user_id].avatar_seed if m.user_id in users else None,
             role=m.role,
             created_at=utc_isoformat(m.created_at),
         )

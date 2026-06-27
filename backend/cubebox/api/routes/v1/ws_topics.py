@@ -83,6 +83,8 @@ def _serialize_participant(p: Any, users_by_id: dict[str, Any] | None = None) ->
         "joined_at": utc_isoformat(p.joined_at),
         "display_name": (user.display_name if user else None) or None,
         "email": user.email if user else None,
+        "avatar_url": user.avatar_url if user else None,
+        "avatar_seed": user.avatar_seed if user else None,
     }
 
 

@@ -26,6 +26,8 @@ class ConversationParticipantOut(BaseModel):
     joined_at: str
     display_name: str | None = None
     email: str | None = None
+    avatar_url: str | None = None
+    avatar_seed: str | None = None
 
 
 class ListConversationParticipantsResponse(BaseModel):

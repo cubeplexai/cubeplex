@@ -24,6 +24,8 @@ export interface TopicParticipant {
   /** Hydrated by the backend from the User row. */
   display_name?: string | null
   email?: string | null
+  avatar_url?: string | null
+  avatar_seed?: string | null
 }
 
 export interface TopicCreateResponse {

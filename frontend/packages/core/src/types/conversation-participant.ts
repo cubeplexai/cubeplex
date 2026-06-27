@@ -5,4 +5,6 @@ export interface ConversationParticipant {
   joined_at: string
   display_name?: string | null
   email?: string | null
+  avatar_url?: string | null
+  avatar_seed?: string | null
 }

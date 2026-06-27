@@ -723,6 +723,8 @@ def _serialize_conv_participant(
         "user_id": p.user_id,
         "joined_at": utc_isoformat(p.joined_at),
         "display_name": (user.display_name if user else None) or None,
+        "avatar_url": user.avatar_url if user else None,
+        "avatar_seed": user.avatar_seed if user else None,
     }
     if include_email:
         row["email"] = user.email if user else None
