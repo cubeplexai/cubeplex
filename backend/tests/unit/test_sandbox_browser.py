@@ -151,3 +151,31 @@ async def test_live_view_returns_503_when_sandbox_unavailable(monkeypatch) -> No
         await ws_browser.get_live_view(ctx, session=None, conversation_id=None)  # type: ignore[arg-type]
 
     assert exc_info.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_keepalive_returns_404_when_no_active_sandbox(monkeypatch) -> None:
+    """Keepalive on a terminated/absent sandbox row returns 404, not a silent 204.
+
+    ``touch_active`` returns False when the row is absent, deleted, or has
+    ``sandbox_id=None`` (terminal). The route must surface that so the frontend
+    closes the stale iframe instead of pinging forever against a sandbox that
+    extended nothing.
+    """
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from cubebox.api.routes.v1 import ws_browser
+
+    class _Manager:
+        async def touch_active(self, *args, **kwargs) -> bool:
+            return False  # terminated/deleted/absent row
+
+    monkeypatch.setattr(ws_browser, "get_sandbox_manager", lambda: _Manager())
+    ctx = SimpleNamespace(user=SimpleNamespace(id="usr-1"), org_id="org-1", workspace_id="ws-1")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await ws_browser.keepalive(ctx, session=None, conversation_id=None)  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 404

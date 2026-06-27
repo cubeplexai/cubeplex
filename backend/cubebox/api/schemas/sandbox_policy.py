@@ -33,7 +33,19 @@ class UpdateSandboxPolicyIn(BaseModel):
     storage: str | None = None
 
 
-SandboxStatusValue = Literal["provisioning", "running", "paused", "terminated", "absent"]
+SandboxStatusValue = Literal[
+    "provisioning",
+    "running",
+    "pausing",
+    "paused",
+    "resuming",
+    "terminated",
+    "failed",
+    "kill_pending",
+    # Route-level sentinel: ``get_sandbox_status`` returns this when no active
+    # row exists for the scope. Never stored on a UserSandbox row.
+    "absent",
+]
 
 
 class SandboxStatusOut(BaseModel):
