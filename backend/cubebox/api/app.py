@@ -536,6 +536,7 @@ def create_app(
         ws_members,
         ws_sandbox,
         ws_sandbox_env,
+        ws_sandboxes,
         ws_scheduled_tasks,
         ws_settings,
         ws_skills,
@@ -590,6 +591,7 @@ def create_app(
     app.include_router(ws_mcp.router, prefix="/api/v1")
     app.include_router(ws_sandbox.router, prefix="/api/v1")
     app.include_router(ws_sandbox_env.router, prefix="/api/v1")
+    app.include_router(ws_sandboxes.router, prefix="/api/v1")
     app.include_router(ws_scheduled_tasks.router, prefix="/api/v1")
     app.include_router(ws_members.router, prefix="/api/v1")
     app.include_router(ws_settings.router, prefix="/api/v1")
