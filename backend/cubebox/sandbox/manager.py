@@ -44,7 +44,7 @@ from cubebox.repositories.egress_ref import EgressRefRepository
 from cubebox.repositories.sandbox_env import SandboxEnvRepository
 from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
 from cubebox.repositories.user_sandbox import UserSandboxRepository
-from cubebox.sandbox.base import Sandbox, SandboxError
+from cubebox.sandbox.base import Sandbox, SandboxConflictError, SandboxError
 from cubebox.sandbox.opensandbox import OpenSandbox
 from cubebox.sandbox_env.injector import InjectionResult, SandboxEnvInjector
 from cubebox.sandbox_policy.rules import build_network_policy
@@ -954,6 +954,77 @@ class SandboxManager:
             record = await repo.get_by_sandbox_id(sandbox_id)
             if record:
                 await repo.release_in_use(record.id)
+
+    async def restart_user_sandbox(self, user_sandbox_id: str) -> None:
+        """User-initiated soft restart: kill the current container, keep the
+        row + PVC so the next ``get_or_create`` revives it in place.
+
+        Per-status semantics (spec §4.6):
+        - ``provisioning``                       -> ``SandboxConflictError``
+        - running / paused / pausing / resuming  -> atomic ``claim_for_kill``
+          (guards double-click) then ``_kill_record``
+        - terminated / failed / kill_pending     -> no-op (idempotent)
+
+        ``get_by_id_system`` is a cross-scope PK lookup (no org/ws context at
+        the call site); the row's own org/ws re-scope the repo for ``_kill_record``.
+        """
+        conn_config = self._build_connection_config()
+        async with self._session_factory() as session:
+            row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+            if row is None or row.deleted_at is not None:
+                return
+            if row.status == "provisioning":
+                raise SandboxConflictError("sandbox is provisioning; retry shortly")
+            if row.status in ("running", "paused", "pausing", "resuming"):
+                repo = UserSandboxRepository(
+                    session, org_id=row.org_id, workspace_id=row.workspace_id
+                )
+                claimed = await repo.claim_for_kill(row.id)
+                if not claimed:
+                    return  # another restart already killing
+                await self._kill_record(session, repo, row, conn_config)
+            # terminated / failed / kill_pending: no-op (idempotent)
+            await session.commit()
+
+    async def delete_user_sandbox(self, user_sandbox_id: str) -> None:
+        """User-initiated hard delete: kill the container, soft-delete the row.
+        PVC is left as an orphan for operator cleanup. Kill failure does NOT
+        block soft-delete — user intent is clear and the row should disappear
+        regardless (spec §5.3).
+
+        ``claim_for_soft_delete`` is the atomic double-click guard and also
+        performs the soft-delete (it aliases ``soft_delete``); on a failed
+        claim we return idempotently.
+        """
+        conn_config = self._build_connection_config()
+        async with self._session_factory() as session:
+            row = await UserSandboxRepository.get_by_id_system(session, user_sandbox_id)
+            if row is None or row.deleted_at is not None:
+                return
+            repo = UserSandboxRepository(session, org_id=row.org_id, workspace_id=row.workspace_id)
+            claimed = await repo.claim_for_soft_delete(row.id)
+            if not claimed:
+                return  # another delete already soft-deleted
+            if row.sandbox_id:
+                try:
+                    await self._kill_record(session, repo, row, conn_config)
+                except Exception:
+                    logger.exception(
+                        "kill failed during delete of {}; soft-deleting anyway",
+                        user_sandbox_id,
+                    )
+            await session.commit()
+            logger.warning(
+                "UserSandbox {} soft-deleted; PVC {} is now orphan — operator "
+                "must `kubectl delete pvc` to reclaim storage",
+                user_sandbox_id,
+                build_sandbox_pvc_name(
+                    self._volume_pvc_prefix,
+                    row.workspace_id,
+                    row.scope_type,
+                    row.scope_id,
+                ),
+            )
 
     async def cleanup_expired(self) -> None:
         """Find and terminate sandboxes that exceeded their TTL.

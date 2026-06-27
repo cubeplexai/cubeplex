@@ -20,6 +20,11 @@ class SandboxError(Exception):
     """
 
 
+class SandboxConflictError(SandboxError):
+    """Sandbox is in a state that conflicts with the requested operation
+    (e.g. restart while provisioning)."""
+
+
 @dataclass
 class ExecuteResult:
     """Result of a shell command execution."""
