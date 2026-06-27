@@ -225,6 +225,19 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """Fetch a UserSandbox by primary key, regardless of deleted_at."""
         return await self.get(record_id)
 
+    @classmethod
+    async def get_by_id_system(cls, session: AsyncSession, record_id: str) -> UserSandbox | None:
+        """System-scope PK lookup across all orgs/workspaces.
+
+        Used by ``restart_user_sandbox`` / ``delete_user_sandbox`` which
+        receive only the row id (no request scope); the row's own
+        ``org_id`` / ``workspace_id`` then re-scope the per-action repo.
+        Mirrors the ``list_*_system`` classmethods used by the reapers.
+        """
+        stmt = select(UserSandbox).where(UserSandbox.id == record_id)  # type: ignore[arg-type]
+        result = await session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_sandbox_id(self, sandbox_id: str) -> UserSandbox | None:
         """Get record by OpenSandbox sandbox ID."""
         stmt = self._scoped_select().where(UserSandbox.sandbox_id == sandbox_id)
