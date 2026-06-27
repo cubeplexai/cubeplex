@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 import { useTranslations } from 'next-intl'
 import { useConversationStore, type ConversationParticipant } from '@cubebox/core'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Avatar } from '@/components/ui/avatar-resolved'
 import { cn } from '@/lib/utils'
 
 interface ConversationMemberPanelProps {
@@ -44,14 +45,14 @@ export function ConversationMemberPanel({
                   'hover:bg-accent/40',
                 )}
               >
-                <div
-                  className={cn(
-                    'flex size-6 shrink-0 items-center justify-center rounded-full',
-                    'bg-muted text-[10px] font-medium text-muted-foreground',
-                  )}
-                >
-                  {name.slice(0, 1).toUpperCase()}
-                </div>
+                <Avatar
+                  src={p.avatar_url}
+                  seed={p.avatar_seed ?? p.user_id}
+                  name={name}
+                  userId={p.user_id}
+                  size="sm"
+                  selfHeal
+                />
                 <div className="flex-1 min-w-0 truncate">{name}</div>
                 <span
                   className={cn(
