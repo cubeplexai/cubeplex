@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { createApiClient, useTopicStore, type TopicParticipant } from '@cubebox/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { AvatarStack } from '@/components/ui/avatar-stack'
 import { cn } from '@/lib/utils'
 import { MemberPanel } from '@/components/chat/MemberPanel'
 
@@ -11,8 +12,6 @@ interface ChatHeaderGroupBadgeProps {
   wsId: string
   topicId: string
 }
-
-const AVATAR_MAX = 5
 
 export function ChatHeaderGroupBadge({
   wsId,
@@ -40,9 +39,6 @@ export function ChatHeaderGroupBadge({
   // conversation is effectively a 1:1 even though it has a topic_id.
   if (participants.length < 2) return null
 
-  const shown = participants.slice(0, AVATAR_MAX)
-  const overflow = participants.length - shown.length
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -54,35 +50,15 @@ export function ChatHeaderGroupBadge({
         aria-label={t('openLabel')}
         title={t('openLabel')}
       >
-        <div className="flex -space-x-1.5">
-          {shown.map((p) => {
-            const label = p.display_name || p.email || p.user_id
-            return (
-              <div
-                key={p.id}
-                title={label}
-                className={cn(
-                  'size-5 rounded-full bg-muted ring-1 ring-background',
-                  'flex items-center justify-center text-[9px] font-medium',
-                  'text-muted-foreground',
-                )}
-              >
-                {label.slice(0, 1).toUpperCase()}
-              </div>
-            )
-          })}
-          {overflow > 0 && (
-            <div
-              className={cn(
-                'size-5 rounded-full bg-muted ring-1 ring-background',
-                'flex items-center justify-center text-[9px] font-medium',
-                'text-muted-foreground',
-              )}
-            >
-              +{overflow}
-            </div>
-          )}
-        </div>
+        <AvatarStack
+          items={participants.map((p) => ({
+            src: p.avatar_url,
+            seed: p.avatar_seed ?? p.user_id,
+            name: p.display_name,
+            userId: p.user_id,
+          }))}
+          size={20}
+        />
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={6} className="w-auto p-3">
         <MemberPanel wsId={wsId} topicId={topicId} onClose={() => setOpen(false)} />

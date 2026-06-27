@@ -26,6 +26,7 @@ import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
 import { TopicNode } from '@/components/sidebar/TopicNode'
 import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
 import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
+import { AvatarStack } from '@/components/ui/avatar-stack'
 import { VscMcp } from 'react-icons/vsc'
 import {
   Box,
@@ -60,36 +61,17 @@ const SIDEBAR_AVATAR_MAX = 3
 function GroupChatAvatars({ convoId }: { convoId: string }): React.ReactElement | null {
   const participants = useConversationStore((s) => s.conversationParticipants[convoId])
   if (!participants || participants.length === 0) return null
-  const shown = participants.slice(0, SIDEBAR_AVATAR_MAX)
-  const overflow = participants.length - shown.length
   return (
-    <div className="flex -space-x-1 shrink-0">
-      {shown.map((p) => {
-        const label = p.display_name || p.email || p.user_id
-        return (
-          <div
-            key={p.id}
-            title={label}
-            className={cn(
-              'size-4 rounded-full bg-muted ring-1 ring-card',
-              'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-            )}
-          >
-            {label.slice(0, 1).toUpperCase()}
-          </div>
-        )
-      })}
-      {overflow > 0 && (
-        <div
-          className={cn(
-            'size-4 rounded-full bg-muted ring-1 ring-card',
-            'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-          )}
-        >
-          +{overflow}
-        </div>
-      )}
-    </div>
+    <AvatarStack
+      items={participants.map((p) => ({
+        src: p.avatar_url,
+        seed: p.avatar_seed ?? p.user_id,
+        name: p.display_name,
+        userId: p.user_id,
+      }))}
+      size={16}
+      max={SIDEBAR_AVATAR_MAX}
+    />
   )
 }
 

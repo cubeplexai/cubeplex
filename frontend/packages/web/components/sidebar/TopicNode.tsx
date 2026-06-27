@@ -8,7 +8,6 @@ import { cn } from '@/lib/utils'
 import {
   type Conversation,
   type Topic,
-  type TopicParticipant,
   createApiClient,
   useConversationStore,
   useTopicStore,
@@ -32,6 +31,7 @@ import {
   UserPlus,
 } from 'lucide-react'
 import { MemberPanel } from '@/components/chat/MemberPanel'
+import { AvatarStack } from '@/components/ui/avatar-stack'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -39,43 +39,6 @@ function buildClient(currentWsId: string | null): ApiClient {
   const client = createApiClient('')
   if (currentWsId) client.setWorkspaceId(currentWsId)
   return client
-}
-
-function ParticipantAvatars({
-  participants,
-  max = 5,
-}: {
-  participants: TopicParticipant[]
-  max?: number
-}): React.ReactElement {
-  const shown = participants.slice(0, max)
-  const overflow = participants.length - shown.length
-  return (
-    <div className="flex -space-x-1.5 shrink-0">
-      {shown.map((p) => (
-        <div
-          key={p.id}
-          className={cn(
-            'size-4 rounded-full bg-muted ring-1 ring-card',
-            'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-          )}
-          title={p.display_name || p.email || p.user_id}
-        >
-          {(p.display_name || p.email || p.user_id).slice(0, 1).toUpperCase()}
-        </div>
-      ))}
-      {overflow > 0 && (
-        <div
-          className={cn(
-            'size-4 rounded-full bg-muted ring-1 ring-card',
-            'flex items-center justify-center text-[8px] font-medium text-muted-foreground',
-          )}
-        >
-          +{overflow}
-        </div>
-      )}
-    </div>
-  )
 }
 
 export function TopicNode({
@@ -196,7 +159,15 @@ export function TopicNode({
           {topic.title || tTopics('newGroupChat')}
         </div>
         {participants.length > 0 ? (
-          <ParticipantAvatars participants={participants} />
+          <AvatarStack
+            items={participants.map((p) => ({
+              src: p.avatar_url,
+              seed: p.avatar_seed ?? p.user_id,
+              name: p.display_name,
+              userId: p.user_id,
+            }))}
+            size={16}
+          />
         ) : (
           <span className="text-[10px] text-faint shrink-0">
             {tTopics('members', { count: topic.participant_count ?? 0 })}
