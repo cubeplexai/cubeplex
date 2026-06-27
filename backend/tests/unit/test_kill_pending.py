@@ -77,7 +77,7 @@ async def test_kill_success_marks_terminated() -> None:
     with patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
         await mgr._kill_record(session, repo, record, conn_config)
 
-    repo.mark_terminated.assert_called_once_with(record.id)
+    repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()
 
 
@@ -141,5 +141,5 @@ async def test_kill_404_marks_terminated() -> None:
     with patch("cubebox.sandbox.manager.opensandbox.Sandbox.connect", return_value=raw):
         await mgr._kill_record(session, repo, record, conn_config)
 
-    repo.mark_terminated.assert_called_once_with(record.id)
+    repo.mark_terminated.assert_called_once_with(record.id, clear_sandbox_id=True)
     repo.mark_kill_pending.assert_not_called()
