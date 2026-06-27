@@ -2,7 +2,17 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.authentication import Strategy
 from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists, UserNotExists
@@ -17,6 +27,8 @@ from cubebox.auth.users import UserManager, fastapi_users, get_user_manager
 from cubebox.db import get_session
 from cubebox.i18n import get_locale, get_translator
 from cubebox.models import User
+from cubebox.models.user import AvatarKind
+from cubebox.services.avatar_store import save_avatar_png
 
 
 class UserRead(BaseUser[str]):
@@ -127,10 +139,9 @@ class UserProfileUpdate(BaseModel):
     display_name: str | None = Field(None, max_length=100)
 
 
-@router.get("/me")
-async def me(
-    user: Annotated[User, Depends(current_active_user)],
-    session: Annotated[AsyncSession, Depends(get_session)],
+async def _me_payload(
+    user: User,
+    session: AsyncSession,
     request: Request,
 ) -> dict[str, object]:
     from sqlalchemy import func, select
@@ -171,6 +182,9 @@ async def me(
         "email": user.email,
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,
+        "avatar_kind": user.avatar_kind,
+        "avatar_seed": user.avatar_seed,
+        "avatar_style": user.avatar_style,
         "language": user.language,
         "is_verified": user.is_verified,
         "needs_org_setup": needs_setup,
@@ -178,15 +192,22 @@ async def me(
     }
 
 
+@router.get("/me")
+async def me(
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+) -> dict[str, object]:
+    return await _me_payload(user, session, request)
+
+
 @router.patch("/me")
 async def patch_me(
     user: Annotated[User, Depends(current_active_user)],
     body: Annotated[UserProfileUpdate, Body()],
     session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
 ) -> dict[str, object]:
-    from sqlalchemy import select
-
-    from cubebox.models import OrganizationMembership
 
     if body.language is None and body.display_name is None:
         raise HTTPException(
@@ -200,27 +221,51 @@ async def patch_me(
     session.add(user)
     await session.commit()
     await session.refresh(user)
-    membership_rows = (
-        (
-            await session.execute(
-                select(OrganizationMembership).where(
-                    OrganizationMembership.user_id == user.id  # type: ignore[arg-type]
-                )
-            )
-        )
-        .scalars()
-        .all()
+    return await _me_payload(user, session, request)
+
+
+@router.put("/me/avatar")
+async def put_me_avatar(
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+    file: UploadFile,
+    kind: str = Form("uploaded"),
+    seed: str | None = Form(None),
+    style: str | None = Form(None),
+) -> dict[str, object]:
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty file")
+    url = await save_avatar_png(user.id, data)
+    user.avatar_url = url
+    user.avatar_kind = (
+        kind
+        if kind in (AvatarKind.uploaded.value, AvatarKind.generated.value)
+        else AvatarKind.uploaded.value
     )
-    org_memberships = [{"org_id": m.org_id, "role": m.role} for m in membership_rows]
-    return {
-        "id": user.id,
-        "email": user.email,
-        "display_name": user.display_name,
-        "avatar_url": user.avatar_url,
-        "language": user.language,
-        "needs_org_setup": False,
-        "org_memberships": org_memberships,
-    }
+    user.avatar_seed = seed if kind == AvatarKind.generated.value else None
+    user.avatar_style = style if kind == AvatarKind.generated.value else None
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return await _me_payload(user, session, request)
+
+
+@router.delete("/me/avatar")
+async def delete_me_avatar(
+    user: Annotated[User, Depends(current_active_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    request: Request,
+) -> dict[str, object]:
+    user.avatar_url = None
+    user.avatar_kind = AvatarKind.generated.value
+    user.avatar_seed = None
+    user.avatar_style = None
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return await _me_payload(user, session, request)
 
 
 class ChangePasswordRequest(BaseModel):
