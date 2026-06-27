@@ -9,6 +9,8 @@ CubeBox executes agent-generated code in an isolated sandbox powered by OpenSand
 
 Sandbox configuration is split across two admin pages: **Admin > Sandbox** (`/admin/sandbox`) for policies and **Admin > Sandbox Environment** (`/admin/sandbox-env`) for environment variables and secrets.
 
+This page covers org-level administration. For the user-facing side — listing, restarting, and deleting your own sandboxes from workspace settings — see [Managing Sandboxes](../guides/conversations/sandboxes.md).
+
 ## What the sandbox can run
 
 The agent runs code in the sandbox through a single shell-based `execute` tool — it issues shell commands, writes files via heredocs, and runs scripts (for example, `python script.py`). It is not tied to a fixed list of languages.
