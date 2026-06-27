@@ -26,6 +26,7 @@ const sidebars: SidebarsConfig = {
             'guides/conversations/artifacts',
             'guides/conversations/model-selection',
             'guides/conversations/topics',
+            'guides/conversations/sandboxes',
           ],
         },
         {

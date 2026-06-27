@@ -80,12 +80,14 @@ If an owner leaves or is removed, ownership automatically passes to the earliest
 
 Because a topic is shared, its [code-execution sandbox](../../admin/sandbox.md) is shared too. You pick how that works when you create the topic, and **it cannot be changed afterward** — choose deliberately:
 
-- **Dedicated topic sandbox** — CubeBox spins up a **fresh sandbox that belongs to the topic**. It is isolated from anyone's personal sandbox, and files from the conversation you started in are **not** carried over. This is the default for **New Topic** and the safer choice for a group.
+- **Dedicated topic sandbox** — CubeBox spins up a **fresh sandbox that belongs to the topic**. It gets its own isolated storage, separate from anyone's personal sandbox and from every other topic. Files from the conversation you started in are **not** carried over. This is the default for **New Topic** and the safer choice for a group.
 - **Reuse the creator's sandbox** — the topic runs in the **owner's personal sandbox**. Files and environment carry over, which is convenient when you're upgrading your own conversation and want to keep its working files. The trade-off: **every participant's code runs in the owner's environment**, with access to whatever is in it. This is the default when you **upgrade** an existing conversation.
 
 :::caution
 In "reuse the creator's sandbox" mode, other members' actions execute inside your personal sandbox. Only use it with people you'd trust with your own environment.
 :::
+
+You can see and manage every sandbox you own — including a topic's dedicated sandbox — from the workspace [Sandboxes](./sandboxes.md) settings tab.
 
 ## Conversations inside a topic
 
