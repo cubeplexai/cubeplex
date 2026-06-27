@@ -1222,6 +1222,7 @@
     "navIm": "IM",
     "navMemory": "Memory",
     "navSandboxEnv": "Sandbox Env",
+    "navSandboxes": "Sandboxes",
     "memory": {
       "title": "Memory",
       "description": "Memories your AI assistant has built up over time in this workspace.",
@@ -2358,5 +2359,45 @@
       "error": "Linking failed. Please try again.",
       "goToApp": "Go to cubebox"
     }
+  },
+  "wsSandboxes": {
+    "title": "Sandboxes",
+    "subtitle": "Your isolated sandbox environments in this workspace.",
+    "empty": "No sandboxes yet",
+    "emptyHint": "Sandboxes appear here once you start a conversation in this workspace.",
+    "intro": "Each sandbox is an isolated environment tied to a conversation or topic. Restarting keeps your files; deleting clears everything (operator reclaims storage).",
+    "lastActive": "Last active {time}",
+    "lastActiveNever": "Never used",
+    "restart": "Restart",
+    "delete": "Delete",
+    "restartConfirmTitle": "Restart sandbox?",
+    "restartConfirmBody": "The container will be stopped and a fresh one starts on next use. Your files are kept.",
+    "restartConfirm": "Restart",
+    "restarting": "Restarting…",
+    "deleteConfirmTitle": "Delete sandbox?",
+    "deleteConfirmBody": "Permanently deletes this sandbox and its container. Stored files are left for your operator to reclaim. This cannot be undone.",
+    "deleteConfirm": "Delete",
+    "deleting": "Deleting…",
+    "cancel": "Cancel",
+    "restartSuccess": "Sandbox restarting",
+    "deleteSuccess": "Sandbox deleted",
+    "restartFailed": "Failed to restart sandbox",
+    "deleteFailed": "Failed to delete sandbox",
+    "scope": {
+      "user": "Your workspace sandbox",
+      "conversation": "Group chat: {title}",
+      "topic": "Topic: {title}",
+      "deleted": "(deleted)",
+      "unknown": "Sandbox ({type})"
+    },
+    "statusRunning": "Running",
+    "statusPaused": "Paused",
+    "statusPausing": "Pausing",
+    "statusResuming": "Resuming",
+    "statusStarting": "Starting",
+    "statusOff": "Off",
+    "statusFailed": "Failed",
+    "statusStopping": "Stopping",
+    "statusUnknown": "Unknown"
   }
 }
