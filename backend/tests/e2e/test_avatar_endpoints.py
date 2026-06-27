@@ -44,6 +44,36 @@ async def test_put_avatar_uploaded(fresh_db_unauth_client_single_tenant):
     assert body["avatar_url"].endswith(".png")
 
 
+async def test_me_returns_avatar_fields(fresh_db_unauth_client_single_tenant):
+    """GET /me should include avatar_seed and avatar_kind after PUT generated."""
+    client = fresh_db_unauth_client_single_tenant
+    email = f"av-me-{secrets.token_hex(4)}@example.com"
+    password = "password123"
+
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": password},
+    )
+    csrf = await _login(client, email, password)
+
+    # Set avatar via PUT with kind=generated
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+    put_resp = await client.put(
+        "/api/v1/auth/me/avatar",
+        files={"file": ("a.png", png, "image/png")},
+        data={"kind": "generated", "seed": "abc", "style": "notionists"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert put_resp.status_code == 200
+
+    # GET /me should reflect the avatar fields
+    me_resp = await client.get("/api/v1/auth/me", headers={"X-CSRF-Token": csrf})
+    assert me_resp.status_code == 200
+    me_data = me_resp.json()
+    assert me_data["avatar_seed"] == "abc"
+    assert me_data["avatar_kind"] == "generated"
+
+
 async def test_delete_avatar_reverts(fresh_db_unauth_client_single_tenant):
     """After PUT uploaded, DELETE clears url and sets kind=generated."""
     client = fresh_db_unauth_client_single_tenant
