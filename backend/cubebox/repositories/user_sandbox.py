@@ -95,8 +95,10 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         await self.delete(record_id)
 
     async def get_active_by_scope(self, *, scope_type: str, scope_id: str) -> UserSandbox | None:
-        """Return the active (provisioning OR running) sandbox for this scope.
+        """Return the active (non-deleted) sandbox for this scope.
 
+        Filters by ``deleted_at IS NULL`` so any runtime status
+        (provisioning/running/paused/…) on a live row counts as active.
         ``uq_user_sandbox_active_scope`` guarantees at most one matching
         row per (org, ws, scope_type, scope_id), so no ``order_by/limit``
         "newest wins" is needed.
@@ -105,7 +107,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             self._scoped_select()
             .where(UserSandbox.scope_type == scope_type)
             .where(UserSandbox.scope_id == scope_id)
-            .where(UserSandbox.status.in_(self._ACTIVE_STATUSES))  # type: ignore[attr-defined]
+            .where(UserSandbox.deleted_at.is_(None))  # type: ignore[union-attr]
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -125,6 +127,7 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             .where(UserSandbox.scope_type == scope_type)
             .where(UserSandbox.scope_id == scope_id)
             .where(UserSandbox.status.in_(("running", "paused", "pausing", "resuming")))  # type: ignore[attr-defined]
+            .where(UserSandbox.deleted_at.is_(None))  # type: ignore[union-attr]
             .order_by(UserSandbox.created_at.desc())  # type: ignore[attr-defined]
             .limit(1)
         )
@@ -160,8 +163,9 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
                 UserSandbox.scope_type == "conversation",  # type: ignore[arg-type]
                 UserSandbox.scope_id == conversation_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
                 UserSandbox.status.in_(  # type: ignore[attr-defined]
-                    ("provisioning", "running", "paused", "resuming")
+                    ("provisioning", "running", "paused", "resuming", "terminated")
                 ),
             )
             .values(scope_type="topic", scope_id=topic_id)
@@ -177,8 +181,9 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
                 UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
                 UserSandbox.scope_type == "user",  # type: ignore[arg-type]
                 UserSandbox.scope_id == creator_user_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
                 UserSandbox.status.in_(  # type: ignore[attr-defined]
-                    ("provisioning", "running", "paused", "resuming")
+                    ("provisioning", "running", "paused", "resuming", "terminated")
                 ),
             )
             .values(scope_type="topic", scope_id=topic_id)
@@ -216,6 +221,10 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         )
         await self.session.execute(stmt)
 
+    async def get_by_id(self, record_id: str) -> UserSandbox | None:
+        """Fetch a UserSandbox by primary key, regardless of deleted_at."""
+        return await self.get(record_id)
+
     async def get_by_sandbox_id(self, sandbox_id: str) -> UserSandbox | None:
         """Get record by OpenSandbox sandbox ID."""
         stmt = self._scoped_select().where(UserSandbox.sandbox_id == sandbox_id)
@@ -236,11 +245,17 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
             record.last_activity_at = datetime.now(UTC)
             await self.session.commit()
 
-    async def mark_terminated(self, record_id: str) -> None:
-        """Mark a sandbox as terminated."""
+    async def mark_terminated(self, record_id: str, *, clear_sandbox_id: bool = False) -> None:
+        """Mark a sandbox as terminated.
+
+        When ``clear_sandbox_id`` is set, also null out ``sandbox_id`` so the
+        provider ID is freed for reuse on a later revive/re-provision.
+        """
         record = await self.get(record_id)
         if record:
             record.status = "terminated"
+            if clear_sandbox_id:
+                record.sandbox_id = None
             await self.session.commit()
 
     async def mark_kill_pending(self, record_id: str) -> None:
@@ -408,6 +423,69 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         if record:
             record.status = "failed"
             await self.session.commit()
+
+    async def soft_delete(self, record_id: str) -> bool:
+        """Conditional UPDATE: SET deleted_at=now() WHERE deleted_at IS NULL.
+
+        Returns True if the row was claimed (first caller), False if already
+        deleted (idempotent second caller).
+        """
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+            .values(deleted_at=datetime.now(UTC))
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
+    async def claim_for_provisioning(self, record_id: str) -> bool:
+        """Atomic claim for reviving a terminated/failed row: transition to
+        'provisioning' only if still terminated/failed. Prevents double-
+        provision when two concurrent get_or_create calls race."""
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status.in_(("terminated", "failed")),  # type: ignore[attr-defined]
+            )
+            .values(status="provisioning")
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
+    async def claim_for_kill(self, record_id: str) -> bool:
+        """Atomic claim for restart: transition to 'kill_pending' only if
+        currently running/paused/pausing/resuming. Prevents double-kill."""
+        stmt = (
+            update(UserSandbox)
+            .where(
+                UserSandbox.id == record_id,  # type: ignore[arg-type]
+                UserSandbox.org_id == self.org_id,  # type: ignore[arg-type]
+                UserSandbox.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                UserSandbox.status.in_(  # type: ignore[attr-defined]
+                    ("running", "paused", "pausing", "resuming")
+                ),
+            )
+            .values(status="kill_pending")
+        )
+        result = cast(CursorResult[Any], await self.session.execute(stmt))
+        await self.session.commit()
+        return bool(result.rowcount == 1)
+
+    async def claim_for_soft_delete(self, record_id: str) -> bool:
+        """Alias for soft_delete's conditional UPDATE, used by
+        delete_user_sandbox to guard double-click. Kept as a separate name
+        for call-site clarity."""
+        return await self.soft_delete(record_id)
 
     async def acquire_in_use(self, record_id: str, lease_seconds: int) -> None:
         """Set ``in_use_until`` to now+lease_seconds, blocking auto-pause."""
