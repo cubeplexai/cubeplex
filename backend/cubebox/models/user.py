@@ -7,11 +7,18 @@ by name (``id``, ``email``, ``hashed_password``, ``is_active``, ``is_superuser``
 ``is_verified``).
 """
 
+from enum import StrEnum
 from typing import ClassVar
 
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
+
+
+class AvatarKind(StrEnum):
+    generated = "generated"
+    uploaded = "uploaded"
+    sso = "sso"
 
 
 class User(CubeboxBase, table=True):
@@ -28,3 +35,6 @@ class User(CubeboxBase, table=True):
     language: str = Field(default="en", max_length=10)
     display_name: str | None = Field(default=None, max_length=100)
     avatar_url: str | None = Field(default=None, max_length=2048)
+    avatar_kind: str | None = Field(default=None, max_length=20)  # values from AvatarKind
+    avatar_seed: str | None = Field(default=None, max_length=128)
+    avatar_style: str | None = Field(default=None, max_length=64)
