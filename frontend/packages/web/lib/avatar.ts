@@ -73,7 +73,8 @@ export async function svgToPngBlob(svg: string, size: number): Promise<Blob> {
 
     const blob = () => {
       canvas.toBlob((b) => {
-        b ? resolve(b) : reject(new Error('canvas.toBlob returned null'))
+        if (b) resolve(b)
+        else reject(new Error('canvas.toBlob returned null'))
       }, 'image/png')
     }
 
