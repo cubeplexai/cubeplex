@@ -205,7 +205,7 @@ async def test_pause_idle_pause_raises_reverts_and_kills(mock_encryption_backend
     scoped_repo.mark_running.assert_not_called()
     # _kill_record killed the sandbox and marked terminated.
     raw_sandbox.kill.assert_awaited_once()
-    scoped_repo.mark_terminated.assert_awaited_once_with(record.id)
+    scoped_repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
 
 
 # -------------------------------------------------------------------------
@@ -253,7 +253,7 @@ async def test_pause_idle_no_capability_kills_record(mock_encryption_backend: An
     # claimed row back to `running` before killing.
     scoped_repo.mark_running.assert_not_called()
     raw_sandbox.kill.assert_awaited_once()
-    scoped_repo.mark_terminated.assert_awaited_once_with(record.id)
+    scoped_repo.mark_terminated.assert_awaited_once_with(record.id, clear_sandbox_id=True)
 
 
 # -------------------------------------------------------------------------
