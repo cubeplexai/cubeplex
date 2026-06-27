@@ -904,17 +904,18 @@ class SandboxManager:
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
-            if record is None:
-                return False
+            if record is None or record.deleted_at is not None or not record.sandbox_id:
+                return False  # terminated/deleted row has no container to touch
+            sandbox_id = record.sandbox_id
             await repo.update_activity(record.id)
             # Keep egress placeholders alive for browser-keepalive-only sessions
             # (same rationale as touch()): extend the sandbox's valid refs.
             if self._exchange_host:
                 await EgressRefRepository(session).extend_expiry_for_sandbox(
-                    record.sandbox_id, datetime.now(UTC) + timedelta(seconds=self._ttl)
+                    sandbox_id, datetime.now(UTC) + timedelta(seconds=self._ttl)
                 )
-            self._touch_cache[record.sandbox_id] = datetime.now(UTC)
-        await self._renew_provider_ttl(record.sandbox_id)
+            self._touch_cache[sandbox_id] = datetime.now(UTC)
+        await self._renew_provider_ttl(sandbox_id)
         return True
 
     async def renew_lease(
@@ -1001,6 +1002,7 @@ class SandboxManager:
         the loser polls until the winner's row becomes ``running`` and connects
         to that same sandbox, so the two concurrent callers never both create.
         """
+        assert record.sandbox_id, "paused row must have sandbox_id"  # caller invariant
         if not await repo.mark_resuming(record.id):
             return await self._await_resumed_by_winner(
                 record.id,
@@ -1206,6 +1208,7 @@ class SandboxManager:
                     user_id=user_id,
                 )
         # row.status == "running"
+        assert row.sandbox_id, "running row must have sandbox_id"  # caller invariant
         sandbox_id = row.sandbox_id
         raw = await opensandbox.Sandbox.connect(sandbox_id, connection_config=conn_config)
         backend = OpenSandbox(sandbox=raw, workdir=self._workdir)
@@ -1252,6 +1255,7 @@ class SandboxManager:
                     record.id, idle_ttl_seconds=self._idle_ttl_seconds
                 ):
                     continue  # touched / acquired / already-claimed between select+claim
+                assert record.sandbox_id, "pausing row must have sandbox_id"  # claim invariant
                 raw: opensandbox.Sandbox | None = None
                 try:
                     raw = await opensandbox.Sandbox.connect(
@@ -1376,6 +1380,7 @@ class SandboxManager:
                 )
                 raw: opensandbox.Sandbox | None = None
                 try:
+                    assert record.sandbox_id  # select invariant: transient rows have sandbox_id
                     raw = await opensandbox.Sandbox.connect(
                         record.sandbox_id,
                         connection_config=conn_config,
@@ -1487,6 +1492,7 @@ class SandboxManager:
         On kill failure, marks the row ``kill_pending`` so the next cleanup loop
         retries instead of orphaning the provider sandbox.
         """
+        assert record.sandbox_id, "kill target must have sandbox_id"  # caller invariant
         raw: opensandbox.Sandbox | None = None
         killed = False
         try:
@@ -1522,8 +1528,12 @@ class SandboxManager:
                         exc,
                     )
         if killed:
-            await scoped_repo.mark_terminated(record.id)
-            if self._exchange_host:
+            # clear_sandbox_id frees the provider id for reuse on the next
+            # provision and matches the spec invariant (terminal rows carry
+            # sandbox_id=None); the in-memory ``record.sandbox_id`` used for
+            # revoke below is unaffected (mark_terminated mutates a fresh row).
+            await scoped_repo.mark_terminated(record.id, clear_sandbox_id=True)
+            if self._exchange_host and record.sandbox_id:
                 await EgressRefRepository(session).revoke_for_sandbox(record.sandbox_id)
         else:
             await scoped_repo.mark_kill_pending(record.id)
