@@ -1,10 +1,8 @@
 """Unit: sandbox_id=None guards prevent crashes on terminated rows."""
 
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.sandbox.manager import SandboxManager
 from cubebox.models.user_sandbox import UserSandbox
 
 
