@@ -81,3 +81,30 @@ export async function requestVerifyToken(client: ApiClient, email: string): Prom
   const res = await client.post('/api/v1/auth/request-verify-token', { email })
   if (!res.ok) throw await toApiError(res)
 }
+
+export interface UploadAvatarParams {
+  file: File
+  kind: 'uploaded' | 'generated'
+  seed?: string
+  style?: string
+}
+
+export async function uploadAvatar(
+  client: ApiClient,
+  params: UploadAvatarParams,
+): Promise<MeResult> {
+  const fd = new FormData()
+  fd.append('file', params.file)
+  fd.append('kind', params.kind)
+  if (params.seed !== undefined) fd.append('seed', params.seed)
+  if (params.style !== undefined) fd.append('style', params.style)
+  const res = await client.put('/api/v1/auth/me/avatar', fd)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MeResult
+}
+
+export async function deleteAvatar(client: ApiClient): Promise<MeResult> {
+  const res = await client.del('/api/v1/auth/me/avatar')
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MeResult
+}

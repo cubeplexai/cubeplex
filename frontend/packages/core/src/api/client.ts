@@ -148,10 +148,11 @@ export function createApiClient(baseUrl: string): ApiClient {
       })
     },
     put(path, body) {
+      const isFormData = body instanceof FormData
       return doFetch(path, {
         method: 'PUT',
-        headers: buildHeaders('PUT', { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(body),
+        headers: buildHeaders('PUT', isFormData ? {} : { 'Content-Type': 'application/json' }),
+        body: isFormData ? body : JSON.stringify(body),
       })
     },
     patch(path, body) {
