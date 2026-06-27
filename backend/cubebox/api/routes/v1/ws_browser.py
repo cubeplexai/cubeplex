@@ -131,9 +131,17 @@ async def keepalive(
     scope_type, scope_id, _owner_user_id = await _resolve_sandbox_scope(
         session, ctx, conversation_id
     )
-    await manager.touch_active(
+    touched = await manager.touch_active(
         scope_type=scope_type,
         scope_id=scope_id,
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
     )
+    if not touched:
+        # No active sandbox row (absent / terminated / sandbox_id cleared). The
+        # iframe is stale — tell the frontend to stop pinging rather than
+        # silently 204-ing a keepalive that extended nothing.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="sandbox not active; live view should be closed",
+        )
