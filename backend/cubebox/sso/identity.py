@@ -27,6 +27,15 @@ from cubebox.models.workspace import Workspace
 from cubebox.repositories.external_identity import ExternalIdentityRepository
 
 
+def _should_sso_overwrite_avatar(user: User, avatar_url: str | None) -> bool:
+    """SSO may set/refresh the avatar unless the user uploaded one themselves."""
+    if avatar_url is None:
+        return False
+    if getattr(user, "avatar_kind", None) == "uploaded":
+        return False
+    return user.avatar_url != avatar_url
+
+
 class SSOProvisioningDenied(Exception):
     """Raised when auto-provisioning is disabled and user doesn't exist."""
 
@@ -116,8 +125,9 @@ async def resolve_identity(
         existing.metadata_ = claims or {}
         session.add(existing)
         # Sync avatar from IdP on every login so profile picture stays current.
-        if avatar_url is not None and user.avatar_url != avatar_url:
+        if _should_sso_overwrite_avatar(user, avatar_url):
             user.avatar_url = avatar_url
+            user.avatar_kind = "sso"
             session.add(user)
         await session.commit()
         return ResolvedIdentity(user=user, external_identity=existing, created=False)
@@ -163,8 +173,9 @@ async def resolve_identity(
             request=request,
         )
         created = True
-        if avatar_url is not None:
+        if _should_sso_overwrite_avatar(user, avatar_url):
             user.avatar_url = avatar_url
+            user.avatar_kind = "sso"
             session.add(user)
 
         if sso_connection is not None:
@@ -190,8 +201,9 @@ async def resolve_identity(
                 )
             await _provision_org_membership(session, user, sso_connection)
 
-    if not created and avatar_url is not None and user.avatar_url != avatar_url:
+    if not created and _should_sso_overwrite_avatar(user, avatar_url):
         user.avatar_url = avatar_url
+        user.avatar_kind = "sso"
         session.add(user)
 
     identity = ExternalIdentity(

@@ -159,6 +159,7 @@ async def google_callback(
             external_id=userinfo.sub,
             external_email=userinfo.email,
             email_verified=userinfo.email_verified,
+            avatar_url=userinfo.claims.get("picture") if userinfo.claims else None,
             claims=userinfo.claims or {},
             request=request,
         )
