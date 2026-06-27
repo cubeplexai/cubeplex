@@ -31,15 +31,15 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
             "scope_type",
             "scope_id",
             unique=True,
-            postgresql_where=text("status IN ('provisioning','running')"),
-            sqlite_where=text("status IN ('provisioning','running')"),
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
         ),
     )
 
     user_id: str = Field(foreign_key="users.id", max_length=20, index=True)
     scope_type: str = Field(max_length=20)
     scope_id: str = Field(max_length=20)
-    sandbox_id: str = Field(max_length=255, unique=True)
+    sandbox_id: str | None = Field(default=None, max_length=255, unique=True, nullable=True)
     status: str = Field(default="running", max_length=20)
     image: str = Field(max_length=512)
     volumes_config: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
@@ -93,4 +93,10 @@ class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
         foreign_key="user_sandbox_sync_events.id",
         max_length=20,
         nullable=True,
+    )
+    # Sandbox entity soft-delete (spec §3.1). NULL = entity alive;
+    # NOT NULL = user deleted it. Row is never hard-deleted by the system.
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
     )
