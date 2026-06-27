@@ -1,6 +1,5 @@
 """Unit: sandbox_id=None guards prevent crashes on terminated rows."""
 
-
 import pytest
 
 from cubebox.models.user_sandbox import UserSandbox
