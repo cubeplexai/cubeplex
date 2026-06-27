@@ -740,20 +740,21 @@ git commit -m "fix(sandbox): _kill_record clear_sandbox_id + touch_active/sandbo
 
 ---
 
-## Task 2.5: `SandboxStatusValue` Literal 补全 + ws_sandbox/ws_browser status 路由 None 守卫
+## Task 2.5: `SandboxStatusValue` Literal 补全 + ws_browser 路由 None 守卫
 
 **Files:**
 - Modify: `backend/cubebox/api/schemas/sandbox_policy.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_sandbox.py`
 - Modify: `backend/cubebox/api/routes/v1/ws_browser.py`
 
 **Interfaces:**
 - Consumes: Task 1.1 sandbox_id nullable
-- Produces: status 路由对 terminated 行（sandbox_id=None）不崩
+- Produces: `SandboxStatusValue` 含全部 8 个 status；ws_browser 路由对 terminated 行（sandbox_id=None）不崩
+
+> **校准说明**（Spec 1 merge 后核对）：`ws_sandbox.py:get_sandbox_status` 实测已 hardcode `browser_url=None`、不访问 `record.sandbox_id`，**无需** None 守卫。本 task 只动 `sandbox_policy.py`（Literal 补全）+ `ws_browser.py`（路由层 None 守卫，touch_active 守卫在 Task 2.4）。
 
 - [ ] **Step 1: 补 `SandboxStatusValue` Literal**
 
-找到 `SandboxStatusValue`（`sandbox_policy.py:36`），补全：
+找到 `SandboxStatusValue`（`sandbox_policy.py:36`，当前是 `Literal["provisioning", "running", "paused", "terminated", "absent"]`），补全缺失的 `pausing` / `resuming` / `failed` / `kill_pending`：
 
 ```python
 SandboxStatusValue = Literal[
@@ -762,26 +763,26 @@ SandboxStatusValue = Literal[
 ]
 ```
 
-- [ ] **Step 2: ws_sandbox status 路由 None 守卫**
+- [ ] **Step 2: ws_sandbox status 路由 — 已安全，确认即可**
 
-找到 `get_sandbox_status`（`ws_sandbox.py:159` 附近）。若该路由生成 `browser_url` 依赖 `record.sandbox_id`，加守卫：terminated 行（`not record.sandbox_id`）返回 `browser_url=None`。
+`get_sandbox_status`（`ws_sandbox.py:160-188`）实测已 hardcode `browser_url=None`，**不**访问 `record.sandbox_id`。无需加 None 守卫。只读确认这一行不变即可（不要误加守卫引入噪声）。
 
 - [ ] **Step 3: ws_browser 路由 None 守卫**
 
-找到 `ws_browser.py` 里调 `touch_active` / 用 `record.sandbox_id` 的路由（约 `:77, :133`）。terminated 行（`not record.sandbox_id`）返回 404 或 status=terminated + 无 endpoint。
+找到 `ws_browser.py` 里调 `touch_active` / 用 `record.sandbox_id` 的路由。terminated 行（`not record.sandbox_id`）返回 404 或 status=terminated + 无 endpoint。`touch_active` 本身的 None 守卫在 Task 2.4 已加，这里只管路由层。
 
 - [ ] **Step 4: mypy + 单测**
 
 ```bash
 cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/api/schemas/sandbox_policy.py cubebox/api/routes/v1/ws_sandbox.py cubebox/api/routes/v1/ws_browser.py 2>&1 | tail -3
+cd backend && uv run mypy cubebox/api/schemas/sandbox_policy.py cubebox/api/routes/v1/ws_browser.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/sandbox_policy.py backend/cubebox/api/routes/v1/ws_sandbox.py backend/cubebox/api/routes/v1/ws_browser.py
-git commit -m "fix(sandbox): SandboxStatusValue complete + status/browser routes sandbox_id None guards"
+git add backend/cubebox/api/schemas/sandbox_policy.py backend/cubebox/api/routes/v1/ws_browser.py
+git commit -m "fix(sandbox): SandboxStatusValue complete (pausing/resuming/failed/kill_pending) + ws_browser sandbox_id None guard"
 ```
 
 ---
