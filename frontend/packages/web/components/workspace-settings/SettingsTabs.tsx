@@ -16,6 +16,7 @@ const TABS = [
   { tab: 'sandboxEnv', labelKey: 'navSandboxEnv' },
   { tab: 'members', labelKey: 'navMembers' },
   { tab: 'shares', labelKey: 'navShares' },
+  { tab: 'sandboxes', labelKey: 'navSandboxes' },
 ] as const
 
 /**

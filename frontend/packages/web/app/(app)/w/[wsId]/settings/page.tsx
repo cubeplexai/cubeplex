@@ -3,6 +3,7 @@ import { ImPanel } from '@/components/workspace-settings/ImPanel'
 import { MemoryPanel } from '@/components/workspace-settings/MemoryPanel'
 import { MembersPanel } from '@/components/workspace-settings/MembersPanel'
 import { PersonaEditor } from '@/components/workspace-settings/PersonaEditor'
+import { SandboxesPanel } from '@/components/workspace-settings/SandboxesPanel'
 import { SandboxEnvPanel } from '@/components/workspace-settings/SandboxEnvPanel'
 import { SettingsTabs } from '@/components/workspace-settings/SettingsTabs'
 import { SharesPanel } from '@/components/workspace-settings/SharesPanel'
@@ -29,6 +30,7 @@ export default function WorkspaceSettingsPage({
         {tab === 'sandboxEnv' && <SandboxEnvPanel wsId={wsId} />}
         {tab === 'members' && <MembersPanel wsId={wsId} />}
         {tab === 'shares' && <SharesPanel wsId={wsId} />}
+        {tab === 'sandboxes' && <SandboxesPanel wsId={wsId} />}
       </div>
     </div>
   )
