@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
+import { AvatarEditor } from '@/components/profile/AvatarEditor'
 import { ProfileForm } from '@/components/profile/ProfileForm'
 import { ChangePasswordForm } from '@/components/profile/ChangePasswordForm'
 import { ApiKeysSection } from '@/components/profile/ApiKeysSection'
@@ -19,6 +20,8 @@ export default function ProfilePage() {
       <PageHeader title={t('title')} description={t('subtitle')} />
       <div className="flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto flex max-w-xl flex-col gap-8">
+          <AvatarEditor />
+          <hr className="border-border" />
           <ProfileForm />
           <hr className="border-border" />
           <ChangePasswordForm />
