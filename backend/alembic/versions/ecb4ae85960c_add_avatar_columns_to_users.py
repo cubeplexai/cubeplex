@@ -1,7 +1,7 @@
 """add avatar columns to users
 
 Revision ID: ecb4ae85960c
-Revises: 7aec44dafed6
+Revises: ef2d2e6c9c7d
 Create Date: 2026-06-27 04:57:40.620569
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = 'ecb4ae85960c'
-down_revision: Union[str, Sequence[str], None] = '7aec44dafed6'
+down_revision: Union[str, Sequence[str], None] = 'ef2d2e6c9c7d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
