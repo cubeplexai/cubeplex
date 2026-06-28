@@ -41,7 +41,7 @@ async def test_put_avatar_uploaded(fresh_db_unauth_client_single_tenant):
     assert r.status_code == 200, f"PUT failed: {r.text}"
     body = r.json()
     assert body["avatar_kind"] == "uploaded"
-    assert body["avatar_url"].endswith(".png")
+    assert body["avatar_url"].startswith("/api/v1/avatar/")
 
 
 async def test_me_returns_avatar_fields(fresh_db_unauth_client_single_tenant):
@@ -149,5 +149,5 @@ async def test_cannot_mutate_other_users_avatar(fresh_db_unauth_client_single_te
     )
     assert r.status_code == 200
     body = r.json()
-    assert body["avatar_url"].endswith(".png")
+    assert body["avatar_url"].startswith("/api/v1/avatar/")
     assert body["avatar_kind"] == "uploaded"
