@@ -14,6 +14,7 @@ const SIZE_PRESET_MAP: Record<NonNullable<AvatarProps['size']>, number> = {
   sm: 24,
   default: 32,
   lg: 40,
+  xl: 64,
 }
 
 function nearestPreset(pixels: number): NonNullable<AvatarProps['size']> {

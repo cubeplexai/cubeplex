@@ -12,6 +12,7 @@ from cubebox.auth.dependencies import require_admin, require_member
 from cubebox.db import get_session
 from cubebox.models import Membership, Role, User
 from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
+from cubebox.services.avatar_store import resolve_avatar_url
 from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/members", tags=["workspace-members"])
@@ -82,7 +83,11 @@ async def list_workspace_members(
             user_id=m.user_id,
             email=users[m.user_id].email if m.user_id in users else "",
             display_name=users[m.user_id].display_name if m.user_id in users else None,
-            avatar_url=users[m.user_id].avatar_url if m.user_id in users else None,
+            avatar_url=resolve_avatar_url(
+                users[m.user_id].avatar_url, m.user_id, users[m.user_id].updated_at
+            )
+            if m.user_id in users
+            else None,
             avatar_seed=users[m.user_id].avatar_seed if m.user_id in users else None,
             role=m.role,
             created_at=utc_isoformat(m.created_at),

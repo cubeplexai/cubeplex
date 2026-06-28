@@ -1,47 +1,76 @@
 """Object-store helper for materialized avatar PNGs.
 
-Uploads and deletes avatar images from the S3-compatible object store, and
-builds the public URL that the frontend uses to display them.
+Uploads and deletes avatar images from the S3-compatible object store.
 
-The URL is constructed from the store's endpoint, bucket, and object key
-(``{endpoint}/{bucket}/{key}``).  This is the same scheme that
-``ObjectStoreClient`` itself uses internally — the class stores
-``_endpoint`` and ``_bucket`` for every S3 API call — but unlike
-attachments (which proxy through the API server), avatars are served
-directly from the object store so the frontend gets a static-image URL
-that can be cached and embedded in avatar badges.
+The object store bucket is private (a direct URL returns 403), so avatars are
+served through an API proxy route (``GET /api/v1/avatar/{user_id}``) — the same
+approach attachments use. The DB stores the **object key**
+(``avatars/{user_id}.png``) for self-uploaded/generated avatars; the route layer
+turns that key into the proxy URL at serialization time. SSO ``picture`` URLs
+are external https URLs and are stored verbatim.
 """
 
 from cubebox.objectstore.client import get_objectstore_client
 
+AVATAR_KEY_PREFIX = "avatars/"
 
-def _avatar_public_url(key: str) -> str:
-    """Build the direct public URL for an avatar object key.
 
-    Mirroring the object store client's own endpoint/bucket configuration:
-    ``{endpoint}/{bucket}/{key}``.
-
-    There is no existing URL-builder on ``ObjectStoreClient`` — attachments
-    use a different scheme (proxied through the cubebox API server) — so
-    this helper constructs the URL from the client's private attributes.
-    """
-    client = get_objectstore_client()
-    return f"{client._endpoint}/{client._bucket}/{key}"
+def avatar_object_key(user_id: str) -> str:
+    """The object-store key for a user's materialized avatar PNG."""
+    return f"avatars/{user_id}.png"
 
 
 async def save_avatar_png(user_id: str, data: bytes) -> str:
-    """Upload a materialized avatar PNG and return its public URL.
+    """Upload a materialized avatar PNG and return its **object key**.
 
-    Stores the data at the key ``avatars/{user_id}.png`` in the configured
-    bucket and returns a URL the frontend can use to display it.
+    The caller persists the key in ``users.avatar_url``; the serialization
+    layer turns it into a proxy URL for the frontend.
     """
-    key = f"avatars/{user_id}.png"
-    client = get_objectstore_client()
-    await client.upload_file(key, data, content_type="image/png")
-    return _avatar_public_url(key)
+    key = avatar_object_key(user_id)
+    await get_objectstore_client().upload_file(key, data, content_type="image/png")
+    return key
 
 
 async def delete_avatar_png(user_id: str) -> None:
     """Delete a materialized avatar PNG from the object store, if present."""
-    key = f"avatars/{user_id}.png"
-    await get_objectstore_client().delete_file(key)
+    await get_objectstore_client().delete_file(avatar_object_key(user_id))
+
+
+def resolve_avatar_url(
+    stored: str | None,
+    user_id: str,
+    updated_at: object | None = None,
+) -> str | None:
+    """Turn a stored avatar value into a browser-displayable URL.
+
+    - ``None`` → ``None`` (frontend renders the live DiceBear fallback).
+    - An object key (``avatars/{...}.png``) → a relative proxy URL
+      ``/api/v1/avatar/{user_id}?v=<ts>``. The ``v`` cache-buster is the
+      user's ``updated_at`` epoch seconds: the proxy URL is otherwise stable
+      across avatar changes (same user_id, same key prefix), so without it
+      the browser serves a stale cached PNG after a swap. The frontend
+      serves ``/api/*`` via the Next rewrite to the backend, so a relative
+      URL resolves same-origin.
+    - Anything else (an external https URL, e.g. an SSO ``picture``) → as-is.
+    """
+    if stored is None:
+        return None
+    if stored.startswith(AVATAR_KEY_PREFIX):
+        ts = _epoch_seconds(updated_at)
+        suffix = f"?v={ts}" if ts is not None else ""
+        return f"/api/v1/avatar/{user_id}{suffix}"
+    return stored
+
+
+def _epoch_seconds(updated_at: object | None) -> int | None:
+    """Best-effort epoch-seconds of a tz-aware datetime; None if unobtainable."""
+    if updated_at is None:
+        return None
+    try:
+        from datetime import datetime
+
+        if isinstance(updated_at, datetime):
+            return int(updated_at.timestamp())
+    except Exception:
+        pass
+    return None

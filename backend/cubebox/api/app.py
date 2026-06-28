@@ -543,6 +543,7 @@ def create_app(
         ws_topics,
         ws_triggers,
     )
+    from cubebox.api.routes.v1 import avatars as avatars_routes
     from cubebox.api.routes.v1 import (
         social_login as social_login_routes,
     )
@@ -560,6 +561,7 @@ def create_app(
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(ws_artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
+    app.include_router(avatars_routes.router, prefix="/api/v1")
     app.include_router(shares.router, prefix="/api/v1")
     app.include_router(sso_routes.router, prefix="/api/v1")
     app.include_router(social_login_routes.router, prefix="/api/v1")

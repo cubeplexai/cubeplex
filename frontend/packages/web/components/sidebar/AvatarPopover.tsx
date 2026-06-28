@@ -89,6 +89,7 @@ export function AvatarPopover({ collapsed }: { collapsed?: boolean }) {
           src={user?.avatar_url}
           seed={user?.avatar_seed ?? user?.id}
           name={displayName ?? user?.email}
+          loading={user === null}
         />
         {!collapsed && (
           <span className="text-xs truncate flex-1 text-left text-foreground">
