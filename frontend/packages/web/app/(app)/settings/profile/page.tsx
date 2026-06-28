@@ -45,6 +45,15 @@ export default function ProfilePage() {
             </div>
           </DangerZone>
           <DeleteAccountDialog open={deleteOpen} onOpenChange={setDeleteOpen} />
+          <hr className="border-border" />
+          <section className="flex flex-col gap-2">
+            <h2 className="text-sm font-medium">{t('credits.title')}</h2>
+            <p className="text-sm text-muted-foreground">{t('credits.description')}</p>
+            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              <li>{t('credits.notionists')}</li>
+              <li>{t('credits.bottts')}</li>
+            </ul>
+          </section>
         </div>
       </div>
     </div>
