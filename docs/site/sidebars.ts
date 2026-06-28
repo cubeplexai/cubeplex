@@ -76,6 +76,11 @@ const sidebars: SidebarsConfig = {
             'guides/im/discord',
           ],
         },
+        {
+          type: 'category',
+          label: 'Account',
+          items: ['guides/account/profile'],
+        },
       ],
     },
     {
