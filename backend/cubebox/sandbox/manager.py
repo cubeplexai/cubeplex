@@ -144,6 +144,10 @@ class SandboxManager:
         self._create_timeout: int = config.get("sandbox.create_timeout", 300)
         self._ttl: int = config.get("sandbox.ttl", 600)
         self._touch_interval: int = config.get("sandbox.touch_interval", 60)
+        # Only running and paused sandboxes have a live container worth keeping
+        # alive via periodic pings. kill_pending/terminated/failed rows must not
+        # be touched — they need the reaper to advance them.
+        self._touchable_statuses: tuple[str, ...] = ("running", "paused")
         self._ready_timeout: int = config.get("sandbox.ready_timeout", 60)
         self._use_server_proxy: bool = config.get("sandbox.use_server_proxy", False)
         # OpenSandbox `secureAccess`: Kubernetes runtime supports it (the
@@ -904,8 +908,17 @@ class SandboxManager:
         async with self._session_factory() as session:
             repo = UserSandboxRepository(session, org_id=org_id, workspace_id=workspace_id)
             record = await repo.get_active_by_scope(scope_type=scope_type, scope_id=scope_id)
-            if record is None or record.deleted_at is not None or not record.sandbox_id:
-                return False  # terminated/deleted row has no container to touch
+            if (
+                record is None
+                or record.deleted_at is not None
+                or not record.sandbox_id
+                or record.status not in self._touchable_statuses
+            ):
+                return False
+            # _TOUCHABLE_STATUSES guards against keepalive pings indefinitely
+            # refreshing kill_pending rows (stale tabs), which suppresses
+            # the reaper's retry loop (reaper triggers on TTL expiry but
+            # touch_active keeps bumping last_activity_at).
             sandbox_id = record.sandbox_id
             await repo.update_activity(record.id)
             # Keep egress placeholders alive for browser-keepalive-only sessions
