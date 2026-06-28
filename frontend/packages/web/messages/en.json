@@ -2059,6 +2059,12 @@
       "wrongPassword": "Incorrect password",
       "transferFirst": "Transfer org ownership before deleting your account",
       "error": "Failed to delete account"
+    },
+    "credits": {
+      "title": "Open-source credits",
+      "description": "Avatar styles are generated with DiceBear.",
+      "notionists": "Notionists — Design by Zoish (CC0 1.0), code MIT by Florian Körner.",
+      "bottts": "Bottts — Design by Pablo Stanley (free for personal and commercial use), code MIT by Florian Körner."
     }
   },
   "verifyEmail": {
