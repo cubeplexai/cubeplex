@@ -486,6 +486,7 @@ async def test_touch_active_extends_egress_ref_expiry(
     record.id = "rec-active"
     record.sandbox_id = "sbx-active"
     record.deleted_at = None  # active row; touch_active guards on this
+    record.status = "running"  # _touchable_statuses guard (codex R1)
 
     manager = SandboxManager(session_factory, mock_encryption_backend)
     manager._exchange_host = "egress-exchange.internal"
