@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { AvatarEditor } from '@/components/profile/AvatarEditor'
 import { ProfileForm } from '@/components/profile/ProfileForm'
 import { ChangePasswordForm } from '@/components/profile/ChangePasswordForm'
 import { ApiKeysSection } from '@/components/profile/ApiKeysSection'
@@ -18,10 +17,8 @@ export default function ProfilePage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader title={t('title')} description={t('subtitle')} />
-      <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="mx-auto flex max-w-xl flex-col gap-8">
-          <AvatarEditor />
-          <hr className="border-border" />
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-6">
+        <div className="mx-auto flex max-w-xl flex-col gap-8 pb-10">
           <ProfileForm />
           <hr className="border-border" />
           <ChangePasswordForm />
@@ -45,15 +42,6 @@ export default function ProfilePage() {
             </div>
           </DangerZone>
           <DeleteAccountDialog open={deleteOpen} onOpenChange={setDeleteOpen} />
-          <hr className="border-border" />
-          <section className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium">{t('credits.title')}</h2>
-            <p className="text-sm text-muted-foreground">{t('credits.description')}</p>
-            <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
-              <li>{t('credits.notionists')}</li>
-              <li>{t('credits.bottts')}</li>
-            </ul>
-          </section>
         </div>
       </div>
     </div>

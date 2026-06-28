@@ -18,6 +18,7 @@ export interface MeResult {
   avatar_url: string | null
   avatar_seed: string | null
   avatar_kind: string | null
+  avatar_style: string | null
   language: string
   is_verified: boolean
   needs_org_setup?: boolean

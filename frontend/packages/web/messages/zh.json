@@ -2059,12 +2059,6 @@
       "wrongPassword": "密码不正确",
       "transferFirst": "请先转让组织所有权，再删除账户",
       "error": "删除账户失败"
-    },
-    "credits": {
-      "title": "开源致谢",
-      "description": "头像样式由 DiceBear 生成。",
-      "notionists": "Notionists — 设计者 Zoish（CC0 1.0），代码 MIT（Florian Körner）。",
-      "bottts": "Bottts — 设计者 Pablo Stanley（个人与商业用途免费），代码 MIT（Florian Körner）。"
     }
   },
   "verifyEmail": {

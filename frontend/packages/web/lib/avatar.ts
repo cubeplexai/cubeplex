@@ -85,6 +85,10 @@ export async function svgToPngBlob(svg: string, size: number): Promise<Blob> {
     }
     img.onerror = () => reject(new Error('Failed to load SVG image'))
 
-    img.src = `data:image/svg+xml;base64,${btoa(svg)}`
+    // UTF-8 safe base64: btoa rejects chars outside Latin1, and DiceBear SVGs contain Unicode.
+    const bytes = new TextEncoder().encode(svg)
+    let binary = ''
+    for (const b of bytes) binary += String.fromCharCode(b)
+    img.src = `data:image/svg+xml;base64,${btoa(binary)}`
   })
 }

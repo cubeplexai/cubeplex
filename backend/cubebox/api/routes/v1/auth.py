@@ -1,5 +1,6 @@
 """Auth routes: register, login, logout (cookie-based) with rate limit."""
 
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import (
@@ -28,7 +29,7 @@ from cubebox.db import get_session
 from cubebox.i18n import get_locale, get_translator
 from cubebox.models import User
 from cubebox.models.user import AvatarKind
-from cubebox.services.avatar_store import save_avatar_png
+from cubebox.services.avatar_store import resolve_avatar_url, save_avatar_png
 
 
 class UserRead(BaseUser[str]):
@@ -181,7 +182,7 @@ async def _me_payload(
         "id": user.id,
         "email": user.email,
         "display_name": user.display_name,
-        "avatar_url": user.avatar_url,
+        "avatar_url": resolve_avatar_url(user.avatar_url, user.id, user.updated_at),
         "avatar_kind": user.avatar_kind,
         "avatar_seed": user.avatar_seed,
         "avatar_style": user.avatar_style,
@@ -208,7 +209,6 @@ async def patch_me(
     session: Annotated[AsyncSession, Depends(get_session)],
     request: Request,
 ) -> dict[str, object]:
-
     if body.language is None and body.display_name is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -246,6 +246,9 @@ async def put_me_avatar(
     )
     user.avatar_seed = seed if kind == AvatarKind.generated.value else None
     user.avatar_style = style if kind == AvatarKind.generated.value else None
+    # updated_at has no onupdate trigger — bump it manually so the proxy URL's
+    # cache-buster (?v=<epoch>) changes and the browser reloads the new PNG.
+    user.updated_at = datetime.now(UTC)
     session.add(user)
     await session.commit()
     await session.refresh(user)
@@ -262,6 +265,7 @@ async def delete_me_avatar(
     user.avatar_kind = AvatarKind.generated.value
     user.avatar_seed = None
     user.avatar_style = None
+    user.updated_at = datetime.now(UTC)
     session.add(user)
     await session.commit()
     await session.refresh(user)

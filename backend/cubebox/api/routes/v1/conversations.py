@@ -42,6 +42,7 @@ from cubebox.repositories.conversation import (
     ForkRunNotCompletedError,
     ForkSourceMissingError,
 )
+from cubebox.services.avatar_store import resolve_avatar_url
 from cubebox.skills.cache import SkillCache
 from cubebox.streams.replay_coalescer import ReplayCoalescer
 from cubebox.streams.run_events import (
@@ -723,7 +724,9 @@ def _serialize_conv_participant(
         "user_id": p.user_id,
         "joined_at": utc_isoformat(p.joined_at),
         "display_name": (user.display_name if user else None) or None,
-        "avatar_url": user.avatar_url if user else None,
+        "avatar_url": resolve_avatar_url(user.avatar_url, p.user_id, user.updated_at)
+        if user
+        else None,
         "avatar_seed": user.avatar_seed if user else None,
     }
     if include_email:
