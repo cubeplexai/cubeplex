@@ -132,7 +132,7 @@ async def google_callback(
     if not enabled or not client_id:
         raise HTTPException(404, detail="Google login not configured")
 
-    client_secret = await _get_google_client_secret(request, session)
+    client_secret = str(config.get("social_login.google.client_secret", ""))
     base = _base_url()
     redirect_uri = f"{base}/api/v1/auth/social/google/callback"
 
@@ -175,23 +175,3 @@ async def google_callback(
 
     await _enforce_forced_sso_for_user(session, result.user, allowed_org_id=None)
     return await _login_and_redirect(request, session, result.user)
-
-
-async def _get_google_client_secret(request: Request, session: AsyncSession) -> str:
-    """Decrypt the Google client_secret from the credential vault.
-
-    The Google client_secret is a *system* credential — it lives at the
-    deployment level, not per-org. Stored with ``kind="social_login"``,
-    ``name="google"``, and ``org_id=None`` (system row via the partial
-    unique index on the credential table).
-    """
-    from cubebox.credentials.encryption import EncryptionBackend
-    from cubebox.repositories.credential import CredentialRepository
-
-    repo = CredentialRepository(session, org_id=None)
-    cred = await repo.get_by_kind_name(kind="social_login", name="google")
-    if cred is None:
-        raise HTTPException(500, detail="Google client_secret not configured in vault")
-    backend: EncryptionBackend = request.app.state.encryption_backend
-    plaintext = await backend.decrypt(cred.value_encrypted)
-    return plaintext.decode()
