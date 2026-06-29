@@ -17,7 +17,6 @@ import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { useConversationStore, usePanelStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 import { SharePanel } from '@/components/chat/SharePanel'
-import { ChatHeaderGroupBadge } from '@/components/chat/ChatHeaderGroupBadge'
 import { ConversationMemberStrip } from '@/components/chat/ConversationMemberStrip'
 import { UpgradeToTopicDialog } from '@/components/dialogs/UpgradeToTopicDialog'
 import { InviteToConversationDialog } from '@/components/dialogs/InviteToConversationDialog'
@@ -37,7 +36,6 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
   const conversation = useConversationStore((s) =>
     conversationId ? s.conversations.find((c) => c.id === conversationId) : undefined,
   )
-  const topicId = conversation?.topic_id ?? null
   const canUpgrade = Boolean(workspaceId && conversation && !conversation.topic_id)
   const [upgradeOpen, setUpgradeOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -136,7 +134,6 @@ export function AppShell({ children, headerTitle, conversationId }: AppShellProp
           <Menu className="size-4" />
         </button>
         <span className="text-sm text-muted-foreground truncate flex-1">{headerTitle || ''}</span>
-        {workspaceId && topicId && <ChatHeaderGroupBadge wsId={workspaceId} topicId={topicId} />}
         {workspaceId && conversation?.is_group_chat && (
           <ConversationMemberStrip wsId={workspaceId} conversationId={conversation.id} />
         )}

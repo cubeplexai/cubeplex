@@ -7,7 +7,6 @@ import notionistsDef from '@dicebear/styles/notionists.json'
 import micahDef from '@dicebear/styles/micah.json'
 import openPeepsDef from '@dicebear/styles/open-peeps.json'
 import botttsDef from '@dicebear/styles/bottts.json'
-import { createApiClient, uploadAvatar } from '@cubebox/core'
 import { avatarColor } from '@/lib/avatar'
 import { cn } from '@/lib/utils'
 
@@ -38,13 +37,6 @@ export interface AvatarProps {
   /** User ID — used as fallback seed when `seed` is null. */
   userId?: string
   /**
-   * When true, `src` is null, and `userId` is present: fire a one-shot
-   * background uploadAvatar({ kind:'generated', seed, style }) to
-   * materialize the PNG so IM / email get a stable URL.
-   * The live DiceBear render still shows meanwhile.
-   */
-  selfHeal?: boolean
-  /**
    * When true, render nothing visible (transparent placeholder) — used by
    * callers that know the avatar data is still loading (e.g. the current
    * user's avatar before /me resolves), to avoid a "default -> real" swap.
@@ -68,11 +60,9 @@ export function Avatar({
   style = 'glyphs',
   size = 'default',
   userId,
-  selfHeal,
   loading,
   className,
 }: AvatarProps) {
-  const healed = useRef(false)
   const effectiveSeed = seed ?? userId ?? name ?? 'unknown'
   const pixelSize = SIZE_MAP[size] ?? 32
 
@@ -88,34 +78,23 @@ export function Avatar({
   // (fallback -> image) flicker on every src change.
   const [realLoaded, setRealLoaded] = useState(false)
   const [realFailed, setRealFailed] = useState(false)
+  const realImgRef = useRef<HTMLImageElement>(null)
   useEffect(() => {
-    // Reset load state whenever the src identity changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset image-load tracking when src changes (not a cascading render)
+    // Reset load state whenever the src identity changes, then reconcile with
+    // the element. A cached image can finish loading (fire `load`) before this
+    // passive effect runs; without the reconcile we'd clobber realLoaded back
+    // to false and onLoad never refires — leaving the avatar stuck showing
+    // only the background color. Checking complete/naturalWidth recovers that.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset + reconcile image-load tracking when src changes (not a cascading render)
     setRealLoaded(false)
     setRealFailed(false)
+    const el = realImgRef.current
+    if (!el || !src) return
+    if (el.complete) {
+      if (el.naturalWidth > 0) setRealLoaded(true)
+      else setRealFailed(true)
+    }
   }, [src])
-
-  useEffect(() => {
-    if (!selfHeal || healed.current || src || !userId) return
-    healed.current = true
-    void (async () => {
-      try {
-        const styleInstance = STYLE_INSTANCES[style] ?? STYLE_INSTANCES.glyphs
-        const svg = new DicebearAvatar(styleInstance, { seed: effectiveSeed, size: 256 }).toString()
-        const { svgToPngBlob } = await import('@/lib/avatar')
-        const png = await svgToPngBlob(svg, 256)
-        const client = createApiClient('')
-        await uploadAvatar(client, {
-          file: new File([png], 'avatar.png'),
-          kind: 'generated',
-          seed: effectiveSeed,
-          style,
-        })
-      } catch {
-        // best-effort; the live render still shows correctly
-      }
-    })()
-  }, [selfHeal, src, userId, effectiveSeed, style])
 
   const showReal = src && !realFailed && realLoaded
   // Generated SVG shows when there is no real src (never-saved avatar), OR as
@@ -147,6 +126,7 @@ export function Avatar({
       {src && !realFailed && !loading && (
         // eslint-disable-next-line @next/next/no-img-element -- user/SSO avatar proxy URL
         <img
+          ref={realImgRef}
           src={src}
           alt={name ?? ''}
           onLoad={() => setRealLoaded(true)}

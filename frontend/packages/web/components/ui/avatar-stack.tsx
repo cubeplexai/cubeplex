@@ -47,7 +47,7 @@ export function AvatarStack({
       {shown.map((it, i) => (
         <div
           key={i}
-          className="rounded-full ring-2 ring-background"
+          className="flex items-center justify-center rounded-full ring-2 ring-background"
           style={{ marginLeft: i === 0 ? 0 : -size / 3 }}
         >
           <Avatar

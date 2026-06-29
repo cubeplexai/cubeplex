@@ -232,7 +232,6 @@ export function MemberPanel({ wsId, topicId, onClose }: MemberPanelProps): React
                   name={name}
                   userId={p.user_id}
                   size="sm"
-                  selfHeal
                 />
                 <div className="flex-1 min-w-0 truncate">{name}</div>
                 <span
