@@ -27,7 +27,10 @@ export function ImagePreview({
   const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
 
   const v = version ?? artifact.version
-  const [files, setFiles] = useState<string[] | null>(null)
+  // Tag the cached file list with the version it was fetched for, so a
+  // version switch shows loading instead of the old version's images while
+  // the new /files request is in flight.
+  const [data, setData] = useState<{ files: string[]; version: number } | null>(null)
   const [error, setError] = useState(false)
 
   useEffect(() => {
@@ -42,7 +45,7 @@ export function ImagePreview({
         return res.json() as Promise<FilesResponse>
       })
       .then((body) => {
-        if (!cancelled) setFiles(body.files)
+        if (!cancelled) setData({ files: body.files, version: v })
       })
       .catch(() => {
         if (!cancelled) setError(true)
@@ -63,9 +66,11 @@ export function ImagePreview({
   if (error) {
     return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
   }
-  if (files === null) {
+  // No data yet, or data is from a different version than the one selected.
+  if (!data || data.version !== v) {
     return <PreviewLoading />
   }
+  const files = data.files
   if (files.length === 0) {
     return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
   }
