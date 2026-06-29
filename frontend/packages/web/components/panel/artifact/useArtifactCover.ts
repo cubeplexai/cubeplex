@@ -17,7 +17,7 @@ interface CoverState {
 
 export function useArtifactCover(artifact: Artifact, workspaceId: string): CoverState {
   const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
-  const { id, conversation_id, version: artifactVersion } = artifact
+  const { id, conversation_id } = artifact
 
   // Hooks FIRST — before any early return (rules-of-hooks).
   const [state, setState] = useState<CoverState>({
@@ -40,13 +40,7 @@ export function useArtifactCover(artifact: Artifact, workspaceId: string): Cover
       .then((body) => {
         if (cancelled) return
         const first = body.files[0]
-        // Build preview URL inline so the effect doesn't reference the full
-        // artifact object, keeping the dep array narrow and clean.
-        const v = artifactVersion
-        const coverUrl = first
-          ? `/api/v1/ws/${workspaceId}/conversations/${conversation_id}` +
-            `/artifacts/${id}/preview/v${v}/${first}`
-          : null
+        const coverUrl = first ? buildPreviewUrl(artifact, first, null, workspaceId) : null
         setState({
           coverUrl,
           count: body.files.length,
@@ -59,7 +53,7 @@ export function useArtifactCover(artifact: Artifact, workspaceId: string): Cover
     return () => {
       cancelled = true
     }
-  }, [id, conversation_id, artifactVersion, workspaceId, filename])
+  }, [id, conversation_id, artifact, workspaceId, filename])
 
   // Single image path -> cover is that file, no list call, count 1.
   // (Computed as plain const, not via hook -- hooks are already at the top.)

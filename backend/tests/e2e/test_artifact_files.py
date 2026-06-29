@@ -67,12 +67,23 @@ async def _seed(client: TestClient) -> AsyncIterator[None]:
             ("script.py", b"print(1)"),
         ):
             await store.upload_file(f"{_PREFIX}{name}", data)
+        # v2 files — separate version prefix to test ?version=N param.
+        for name, data in (
+            ("1_v2.png", b"\x89PNG\r\n\x1a\n-v2-first"),
+            ("2_v2.png", b"\x89PNG\r\n\x1a\n-v2-second"),
+        ):
+            await store.upload_file(f"artifacts/{_CONV}/{_ART}/v2/{name}", data)
         yield
     finally:
         store = get_objectstore_client()
         for name in ("2_second.png", "1_first.png", "3_third.png", "script.py"):
             try:
                 await store.delete_file(f"{_PREFIX}{name}")
+            except Exception:
+                pass
+        for name in ("1_v2.png", "2_v2.png"):
+            try:
+                await store.delete_file(f"artifacts/{_CONV}/{_ART}/v2/{name}")
             except Exception:
                 pass
         async with maker() as s:
@@ -116,3 +127,87 @@ def test_files_cross_workspace_404(_seed: None, client: TestClient) -> None:
         params={"filter": "image"},
     )
     assert res.status_code == 404
+
+
+_CONV2 = "conv-nonimg"
+_ART2 = "art-nonimg"
+_PREFIX2 = f"artifacts/{_CONV2}/{_ART2}/v1/"
+
+
+@pytest_asyncio.fixture
+async def _seed_non_image(client: TestClient) -> AsyncIterator[None]:
+    me = client.get("/api/v1/auth/me")
+    assert me.status_code == 200, me.text
+    my_user_id = me.json()["id"]
+
+    engine = create_async_engine(_build_database_url(), poolclass=NullPool)
+    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with maker() as s:
+            await s.execute(
+                text(
+                    "INSERT INTO conversations (id, org_id, workspace_id,"
+                    " creator_user_id, title, has_messages, is_group_chat,"
+                    " created_at, updated_at)"
+                    " VALUES (:id, :org, :ws, :uid, 'notes-only', true, false, NOW(), NOW())"
+                    " ON CONFLICT (id) DO NOTHING"
+                ),
+                {"id": _CONV2, "org": DEFAULT_ORG_ID, "ws": DEFAULT_WS_ID, "uid": my_user_id},
+            )
+            await s.execute(
+                text(
+                    "INSERT INTO artifacts (id, org_id, workspace_id, conversation_id,"
+                    " name, artifact_type, path, entry_file, mime_type, description,"
+                    " version, created_at, updated_at)"
+                    " VALUES (:id, :org, :ws, :conv, 'Notes', 'text',"
+                    " '/workspace/notes', NULL, NULL, NULL, 1, NOW(), NOW())"
+                    " ON CONFLICT (id) DO NOTHING"
+                ),
+                {
+                    "id": _ART2,
+                    "org": DEFAULT_ORG_ID,
+                    "ws": DEFAULT_WS_ID,
+                    "conv": _CONV2,
+                },
+            )
+            await s.commit()
+
+        store = get_objectstore_client()
+        await store.upload_file(f"{_PREFIX2}notes.txt", b"hello")
+        yield
+    finally:
+        store = get_objectstore_client()
+        try:
+            await store.delete_file(f"{_PREFIX2}notes.txt")
+        except Exception:
+            pass
+        async with maker() as s:
+            await s.execute(text("DELETE FROM artifacts WHERE id = :id"), {"id": _ART2})
+            await s.execute(text("DELETE FROM conversations WHERE id = :id"), {"id": _CONV2})
+            await s.commit()
+        await engine.dispose()
+
+
+def test_files_version_param(_seed: None, client: TestClient) -> None:
+    """?version=N returns files from that version's prefix."""
+    res = client.get(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV}/artifacts/{_ART}/files",
+        params={"version": 2, "filter": "image"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["version"] == 2
+    assert body["files"] == ["1_v2.png", "2_v2.png"]
+
+
+def test_files_filter_image_empty_when_only_non_image(
+    _seed_non_image: None,
+    client: TestClient,
+) -> None:
+    """Directory with only non-image files returns files: [], not 404."""
+    res = client.get(
+        f"/api/v1/ws/{DEFAULT_WS_ID}/conversations/{_CONV2}/artifacts/{_ART2}/files",
+        params={"filter": "image"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["files"] == []
