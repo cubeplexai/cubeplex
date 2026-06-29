@@ -8,6 +8,7 @@ import { usePanelStore } from '@cubebox/core'
 import type { Artifact } from '@cubebox/core'
 import { getArtifactIcon } from '@/components/panel/artifact/artifactIcons'
 import { buildDownloadUrl, buildPreviewUrl } from '@/components/panel/artifact/previewUtils'
+import { useArtifactCover } from '@/components/panel/artifact/useArtifactCover'
 import { ArtifactHtmlThumb } from './ArtifactHtmlThumb'
 import {
   DropdownMenu,
@@ -42,14 +43,16 @@ export function ArtifactLibraryCard({
   // Carry the artifact id so the conversation page auto-opens its preview panel.
   const conversationHref = `/w/${workspaceId}/conversations/${artifact.conversation_id}?artifact=${artifact.id}`
 
+  const cover = useArtifactCover(artifact, workspaceId)
   const [thumbFailed, setThumbFailed] = useState(false)
-  const showImage = isImageArtifact(artifact) && !thumbFailed
-  const showHtml = !showImage && isHtmlArtifact(artifact)
-  // Website artifacts default to index.html (matching HtmlPreview); others use
-  // the explicit entry file or the path basename.
-  const fallbackFile = isHtmlArtifact(artifact) ? 'index.html' : ''
-  const thumbFile = artifact.entry_file || artifact.path.split('/').pop() || fallbackFile
-  const thumbUrl = buildPreviewUrl(artifact, thumbFile, null, workspaceId)
+  const isHtml = isHtmlArtifact(artifact)
+  const showImage = isImageArtifact(artifact) && !thumbFailed && cover.coverUrl !== null
+  const showHtml = !showImage && isHtml
+  const fallbackFile = isHtml ? 'index.html' : ''
+  // HTML keeps its own thumb URL; image uses the cover hook result.
+  const thumbUrl = isHtml
+    ? buildPreviewUrl(artifact, artifact.entry_file || fallbackFile, null, workspaceId)
+    : (cover.coverUrl ?? buildPreviewUrl(artifact, '', null, workspaceId))
 
   const handlePreview = useCallback(() => {
     openArtifact(artifact.conversation_id, artifact.id)
@@ -132,6 +135,15 @@ export function ArtifactLibraryCard({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {cover.count > 1 && !thumbFailed && (
+          <span
+            className="absolute bottom-2 right-2 rounded-full bg-background/80 px-1.5
+              py-0.5 text-[10px] font-medium text-muted-foreground backdrop-blur-sm"
+            data-testid="artifact-card-count"
+          >
+            ×{cover.count}
+          </span>
+        )}
       </div>
       <div className="min-w-0 p-3">
         <div className="flex items-center gap-2">
