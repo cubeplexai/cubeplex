@@ -37,6 +37,7 @@ from cubebox.repositories.user_sandbox import UserSandboxRepository
 from cubebox.sandbox import SandboxError
 from cubebox.sandbox.manager import get_sandbox_manager
 from cubebox.sandbox.opensandbox import OpenSandbox
+from cubebox.utils.http import content_disposition
 from cubebox.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/sandbox", tags=["ws-sandbox"])
@@ -380,9 +381,7 @@ async def download_sandbox_file(
     return StreamingResponse(
         stream,
         media_type=mime or "application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-        },
+        headers={"Content-Disposition": content_disposition(filename)},
     )
 
 
