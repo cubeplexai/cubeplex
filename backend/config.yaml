@@ -287,6 +287,23 @@ default:
       login_per_minute: 5
       register_per_minute: 3
 
+  # Email (verification + password reset). `log` backend just prints the
+  # rendered email to stdout (dev); `smtp` actually sends via aiosmtplib.
+  # Put real credentials in gitignored config.*.local.yaml or env, not here.
+  #   CUBEBOX_EMAIL__SMTP_PASSWORD / CUBEBOX_EMAIL__SMTP_USER / ...
+  # TLS: leave `smtp_tls` unset for the common case — port 465 auto-uses
+  # implicit TLS, anything else (e.g. 587) uses STARTTLS. Set `smtp_tls: true`
+  # to force implicit TLS, or `smtp_tls: false` to disable it entirely
+  # (plaintext relay, no STARTTLS).
+  email:
+    backend: "log" # "log" | "smtp"
+    from_address: "noreply@cubebox.local"
+    smtp_host: "localhost"
+    smtp_port: 587
+    # smtp_tls: true    # uncomment to force implicit TLS (port 465)
+    smtp_user: ""
+    smtp_password: ""
+
   # Social login (Google OAuth2/OIDC). The client_secret is NOT stored here;
   # operator seeds it into the Credential Vault as kind="social_login",
   # name="google", org_id=NULL.
