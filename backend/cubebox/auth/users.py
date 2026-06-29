@@ -327,7 +327,7 @@ class UserManager(BaseUserManager[User, str]):
     ) -> None:
         from cubebox.services.email import get_email_service
 
-        base_url = config.get("app.base_url", "http://localhost:3000")
+        base_url = config.get("app.frontend_base_url", "http://localhost:3000")
         reset_url = f"{base_url}/reset-password?token={token}"
         try:
             await get_email_service().send(
@@ -344,7 +344,7 @@ class UserManager(BaseUserManager[User, str]):
     ) -> None:
         from cubebox.services.email import get_email_service
 
-        base_url = config.get("app.base_url", "http://localhost:3000")
+        base_url = config.get("app.frontend_base_url", "http://localhost:3000")
         verify_url = f"{base_url}/verify-email?token={token}"
         try:
             await get_email_service().send(

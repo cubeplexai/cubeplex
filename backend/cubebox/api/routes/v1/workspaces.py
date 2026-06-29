@@ -187,7 +187,7 @@ async def create_invite(
     if body.email is not None:
         from cubebox.services.email import get_email_service
 
-        base_url = config.get("app.base_url", "http://localhost:3000")
+        base_url = config.get("app.frontend_base_url", "http://localhost:3000")
         invite_url = f"{base_url}/invite/accept?token={tok.token}"
         ws = await WorkspaceRepository(session).get(workspace_id)
         ws_name = ws.name if ws else workspace_id

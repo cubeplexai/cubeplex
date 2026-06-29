@@ -46,7 +46,7 @@ def _get_state_store(request: Request) -> SSOStateStore:
 
 
 def _base_url() -> str:
-    url = str(config.get("app.base_url", "http://localhost:3000")).rstrip("/")
+    url = str(config.get("app.public_base_url", "http://localhost:8000")).rstrip("/")
     if "://" not in url:
         # Match sso.py's structured 500 instead of an IndexError later.
         raise HTTPException(500, detail={"code": "app_base_url_missing_scheme"})

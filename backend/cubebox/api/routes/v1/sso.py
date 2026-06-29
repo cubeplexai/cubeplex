@@ -67,7 +67,7 @@ def _get_state_store(request: Request) -> SSOStateStore:
 
 
 def _base_url() -> str:
-    url = str(config.get("app.base_url", "http://localhost:3000")).rstrip("/")
+    url = str(config.get("app.public_base_url", "http://localhost:8000")).rstrip("/")
     if "://" not in url:
         # Misconfiguration: surfaces as a clean 500 with a known code
         # instead of an opaque IndexError from string-splitting later.
@@ -76,7 +76,7 @@ def _base_url() -> str:
 
 
 def _http_host_from_base(base: str) -> str:
-    """Extract the host[:port] segment from ``app.base_url`` for python3-saml."""
+    """Extract the host[:port] segment from ``app.public_base_url`` for python3-saml."""
     return base.split("://", 1)[1].split("/")[0]
 
 
