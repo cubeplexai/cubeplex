@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response
 from loguru import logger
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.auth.context import RequestContext
@@ -26,6 +27,8 @@ from cubebox.repositories import (
     ConversationRepository,
 )
 from cubebox.utils.http import content_disposition
+
+IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"})
 
 router = APIRouter(
     prefix="/ws/{workspace_id}/conversations/{conversation_id}/artifacts",
@@ -184,6 +187,58 @@ async def download_artifact(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to download artifact",
         ) from None
+
+
+class ArtifactFilesOut(BaseModel):
+    version: int
+    files: list[str]
+
+
+@router.get("/{artifact_id}/files", response_model=ArtifactFilesOut)
+async def list_artifact_files(
+    conversation_id: str,
+    artifact_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    version: int | None = Query(default=None),
+    filter: str | None = Query(default=None),
+) -> ArtifactFilesOut:
+    """List the files stored for an artifact version.
+
+    ``filter=image`` restricts to image extensions (sorted ascending by
+    filename); without ``filter`` all files are returned sorted. Used by the
+    preview panel to render a multi-image directory as a carousel.
+    """
+    await _require_conversation(session, ctx, conversation_id)
+    repo = ArtifactRepository(session, org_id=ctx.org_id, workspace_id=ctx.workspace_id)
+    artifact = await repo.get_by_id(artifact_id)
+    if not artifact or artifact.conversation_id != conversation_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Artifact {artifact_id} not found",
+        )
+
+    target_version = version or artifact.version
+    prefix = f"artifacts/{conversation_id}/{artifact_id}/v{target_version}/"
+
+    try:
+        store = get_objectstore_client()
+        keys = await store.list_objects(prefix)
+    except Exception as e:
+        logger.error("Error listing artifact files: {}", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list artifact files",
+        ) from None
+
+    rel_files = [k[len(prefix) :] for k in keys]
+    if filter == "image":
+        rel_files = [
+            f for f in rel_files if "." in f and f.rsplit(".", 1)[-1].lower() in IMAGE_EXTENSIONS
+        ]
+    rel_files.sort()
+
+    return ArtifactFilesOut(version=target_version, files=rel_files)
 
 
 OFFICE_EXTENSIONS = frozenset({".docx", ".xlsx", ".pptx"})
