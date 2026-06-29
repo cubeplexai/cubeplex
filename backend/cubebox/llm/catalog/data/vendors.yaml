@@ -89,17 +89,24 @@
     # Claude-Code-compatible anthropic wire on /api/coding.
     - { region: cn, protocol: openai-completions, plan: coding, path: /api/coding/v3, capability: doubao-compat }
     - { region: cn, protocol: anthropic-messages, plan: coding, path: /api/coding, capability: volcengine-coding }
+    # Agent Plan — same family of models, dedicated routing on /api/plan/* with
+    # a separate subscription / quota. Two wires, mirroring the coding plan.
+    - { region: cn, protocol: openai-completions, plan: agent, path: /api/plan/v3, capability: doubao-compat }
+    - { region: cn, protocol: anthropic-messages, plan: agent, path: /api/plan, capability: volcengine-coding }
   models:
-    - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, plan: [general, coding], context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: doubao-seed-2.0-code, display_name: Doubao Seed 2.0 Code, plan: [general, coding], context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: doubao-seed-2.0-lite, display_name: Doubao Seed 2.0 Lite, plan: [general, coding], context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: doubao-seed-2.0-mini, display_name: Doubao Seed 2.0 Mini, plan: [general, coding], context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-pro, display_name: Doubao Seed 2.0 Pro, plan: [general, coding, agent], context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-code, display_name: Doubao Seed 2.0 Code, plan: [general, coding, agent], context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-lite, display_name: Doubao Seed 2.0 Lite, plan: [general, coding, agent], context_window: 256000, max_tokens: 16384, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: doubao-seed-2.0-mini, display_name: Doubao Seed 2.0 Mini, plan: [general, coding, agent], context_window: 256000, max_tokens: 16384, input_modalities: [text], reasoning: false, pricing: { input: 0, output: 0 } }
     - { model_id: doubao-seed-1-8-251228, display_name: DouBao Seed 1.8, plan: general, context_window: 256000, max_tokens: 32700, input_modalities: [text, image], reasoning: true, pricing: { input: 2.4, output: 24 } }
     - { model_id: kimi-k2.6, display_name: Kimi K2.6, plan: coding, context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: glm-5.2, display_name: GLM-5.2, plan: coding, context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: deepseek-v4-flash, display_name: DeepSeek V4 Flash, plan: coding, context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro, plan: coding, context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
-    - { model_id: minimax-m3, display_name: MiniMax M3, plan: coding, context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: kimi-k2.7-code, display_name: Kimi K2.7 Code, plan: agent, context_window: 256000, max_tokens: 32000, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: glm-5.2, display_name: GLM-5.2, plan: [coding, agent], context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: glm-5.1, display_name: GLM-5.1, plan: [coding, agent], context_window: 200000, max_tokens: 32768, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: deepseek-v4-flash, display_name: DeepSeek V4 Flash, plan: [coding, agent], context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: deepseek-v4-pro, display_name: DeepSeek V4 Pro, plan: [coding, agent], context_window: 1000000, max_tokens: 32768, input_modalities: [text], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: minimax-m3, display_name: MiniMax M3, plan: [coding, agent], context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
+    - { model_id: minimax-m2.7, display_name: MiniMax M2.7, plan: agent, context_window: 204800, max_tokens: 131072, input_modalities: [text, image], reasoning: true, pricing: { input: 0, output: 0 } }
 
 - vendor: deepseek
   display_name: DeepSeek
