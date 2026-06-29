@@ -17,6 +17,14 @@ export function buildPreviewUrl(
   )
 }
 
+export const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
+
+export function hasImageExt(filename: string): boolean {
+  const dot = filename.lastIndexOf('.')
+  if (dot < 0) return false
+  return IMAGE_EXTENSIONS.has(filename.slice(dot + 1).toLowerCase())
+}
+
 export function buildDownloadUrl(
   artifact: Artifact,
   workspaceId: string,
