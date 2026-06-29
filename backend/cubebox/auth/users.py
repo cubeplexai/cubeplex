@@ -121,12 +121,17 @@ class UserManager(BaseUserManager[User, str]):
             user_agent=request.headers.get("user-agent") if request else None,
         )
 
-        try:
-            await self.request_verify(user, request)
-        except Exception:
-            logger.opt(exception=True).warning(
-                "Failed to send initial verification email to {}", user.email
-            )
+        # Only send the initial verification email for self-registered
+        # (password) users. SSO/social-login provisioning creates users with
+        # is_verified=True (the IdP attested the email), so request_verify
+        # would raise UserAlreadyVerified — and there's nothing to verify.
+        if not user.is_verified:
+            try:
+                await self.request_verify(user, request)
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Failed to send initial verification email to {}", user.email
+                )
 
     async def _on_register_multi_tenant(self, *, user: User, session: AsyncSession) -> None:
         """Per-user org bootstrap + OrganizationMembership(role=owner)."""
@@ -327,7 +332,7 @@ class UserManager(BaseUserManager[User, str]):
     ) -> None:
         from cubebox.services.email import get_email_service
 
-        base_url = config.get("app.frontend_base_url", "http://localhost:3000")
+        base_url = config.get("frontend_base_url", "http://localhost:3000")
         reset_url = f"{base_url}/reset-password?token={token}"
         try:
             await get_email_service().send(
@@ -344,7 +349,7 @@ class UserManager(BaseUserManager[User, str]):
     ) -> None:
         from cubebox.services.email import get_email_service
 
-        base_url = config.get("app.frontend_base_url", "http://localhost:3000")
+        base_url = config.get("frontend_base_url", "http://localhost:3000")
         verify_url = f"{base_url}/verify-email?token={token}"
         try:
             await get_email_service().send(

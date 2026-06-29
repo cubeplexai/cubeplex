@@ -67,7 +67,7 @@ def _get_state_store(request: Request) -> SSOStateStore:
 
 
 def _base_url() -> str:
-    url = str(config.get("app.public_base_url", "http://localhost:8000")).rstrip("/")
+    url = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     if "://" not in url:
         # Misconfiguration: surfaces as a clean 500 with a known code
         # instead of an opaque IndexError from string-splitting later.
@@ -75,8 +75,21 @@ def _base_url() -> str:
     return url
 
 
+def _frontend_base_url() -> str:
+    """Frontend origin — for browser redirects that land on a Next.js page
+    (post-login workspace home, SSO error page). Distinct from
+    ``_base_url()`` (``public_base_url``), which is the backend origin used
+    for IdP redirect URIs. They differ whenever the backend is reached via
+    a proxy/ingress that isn't the same origin the browser loads the SPA
+    from (e.g. local dev behind the cubeparser.cn ingress)."""
+    url = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
+    if "://" not in url:
+        raise HTTPException(500, detail={"code": "app_base_url_missing_scheme"})
+    return url
+
+
 def _http_host_from_base(base: str) -> str:
-    """Extract the host[:port] segment from ``app.public_base_url`` for python3-saml."""
+    """Extract the host[:port] segment from ``public_base_url`` for python3-saml."""
     return base.split("://", 1)[1].split("/")[0]
 
 
@@ -538,7 +551,7 @@ async def _login_and_redirect(request: Request, session: AsyncSession, user: Use
         )
     ).scalar_one_or_none()
 
-    base = _base_url()
+    base = _frontend_base_url()
     redirect_to = f"{base}/w/{ws.id}" if ws else base
 
     redirect_resp = RedirectResponse(url=redirect_to, status_code=302)
@@ -557,5 +570,5 @@ def _sso_error_redirect(error_code: str) -> RedirectResponse:
     """
     from urllib.parse import quote
 
-    base = _base_url()
+    base = _frontend_base_url()
     return RedirectResponse(url=f"{base}/sso/callback?error={quote(error_code)}", status_code=302)
