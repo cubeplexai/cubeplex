@@ -12,7 +12,10 @@ register it using the `save_artifact` tool so the user can preview and download 
 **artifact_type guide:**
 - "website" — HTML/CSS/JS sites or apps (set entry_file to the main HTML file)
 - "document" — Markdown, text, or generated documents (PDF, DOCX, etc.)
-- "image" — PNG, SVG, JPG images (e.g. matplotlib output)
+- "image" — PNG, SVG, JPG images (e.g. matplotlib output). Point `path` at a single \
+image file. If you produce multiple images as one deliverable, save them in a directory, \
+number the filenames (`1_*.png`, `2_*.png`, …) so they preview in order, and leave \
+`entry_file` unset — the preview renders them as a navigable gallery.
 - "code" — Source code files or projects
 - "data" — CSV, JSON, Excel data files
 - "skill" — A skill bundle directory with SKILL.md at its root. Use this when the \
