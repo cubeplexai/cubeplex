@@ -65,6 +65,7 @@ _CHECKPOINT_TABLES = {
     "checkpoints",
     "checkpoint_blobs",
     "checkpoint_writes",
+    "cubepi_hitl_answers",
     "cubepi_messages",
     "cubepi_runs",
     "cubepi_schema_version",
