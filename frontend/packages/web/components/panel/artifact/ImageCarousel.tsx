@@ -22,6 +22,10 @@ export function ImageCarousel({
   const [index, setIndex] = useState(0)
   const count = imageFiles.length
 
+  // Defensive clamp: the parent remounts this component on version changes,
+  // so `index` stays in range in practice — but never read past the end.
+  const safeIndex = Math.min(index, Math.max(0, count - 1))
+
   const go = useCallback(
     (delta: number) => {
       setIndex((i) => Math.min(count - 1, Math.max(0, i + delta)))
@@ -42,17 +46,17 @@ export function ImageCarousel({
     [go],
   )
 
-  const url = buildPreviewUrl(artifact, imageFiles[index], version, workspaceId)
+  const url = buildPreviewUrl(artifact, imageFiles[safeIndex], version, workspaceId)
 
   return (
     <div className="flex h-full flex-col" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="relative flex-1 overflow-hidden">
-        <ImageViewer url={url} alt={`${artifact.name} ${index + 1}/${count}`} />
+        <ImageViewer url={url} alt={`${artifact.name} ${safeIndex + 1}/${count}`} />
         {count > 1 && (
           <>
             <button
               onClick={() => go(-1)}
-              disabled={index === 0}
+              disabled={safeIndex === 0}
               aria-label="Previous image"
               className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-background/70
                 p-1.5 text-foreground backdrop-blur-sm transition-colors hover:bg-background
@@ -62,7 +66,7 @@ export function ImageCarousel({
             </button>
             <button
               onClick={() => go(1)}
-              disabled={index === count - 1}
+              disabled={safeIndex === count - 1}
               aria-label="Next image"
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-background/70
                 p-1.5 text-foreground backdrop-blur-sm transition-colors hover:bg-background
@@ -75,7 +79,7 @@ export function ImageCarousel({
               bg-background/70 px-2 py-0.5 text-xs tabular-nums text-muted-foreground
               backdrop-blur-sm"
             >
-              {index + 1} / {count}
+              {safeIndex + 1} / {count}
             </div>
           </>
         )}
