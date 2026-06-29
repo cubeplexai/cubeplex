@@ -1,8 +1,12 @@
 'use client'
 
+import { useState, useEffect } from 'react'
 import type { Artifact } from '@cubebox/core'
-import { buildPreviewUrl } from './previewUtils'
+import { buildPreviewUrl, hasImageExt } from './previewUtils'
 import { ImageViewer } from '@/components/shared/previews'
+import { PreviewLoading } from './PreviewLoading'
+import { FallbackPreview } from './FallbackPreview'
+import { ImageCarousel } from './ImageCarousel'
 
 interface ImagePreviewProps {
   artifact: Artifact
@@ -10,9 +14,71 @@ interface ImagePreviewProps {
   workspaceId: string
 }
 
-export function ImagePreview({ artifact, version, workspaceId }: ImagePreviewProps) {
-  const filename = artifact.path.split('/').pop() || 'image'
-  const previewUrl = buildPreviewUrl(artifact, filename, version, workspaceId)
+interface FilesResponse {
+  version: number
+  files: string[]
+}
 
-  return <ImageViewer url={previewUrl} alt={artifact.name} />
+export function ImagePreview({
+  artifact,
+  version,
+  workspaceId,
+}: ImagePreviewProps): React.ReactElement {
+  const filename = artifact.entry_file || artifact.path.split('/').pop() || ''
+
+  const v = version ?? artifact.version
+  const [files, setFiles] = useState<string[] | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    if (hasImageExt(filename)) return
+    let cancelled = false
+    const url =
+      `/api/v1/ws/${workspaceId}/conversations/${artifact.conversation_id}` +
+      `/artifacts/${artifact.id}/files?filter=image&version=${v}`
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`)
+        return res.json() as Promise<FilesResponse>
+      })
+      .then((body) => {
+        if (!cancelled) setFiles(body.files)
+      })
+      .catch(() => {
+        if (!cancelled) setError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [artifact.id, artifact.conversation_id, v, workspaceId, filename])
+
+  // Heuristic: a path that already points at an image file → single image,
+  // no list call. Otherwise (directory like /workspace/charts) fetch the
+  // file list and render a carousel.
+  if (hasImageExt(filename)) {
+    const url = buildPreviewUrl(artifact, filename, version, workspaceId)
+    return <ImageViewer url={url} alt={artifact.name} />
+  }
+
+  if (error) {
+    return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
+  }
+  if (files === null) {
+    return <PreviewLoading />
+  }
+  if (files.length === 0) {
+    return <FallbackPreview artifact={artifact} version={version} workspaceId={workspaceId} />
+  }
+  if (files.length === 1) {
+    const url = buildPreviewUrl(artifact, files[0], version, workspaceId)
+    return <ImageViewer url={url} alt={artifact.name} />
+  }
+  return (
+    <ImageCarousel
+      artifact={artifact}
+      imageFiles={files}
+      version={version}
+      workspaceId={workspaceId}
+    />
+  )
 }
