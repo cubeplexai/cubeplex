@@ -55,6 +55,7 @@ PREFIX_CPM: str = "cpm"
 PREFIX_SSO_CONNECTION: str = "sso"
 PREFIX_EXTERNAL_IDENTITY: str = "eid"
 PREFIX_API_KEY: str = "ak"
+PREFIX_ORG_INVITE: str = "oinv"
 
 
 @dataclass

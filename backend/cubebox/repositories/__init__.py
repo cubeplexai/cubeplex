@@ -18,6 +18,7 @@ from cubebox.repositories.mcp import (
     MCPWorkspaceConnectorStateRepository,
 )
 from cubebox.repositories.membership import MembershipRepository
+from cubebox.repositories.org_invite_token import OrgInviteTokenRepository
 from cubebox.repositories.organization import OrganizationRepository
 from cubebox.repositories.organization_membership import OrganizationMembershipRepository
 from cubebox.repositories.skill import (
@@ -54,6 +55,7 @@ __all__ = [
     "OrgPreinstalledTombstoneRepository",
     "OrgSkillInstallRepository",
     "OrganizationMembershipRepository",
+    "OrgInviteTokenRepository",
     "OrganizationRepository",
     "SkillRepository",
     "SkillVersionRepository",
