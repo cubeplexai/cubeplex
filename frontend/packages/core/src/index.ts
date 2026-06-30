@@ -7,6 +7,7 @@ export * from './api/providers'
 export { useProvidersStore } from './stores/providersStore'
 export { useModelsStore } from './stores/modelsStore'
 export * from './oauth'
+export * from './auth'
 export { useOrgAdminFlag } from './hooks/useOrgAdminFlag'
 
 // `useDeploymentMode` and `useUserEvents` are intentionally NOT re-exported
