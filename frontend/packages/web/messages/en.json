@@ -1357,7 +1357,8 @@
     "goHome": "Go to homepage",
     "joined": "You're in!",
     "joinedDescription": "You've joined the workspace \"{workspace}\".",
-    "openWorkspace": "Open workspace"
+    "openWorkspace": "Open workspace",
+    "joinedOrg": "You've joined the organization!"
   },
   "panel": {
     "header": {
