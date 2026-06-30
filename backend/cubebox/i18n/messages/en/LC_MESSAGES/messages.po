@@ -17,3 +17,6 @@ msgstr "An account with this email already exists"
 msgid "register_invalid_password"
 msgstr "Password does not meet requirements"
 
+msgid "login_email_not_verified"
+msgstr "Please verify your email before signing in."
+

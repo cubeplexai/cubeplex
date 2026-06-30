@@ -17,3 +17,6 @@ msgstr "该邮箱已注册"
 msgid "register_invalid_password"
 msgstr "密码不符合要求"
 
+msgid "login_email_not_verified"
+msgstr "请先验证邮箱再登录。"
+

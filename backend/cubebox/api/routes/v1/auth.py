@@ -78,6 +78,12 @@ async def register(
         except Exception:
             # OTP send failure must not leak; the user can resend from /verify-otp.
             logger.warning("Failed to issue OTP for {}", user.email)
+    elif not user.is_verified:
+        # Auto-verify when email verification is disabled.
+        user.is_verified = True
+        session = user_manager.user_db.session  # type: ignore[attr-defined]
+        session.add(user)
+        await session.commit()
     default_ws = getattr(user, "_default_workspace_id", None)
     return {
         "id": user.id,
@@ -107,16 +113,23 @@ async def verify_otp_endpoint(
     body: Annotated[VerifyOtpRequest, Body()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
     strategy: Annotated[Strategy[User, str], Depends(auth_backend.get_strategy)],
+    session: Annotated[AsyncSession, Depends(get_session)],
 ) -> JSONResponse:
     from cubebox.auth.email_otp import verify_otp as _verify_otp
 
     result = await _verify_otp(body.email, body.code)
     if result.ok:
-        # On success, also issue the auth cookie so the verify-otp page
-        # establishes the session without needing the password.
+        # Mark user as verified in the database.
         try:
             user = await user_manager.get_by_email(body.email)
             if user is not None and user.is_active:
+                if not user.is_verified:
+                    user.is_verified = True
+                    session.add(user)
+                    await session.commit()
+
+                # Issue the auth cookie so the verify-otp page
+                # establishes the session without needing the password.
                 token = await strategy.write_token(user)
                 response = JSONResponse(content={"ok": True})
                 transport = auth_backend.transport
