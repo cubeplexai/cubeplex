@@ -36,6 +36,7 @@ from cubebox.models.memory import (
     MemoryStatus,
     MemoryType,
 )
+from cubebox.models.org_invite_token import OrgInviteToken
 from cubebox.models.org_provider_override import OrgProviderOverride
 from cubebox.models.org_settings import OrgSettings
 from cubebox.models.organization import Organization
@@ -100,6 +101,7 @@ __all__ = [
     "OrgRole",
     "OrgSettings",
     "OrgSkillInstall",
+    "OrgInviteToken",
     "Organization",
     "OrganizationMembership",
     "Provider",
