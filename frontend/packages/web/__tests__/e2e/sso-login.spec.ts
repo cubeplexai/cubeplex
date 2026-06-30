@@ -17,7 +17,7 @@ async function mockSystemInfo(page: import('@playwright/test').Page, mode: strin
       contentType: 'application/json',
       body: JSON.stringify({
         deployment_mode: mode,
-        needs_org_setup: false,
+        needs_onboarding: false,
         version: 'test',
         sandbox_enabled: false,
       }),

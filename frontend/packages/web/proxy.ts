@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { AUTH_COOKIE_NAME } from '@cubebox/core'
 
 const PUBLIC_PATHS = ['/login', '/register']
-const PROTECTED_PREFIXES = ['/w/', '/workspaces', '/admin', '/setup']
+const PROTECTED_PREFIXES = ['/w/', '/workspaces', '/admin', '/onboarding']
 
 function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some((p) => pathname === p.replace(/\/$/, '') || pathname.startsWith(p))
