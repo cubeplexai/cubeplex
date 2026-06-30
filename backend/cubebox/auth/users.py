@@ -7,6 +7,8 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi_users import BaseUserManager, FastAPIUsers
 from fastapi_users.db import SQLAlchemyUserDatabase
+from fastapi_users.exceptions import InvalidPasswordException
+from fastapi_users.schemas import BaseUserCreate
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -153,6 +155,19 @@ class UserManager(BaseUserManager[User, str]):
     def parse_id(self, value: object) -> str:
         # uuid7 strings, not UUIDs
         return str(value)
+
+    async def validate_password(
+        self,
+        password: str,
+        user: BaseUserCreate | User,
+    ) -> None:
+        """Override the fastapi-users no-op. Backend is authoritative."""
+        from cubebox.auth.password_policy import validate_password_from_config
+
+        result = validate_password_from_config(password)
+        if not result.ok:
+            # reason carries the structured per-rule error keys for the API layer.
+            raise InvalidPasswordException(reason=result.errors)
 
     async def on_after_register(self, user: User, request: Request | None = None) -> None:
         logger.info("User registered: {}", user.email)
