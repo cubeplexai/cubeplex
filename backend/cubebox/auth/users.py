@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.auth.db import get_user_db
 from cubebox.auth.jwt import auth_backend
 from cubebox.config import config
-from cubebox.models import User
+from cubebox.models import User, Workspace
 from cubebox.models.organization import Organization
 
 _SLUG_RE = re.compile(r"[^a-z0-9-]+")
@@ -75,6 +75,77 @@ async def _install_preinstalled_skills(session: AsyncSession, *, org_id: str, us
             )
 
 
+async def _install_preinstalled_skills_safe(
+    session: AsyncSession, *, org_id: str, user_id: str
+) -> None:
+    """Wrap _install_preinstalled_skills; log and swallow on failure."""
+    try:
+        await _install_preinstalled_skills(session, org_id=org_id, user_id=user_id)
+    except Exception:
+        logger.warning(
+            "Failed to auto-install preinstalled skills for new org {}; skipping",
+            org_id,
+        )
+
+
+async def _bootstrap_org_and_workspace(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    org_name: str,
+    org_slug: str,
+    workspace_name: str,
+) -> tuple[Organization, Workspace]:
+    """Full first-owner bootstrap: org + workspace + memberships + AgentConfig + MCP + skills."""
+    from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
+    from cubebox.models import OrgRole, Role
+    from cubebox.models.agent_config import AgentConfig
+    from cubebox.repositories import (
+        MembershipRepository,
+        OrganizationMembershipRepository,
+        OrganizationRepository,
+        WorkspaceRepository,
+    )
+
+    org = await OrganizationRepository(session).create(name=org_name, slug=org_slug)
+    await OrganizationMembershipRepository(session).grant(
+        user_id=user_id, org_id=org.id, role=OrgRole.OWNER
+    )
+    ws = await WorkspaceRepository(session).create(org_id=org.id, name=workspace_name)
+    await MembershipRepository(session).grant(user_id=user_id, workspace_id=ws.id, role=Role.ADMIN)
+    session.add(AgentConfig(org_id=org.id, workspace_id=ws.id))
+    await enroll_workspace_in_org_wide_mcp(
+        session, org_id=org.id, workspace_id=ws.id, actor_user_id=user_id
+    )
+    await session.flush()
+    await _install_preinstalled_skills_safe(session, org_id=org.id, user_id=user_id)
+    return org, ws
+
+
+async def _bootstrap_workspace_in_org(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    org_id: str,
+    workspace_name: str,
+) -> Workspace:
+    """Create a workspace in an existing org for a user who already has an org membership."""
+    from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
+    from cubebox.models import Role
+    from cubebox.models.agent_config import AgentConfig
+    from cubebox.repositories import MembershipRepository, WorkspaceRepository
+
+    ws = await WorkspaceRepository(session).create(org_id=org_id, name=workspace_name)
+    await MembershipRepository(session).grant(user_id=user_id, workspace_id=ws.id, role=Role.ADMIN)
+    session.add(AgentConfig(org_id=org_id, workspace_id=ws.id))
+    await enroll_workspace_in_org_wide_mcp(
+        session, org_id=org_id, workspace_id=ws.id, actor_user_id=user_id
+    )
+    await session.flush()
+    await _install_preinstalled_skills_safe(session, org_id=org_id, user_id=user_id)
+    return ws
+
+
 class UserManager(BaseUserManager[User, str]):
     reset_password_token_secret = config.get("auth.jwt_secret", "CHANGE_ME")
     verification_token_secret = config.get("auth.jwt_secret", "CHANGE_ME")
@@ -134,53 +205,8 @@ class UserManager(BaseUserManager[User, str]):
                 )
 
     async def _on_register_multi_tenant(self, *, user: User, session: AsyncSession) -> None:
-        """Per-user org bootstrap + OrganizationMembership(role=owner)."""
-        from cubebox.models import OrgRole, Role
-        from cubebox.repositories import (
-            MembershipRepository,
-            OrganizationMembershipRepository,
-            OrganizationRepository,
-            WorkspaceRepository,
-        )
-
-        org = None
-        ws = None
-        try:
-            local_part = user.email.split("@", 1)[0]
-            org_name = f"{local_part}'s Org"
-            slug = await _allocate_org_slug(session, _slugify_org_name(org_name))
-            org = await OrganizationRepository(session).create(name=org_name, slug=slug)
-            await OrganizationMembershipRepository(session).grant(
-                user_id=user.id, org_id=org.id, role=OrgRole.OWNER
-            )
-            ws = await WorkspaceRepository(session).create(org_id=org.id, name="Personal")
-            await MembershipRepository(session).grant(
-                user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
-            )
-            from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
-            from cubebox.models.agent_config import AgentConfig
-
-            agent_cfg = AgentConfig(org_id=org.id, workspace_id=ws.id)
-            session.add(agent_cfg)
-            await enroll_workspace_in_org_wide_mcp(
-                session, org_id=org.id, workspace_id=ws.id, actor_user_id=user.id
-            )
-            await session.flush()
-        except Exception as exc:
-            logger.exception(
-                "register_bootstrap failed for user {} ({}): {!r}",
-                user.email,
-                user.id,
-                exc,
-            )
-            await self._best_effort_cleanup_register(user=user, org=org, session=session)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="REGISTER_BOOTSTRAP_FAILED",
-            ) from exc
-
-        user._default_workspace_id = ws.id
-        await self._install_preinstalled_skills_safe(session, org_id=org.id, user_id=user.id)
+        """multi_tenant: register creates the user only; onboarding bootstraps."""
+        user._default_workspace_id = None
 
     async def _on_register_single_tenant(
         self,
@@ -202,12 +228,8 @@ class UserManager(BaseUserManager[User, str]):
         from collections.abc import Callable, Coroutine
         from typing import Any
 
-        from cubebox.models import OrgRole, Role
-        from cubebox.repositories import (
-            MembershipRepository,
-            OrganizationMembershipRepository,
-            WorkspaceRepository,
-        )
+        from cubebox.models import OrgRole
+        from cubebox.repositories import OrganizationMembershipRepository
 
         # Type aliases to satisfy mypy — the callables are injected for testability
         _acquire_fn: Callable[[AsyncSession], Coroutine[Any, Any, bool]] = acquire_setup_lock  # type: ignore[assignment]
@@ -243,38 +265,20 @@ class UserManager(BaseUserManager[User, str]):
                 detail="REGISTER_BOOTSTRAP_FAILED",
             )
 
-        ws = None
         try:
             await OrganizationMembershipRepository(session).grant(
                 user_id=user.id, org_id=singleton_org_id, role=OrgRole.MEMBER
             )
-            ws = await WorkspaceRepository(session).create(org_id=singleton_org_id, name="Personal")
-            await MembershipRepository(session).grant(
-                user_id=user.id, workspace_id=ws.id, role=Role.ADMIN
+            ws = await _bootstrap_workspace_in_org(
+                session, user_id=user.id, org_id=singleton_org_id, workspace_name="Personal"
             )
-            from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
-            from cubebox.models.agent_config import AgentConfig
-
-            agent_cfg = AgentConfig(org_id=singleton_org_id, workspace_id=ws.id)
-            session.add(agent_cfg)
-            await enroll_workspace_in_org_wide_mcp(
-                session,
-                org_id=singleton_org_id,
-                workspace_id=ws.id,
-                actor_user_id=user.id,
-            )
-            await session.flush()
         except Exception as exc:
             await self._best_effort_cleanup_register(user=user, org=None, session=session)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="REGISTER_BOOTSTRAP_FAILED",
             ) from exc
-
         user._default_workspace_id = ws.id
-        await self._install_preinstalled_skills_safe(
-            session, org_id=singleton_org_id, user_id=user.id
-        )
 
     async def _best_effort_cleanup_register(
         self,
@@ -299,18 +303,6 @@ class UserManager(BaseUserManager[User, str]):
             await session.commit()
         except Exception:
             await session.rollback()
-
-    async def _install_preinstalled_skills_safe(
-        self, session: AsyncSession, *, org_id: str, user_id: str
-    ) -> None:
-        """Wrap _install_preinstalled_skills; log and swallow on failure."""
-        try:
-            await _install_preinstalled_skills(session, org_id=org_id, user_id=user_id)
-        except Exception:
-            logger.warning(
-                "Failed to auto-install preinstalled skills for new org {}; skipping",
-                org_id,
-            )
 
     async def on_after_login(
         self,
