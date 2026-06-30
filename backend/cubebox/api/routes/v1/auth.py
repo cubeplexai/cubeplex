@@ -59,10 +59,11 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_t("register_user_already_exists"),
         ) from None
-    except InvalidPasswordException:
+    except InvalidPasswordException as exc:
+        errors = exc.reason if isinstance(exc.reason, list) else [str(exc.reason)]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_t("register_invalid_password"),
+            detail={"code": "weak_password", "errors": errors},
         ) from None
     default_ws = getattr(user, "_default_workspace_id", None)
     return {
@@ -274,7 +275,7 @@ async def delete_me_avatar(
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=8)
+    new_password: str
 
 
 @router.post("/change-password")
@@ -294,10 +295,11 @@ async def change_password(
         )
     try:
         await user_manager.validate_password(body.new_password, user)
-    except InvalidPasswordException:
+    except InvalidPasswordException as exc:
+        errors = exc.reason if isinstance(exc.reason, list) else [str(exc.reason)]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid_password",
+            detail={"code": "weak_password", "errors": errors},
         ) from None
     user.hashed_password = user_manager.password_helper.hash(body.new_password)
     session = user_manager.user_db.session  # type: ignore[attr-defined]
