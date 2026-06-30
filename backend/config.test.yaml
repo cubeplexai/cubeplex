@@ -100,6 +100,14 @@ test:
     rate_limit:
       login_per_minute: 1000
       register_per_minute: 1000
+    password_policy: "high"
+    email_verification:
+      enabled: "true"
+      code_length: 6
+      code_ttl_seconds: 600
+      max_attempts: 5
+      resend_cooldown_seconds: 60
+      rate_limit_per_hour: 100
 
   # Parsers: docling-serve URL comes from DOCLING_URL env when running e2e.
   # Non-e2e unit tests use httpx MockTransport and never hit this URL.

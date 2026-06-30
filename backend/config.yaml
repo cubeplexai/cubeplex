@@ -286,6 +286,14 @@ default:
     rate_limit:
       login_per_minute: 5
       register_per_minute: 3
+    password_policy: "high"   # "high" | "low", default high. ENV: CUBEBOX_AUTH__PASSWORD_POLICY
+    email_verification:
+      enabled: "auto"   # auto|true|false; auto = enabled iff email.backend == "smtp"
+      code_length: 6          # OTP digit count
+      code_ttl_seconds: 600   # OTP lifetime
+      max_attempts: 5         # wrong guesses before code is invalidated
+      resend_cooldown_seconds: 60  # min wait between resend calls
+      rate_limit_per_hour: 10      # per-email send cap (independent of REGISTER_LIMIT)
 
   # Email (verification + password reset). `log` backend just prints the
   # rendered email to stdout (dev); `smtp` actually sends via aiosmtplib.
