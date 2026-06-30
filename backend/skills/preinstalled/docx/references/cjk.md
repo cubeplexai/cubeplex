@@ -97,3 +97,14 @@ The `official` set targets the Chinese government document standard
 Build it with `Doc("official", lang="zh-CN")`. Page numbers via
 `page_numbers()` (centered footer). The substitution note above applies — say so
 if exactness is required. Full worked example in `themes/official.md`.
+
+## Fonts travel with the document
+
+Noto CJK SC / LXGW WenKai are **not installed on a stock Mac or Windows box**.
+Without embedding, Word silently substitutes (宋体 → 宋体/PingFang, 黑体 → a
+fallback) and the carefully chosen 黑/楷/仿宋 ladder collapses — or, if no CJK
+fallback resolves, you get tofu (□). `save()` solves this: it subsets each used
+font to just the glyphs in the document and embeds the obfuscated `.odttf` parts
+into the package, so the file renders the same everywhere. This is on by default;
+see SKILL.md "Non-negotiables". Subsetting keeps the size sane (a few hundred KB
+per CJK face rather than ~16 MB).

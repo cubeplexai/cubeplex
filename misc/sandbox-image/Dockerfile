@@ -129,6 +129,7 @@ RUN python3 -m venv /opt/venv \
         httpx \
         aiohttp \
         python-docx \
+        fonttools \
         pdf2image \
         reportlab \
         pdfplumber \
