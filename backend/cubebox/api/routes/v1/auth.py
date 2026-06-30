@@ -148,25 +148,15 @@ async def _me_payload(
 ) -> dict[str, object]:
     from sqlalchemy import func, select
 
-    from cubebox.models import Organization, OrganizationMembership
+    from cubebox.models import Membership, OrganizationMembership
 
-    mode = getattr(request.app.state, "deployment_mode", "single_tenant")
-    needs_setup = False
-    if mode == "single_tenant":
-        org_count = (
-            await session.execute(select(func.count()).select_from(Organization))
-        ).scalar_one()
-        if int(org_count) == 0:
-            needs_setup = True
-        else:
-            has_membership = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(OrganizationMembership)
-                    .where(OrganizationMembership.user_id == user.id)  # type: ignore[arg-type]
-                )
-            ).scalar_one()
-            needs_setup = int(has_membership) == 0
+    # needs_onboarding = user has no workspace membership yet (pending wizard).
+    ws_membership_count = (
+        await session.execute(
+            select(func.count()).select_from(Membership).where(Membership.user_id == user.id)  # type: ignore[arg-type]
+        )
+    ).scalar_one()
+    needs_onboarding = int(ws_membership_count) == 0
     membership_rows = (
         (
             await session.execute(
@@ -189,7 +179,7 @@ async def _me_payload(
         "avatar_style": user.avatar_style,
         "language": user.language,
         "is_verified": user.is_verified,
-        "needs_org_setup": needs_setup,
+        "needs_onboarding": needs_onboarding,
         "org_memberships": org_memberships,
     }
 
