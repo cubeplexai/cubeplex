@@ -45,7 +45,13 @@
     "notAMember": "不是成员？",
     "ssoError": "SSO 登录失败",
     "backToLogin": "返回登录",
-    "loggingIn": "正在登录…"
+    "loggingIn": "正在登录…",
+    "verifyOtpTitle": "输入验证码",
+    "verifyOtpSubtitle": "我们已将 6 位验证码发送至 {email}",
+    "verifying": "验证中…",
+    "verify": "验证",
+    "resendCode": "重新发送",
+    "resendIn": "{seconds} 秒后重新发送"
   },
   "sidebar": {
     "newChat": "新建对话",
