@@ -100,9 +100,14 @@ test:
     rate_limit:
       login_per_minute: 1000
       register_per_minute: 1000
-    password_policy: "high"
+    # Low policy + verification=auto (False, since email.backend=log) keep the
+    # existing fixture suite green (fixtures use safe=False programmatic user
+    # creation with weak passwords + unverified login). OTP + high-policy
+    # behavior is exercised per-test via monkeypatch in test_register_otp_flow
+    # / test_password_policy_e2e.
+    password_policy: "low"
     email_verification:
-      enabled: "true"
+      enabled: "auto"
       code_length: 6
       code_ttl_seconds: 600
       max_attempts: 5
