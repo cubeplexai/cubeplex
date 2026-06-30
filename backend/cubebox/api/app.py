@@ -524,6 +524,7 @@ def create_app(
         me_api_keys_router,
         memory_router,
         model_presets,
+        onboarding,
         public_artifacts,
         shares,
         system,
@@ -555,6 +556,7 @@ def create_app(
     )
 
     app.include_router(system.router, prefix="/api/v1")
+    app.include_router(onboarding.router, prefix="/api/v1")
     app.include_router(workspaces_router, prefix="/api/v1")
     # Search router goes first: it owns `/conversations/search`, while the
     # conversations router declares `/conversations/{conversation_id}` which
