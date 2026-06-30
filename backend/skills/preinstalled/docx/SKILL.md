@@ -98,6 +98,13 @@ field — Word refreshes on open) · `page_numbers()` · `page_break()` ·
   Normal-only document.
 - **CJK always gets its East-Asian font** (the builder sets it) — verify with the
   checker; tofu is an error, not a warning.
+- **Fonts are embedded on save by default.** `save()` subsets the fonts the
+  document actually uses (CJK faces included) and embeds them into the `.docx`,
+  so it renders identically on a machine that lacks Noto / LXGW (e.g. a stock
+  Mac opening it in Word — no silent fallback to 宋体/PingFang, no tofu). Adds
+  ~0.3–1.5 MB for CJK docs. Disable only if you have a reason: `Doc(...,
+  embed_fonts=False)` or `save(path, embed=False)`. Embedding is best-effort —
+  if `fonttools` or a font file is missing it warns and still saves the doc.
 - **Never deliver without a clean checker run.** No placeholder text, no empty
   headings, no `[TODO]`.
 - Output is standard editable `.docx` (Word / WPS / LibreOffice). This skill is

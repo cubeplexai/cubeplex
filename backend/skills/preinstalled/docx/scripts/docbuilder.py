@@ -152,9 +152,11 @@ def theme_catalog() -> str:
 class Doc:
     """A themed .docx document. Build top to bottom; one style set per doc."""
 
-    def __init__(self, theme: str = "corporate", lang: str = "en-US") -> None:
+    def __init__(self, theme: str = "corporate", lang: str = "en-US",
+                 embed_fonts: bool = True) -> None:
         self.t = THEMES.get(theme, THEMES["corporate"])
         self.lang = lang
+        self.embed_fonts = embed_fonts
         self.doc = Document()
         self._page_setup()
         self._doc_defaults()
@@ -558,13 +560,23 @@ class Doc:
         self._text_width_emu = sec.page_width - sec.left_margin - sec.right_margin
         return self
 
-    def save(self, path):
+    def save(self, path, embed: bool | None = None):
         import os
 
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
         self.doc.save(path)
+        do_embed = self.embed_fonts if embed is None else embed
+        if do_embed:
+            try:
+                from font_embed import embed_used_fonts
+
+                embed_used_fonts(path, self.t)
+            except Exception as e:  # embedding is best-effort; never lose the doc
+                import sys
+
+                print(f"warn: font embedding skipped ({e})", file=sys.stderr)
         return path
 
 
