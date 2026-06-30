@@ -4,6 +4,7 @@ export interface RegisterResult {
   id: string
   email: string
   default_workspace_id: string
+  verification_required: boolean
 }
 
 export interface OrgMembership {
@@ -21,7 +22,7 @@ export interface MeResult {
   avatar_style: string | null
   language: string
   is_verified: boolean
-  needs_org_setup?: boolean
+  needs_onboarding?: boolean
   org_memberships?: OrgMembership[]
 }
 
@@ -73,14 +74,20 @@ export async function updateProfile(
   return (await res.json()) as MeResult
 }
 
-export async function verifyEmail(client: ApiClient, token: string): Promise<void> {
-  const res = await client.post('/api/v1/auth/verify', { token })
+export async function verifyOtp(
+  client: ApiClient,
+  email: string,
+  code: string,
+): Promise<{ ok: true }> {
+  const res = await client.post('/api/v1/auth/verify-otp', { email, code })
   if (!res.ok) throw await toApiError(res)
+  return { ok: true }
 }
 
-export async function requestVerifyToken(client: ApiClient, email: string): Promise<void> {
-  const res = await client.post('/api/v1/auth/request-verify-token', { email })
+export async function resendOtp(client: ApiClient, email: string): Promise<{ ok: boolean }> {
+  const res = await client.post('/api/v1/auth/resend-otp', { email })
   if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as { ok: boolean }
 }
 
 export interface UploadAvatarParams {

@@ -13,7 +13,6 @@ export function useDeploymentMode() {
   )
   return {
     mode: data?.deployment_mode,
-    needsOrgSetup: data?.needs_org_setup ?? false,
     version: data?.version,
     sandboxEnabled: data?.sandbox_enabled ?? false,
     loading: isLoading,
