@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubebox/core'
+import { validatePassword } from '@cubebox/core/auth'
+import { isInviteAcceptPath } from '@/lib/invitePath'
 
 export function RegisterForm({ nextPath = '/' }: { nextPath?: string }) {
   const t = useTranslations('auth')
@@ -20,18 +22,36 @@ export function RegisterForm({ nextPath = '/' }: { nextPath?: string }) {
     setError(null)
     setSubmitting(true)
     try {
+      // Pre-validate password (UX only; backend is authoritative)
+      const pwCheck = validatePassword(password, 'high')
+      if (!pwCheck.ok) {
+        setError(t('passwordTooWeak'))
+        return
+      }
+
       const client = createApiClient('')
       const result = await registerUser(client, email, password, displayName || undefined)
-      // Register endpoint does NOT set an auth cookie — auto log-in here.
+      const safeNext = nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : '/'
+
+      if (result.verification_required) {
+        router.push(
+          `/verify-otp?email=${encodeURIComponent(email)}&next=${encodeURIComponent(safeNext)}`,
+        )
+        return
+      }
+
+      // Verification off: register set is_verified=true. Establish session + route.
       await loginUser(client, email, password)
       await useAuthStore.getState().loadMe(client)
-      // M9: in single_tenant mode the first registrant is a pending owner with
-      // no workspace yet — backend returns default_workspace_id="". Bounce them
-      // to /setup; the (app) layout would 404 on /w/ otherwise.
-      if (!result.default_workspace_id) {
-        router.push('/setup')
+      const me = useAuthStore.getState().user
+      if (isInviteAcceptPath(safeNext)) {
+        router.push(safeNext)
+      } else if (me?.needs_onboarding) {
+        router.push('/onboarding')
       } else {
-        router.push(`/w/${result.default_workspace_id}`)
+        router.push(
+          result.default_workspace_id ? `/w/${result.default_workspace_id}` : '/onboarding',
+        )
       }
     } catch (err) {
       setError((err as Error).message)

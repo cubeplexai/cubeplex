@@ -14,6 +14,10 @@ interface SsoRequiredState {
   loginUrl: string
 }
 
+interface EmailNotVerifiedState {
+  message: string
+}
+
 /**
  * Extracts the SSO required signal from a 403 response. Backend returns:
  *   { "detail": { "code": "sso_required", "message": "...", "login_url": "..." } }
@@ -29,6 +33,12 @@ function extractSsoRequired(err: unknown): SsoRequiredState | null {
   return { message: err.message, loginUrl }
 }
 
+function extractEmailNotVerified(err: unknown): EmailNotVerifiedState | null {
+  if (!(err instanceof ApiError) || err.status !== 403) return null
+  if (err.code !== 'email_not_verified') return null
+  return { message: err.message }
+}
+
 export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
   const t = useTranslations('auth')
   const router = useRouter()
@@ -38,12 +48,14 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [ssoRequired, setSsoRequired] = useState<SsoRequiredState | null>(null)
+  const [emailNotVerified, setEmailNotVerified] = useState<EmailNotVerifiedState | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setSsoRequired(null)
+    setEmailNotVerified(null)
     setSubmitting(true)
     try {
       const client = createApiClient('')
@@ -55,9 +67,14 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
       const ssoState = extractSsoRequired(err)
       if (ssoState) {
         setSsoRequired(ssoState)
-      } else {
-        setError((err as Error).message)
+        return
       }
+      const emailState = extractEmailNotVerified(err)
+      if (emailState) {
+        setEmailNotVerified(emailState)
+        return
+      }
+      setError((err as Error).message)
     } finally {
       setSubmitting(false)
     }
@@ -106,6 +123,19 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
             className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
           >
             {t('continueToSSO')}
+          </Link>
+        </div>
+      ) : emailNotVerified ? (
+        <div
+          role="alert"
+          className="space-y-2 rounded-md border border-border bg-muted/40 p-3 text-sm"
+        >
+          <div>{emailNotVerified.message}</div>
+          <Link
+            href={`/verify-otp?email=${encodeURIComponent(email)}&next=${encodeURIComponent(nextPath)}`}
+            className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+          >
+            {t('verifyEmailNow')}
           </Link>
         </div>
       ) : (

@@ -51,7 +51,9 @@
     "verifying": "验证中…",
     "verify": "验证",
     "resendCode": "重新发送",
-    "resendIn": "{seconds} 秒后重新发送"
+    "resendIn": "{seconds} 秒后重新发送",
+    "passwordTooWeak": "密码至少需要10个字符，且包含大小写字母、数字和符号。",
+    "verifyEmailNow": "立即验证邮箱"
   },
   "sidebar": {
     "newChat": "新建对话",
@@ -2076,8 +2078,9 @@
   },
   "verificationBanner": {
     "message": "请验证您的邮箱地址。",
-    "resend": "重新发送验证邮件",
-    "sent": "验证邮件已发送。"
+    "resend": "重新发送验证码",
+    "resendIn": "{seconds} 秒后重新发送",
+    "enterCode": "输入验证码"
   },
   "im": {
     "back": "返回",
