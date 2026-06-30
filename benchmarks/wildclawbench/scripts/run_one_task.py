@@ -157,7 +157,7 @@ def main() -> int:
     ap.add_argument("--task", required=True, help="path to the task .md")
     ap.add_argument("--repo", required=True, help="WildClawBench repo root (for skills/workspace resolution)")
     ap.add_argument("--data", required=True, help="dir with this task's exec/ and gt/ data")
-    ap.add_argument("--image", default="hub.sensedeal.vip/library/wildclawbench-ubuntu:v1.3")
+    ap.add_argument("--image", default="hub.sensedeal.vip/library/wildclawbench-ubuntu:v1.3-browser")
     ap.add_argument("--model-key", default="max")
     ap.add_argument("--max-agent-seconds", type=float, default=900.0)
     ap.add_argument("--config", default=str(WCB.parents[1] / "backend/config.development.local.yaml"))
@@ -172,7 +172,12 @@ def main() -> int:
     judge_env = {
         "OPENROUTER_API_KEY": or_key,
         "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
-        "JUDGE_MODEL": "openai/gpt-5.4",
+        # WildClawBench defaults JUDGE_MODEL to openai/gpt-5.4, but the tasks'
+        # grade() calls use max_tokens=256, which gpt-5.4 (a reasoning model)
+        # rejects (400 Invalid max_output_tokens). Use a strong vision model
+        # that accepts max_tokens instead. NOTE: this diverges from the
+        # benchmark's default judge — disclose when publishing numbers.
+        "JUDGE_MODEL": "anthropic/claude-sonnet-4-6",
         "TMP_WORKSPACE": WORK,
     }
     print(f"[wcb] task={task.task_id} model={args.model_key} judge_key={'set' if or_key else 'MISSING'}")
@@ -187,13 +192,16 @@ def main() -> int:
         print(f"[wcb] default_image -> {args.image}")
 
         # 2. persistent workspace + /tmp_workspace symlink (exec also spins sandbox up).
-        #    Also point pip at the egress proxy (the sandbox has no proxy env, so the
-        #    agent's pip can't reach PyPI otherwise — it thrashes retrying). pip reads
-        #    /etc/pip.conf regardless of shell, so this fixes the agent's pip too.
+        #    The wcb image ships /tmp_workspace as a REAL directory; `ln -sfn` on an
+        #    existing dir creates the link INSIDE it (→ /tmp_workspace/.wcb) instead of
+        #    replacing it, so grade's /tmp_workspace/gt/gt.png wouldn't resolve. Remove
+        #    the dir first, then symlink. Also point pip at the egress proxy (the sandbox
+        #    has no proxy env, so the agent's pip can't reach PyPI otherwise — it
+        #    thrashes retrying). pip reads /etc/pip.conf regardless of shell.
         proxy = PROXY
         cube.exec(
-            f"rm -rf {WORK} && mkdir -p {WORK}/input {WORK}/results {WORK}/gt && "
-            f"ln -sfn {WORK} /tmp_workspace && "
+            f"rm -rf {WORK} /tmp_workspace && mkdir -p {WORK}/input {WORK}/results {WORK}/gt && "
+            f"ln -s {WORK} /tmp_workspace && "
             f"printf '[global]\\nproxy = {proxy}\\n' > /etc/pip.conf && echo ready",
             timeout=180,
         )
@@ -233,11 +241,16 @@ def main() -> int:
         n_tools = sum(1 for e in events if e.get("type") == "tool_call")
         print(f"[wcb] agent done in {time.time()-t0:.0f}s, {len(events)} events, {n_tools} tool calls")
 
-        # 5. transcript + gt + grade scaffolding
+        # 5. transcript + gt + grade scaffolding.
+        #    Re-upload gt RIGHT BEFORE grading (not with the input): the agent may
+        #    have moved/deleted files under /tmp_workspace while solving, so gt
+        #    uploaded at step 3 isn't guaranteed present at grade time. Also
+        #    ensure the results dir exists (grade reads results/ from it).
         records = sse_to_openclaw_records(events, prompt=task.prompt)
         tpath = out_dir / "transcript.jsonl"
         write_openclaw_jsonl(records, tpath)
         cube.upload(tpath, f"{WORK}/transcript.jsonl")
+        cube.exec(f"mkdir -p {WORK}/gt {WORK}/results", timeout=60)
         for f in sorted((data / "gt").rglob("*")):
             if f.is_file():
                 rel = f.relative_to(data / "gt")
@@ -255,16 +268,24 @@ def main() -> int:
         cube.upload_bytes(grade_runner.encode(), "_grade_runner.py", f"{WORK}/_grade_runner.py")
         print("[wcb] uploaded gt + transcript + grade runner")
 
-        # 6. install grade deps + run grade()
+        # 6. install grade deps + run grade().
+        #    The sandbox ships a default http_proxy/https_proxy (opensandbox-injected,
+        #    100.104.x:7897) that can't reach OpenRouter — and httpx honors the
+        #    lowercase vars. Set BOTH cases to our working proxy so the LLM judge
+        #    doesn't hang until timeout (→ keyword fallback → understated score).
+        grade_proxy_env = {
+            "HTTP_PROXY": PROXY, "HTTPS_PROXY": PROXY,
+            "http_proxy": PROXY, "https_proxy": PROXY,
+        }
         print("[wcb] installing grade deps + grading...")
         cube.exec(
             "pip install -q openai pillow numpy 2>&1 | tail -1 || true",
-            envs={"HTTP_PROXY": PROXY, "HTTPS_PROXY": PROXY},
+            envs={**grade_proxy_env},
             timeout=300,
         )
         r = cube.exec(
             f"cd {WORK} && python3 _grade_runner.py",
-            envs=judge_env,
+            envs={**judge_env, **grade_proxy_env},
             timeout=600,
         )
         raw = r.get("output", "")
