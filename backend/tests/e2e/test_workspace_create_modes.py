@@ -32,12 +32,18 @@ async def test_single_tenant_forces_singleton_org(
         json={"email": email, "password": "password123"},
     )
     await _login(client, email)
-    setup = await client.post(
-        "/api/v1/system/setup",
-        json={"org_name": "Acme", "slug": "acme"},
+    # Onboarding bootstraps the singleton org + first workspace.
+    onboarding = await client.post(
+        "/api/v1/onboarding",
+        json={"org_name": "Acme", "org_slug": "acme", "workspace_name": "Personal"},
     )
-    assert setup.status_code == 201, f"setup failed: {setup.status_code} {setup.text}"
-    real_org_id = setup.json()["org_id"]
+    assert onboarding.status_code == 201, (
+        f"onboarding failed: {onboarding.status_code} {onboarding.text}"
+    )
+    # Resolve the singleton org id from /me (onboarding returns workspace_id only).
+    me = await client.get("/api/v1/auth/me")
+    assert me.status_code == 200, me.text
+    real_org_id = me.json()["org_memberships"][0]["org_id"]
 
     # Submit a fake org_id; backend should ignore and use singleton.
     resp = await client.post(
