@@ -1,5 +1,0 @@
-Welcome to cubebox!
-
-Click the link below to verify your email:
-
-{{ verify_url }}

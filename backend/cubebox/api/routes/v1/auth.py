@@ -14,10 +14,12 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi_users.authentication import Strategy
 from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists, UserNotExists
 from fastapi_users.schemas import BaseUser, BaseUserCreate
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +27,7 @@ from cubebox.api.middleware.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limit
 from cubebox.auth.dependencies import current_active_user
 from cubebox.auth.jwt import auth_backend
 from cubebox.auth.users import UserManager, fastapi_users, get_user_manager
+from cubebox.config import config
 from cubebox.db import get_session
 from cubebox.i18n import get_locale, get_translator
 from cubebox.models import User
@@ -50,7 +53,7 @@ async def register(
     body: Annotated[UserCreate, Body()],
     user_manager: Annotated[UserManager, Depends(get_user_manager)],
     locale: Annotated[str, Depends(get_locale)],
-) -> dict[str, str]:
+) -> dict[str, object]:
     _t = get_translator(locale)
     try:
         user = await user_manager.create(body, safe=True, request=request)
@@ -65,12 +68,108 @@ async def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "weak_password", "errors": errors},
         ) from None
+    from cubebox.auth.email_otp import is_email_verification_enabled, issue_otp
+
+    verification_required = False
+    if is_email_verification_enabled():
+        verification_required = True
+        try:
+            await issue_otp(user.email)
+        except Exception:
+            # OTP send failure must not leak; the user can resend from /verify-otp.
+            logger.warning("Failed to issue OTP for {}", user.email)
     default_ws = getattr(user, "_default_workspace_id", None)
     return {
         "id": user.id,
         "email": user.email,
         "default_workspace_id": default_ws or "",
+        "verification_required": verification_required,
     }
+
+
+class VerifyOtpRequest(BaseModel):
+    email: str
+    code: str
+
+
+class ResendOtpRequest(BaseModel):
+    email: str
+
+
+_OTP_VERIFY_LIMIT = f"{config.get('auth.rate_limit.login_per_minute', 5)}/minute"
+_OTP_RESEND_LIMIT = f"{config.get('auth.rate_limit.login_per_minute', 5)}/minute"
+
+
+@router.post("/verify-otp")
+@limiter.limit(_OTP_VERIFY_LIMIT)
+async def verify_otp_endpoint(
+    request: Request,
+    body: Annotated[VerifyOtpRequest, Body()],
+    user_manager: Annotated[UserManager, Depends(get_user_manager)],
+    strategy: Annotated[Strategy[User, str], Depends(auth_backend.get_strategy)],
+) -> JSONResponse:
+    from cubebox.auth.email_otp import verify_otp as _verify_otp
+
+    result = await _verify_otp(body.email, body.code)
+    if result.ok:
+        # On success, also issue the auth cookie so the verify-otp page
+        # establishes the session without needing the password.
+        try:
+            user = await user_manager.get_by_email(body.email)
+            if user is not None and user.is_active:
+                token = await strategy.write_token(user)
+                response = JSONResponse(content={"ok": True})
+                transport = auth_backend.transport
+                # CookieTransport attributes — safe at runtime despite Transport base type.
+                response.set_cookie(
+                    key=getattr(transport, "cookie_name", "cubebox_auth"),
+                    value=token,
+                    max_age=getattr(transport, "cookie_max_age", None),
+                    path=getattr(transport, "cookie_path", "/"),
+                    domain=getattr(transport, "cookie_domain", None),
+                    secure=getattr(transport, "cookie_secure", False),
+                    httponly=getattr(transport, "cookie_httponly", True),
+                    samesite=getattr(transport, "cookie_samesite", "lax"),
+                )
+                return response
+        except UserNotExists:
+            pass
+        return JSONResponse(content={"ok": True})
+    code_map = {
+        "invalid_otp": "invalid_otp",
+        "expired_or_unknown": "otp_expired",
+        "max_attempts_reached": "otp_max_attempts",
+    }
+    detail: dict[str, object] = {"code": code_map.get(result.reason or "", "otp_expired")}
+    if result.remaining_attempts is not None:
+        detail["remaining_attempts"] = result.remaining_attempts
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+@router.post("/resend-otp")
+@limiter.limit(_OTP_RESEND_LIMIT)
+async def resend_otp_endpoint(
+    request: Request,
+    body: Annotated[ResendOtpRequest, Body()],
+) -> dict[str, bool]:
+    from cubebox.auth.email_otp import _CooldownError, _RateLimitError, issue_otp
+
+    try:
+        await issue_otp(body.email)
+    except _CooldownError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": "otp_cooldown"},
+        ) from None
+    except _RateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"code": "otp_rate_limited"},
+        ) from None
+    except Exception:
+        logger.warning("Failed to resend OTP for {}", body.email)
+    # Always return ok — no email enumeration.
+    return {"ok": True}
 
 
 @router.post("/login")
@@ -92,6 +191,14 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=_t("login_bad_credentials"),
+        )
+
+    from cubebox.auth.email_otp import is_email_verification_enabled
+
+    if is_email_verification_enabled() and not user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "email_not_verified", "message": _t("login_email_not_verified")},
         )
 
     # SSO enforcement: if the user belongs to any org with an active SSO
@@ -610,4 +717,3 @@ async def delete_account(
 # on login silently disappears.
 router.include_router(fastapi_users.get_auth_router(auth_backend))
 router.include_router(fastapi_users.get_reset_password_router(), prefix="")
-router.include_router(fastapi_users.get_verify_router(UserRead), prefix="")
