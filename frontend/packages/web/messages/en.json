@@ -51,7 +51,9 @@
     "verifying": "Verifying…",
     "verify": "Verify",
     "resendCode": "Resend code",
-    "resendIn": "Resend in {seconds}s"
+    "resendIn": "Resend in {seconds}s",
+    "passwordTooWeak": "Password must be at least 10 characters with uppercase, lowercase, digit, and symbol.",
+    "verifyEmailNow": "Verify email now"
   },
   "sidebar": {
     "newChat": "New Chat",
@@ -2076,8 +2078,9 @@
   },
   "verificationBanner": {
     "message": "Please verify your email address.",
-    "resend": "Resend verification email",
-    "sent": "Verification email sent."
+    "resend": "Resend code",
+    "resendIn": "Resend in {seconds}s",
+    "enterCode": "Enter code"
   },
   "im": {
     "back": "Back",

@@ -16,6 +16,12 @@
       "import": "./src/api/index.ts",
       "default": "./src/api/index.ts"
     },
+    "./auth": {
+      "types": "./src/auth/index.ts",
+      "source": "./src/auth/index.ts",
+      "import": "./src/auth/index.ts",
+      "default": "./src/auth/index.ts"
+    },
     "./stores": {
       "types": "./src/stores/index.ts",
       "source": "./src/stores/index.ts",
