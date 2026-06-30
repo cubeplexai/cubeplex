@@ -207,17 +207,8 @@ class UserManager(BaseUserManager[User, str]):
             user_agent=request.headers.get("user-agent") if request else None,
         )
 
-        # Only send the initial verification email for self-registered
-        # (password) users. SSO/social-login provisioning creates users with
-        # is_verified=True (the IdP attested the email), so request_verify
-        # would raise UserAlreadyVerified — and there's nothing to verify.
-        if not user.is_verified:
-            try:
-                await self.request_verify(user, request)
-            except Exception:
-                logger.opt(exception=True).warning(
-                    "Failed to send initial verification email to {}", user.email
-                )
+        # Verification email is no longer sent here — the register endpoint
+        # issues an OTP when email verification is enabled (Task 5).
 
     async def _on_register_multi_tenant(self, *, user: User, session: AsyncSession) -> None:
         """multi_tenant: register creates the user only; onboarding bootstraps."""
@@ -354,19 +345,7 @@ class UserManager(BaseUserManager[User, str]):
     async def on_after_request_verify(
         self, user: User, token: str, request: Request | None = None
     ) -> None:
-        from cubebox.services.email import get_email_service
-
-        base_url = config.get("frontend_base_url", "http://localhost:3000")
-        verify_url = f"{base_url}/verify-email?token={token}"
-        try:
-            await get_email_service().send(
-                to=user.email,
-                subject="Verify your cubebox email",
-                template="email_verification",
-                context={"verify_url": verify_url},
-            )
-        except Exception:
-            logger.warning("Failed to send verification email to {}", user.email)
+        """No-op — magic-link verification was replaced by OTP (Task 5)."""
 
 
 async def get_user_manager(
