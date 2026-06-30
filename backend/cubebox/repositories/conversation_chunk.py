@@ -1,12 +1,17 @@
 """Repository for conversation_chunks (scoped by org/workspace/user)."""
 
+import logging
 from typing import Any
 
+from psycopg.errors import UniqueViolation
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models.conversation_chunk import ConversationChunk
 from cubebox.repositories.base import ScopedRepository
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationChunkRepository(ScopedRepository[ConversationChunk]):
@@ -37,6 +42,11 @@ class ConversationChunkRepository(ScopedRepository[ConversationChunk]):
         DELETE is scope-filtered so a wrong-scope call cannot wipe another
         user's chunks; INSERT force-sets scope columns so they cannot be
         leaked across workspaces.
+
+        A duplicate-key IntegrityError on commit means a concurrent worker
+        wrote chunks for the same conversation between our DELETE and INSERT.
+        That's harmless — the data is identical or a superset — so we swallow
+        it instead of crashing the worker loop.
         """
         await self.session.execute(
             delete(ConversationChunk).where(
@@ -52,7 +62,19 @@ class ConversationChunkRepository(ScopedRepository[ConversationChunk]):
             c.creator_user_id = self.user_id
             c.conversation_id = conversation_id
             self.session.add(c)
-        await self.session.commit()
+        try:
+            await self.session.commit()
+        except IntegrityError as exc:
+            if isinstance(exc.orig, UniqueViolation):
+                await self.session.rollback()
+                logger.warning(
+                    "replace_for_conversation skipped for %s: concurrent worker wrote "
+                    "chunks first (UniqueViolation on ix_chunks_conversation). "
+                    "The existing chunks are identical or a superset.",
+                    conversation_id,
+                )
+                return
+            raise
 
     async def get_by_ids(self, ids: list[str]) -> list[ConversationChunk]:
         if not ids:

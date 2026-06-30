@@ -42,6 +42,36 @@ class EmbeddingJobRepository(ScopedRepository[EmbeddingJob]):
         seq_lo: int = 0,
         seq_hi: int = 2**62,
     ) -> EmbeddingJob:
+        """Enqueue an indexing job, merging with an existing pending/running job
+        for the same conversation when one already exists.
+
+        Merging prevents duplicate jobs from racing to DELETE-then-INSERT chunks
+        and violating the ``ix_chunks_conversation`` unique constraint.
+        """
+        # Check for an existing pending/running job for this conversation. If
+        # one exists, bump its seq_hi to cover the union of both windows and
+        # skip inserting a duplicate.  FOR UPDATE serialises concurrent callers
+        # so exactly one row survives.
+        stmt = (
+            select(EmbeddingJob)
+            .where(
+                EmbeddingJob.conversation_id == conversation_id,  # type: ignore[arg-type]
+                EmbeddingJob.org_id == self.org_id,  # type: ignore[arg-type]
+                EmbeddingJob.workspace_id == self.workspace_id,  # type: ignore[arg-type]
+                EmbeddingJob.creator_user_id == self.user_id,  # type: ignore[arg-type]
+                EmbeddingJob.state.in_(  # type: ignore[attr-defined]
+                    [EmbeddingJobState.pending, EmbeddingJobState.running]
+                ),
+            )
+            .with_for_update()
+        )
+        existing = (await self.session.execute(stmt)).scalar_one_or_none()
+        if existing is not None:
+            existing.seq_hi = max(existing.seq_hi, seq_hi)
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+
         job = EmbeddingJob(
             org_id=self.org_id,
             workspace_id=self.workspace_id,
