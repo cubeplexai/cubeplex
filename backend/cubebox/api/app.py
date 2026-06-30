@@ -545,6 +545,9 @@ def create_app(
     )
     from cubebox.api.routes.v1 import avatars as avatars_routes
     from cubebox.api.routes.v1 import (
+        org_invites as org_invites_routes,
+    )
+    from cubebox.api.routes.v1 import (
         social_login as social_login_routes,
     )
     from cubebox.api.routes.v1 import (
@@ -577,6 +580,7 @@ def create_app(
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(me_api_keys_router, prefix="/api/v1")
     app.include_router(user_events_router, prefix="/api/v1")
+    app.include_router(org_invites_routes.router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(admin_members.router, prefix="/api/v1")
     app.include_router(admin_mcp.router, prefix="/api/v1")
