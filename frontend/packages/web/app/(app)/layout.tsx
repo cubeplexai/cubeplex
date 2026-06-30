@@ -34,11 +34,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     useWorkspaceStore.getState().fetchList(client)
   }, [client])
 
-  // M9: pending owners (single_tenant first user before /setup completes) bounce to /setup.
-  const needsOrgSetup = useAuthStore((s) => s.user?.needs_org_setup)
+  // M9: pending owners (single_tenant first user before onboarding completes) bounce to /onboarding.
+  const needsOnboarding = useAuthStore((s) => s.user?.needs_onboarding)
   useEffect(() => {
-    if (needsOrgSetup) router.replace('/setup')
-  }, [needsOrgSetup, router])
+    if (needsOnboarding) router.replace('/onboarding')
+  }, [needsOnboarding, router])
 
   const pathname = usePathname()
   const drawerOpen = useMobileMenu((s) => s.isOpen)

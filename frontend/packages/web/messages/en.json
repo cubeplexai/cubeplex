@@ -2408,5 +2408,15 @@
     "statusFailed": "Failed",
     "statusStopping": "Stopping",
     "statusUnknown": "Unknown"
+  },
+  "onboarding": {
+    "onboardingTitle": "Set up your workspace",
+    "orgName": "Organization name",
+    "orgSlug": "Organization identifier",
+    "workspaceName": "Workspace name",
+    "workspaceNamePlaceholder": "e.g. My Workspace",
+    "createWorkspace": "Create workspace",
+    "createOrgAndWorkspace": "Create organization and workspace",
+    "creating": "Creating…"
   }
 }
