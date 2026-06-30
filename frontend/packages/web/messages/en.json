@@ -45,7 +45,13 @@
     "notAMember": "Not a member?",
     "ssoError": "SSO Login Failed",
     "backToLogin": "Back to login",
-    "loggingIn": "Logging you in…"
+    "loggingIn": "Logging you in…",
+    "verifyOtpTitle": "Enter verification code",
+    "verifyOtpSubtitle": "We sent a 6-digit code to {email}",
+    "verifying": "Verifying…",
+    "verify": "Verify",
+    "resendCode": "Resend code",
+    "resendIn": "Resend in {seconds}s"
   },
   "sidebar": {
     "newChat": "New Chat",
