@@ -1357,7 +1357,8 @@
     "goHome": "返回首页",
     "joined": "加入成功！",
     "joinedDescription": "您已成功加入工作区\"{workspace}\"。",
-    "openWorkspace": "打开工作区"
+    "openWorkspace": "打开工作区",
+    "joinedOrg": "您已成功加入组织！"
   },
   "panel": {
     "header": {
