@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button'
 import { SETTINGS_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
 import { cn } from '@/lib/utils'
 import { WsMembersTable } from './members/WsMembersTable'
-import { InviteSection } from './members/InviteSection'
 import { AddWsMemberDialog } from './members/AddWsMemberDialog'
 
 interface MembersPanelProps {
@@ -61,7 +60,6 @@ export function MembersPanel({ wsId }: MembersPanelProps) {
           ) : (
             <>
               <WsMembersTable wsId={wsId} />
-              <InviteSection wsId={wsId} />
             </>
           )}
         </div>
