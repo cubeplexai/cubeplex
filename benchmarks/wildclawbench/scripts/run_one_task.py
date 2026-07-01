@@ -157,7 +157,7 @@ def main() -> int:
     ap.add_argument("--task", required=True, help="path to the task .md")
     ap.add_argument("--repo", required=True, help="WildClawBench repo root (for skills/workspace resolution)")
     ap.add_argument("--data", required=True, help="dir with this task's exec/ and gt/ data")
-    ap.add_argument("--image", default="hub.sensedeal.vip/library/wildclawbench-ubuntu:v1.3-browser")
+    ap.add_argument("--image", default="hub.sensedeal.vip/library/wildclawbench-ubuntu:v1.4")
     ap.add_argument("--model-key", default="max")
     ap.add_argument("--max-agent-seconds", type=float, default=900.0)
     ap.add_argument("--config", default=str(WCB.parents[1] / "backend/config.development.local.yaml"))
