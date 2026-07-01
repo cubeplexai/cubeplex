@@ -11,3 +11,6 @@ class SystemInfoResponse(BaseModel):
     # Whether sandbox support is enabled; gates sandbox-only UI (e.g. the
     # browser live-view button) so it isn't shown where it can't work.
     sandbox_enabled: bool = False
+    # Active password policy preset ("low" | "high"). Frontend mirrors the
+    # rules for pre-submit UX; the backend remains authoritative.
+    password_policy: Literal["low", "high"] = "high"

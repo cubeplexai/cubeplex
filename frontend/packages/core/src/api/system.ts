@@ -4,6 +4,7 @@ export interface SystemInfoResponse {
   deployment_mode: 'single_tenant' | 'multi_tenant'
   version: string
   sandbox_enabled?: boolean
+  password_policy?: 'low' | 'high'
 }
 
 export async function fetchSystemInfo(client: ApiClient): Promise<SystemInfoResponse> {

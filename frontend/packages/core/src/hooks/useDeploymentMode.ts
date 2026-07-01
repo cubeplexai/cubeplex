@@ -15,6 +15,7 @@ export function useDeploymentMode() {
     mode: data?.deployment_mode,
     version: data?.version,
     sandboxEnabled: data?.sandbox_enabled ?? false,
+    passwordPolicy: data?.password_policy ?? 'high',
     loading: isLoading,
     error: error as Error | undefined,
   }

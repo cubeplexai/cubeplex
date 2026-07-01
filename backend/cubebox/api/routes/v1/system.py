@@ -20,10 +20,12 @@ async def get_system_info(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> SystemInfoResponse:
     mode = getattr(request.app.state, "deployment_mode", "single_tenant")
+    from cubebox.auth.password_policy import get_password_policy
     from cubebox.config import config
 
     return SystemInfoResponse(
         deployment_mode=mode,  # type: ignore[arg-type]
         version=_CUBEBOX_VERSION,
         sandbox_enabled=config.get("sandbox.enabled", False),
+        password_policy=get_password_policy(),  # type: ignore[arg-type]
     )

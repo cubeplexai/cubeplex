@@ -52,7 +52,7 @@
     "verify": "Verify",
     "resendCode": "Resend code",
     "resendIn": "Resend in {seconds}s",
-    "passwordTooWeak": "Password must be at least 10 characters with uppercase, lowercase, digit, and symbol.",
+    "passwordTooWeak": "Password doesn't meet the strength requirements.",
     "verifyEmailNow": "Verify email now"
   },
   "sidebar": {

@@ -24,6 +24,13 @@ You are automatically assigned the **workspace admin** role in the new workspace
 
 ## Invite members
 
+There are two kinds of invite links, depending on what you want the newcomer to join:
+
+- **Workspace invite** — the newcomer joins a specific workspace at the chosen role. Use this when someone should land directly in one workspace.
+- **Organization invite** — the newcomer joins your organization (as **Admin** or **Member**) but is not yet placed in a workspace. After accepting, they run a short onboarding step to create their first personal workspace. Create organization invites from the org admin **Members** area.
+
+To invite to a workspace:
+
 1. Navigate to your workspace, open **Settings** in the sidebar, then select the **Members** tab.
 2. Click **Invite member**.
 3. Enter the user's email address and choose a role:
