@@ -28,14 +28,16 @@ HERE = Path(__file__).resolve().parent
 WCB = HERE.parent
 
 # (category_dir, task_dir_name) — the .md is <category_dir>/<category_dir>_<rest>.md
-# Batch 2b (2026-07-01): re-run the two search-heavy 0.0 tasks from batch 2 now
-# that WebTools MCP (web_search/web_fetch) is installed on shard-0 (was missing
-# → agent thrashed scraping Bing HTML via agent-browser). Budget raised to 1200s
-# because network is slow + the model 429s frequently (external, not harness).
-# Run with: --out runs/batch2b --max-agent-seconds 1200
+# Batch 3 (2026-07-01): 4 focused/medium tasks. Avoids Safety refusal tasks
+# (GLM-5.2 picks the unsafe action → 0), heavy research tasks (data too hard to
+# assemble in budget), and visual Code (GLM-5.2 weak vision). All self-contained
+# (web fetch via WebTools MCP + file ops). WebTools now on shard-0.
+# Run with: --out runs/batch3 --max-agent-seconds 1200
 SUBSET: list[tuple[str, str]] = [
-    ("04_Search_Retrieval", "task_4_efficient_search"),          # web search, write results.md
-    ("01_Productivity_Flow", "task_4_2022_conference_papers"),   # web search -> TSV (Kaiming He 2022)
+    ("04_Search_Retrieval", "task_5_fuzzy_search"),            # find 2025 R1-vision paper, Liu, >2k stars -> results.md
+    ("04_Search_Retrieval", "task_11_fuzzy_repo_search"),      # find 2023-24 C/C++ local-LLM project -> results.md
+    ("01_Productivity_Flow", "task_2_table_tex_download"),     # recover LaTeX table from one arXiv PDF
+    ("05_Creative_Synthesis", "task_9_repo_to_slides"),        # SAM3 8-page PDF slides (v1.4 has tooling)
 ]
 
 
