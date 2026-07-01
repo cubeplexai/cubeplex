@@ -169,18 +169,24 @@ def main() -> int:
     out_dir = Path(args.out) / task.task_id
     out_dir.mkdir(parents=True, exist_ok=True)
     or_key = _openrouter_key(Path(args.config))
+    # Judge is overridable via env vars so the API key never lands in the repo.
+    # Defaults: OpenRouter + claude-sonnet-4-6 (strong vision, accepts max_tokens;
+    # WCB's default gpt-5.4 rejects max_tokens=256). Override WCB_JUDGE_* to point
+    # at a local/self-hosted judge endpoint (key from the shell env, NOT committed).
     judge_env = {
-        "OPENROUTER_API_KEY": or_key,
-        "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
-        # WildClawBench defaults JUDGE_MODEL to openai/gpt-5.4, but the tasks'
-        # grade() calls use max_tokens=256, which gpt-5.4 (a reasoning model)
-        # rejects (400 Invalid max_output_tokens). Use a strong vision model
-        # that accepts max_tokens instead. NOTE: this diverges from the
-        # benchmark's default judge — disclose when publishing numbers.
-        "JUDGE_MODEL": "anthropic/claude-sonnet-4-6",
+        "OPENROUTER_API_KEY": os.environ.get("WCB_JUDGE_API_KEY", or_key),
+        "OPENROUTER_BASE_URL": os.environ.get(
+            "WCB_JUDGE_BASE_URL", "https://openrouter.ai/api/v1"
+        ),
+        "JUDGE_MODEL": os.environ.get("WCB_JUDGE_MODEL", "anthropic/claude-sonnet-4-6"),
         "TMP_WORKSPACE": WORK,
     }
-    print(f"[wcb] task={task.task_id} model={args.model_key} judge_key={'set' if or_key else 'MISSING'}")
+    jkey = judge_env["OPENROUTER_API_KEY"]
+    print(
+        f"[wcb] task={task.task_id} model={args.model_key} "
+        f"judge={judge_env['JUDGE_MODEL']} @ {judge_env['OPENROUTER_BASE_URL']} "
+        f"judge_key={'set' if jkey else 'MISSING'}"
+    )
 
     cube = Cube()
     pol = cube.get_policy()
@@ -257,10 +263,27 @@ def main() -> int:
                 cube.upload(f, f"{WORK}/gt/{rel}")
         loader = (Path(args.repo) / "src/utils/transcript_loader.py").read_text()
         cube.upload_bytes(loader.encode(), "_transcript_loader.py", f"{WORK}/_transcript_loader.py")
+        # Judge-compat shim: WildClawBench's grade() passes max_tokens to the
+        # OpenAI client, but reasoning judges (gpt-5.x, o1/o3/o4) reject it and
+        # require max_completion_tokens. Remap for reasoning models only, so the
+        # default claude-sonnet path (which accepts max_tokens) is untouched.
+        judge_shim = (
+            "import re, openai.resources.chat.completions as _oc\n"
+            "_REASONING = re.compile(r'^(gpt-5|o[134]\\b|o[134]-)', re.I)\n"
+            "_orig_create = _oc.Completions.create\n"
+            "def _patched_create(self, *a, **kw):\n"
+            "    if 'max_tokens' in kw and 'max_completion_tokens' not in kw:\n"
+            "        _m = kw.get('model') or (a[0] if a else '')\n"
+            "        if isinstance(_m, str) and _REASONING.search(_m):\n"
+            "            kw['max_completion_tokens'] = kw.pop('max_tokens')\n"
+            "    return _orig_create(self, *a, **kw)\n"
+            "_oc.Completions.create = _patched_create\n"
+        )
         grade_runner = (
             "import json\n"
             "from _transcript_loader import load_transcript\n"
             f"_transcript = load_transcript({json.dumps(f'{WORK}/transcript.jsonl')})\n\n"
+            f"{judge_shim}\n\n"
             f"{task.automated_checks}\n\n"
             f"result = grade(transcript=_transcript, workspace_path={json.dumps(WORK)})\n"
             "print(json.dumps(result))\n"
@@ -273,9 +296,14 @@ def main() -> int:
         #    100.104.x:7897) that can't reach OpenRouter — and httpx honors the
         #    lowercase vars. Set BOTH cases to our working proxy so the LLM judge
         #    doesn't hang until timeout (→ keyword fallback → understated score).
+        #    NO_PROXY keeps the LAN judge endpoint (192.168.1.215:4000) direct
+        #    instead of looping through the clash proxy on the same host; remote
+        #    judges (openrouter.ai) still go through the proxy.
+        NO_PROXY = "localhost,127.0.0.1,10.0.0.0/8,192.168.0.0/16,100.104.0.0/16"
         grade_proxy_env = {
             "HTTP_PROXY": PROXY, "HTTPS_PROXY": PROXY,
             "http_proxy": PROXY, "https_proxy": PROXY,
+            "NO_PROXY": NO_PROXY, "no_proxy": NO_PROXY,
         }
         print("[wcb] installing grade deps + grading...")
         cube.exec(
