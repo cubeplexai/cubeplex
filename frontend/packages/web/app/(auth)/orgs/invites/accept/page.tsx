@@ -1,6 +1,6 @@
 'use client'
 
-import { use, useEffect, useState } from 'react'
+import { use, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
@@ -22,14 +22,19 @@ export default function AcceptOrgInvitePage({
   const [result, setResult] = useState<AcceptOrgInviteResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  // Re-entry guard: React StrictMode double-mounts effects in dev, which would
+  // fire two concurrent accept requests (one 200, one 400 "already used").
+  const calledRef = useRef(false)
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
+    if (calledRef.current) return
     if (!token) {
       setError(t('invalidLink'))
       setLoading(false)
       return
     }
+    calledRef.current = true
     const client = createApiClient('')
     acceptOrgInvite(client, token)
       .then(async (r) => {

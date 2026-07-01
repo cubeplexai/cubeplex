@@ -4,6 +4,7 @@ export interface OrgInviteOut {
   token: string
   expires_at: string
   role: string
+  invite_url: string
 }
 
 export interface AcceptOrgInviteResult {

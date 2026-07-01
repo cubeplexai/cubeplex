@@ -33,6 +33,7 @@ class OrgInviteOut(BaseModel):
     token: str
     expires_at: str
     role: str
+    invite_url: str
 
 
 @_ADMIN_ROUTER.post("", response_model=OrgInviteOut, status_code=status.HTTP_201_CREATED)
@@ -53,7 +54,16 @@ async def create_org_invite(
     tok = await OrgInviteTokenRepository(session).issue(
         org_id=org_id, role=role, created_by=user.id
     )
-    return OrgInviteOut(token=tok.token, expires_at=utc_isoformat(tok.expires_at), role=tok.role)
+    from cubebox.config import config
+
+    base_url = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
+    invite_url = f"{base_url}/orgs/invites/accept?token={tok.token}"
+    return OrgInviteOut(
+        token=tok.token,
+        expires_at=utc_isoformat(tok.expires_at),
+        role=tok.role,
+        invite_url=invite_url,
+    )
 
 
 class AcceptOrgInviteRequest(BaseModel):
