@@ -165,4 +165,45 @@ describe('PresetEditor', () => {
     // The offending ref shows the "Missing" badge.
     expect(screen.getAllByText(en.adminPresets.missingRefBadge).length).toBeGreaterThan(0)
   })
+
+  it('loads more model choices when the picker list is scrolled', async () => {
+    const models = Array.from(
+      { length: 65 },
+      (_, i) => `provider/model-${String(i).padStart(2, '0')}`,
+    )
+
+    renderWithIntl(<PresetEditor initial={initialResponse()} availableModels={models} />)
+
+    fireEvent.click(document.getElementById('tier-enabled-max')!)
+    const picker = screen.getAllByLabelText(en.adminPresets.primary)[0]
+    fireEvent.focus(picker)
+
+    expect(screen.getByRole('option', { name: 'provider/model-00' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'provider/model-64' })).toBeNull()
+
+    const list = screen.getByRole('listbox')
+    fireEvent.scroll(list, {
+      currentTarget: { scrollTop: 1000, clientHeight: 200, scrollHeight: 1000 },
+    })
+
+    expect(screen.getByRole('option', { name: 'provider/model-64' })).toBeTruthy()
+  })
+
+  it('selects filtered model choices with the keyboard', async () => {
+    renderWithIntl(
+      <PresetEditor
+        initial={initialResponse()}
+        availableModels={['litellm/alpha', 'litellm/beta', 'litellm/gamma']}
+      />,
+    )
+
+    fireEvent.click(document.getElementById('tier-enabled-max')!)
+    const picker = screen.getAllByLabelText(en.adminPresets.primary)[0]
+    fireEvent.change(picker, { target: { value: 'litellm' } })
+    fireEvent.keyDown(picker, { key: 'ArrowDown' })
+    fireEvent.keyDown(picker, { key: 'ArrowDown' })
+    fireEvent.keyDown(picker, { key: 'Enter' })
+
+    expect(screen.getByText('litellm/beta')).toBeTruthy()
+  })
 })
