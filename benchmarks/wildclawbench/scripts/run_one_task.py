@@ -263,19 +263,30 @@ def main() -> int:
                 cube.upload(f, f"{WORK}/gt/{rel}")
         loader = (Path(args.repo) / "src/utils/transcript_loader.py").read_text()
         cube.upload_bytes(loader.encode(), "_transcript_loader.py", f"{WORK}/_transcript_loader.py")
-        # Judge-compat shim: WildClawBench's grade() passes max_tokens to the
-        # OpenAI client, but reasoning judges (gpt-5.x, o1/o3/o4) reject it and
-        # require max_completion_tokens. Remap for reasoning models only, so the
-        # default claude-sonnet path (which accepts max_tokens) is untouched.
+        # Judge-compat shim: WildClawBench's grade() calls the OpenAI client in
+        # two shapes that break on reasoning judges (gpt-5.x, o1/o3/o4):
+        #   (a) it passes max_tokens — reasoning models reject it (400) and want
+        #       max_completion_tokens. Remap for reasoning models only.
+        #   (b) some grade() calls pass NEITHER max_tokens nor max_completion_tokens
+        #       (e.g. fuzzy_search). On reasoning models via litellm this can
+        #       intermittently return HTTP 200 with empty message.content — the
+        #       reasoning trace consumes the (small/default) completion budget and
+        #       leaves nothing for the final answer. Supply a default
+        #       max_completion_tokens so the final answer always has room.
+        # Both branches touch reasoning models only; the default claude-sonnet
+        # path (which accepts max_tokens and doesn't intermittently empty out) is
+        # untouched. Verified fuzzy_search judge returns score 1 with this shim.
         judge_shim = (
             "import re, openai.resources.chat.completions as _oc\n"
             "_REASONING = re.compile(r'^(gpt-5|o[134]\\b|o[134]-)', re.I)\n"
             "_orig_create = _oc.Completions.create\n"
             "def _patched_create(self, *a, **kw):\n"
-            "    if 'max_tokens' in kw and 'max_completion_tokens' not in kw:\n"
-            "        _m = kw.get('model') or (a[0] if a else '')\n"
-            "        if isinstance(_m, str) and _REASONING.search(_m):\n"
+            "    _m = kw.get('model') or (a[0] if a else '')\n"
+            "    if isinstance(_m, str) and _REASONING.search(_m):\n"
+            "        if 'max_tokens' in kw and 'max_completion_tokens' not in kw:\n"
             "            kw['max_completion_tokens'] = kw.pop('max_tokens')\n"
+            "        elif 'max_completion_tokens' not in kw:\n"
+            "            kw['max_completion_tokens'] = 4096\n"
             "    return _orig_create(self, *a, **kw)\n"
             "_oc.Completions.create = _patched_create\n"
         )
