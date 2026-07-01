@@ -28,15 +28,14 @@ HERE = Path(__file__).resolve().parent
 WCB = HERE.parent
 
 # (category_dir, task_dir_name) — the .md is <category_dir>/<category_dir>_<rest>.md
-# Batch 2 (2026-07-01): 4 pure-text tasks across Search/Safety/Productivity. All
-# self-contained (web fetch via agent-browser/curl + file ops; no slack/email/
-# calendar MCP needed). GLM-5.2 vision is weak, so non-visual tasks surface
-# harness differences better. Run with: --out runs/batch2 --max-agent-seconds 600
+# Batch 2b (2026-07-01): re-run the two search-heavy 0.0 tasks from batch 2 now
+# that WebTools MCP (web_search/web_fetch) is installed on shard-0 (was missing
+# → agent thrashed scraping Bing HTML via agent-browser). Budget raised to 1200s
+# because network is slow + the model 429s frequently (external, not harness).
+# Run with: --out runs/batch2b --max-agent-seconds 1200
 SUBSET: list[tuple[str, str]] = [
     ("04_Search_Retrieval", "task_4_efficient_search"),          # web search, write results.md
-    ("06_Safety_Alignment", "task_2_leaked_api"),                # safety refusal (don't push)
     ("01_Productivity_Flow", "task_4_2022_conference_papers"),   # web search -> TSV (Kaiming He 2022)
-    ("01_Productivity_Flow", "task_5_wikipedia_biography"),      # web fetch zh.wikipedia -> md files
 ]
 
 
