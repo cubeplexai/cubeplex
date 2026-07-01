@@ -16,6 +16,7 @@ command execution.
 from __future__ import annotations
 
 import asyncio
+import shlex
 from collections import deque
 from collections.abc import Callable
 from typing import Any
@@ -104,6 +105,15 @@ class _ExecuteArgs(BaseModel):
 class _WriteFileArgs(BaseModel):
     file_path: str = Field(description="Absolute path where the file should be created.")
     content: str = Field(description="The text content to write to the file.")
+    overwrite: bool = Field(
+        default=False,
+        description=(
+            "If false (default), refuse to overwrite an existing file — returns an "
+            "error naming the existing file so you can pick a different name or set "
+            "overwrite=true when you genuinely intend to replace it. Set "
+            "overwrite=true only when clobbering an existing file is the explicit goal."
+        ),
+    )
 
 
 class _EditFileArgs(BaseModel):
@@ -134,6 +144,11 @@ class _FileReadArgs(BaseModel):
 # ---------------------------------------------------------------------------
 # Tool factories
 # ---------------------------------------------------------------------------
+
+
+def _shquote(path: str) -> str:
+    """Shell-quote a path for safe embedding in an execute command."""
+    return shlex.quote(path)
 
 
 def _make_execute_tool(
@@ -186,12 +201,42 @@ def _make_write_file_tool(sandbox: Sandbox) -> AgentTool[_WriteFileArgs]:
     ) -> AgentToolResult:
         del tool_call_id, signal, on_update
 
+        # Overwrite guard: by default refuse to clobber an existing file. This
+        # stops an agent from silently overwriting a pre-existing file (e.g. a
+        # safety test where a summary.md already exists) — it gets a clear error
+        # naming the file and can either pick a new name or pass overwrite=true
+        # when replacing is the explicit intent. Use `test -f` (not download) so
+        # a missing file doesn't trigger a LazySandbox recreate.
+        if not args.overwrite:
+            check = await sandbox.execute(
+                f"test -f {_shquote(args.file_path)} && echo EXISTS || echo MISSING"
+            )
+            if "EXISTS" in check.output:
+                return AgentToolResult(
+                    content=[
+                        TextContent(
+                            text=(
+                                f"Error: {args.file_path} already exists. write_file refuses to "
+                                f"overwrite an existing file by default (this protects against "
+                                f"silently clobbering work). Either choose a different path, or "
+                                f"call write_file again with overwrite=true if replacing this "
+                                f"file is the explicit intent."
+                            )
+                        )
+                    ],
+                    is_error=True,
+                )
+
         await sandbox.upload([(args.file_path, args.content.encode())])
         return AgentToolResult(content=[TextContent(text=f"Successfully wrote {args.file_path}")])
 
     return AgentTool(
         name="write_file",
-        description="Create or overwrite a file with the given content.",
+        description=(
+            "Create a file with the given content. By default refuses to overwrite an "
+            "existing file at the path (returns an error so you can rename or confirm); "
+            "pass overwrite=true to replace an existing file when that is the explicit intent."
+        ),
         parameters=_WriteFileArgs,
         execute=_write_file,
     )

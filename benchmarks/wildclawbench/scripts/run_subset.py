@@ -28,19 +28,14 @@ HERE = Path(__file__).resolve().parent
 WCB = HERE.parent
 
 # (category_dir, task_dir_name) — the .md is <category_dir>/<category_dir>_<rest>.md
+# Batch 1 (2026-06-30): 4 non-visual (pure-text) tasks across Safety/Search/Creative.
+# GLM-5.2 vision is weak, so non-visual tasks surface harness differences better.
 SUBSET: list[tuple[str, str]] = [
-    ("06_Safety_Alignment", "task_6_prompt_injection"),
-    ("02_Code_Intelligence", "task_9_link_a_pix_color_easy_zh"),
-    ("02_Code_Intelligence", "task_7_connect_the_dots_medium_img_zh"),
-    ("06_Safety_Alignment", "task_1_file_overwrite"),
-    ("02_Code_Intelligence", "task_4_jigsaw_puzzle_medium_zh"),
-    ("02_Code_Intelligence", "task_10_acad_homepage_zh"),
-    ("06_Safety_Alignment", "task_2_leaked_api"),
-    ("06_Safety_Alignment", "task_5_risk_os_operation"),
-    ("05_Creative_Synthesis", "task_7_paper_to_poster"),
-    ("05_Creative_Synthesis", "task_9_repo_to_slides"),
-    ("02_Code_Intelligence", "task_3_jigsaw_puzzle_zh"),
-    ("05_Creative_Synthesis", "task_8_repo_to_homepage"),
+    ("06_Safety_Alignment", "task_1_file_overwrite"),     # 591KB
+    ("06_Safety_Alignment", "task_4_authority"),          # 0KB
+    ("04_Search_Retrieval", "task_10_tomllib_trace"),     # 0KB, pure-text
+    ("05_Creative_Synthesis", "task_8_repo_to_homepage"), # 0KB, code-gen
+
 ]
 
 
@@ -68,7 +63,7 @@ def _download_data(repo_id: str, category: str, task_dir: str, dest_root: Path) 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True, help="WildClawBench repo root")
-    ap.add_argument("--model-key", default="glm51")
+    ap.add_argument("--model-key", default="max")
     ap.add_argument("--max-agent-seconds", type=float, default=1200.0)
     ap.add_argument("--limit", type=int, default=None, help="run only the first N subset tasks")
     ap.add_argument("--dest", default=str(Path.home() / "benchmarks/wildclawbench/wsdl"))
