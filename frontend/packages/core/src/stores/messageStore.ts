@@ -749,6 +749,7 @@ function buildTurnMessages(
   turnUsage: import('../types').TurnUsage | null,
   stopReason: AssistantMessageType['stop_reason'] = 'stop',
   runId: string | null = null,
+  errorMessage: string | null = null,
 ): { assistantMessage: AssistantMessageType | null; toolMessages: ToolResultMessageType[] } {
   const mainStream = agents[MAIN_AGENT_KEY]
   if (!mainStream) return { assistantMessage: null, toolMessages: [] }
@@ -775,6 +776,7 @@ function buildTurnMessages(
     run_id: runId,
     metadata: {},
   }
+  if (errorMessage !== null) assistantMessage.error_message = errorMessage
 
   const toolMessages: ToolResultMessageType[] = []
 
@@ -851,6 +853,48 @@ function buildTurnMessages(
   }
 
   return { assistantMessage, toolMessages }
+}
+
+function errorMessageForAssistant(data: ErrorEventData): string {
+  return typeof data.details === 'string' && data.details.trim() ? data.details : data.message
+}
+
+function buildErrorAssistantMessage(
+  data: ErrorEventData,
+  runId: string | null,
+): AssistantMessageType {
+  return {
+    id: nextMessageId('assistant-error'),
+    role: 'assistant',
+    content: [],
+    stop_reason: 'error',
+    error_message: errorMessageForAssistant(data),
+    usage: null,
+    timestamp: Date.now() / 1000,
+    run_id: runId,
+    metadata: {},
+  }
+}
+
+function appendErroredAssistantTurn(
+  state: MessageStore,
+  conversationId: string,
+  data: ErrorEventData,
+): Message[] {
+  const runId = state.currentRunId
+  const { assistantMessage, toolMessages } = buildTurnMessages(
+    state.streamAgents,
+    state.toolResultMap,
+    state.turnUsage[conversationId] ?? null,
+    'error',
+    runId,
+    errorMessageForAssistant(data),
+  )
+  return [
+    ...(state.messages[conversationId] ?? []),
+    assistantMessage ?? buildErrorAssistantMessage(data, runId),
+    ...toolMessages,
+  ]
 }
 
 async function finalizeCompletedStream(
@@ -1014,11 +1058,19 @@ async function consumeRunStream(
         continue
       } else if (event.type === 'error') {
         const errData = event.data as ErrorEventData
+        flush()
         set((s) => ({
+          messages: {
+            ...s.messages,
+            [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
+          },
           errors: {
             ...s.errors,
             [conversationId]: { runId: s.currentRunId ?? '', data: errData },
           },
+          streamAgents: {},
+          toolStartedMap: {},
+          toolResultMap: {},
           isStreaming: false,
           pendingConfirmMap: {},
           pendingAsk: null,
@@ -1306,15 +1358,20 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
             },
           }
         }
+        const hasPersistedAssistant = messages.some((msg) => msg.role === 'assistant')
+        const currentError = get().errors[conversationId]
+        const nextError =
+          seedError ?? (!hasPersistedAssistant && currentError !== null ? currentError : null)
+
         set((s) => ({
           messages: { ...s.messages, [conversationId]: messages },
           oldestSeqByConv: { ...s.oldestSeqByConv, [conversationId]: bootstrap.oldest_seq },
           hasMoreByConv: { ...s.hasMoreByConv, [conversationId]: bootstrap.has_more },
           todos: restoredTodos,
-          // When neither active_run nor last_run_error carries error info, clear the
-          // conversation's stale error so a successful retry does not keep showing the
-          // previous failure bubble. seedError is null means server reports no error.
-          errors: { ...s.errors, [conversationId]: seedError ?? null },
+          // Clear only when bootstrap has authoritative error state or persisted
+          // assistant history; otherwise keep a live error visible through the
+          // bootstrap race.
+          errors: { ...s.errors, [conversationId]: nextError },
           lastRunStatus: bootstrap.last_run_status ?? null,
           streamAgents: nextStreamAgents,
           pendingSteers: { ...s.pendingSteers, [conversationId]: [] },
@@ -1599,11 +1656,19 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
               )
               continue outer
             }
+            flush()
             set((s) => ({
+              messages: {
+                ...s.messages,
+                [conversationId]: appendErroredAssistantTurn(s, conversationId, errData),
+              },
               errors: {
                 ...s.errors,
                 [conversationId]: { runId: s.currentRunId ?? '', data: errData },
               },
+              streamAgents: {},
+              toolStartedMap: {},
+              toolResultMap: {},
               isStreaming: false,
               pendingConfirmMap: {},
               pendingAsk: null,

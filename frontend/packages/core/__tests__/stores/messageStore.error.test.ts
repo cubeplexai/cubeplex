@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useMessageStore } from '../../src/stores/messageStore'
+import type { ApiClient } from '../../src/api'
 import type { ErrorEventData } from '../../src/types/events'
 
 // The error-event branch lives inside consumeRunStream / send — both are async
@@ -24,6 +25,17 @@ function resetStore(): void {
     streamingConversationId: null,
     lastAppliedEventId: null,
   })
+}
+
+function makeBootstrapClient(body: Record<string, unknown>): ApiClient {
+  const response = {
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(body),
+  }
+  return {
+    get: vi.fn().mockResolvedValue(response),
+  } as unknown as ApiClient
 }
 
 describe('messageStore — error state shape (SSE branch)', () => {
@@ -205,6 +217,40 @@ describe('messageStore — bootstrap seedError path (lines 1197-1212)', () => {
     // Verify the existing error is preserved (no overwrite).
     expect(currentErrors[CONV]?.runId).toBe('run-existing')
     expect(currentErrors[CONV]?.data.error_code).toBe('rate_limited')
+  })
+})
+
+describe('messageStore — bootstrap error merge', () => {
+  beforeEach(resetStore)
+
+  it('keeps a live error visible when bootstrap has not persisted any assistant turn yet', async () => {
+    useMessageStore.setState({
+      errors: {
+        [CONV]: {
+          runId: 'run-live-1',
+          data: { error_code: 'rate_limited', message: 'Rate limit.' },
+        },
+      },
+    })
+
+    const client = makeBootstrapClient({
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: [{ type: 'text', text: 'hi' }],
+          timestamp: Date.parse('2026-06-01T00:00:00Z') / 1000,
+          metadata: {},
+        },
+      ],
+      total: 1,
+      active_run: null,
+      last_run_status: null,
+    })
+
+    await useMessageStore.getState().loadMessages(client, CONV)
+
+    expect(useMessageStore.getState().errors[CONV]?.data.error_code).toBe('rate_limited')
   })
 })
 

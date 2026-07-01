@@ -56,6 +56,34 @@ class RunContext:
     conversation_creator_user_id: str | None = None
 
 
+class CubepiAgentRunError(RuntimeError):
+    """Raised when cubepi returns a terminal assistant error without raising."""
+
+
+def _cubepi_agent_error_message(agent: Any) -> str | None:
+    state = getattr(agent, "state", None)
+    error_message = getattr(state, "error_message", None)
+    if isinstance(error_message, str) and error_message.strip():
+        return error_message
+    return None
+
+
+def _raise_if_cubepi_agent_failed(agent: Any) -> None:
+    error_message = _cubepi_agent_error_message(agent)
+    if error_message is not None:
+        raise CubepiAgentRunError(error_message)
+
+
+def _message_for_run_exception(
+    exc: BaseException,
+    code: ErrorCode,
+    params: dict[str, Any],
+) -> str:
+    if isinstance(exc, CubepiAgentRunError):
+        return str(exc)
+    return english_fallback(code, params)
+
+
 def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
     if not ns:
         return None
@@ -1736,6 +1764,7 @@ class RunManager:
                         # Aligns the cubepi message ledger with cubebox's redis
                         # run-meta, SSE streams, and billing_llm_events.
                         await agent.prompt(_user_msg, run_id=run_id)
+                        _raise_if_cubepi_agent_failed(agent)
             except BaseException as _run_exc:
                 # Out-of-band, best-effort: a 401/403 flips provider liveness to
                 # "fail"; a model_not_found flips this model to "unavailable".
@@ -2121,6 +2150,7 @@ class RunManager:
                     with tracing_context(metadata=_trace_meta):
                         async with trace(tracer, agent):
                             await agent.respond(question_id=question_id, answer=answer)
+                            _raise_if_cubepi_agent_failed(agent)
                 except BaseException as _run_exc:
                     _schedule_writeback(
                         org_id=ctx.org_id,
@@ -3648,7 +3678,7 @@ class RunManager:
             }
             _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
             _err_code, _err_params = classify_exception(exc, **_classify_params)
-            _err_message = english_fallback(_err_code, _err_params)
+            _err_message = _message_for_run_exception(exc, _err_code, _err_params)
             await update_run_meta(
                 self._redis,
                 prefix=self._key_prefix,
@@ -3674,6 +3704,8 @@ class RunManager:
                 await self._append_error(
                     run_id,
                     conversation_id,
+                    message=_err_message,
+                    details=str(exc),
                     exc=exc,
                     params=_classify_params,
                 )
@@ -4190,7 +4222,7 @@ class RunManager:
             }
             _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
             _err_code, _err_params = classify_exception(exc, **_classify_params)
-            _err_message = english_fallback(_err_code, _err_params)
+            _err_message = _message_for_run_exception(exc, _err_code, _err_params)
             with suppress(Exception):
                 await update_run_meta(
                     self._redis,
@@ -4215,6 +4247,8 @@ class RunManager:
                 await self._append_error(
                     run_id,
                     conversation_id,
+                    message=_err_message,
+                    details=str(exc),
                     exc=exc,
                     params=_classify_params,
                 )
