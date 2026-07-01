@@ -6,23 +6,21 @@ pytestmark = pytest.mark.e2e
 
 
 @pytest.mark.asyncio
-async def test_admin_can_create_invite(admin_client):
+async def test_admin_can_rename_workspace(admin_client):
     client, workspace_id = admin_client
-    r = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/invites",
-        json={"role": "member"},
+    r = await client.patch(
+        f"/api/v1/workspaces/{workspace_id}",
+        json={"name": "renamed-by-admin"},
     )
-    assert r.status_code == 201, r.text
-    body = r.json()
-    assert "token" in body
+    assert r.status_code == 200, r.text
 
 
 @pytest.mark.asyncio
-async def test_member_cannot_create_invite(member_client):
+async def test_member_cannot_rename_workspace(member_client):
     client, workspace_id = member_client
-    r = await client.post(
-        f"/api/v1/workspaces/{workspace_id}/invites",
-        json={"role": "member"},
+    r = await client.patch(
+        f"/api/v1/workspaces/{workspace_id}",
+        json={"name": "renamed-by-member"},
     )
     assert r.status_code == 403, r.text
 

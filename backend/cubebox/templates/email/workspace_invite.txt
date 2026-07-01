@@ -1,7 +1,0 @@
-You've been invited to join the workspace "{{ workspace_name }}" on cubebox.
-
-Click the link below to accept:
-
-{{ invite_url }}
-
-This link expires in 24 hours.

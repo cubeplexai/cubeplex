@@ -21,7 +21,6 @@ from cubebox.models.im_connector import (
     IMThreadLink,
     IMWebhookReceipt,
 )
-from cubebox.models.invite_token import InviteToken
 from cubebox.models.mcp import (
     MCPConnectorInstall,
     MCPConnectorTemplate,
@@ -78,7 +77,6 @@ __all__ = [
     "EmbeddingJob",
     "EmbeddingJobState",
     "ExternalIdentity",
-    "InviteToken",
     "LlmBillingEvent",
     "MCPConnectorInstall",
     "MCPConnectorTemplate",

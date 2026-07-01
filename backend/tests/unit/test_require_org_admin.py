@@ -16,7 +16,6 @@ from sqlmodel import SQLModel
 
 from cubebox.auth.dependencies import require_org_admin
 from cubebox.models import (  # noqa: F401
-    InviteToken,
     Membership,
     Organization,
     OrganizationMembership,

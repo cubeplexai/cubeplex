@@ -145,69 +145,6 @@ async def test_org_invite_accept_then_onboarding(
 
 
 @pytest.mark.asyncio
-async def test_workspace_invite_accept_skips_onboarding(
-    unauthenticated_memory_client: httpx.AsyncClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Workspace-invite accept grants membership + sets needs_onboarding false."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
-
-    # ---- Admin user: register + onboard ----
-    admin_email = f"wsadmin-{secrets.token_hex(4)}@example.com"
-    admin_slug = f"wsadmin-{secrets.token_hex(4)}"
-
-    resp = await unauthenticated_memory_client.post(
-        "/api/v1/auth/register",
-        json={"email": admin_email, "password": "StrongPass1!"},
-    )
-    assert resp.status_code == 201
-
-    await _login(unauthenticated_memory_client, admin_email, "StrongPass1!")
-
-    resp = await unauthenticated_memory_client.post(
-        "/api/v1/onboarding",
-        json={
-            "org_name": "WSAdminOrg",
-            "org_slug": admin_slug,
-            "workspace_name": "WSAdminWS",
-        },
-    )
-    assert resp.status_code == 201, resp.text
-    ws_id = resp.json()["workspace_id"]
-
-    # Admin creates a workspace invite
-    resp = await unauthenticated_memory_client.post(
-        f"/api/v1/workspaces/{ws_id}/invites",
-        json={"role": "member"},
-    )
-    assert resp.status_code == 201, resp.text
-    ws_invite_token = resp.json()["token"]
-
-    # ---- Second user: register, accept workspace invite ----
-    user2_email = f"wsinvitee-{secrets.token_hex(4)}@example.com"
-
-    resp = await unauthenticated_memory_client.post(
-        "/api/v1/auth/register",
-        json={"email": user2_email, "password": "StrongPass1!"},
-    )
-    assert resp.status_code == 201
-
-    await _login(unauthenticated_memory_client, user2_email, "StrongPass1!")
-
-    # Accept workspace invite
-    resp = await unauthenticated_memory_client.post(
-        "/api/v1/workspaces/invites/accept",
-        json={"token": ws_invite_token},
-    )
-    assert resp.status_code == 200, resp.text
-
-    # GET /me -> needs_onboarding false (has workspace)
-    me = await unauthenticated_memory_client.get("/api/v1/auth/me")
-    assert me.status_code == 200, me.text
-    assert me.json()["needs_onboarding"] is False
-
-
-@pytest.mark.asyncio
 async def test_org_invite_reuse_rejected(
     unauthenticated_memory_client: httpx.AsyncClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -71,9 +71,9 @@ async def test_admin_only_route_denies_member(
 ) -> None:
     """require_admin -> PermissionChecker.check -> denies non-admin."""
     client, ws_id = member_client
-    resp = await client.post(
-        f"/api/v1/workspaces/{ws_id}/invites",
-        json={"role": "member"},
+    resp = await client.patch(
+        f"/api/v1/workspaces/{ws_id}",
+        json={"name": "renamed-by-member"},
     )
     assert resp.status_code == 403
 
@@ -84,30 +84,30 @@ async def test_admin_only_route_allows_admin(
 ) -> None:
     """require_admin -> PermissionChecker.check -> allows admin."""
     client, ws_id = admin_client
-    resp = await client.post(
-        f"/api/v1/workspaces/{ws_id}/invites",
-        json={"role": "member"},
+    resp = await client.patch(
+        f"/api/v1/workspaces/{ws_id}",
+        json={"name": "renamed-by-admin"},
     )
-    assert resp.status_code == 201
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_invite_creation_emits_audit_event(
+async def test_workspace_rename_emits_audit_event(
     admin_client: tuple[httpx.AsyncClient, str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """After invite creation, the DefaultAuditSink records workspace.invite_created."""
+    """After workspace rename, the DefaultAuditSink records workspace.renamed."""
     client, ws_id = admin_client
 
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="cubebox.audit"):
-        resp = await client.post(
-            f"/api/v1/workspaces/{ws_id}/invites",
-            json={"role": "member"},
+        resp = await client.patch(
+            f"/api/v1/workspaces/{ws_id}",
+            json={"name": "audit-renamed"},
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 200
 
     messages = [r.getMessage() for r in caplog.records if r.name == "cubebox.audit"]
-    assert any("workspace.invite_created" in m for m in messages), (
-        f"no audit log for invite_created; captured: {messages}"
+    assert any("workspace.renamed" in m for m in messages), (
+        f"no audit log for workspace.renamed; captured: {messages}"
     )

@@ -8,7 +8,6 @@ from sqlmodel import SQLModel
 
 # Ensure all tables are registered on SQLModel.metadata before create_all.
 from cubebox.models import (  # noqa: F401
-    InviteToken,
     Membership,
     Organization,
     Role,

@@ -484,7 +484,6 @@ async def delete_account(
     from cubebox.models.conversation import Conversation
     from cubebox.models.credential import Credential
     from cubebox.models.egress_ref import EgressRef
-    from cubebox.models.invite_token import InviteToken
     from cubebox.models.mcp import (
         MCPConnectorInstall,
         MCPCredentialGrant,
@@ -562,11 +561,6 @@ async def delete_account(
                 Credential.id.in_(list(all_grant_cred_ids))  # type: ignore[attr-defined]
             )
         )
-
-    # Invite tokens created by the user are no longer redeemable — delete them.
-    await session.execute(
-        sa_delete(InviteToken).where(InviteToken.created_by == user.id)  # type: ignore[arg-type]
-    )
 
     # Subquery deletes for child tables that lack a direct user FK.
     billing_tbl = BillingEvent.__table__  # type: ignore[attr-defined]
