@@ -52,7 +52,7 @@
     "verify": "验证",
     "resendCode": "重新发送",
     "resendIn": "{seconds} 秒后重新发送",
-    "passwordTooWeak": "密码至少需要10个字符，且包含大小写字母、数字和符号。",
+    "passwordTooWeak": "密码不符合强度要求。",
     "verifyEmailNow": "立即验证邮箱"
   },
   "sidebar": {

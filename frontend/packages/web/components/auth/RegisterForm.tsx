@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubebox/core'
+import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
 import { validatePassword } from '@cubebox/core/auth'
 import { isInviteAcceptPath } from '@/lib/invitePath'
 
 export function RegisterForm({ nextPath = '/' }: { nextPath?: string }) {
   const t = useTranslations('auth')
   const router = useRouter()
+  const { passwordPolicy } = useDeploymentMode()
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -23,7 +25,7 @@ export function RegisterForm({ nextPath = '/' }: { nextPath?: string }) {
     setSubmitting(true)
     try {
       // Pre-validate password (UX only; backend is authoritative)
-      const pwCheck = validatePassword(password, 'high')
+      const pwCheck = validatePassword(password, passwordPolicy)
       if (!pwCheck.ok) {
         setError(t('passwordTooWeak'))
         return

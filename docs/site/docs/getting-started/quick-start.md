@@ -17,14 +17,16 @@ Get from zero to your first AI conversation in a few minutes.
 
 1. Go to [cubebox.ai](https://cubebox.ai) and click **Sign up**.
 2. Enter your email and password (or use a social login).
-3. Your personal organization and default workspace are created automatically.
+3. If your instance has email verification enabled, enter the one-time code sent to your inbox to confirm your address.
+4. Finish the **onboarding** wizard: name your organization, choose a slug, and create your first workspace.
 
 </TabItem>
 <TabItem value="self-hosted" label="Self-hosted">
 
 1. Open the CubeBox URL your administrator provided.
-2. If you are the **first user**, registration takes you to a one-time **setup** screen where you name the organization and choose a slug. You become its owner.
-3. Otherwise, register normally — you join the existing organization as a member and land in your own personal workspace.
+2. Register with your email and password. If email verification is enabled, enter the one-time code sent to your inbox.
+3. If you are the **first user**, the onboarding wizard has you name the organization, choose a slug, and create your first workspace. You become the organization's owner.
+4. Otherwise you join the existing organization as a member and create your own personal workspace through the same wizard.
 
 </TabItem>
 </Tabs>
