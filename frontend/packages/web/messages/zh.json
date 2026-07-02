@@ -2429,6 +2429,7 @@
     "orgSlug": "组织标识",
     "workspaceName": "工作区名称",
     "workspaceNamePlaceholder": "例如：我的工作区",
+    "defaultWorkspaceName": "{name}的工作区",
     "createWorkspace": "创建工作区",
     "createOrgAndWorkspace": "创建组织和空间",
     "creating": "创建中…"
