@@ -24,14 +24,27 @@ export function OnboardingForm() {
   const [slug, setSlug] = useState('')
   const [slugTouched, setSlugTouched] = useState(false)
   const [workspaceName, setWorkspaceName] = useState('')
+  const [workspaceTouched, setWorkspaceTouched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Auto-suggest slug from org name when slug is untouched
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (fullMode && !slugTouched) setSlug(suggestSlug(orgName))
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [orgName, slugTouched, fullMode])
+
+  // Default the workspace name to a per-user value (display name or email
+  // local-part) so multiple personal workspaces in an org are distinguishable
+  // — never a uniform "My Workspace". Only fills while the user hasn't edited.
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (workspaceTouched || workspaceName) return
+    const name = me?.display_name?.trim() || me?.email?.split('@')[0]
+    if (name) setWorkspaceName(t('defaultWorkspaceName', { name }))
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [me, workspaceTouched, workspaceName, t])
 
   const slugError: SlugError | null = !fullMode || slug.length === 0 ? null : validateSlug(slug)
 
@@ -127,7 +140,10 @@ export function OnboardingForm() {
           minLength={1}
           maxLength={64}
           value={workspaceName}
-          onChange={(e) => setWorkspaceName(e.target.value)}
+          onChange={(e) => {
+            setWorkspaceName(e.target.value)
+            setWorkspaceTouched(true)
+          }}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           placeholder={t('workspaceNamePlaceholder')}
         />

@@ -2429,6 +2429,7 @@
     "orgSlug": "Organization identifier",
     "workspaceName": "Workspace name",
     "workspaceNamePlaceholder": "e.g. My Workspace",
+    "defaultWorkspaceName": "{name}'s Workspace",
     "createWorkspace": "Create workspace",
     "createOrgAndWorkspace": "Create organization and workspace",
     "creating": "Creating…"
