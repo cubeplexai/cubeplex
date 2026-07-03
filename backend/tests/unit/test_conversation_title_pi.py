@@ -64,9 +64,7 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, provider: FauxProvider) -> N
     async def _fake_load(session: Any, org_id: str, backend: Any) -> LLMSnapshot:
         return _snap()
 
-    def _fake_build_chain_model(
-        snap: LLMSnapshot, preset: ModelPreset, *, thinking: str = "off", **_: Any
-    ) -> BoundModel:
+    def _fake_build_chain_model(snap: LLMSnapshot, preset: ModelPreset, **_: Any) -> BoundModel:
         spec = Model(
             id="title-m",
             provider_id="acme",

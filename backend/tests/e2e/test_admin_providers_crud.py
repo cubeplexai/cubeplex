@@ -325,7 +325,7 @@ async def test_create_provider_persists_capability(
     admin_client: tuple[AsyncClient, str],
 ) -> None:
     client, _ = admin_client
-    cap = {"reasoning_off_payload": {"thinking": {"type": "disabled"}}}
+    cap = {"reasoning": {"mode_payloads": {"off": {"thinking": {"type": "disabled"}}}}}
     res = await client.post(
         "/api/v1/admin/providers",
         json={

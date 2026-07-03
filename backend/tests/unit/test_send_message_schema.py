@@ -1,29 +1,33 @@
-"""Schema tests for SendMessageRequest (model_key + thinking fields)."""
-
 import pytest
 from pydantic import ValidationError
 
 from cubebox.api.routes.v1.conversations import SendMessageRequest
 
 
-def test_request_accepts_model_key_and_thinking() -> None:
+def test_request_accepts_model_key_and_reasoning() -> None:
     body = SendMessageRequest.model_validate(
         {
             "content": "hi",
-            "model_key": "ultra",
-            "thinking": "high",
+            "model_key": "pro",
+            "reasoning": {"mode": "on", "effort": "high", "summary": "none"},
         }
     )
-    assert body.model_key == "ultra"
-    assert body.thinking == "high"
+
+    assert body.model_key == "pro"
+    assert body.reasoning.mode == "on"
+    assert body.reasoning.effort == "high"
 
 
-def test_thinking_defaults_to_off() -> None:
+def test_reasoning_defaults_to_off_medium_none() -> None:
     body = SendMessageRequest.model_validate({"content": "hi"})
-    assert body.thinking == "off"
-    assert body.model_key is None
+
+    assert body.reasoning.model_dump() == {
+        "mode": "off",
+        "effort": "medium",
+        "summary": "none",
+    }
 
 
-def test_thinking_rejects_unknown_value() -> None:
+def test_request_rejects_legacy_thinking() -> None:
     with pytest.raises(ValidationError):
-        SendMessageRequest.model_validate({"content": "hi", "thinking": "nuclear"})
+        SendMessageRequest.model_validate({"content": "hi", "thinking": "high"})

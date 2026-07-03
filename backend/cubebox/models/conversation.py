@@ -46,11 +46,13 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
     is_group_chat: bool = Field(default=False)
     # Per-conversation model setting the user last sent with. ``model_key`` is
     # the stable selection key (a tier name like "pro" or a custom-preset
-    # label), NULL meaning "use the workspace default". ``thinking`` is the
-    # reasoning level stored as a plain str (the typed ThinkingLevel lives at
-    # the API/runtime layer).
+    # label), NULL meaning "use the workspace default". ``reasoning`` stores
+    # the provider-independent ReasoningControl JSON.
     model_key: str | None = Field(default=None, max_length=64)
-    thinking: str = Field(default="medium", max_length=16)
+    reasoning: dict[str, Any] = Field(
+        default_factory=lambda: {"mode": "off", "effort": "medium", "summary": "none"},
+        sa_column=Column(JSON),
+    )
     # Source metadata (e.g. IM-bot linkage under an "im" key). Mirrors
     # Topic.attributes; see docs/dev/specs/2026-06-23-im-bot-settings-design.md.
     attributes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))

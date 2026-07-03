@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
-from cubepi.providers.base import ThinkingLevel
+from cubepi.providers.base import ReasoningControl
 from cubepi.providers.fallback import FallbackBoundModel
 from fastapi import FastAPI
 from loguru import logger
@@ -900,7 +900,7 @@ class RunManager:
         ctx: RunContext,
         run_id: str | None = None,
         model_key: str | None = None,
-        thinking: ThinkingLevel = "off",
+        reasoning: ReasoningControl | None = None,
         cancel_pending_hitl: bool = False,
     ) -> str:
         """Create and start a new background run.
@@ -1001,7 +1001,7 @@ class RunManager:
                 attachments=list(attachments or []),
                 ctx=ctx,
                 model_key=model_key,
-                thinking=thinking,
+                reasoning=reasoning or ReasoningControl(),
             ),
             name=f"run:{run_id}",
         )
@@ -1554,7 +1554,7 @@ class RunManager:
         trigger: str = "interactive",
         extra_ref_holder: dict[str, Any] | None = None,
         model_key: str | None = None,
-        thinking: ThinkingLevel = "off",
+        reasoning: ReasoningControl | None = None,
     ) -> str:
         """Execute a single user turn through the cubepi runtime.
 
@@ -1625,7 +1625,7 @@ class RunManager:
                 publish_stream_event=publish_stream_event,
                 trigger=trigger,
                 model_key=model_key,
-                thinking=thinking,
+                reasoning=reasoning or ReasoningControl(),
             )
             # Late-bind extra_ref to the live agent._extra dict so compaction /
             # skills / todo middleware can read and write persistent state.
@@ -2216,7 +2216,7 @@ class RunManager:
         publish_stream_event: Any,
         trigger: str = "interactive",
         model_key: str | None = None,
-        thinking: ThinkingLevel = "off",
+        reasoning: ReasoningControl | None = None,
     ) -> tuple[Any, list[Any], Any]:
         """Build provider + middleware + tools + channel + agent for a conversation.
 
@@ -2282,7 +2282,6 @@ class RunManager:
         this_run_model = build_chain_model(
             snap,
             preset,
-            thinking=thinking,
             cache_policy_factory=lambda slug: (
                 CubeboxCacheMarkerPolicy()
                 if snap.providers[slug].api == "anthropic-messages"
@@ -3075,10 +3074,7 @@ class RunManager:
             checkpointer=cp,
             thread_id=conversation_id,
             middleware=cubepi_middleware,
-            # Honor the user-selected level threaded through from
-            # SendMessageRequest. Providers (e.g. AnthropicProvider) clamp
-            # this to what the active model actually supports.
-            thinking=thinking,
+            reasoning=reasoning or ReasoningControl(),
             channel=sandbox_hitl_channel,
             deferred_tool_groups=_deferred_groups or None,
         )
@@ -3147,7 +3143,7 @@ class RunManager:
                     await _llm_session.commit()
 
             preset = resolve_task_preset(snap, "compaction")
-            bound_model = build_chain_model(snap, preset, thinking="off")
+            bound_model = build_chain_model(snap, preset)
             # Tracer is optional — pass None to run_consolidation when tracing
             # is disabled, otherwise the background LLM call is wrapped in
             # tracer.oneshot() so it shows up in `cubepi trace ls` filterable
@@ -3266,7 +3262,7 @@ class RunManager:
         attachments: list[str],
         ctx: RunContext,
         model_key: str | None = None,
-        thinking: ThinkingLevel = "off",
+        reasoning: ReasoningControl | None = None,
     ) -> None:
         from cubebox.api.routes.v1.conversations import (
             _enqueue_search_index,
@@ -3551,7 +3547,7 @@ class RunManager:
                 trigger=ctx.trigger,
                 extra_ref_holder=extra_ref_holder,
                 model_key=model_key,
-                thinking=thinking,
+                reasoning=reasoning or ReasoningControl(),
             )
             await _update_conversation_timestamp(
                 conversation_id,

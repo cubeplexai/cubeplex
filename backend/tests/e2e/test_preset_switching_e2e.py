@@ -291,7 +291,11 @@ async def test_explicit_preset_label_routes_to_small(
         client,
         ws_id,
         conv_id,
-        {"content": "hi", "model_key": "small", "thinking": "high"},
+        {
+            "content": "hi",
+            "model_key": "small",
+            "reasoning": {"mode": "on", "effort": "high", "summary": "none"},
+        },
     )
 
     errors = [e for e in events if e.get("type") == "error"]
@@ -315,7 +319,7 @@ async def test_explicit_preset_label_routes_to_small(
                 )
             ).scalar_one()
             assert row.model_key == "small", row.model_key
-            assert row.thinking == "high", row.thinking
+            assert row.reasoning == {"mode": "on", "effort": "high", "summary": "none"}
     finally:
         await test_engine.dispose()
 
@@ -335,7 +339,11 @@ async def test_unknown_model_key_falls_back_to_default(
         client,
         ws_id,
         conv_id,
-        {"content": "hi", "model_key": "ghost", "thinking": "high"},
+        {
+            "content": "hi",
+            "model_key": "ghost",
+            "reasoning": {"mode": "on", "effort": "high", "summary": "none"},
+        },
     )
 
     errors = [e for e in events if e.get("type") == "error"]
@@ -357,6 +365,6 @@ async def test_unknown_model_key_falls_back_to_default(
                 )
             ).scalar_one()
             assert row.model_key is None, row.model_key
-            assert row.thinking == "high", row.thinking
+            assert row.reasoning == {"mode": "on", "effort": "high", "summary": "none"}
     finally:
         await test_engine.dispose()

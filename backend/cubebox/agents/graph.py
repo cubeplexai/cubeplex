@@ -15,7 +15,7 @@ from cubepi.agent.types import AgentTool
 from cubepi.deferred import DeferredToolGroup
 from cubepi.hitl import HitlChannel
 from cubepi.middleware.base import Middleware
-from cubepi.providers.base import ThinkingLevel
+from cubepi.providers.base import ReasoningControl
 
 from cubebox.middleware._compose import compose_after_tool_call
 
@@ -28,7 +28,7 @@ def create_cubebox_agent(
     checkpointer: Any = None,
     thread_id: str | None = None,
     middleware: list[Middleware] | None = None,
-    thinking: ThinkingLevel = "off",
+    reasoning: ReasoningControl | None = None,
     channel: HitlChannel | None = None,
     deferred_tool_groups: list[DeferredToolGroup] | None = None,
 ) -> Agent[Any]:
@@ -44,7 +44,7 @@ def create_cubebox_agent(
     mw_list = middleware or []
     return Agent(
         model=bound_model,
-        thinking=thinking,
+        reasoning=reasoning or ReasoningControl(),
         system_prompt=system_prompt,
         tools=tools or [],
         checkpointer=checkpointer,
