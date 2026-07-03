@@ -41,7 +41,7 @@ Some models support **extended thinking** — a mode where the agent reasons ste
 
 Higher thinking levels consume more tokens and take longer, but produce more thorough analysis for complex questions. For simple questions ("What is the capital of France?"), thinking adds cost without benefit.
 
-The thinking level is sticky across messages, like the preset. A **thinking badge** appears next to the control when an elevated level is active, so you do not accidentally leave it on high for routine questions.
+The thinking level is sticky across messages, like the preset. CubeBox stores it as a standard reasoning setting (`mode`, `effort`, and `summary`) and maps it to each provider's API. A **thinking badge** appears next to the control when an elevated level is active, so you do not accidentally leave it on high for routine questions.
 
 ### Viewing thinking output
 

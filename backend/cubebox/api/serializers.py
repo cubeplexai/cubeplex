@@ -12,6 +12,12 @@ from typing import Any
 from cubebox.models import Conversation
 from cubebox.utils.time import utc_isoformat
 
+DEFAULT_REASONING: dict[str, str] = {
+    "mode": "off",
+    "effort": "medium",
+    "summary": "none",
+}
+
 
 def serialize_conversation(c: Conversation) -> dict[str, Any]:
     """Serialize a conversation row for the API.
@@ -28,5 +34,5 @@ def serialize_conversation(c: Conversation) -> dict[str, Any]:
         "created_at": utc_isoformat(c.created_at),
         "updated_at": utc_isoformat(c.updated_at),
         "model_key": c.model_key,
-        "thinking": c.thinking,
+        "reasoning": c.reasoning or DEFAULT_REASONING,
     }

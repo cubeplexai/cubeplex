@@ -12,9 +12,9 @@ from collections.abc import Callable
 from typing import Any, Literal, cast
 
 from cubepi.providers.base import (
+    ReasoningControl,
     StreamOptions,
     TextContent,
-    ThinkingLevel,
     ToolCall,
     ToolDefinition,
     UserMessage,
@@ -98,7 +98,7 @@ async def _drain_stream(
     provider: Any,
     model_id: str,
     *,
-    thinking: ThinkingLevel = "off",
+    reasoning: ReasoningControl | None = None,
     prompt: str = "Reply with OK.",
     max_output: int = 64,
     max_seconds: float = 15.0,
@@ -112,14 +112,20 @@ async def _drain_stream(
     that a buffering gateway returns without emitting per-chunk tool-call events.
     """
     start = time.perf_counter()
-    model = provider.model(model_id, context_window=8192, max_tokens=max_output).spec
+    reasoning = reasoning or ReasoningControl()
+    model = provider.model(
+        model_id,
+        context_window=8192,
+        max_tokens=max_output,
+        reasoning=reasoning.mode != "off",
+    ).spec
     if temperature is not None:
         model.temperature = temperature
     stream = await asyncio.wait_for(
         provider.stream(
             model=model,
             messages=[UserMessage(content=[TextContent(text=prompt)])],
-            options=StreamOptions(thinking=thinking),
+            options=StreamOptions(reasoning=reasoning),
             tools=tools,
         ),
         timeout=max_seconds,
@@ -200,7 +206,7 @@ async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
         events, elapsed, _ = await _drain_stream(
             provider,
             model_id,
-            thinking="off",
+            reasoning=ReasoningControl(mode="off"),
             prompt=".",
             max_output=1,
             max_seconds=5.0,
@@ -236,20 +242,24 @@ async def probe_liveness(provider: Any, *, model_id: str) -> ProbeStep:
 async def probe_reasoning_toggle(
     provider: Any, *, model_id: str, capability: CapabilityDescriptor
 ) -> ProbeStep:
-    if not capability.reasoning_off_payload and not capability.reasoning_on_payload:
+    if capability.reasoning is None:
         return ProbeStep(
             name="reasoning",
             status="skip",
-            detail="capability has no reasoning_off/on payload",
+            detail="capability has no reasoning mapping",
         )
     try:
-        await _drain_stream(provider, model_id, thinking="off")
-        await _drain_stream(provider, model_id, thinking="medium")
+        await _drain_stream(provider, model_id, reasoning=ReasoningControl(mode="off"))
+        await _drain_stream(
+            provider,
+            model_id,
+            reasoning=ReasoningControl(mode="on", effort="medium"),
+        )
     except Exception as exc:
         # A model-not-found error here is what Task 9's _is_model_not_found keys
         # on to short-circuit to "unavailable" — keep type/raw_status in the error.
         return ProbeStep(name="reasoning", status="fail", error=_probe_error(exc))
-    return ProbeStep(name="reasoning", status="pass", detail="off + on payload both accepted")
+    return ProbeStep(name="reasoning", status="pass", detail="off + on reasoning accepted")
 
 
 # Stream event types that signal the endpoint emitted a tool call. cubepi's
@@ -352,7 +362,7 @@ async def probe_usage(provider: Any, *, model_id: str) -> ProbeStep:
             provider.stream(
                 model=provider.model(model_id, context_window=8192, max_tokens=16).spec,
                 messages=[UserMessage(content=[TextContent(text="hi")])],
-                options=StreamOptions(thinking="off"),
+                options=StreamOptions(reasoning=ReasoningControl(mode="off")),
             ),
             timeout=15.0,
         )

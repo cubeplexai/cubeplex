@@ -25,6 +25,12 @@ from cubebox.models.topic import Topic, TopicParticipant
 from cubebox.repositories.base import ScopedRepository
 from cubebox.utils.time import utc_isoformat
 
+DEFAULT_REASONING: dict[str, str] = {
+    "mode": "off",
+    "effort": "medium",
+    "summary": "none",
+}
+
 
 class ForkGroupChatError(Exception):
     """Source conversation is a group chat; fork is not supported."""
@@ -254,7 +260,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
         self,
         conversation_id: str,
         *,
-        model_setting: tuple[str | None, str] | None = None,
+        model_setting: tuple[str | None, dict[str, Any]] | None = None,
     ) -> None:
         """Mark the conversation as having user activity.
 
@@ -264,7 +270,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
         (so the timestamp reflects the latest activity for recency
         ordering in ``list_all``).
 
-        ``model_setting`` is an optional ``(model_key, thinking)`` pair. When
+        ``model_setting`` is an optional ``(model_key, reasoning)`` pair. When
         provided (the send path), it persists the user's per-conversation
         model selection; ``model_key=None`` inside the tuple means "use the
         workspace default" and is distinct from passing no tuple at all,
@@ -276,7 +282,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
         conv.has_messages = True
         conv.updated_at = datetime.now(UTC)
         if model_setting is not None:
-            conv.model_key, conv.thinking = model_setting
+            conv.model_key, conv.reasoning = model_setting
         await self.session.commit()
 
     async def set_pin(self, conversation_id: str, is_pinned: bool) -> Conversation | None:
@@ -300,7 +306,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
         (``cp.fork`` handles the advisory lock, parent linkage, and the
         bulk INSERT … SELECT). Then inserts a fresh ``conversations`` row
         owned by ``self.user_id``, carrying over ``topic_id``, ``model_key``,
-        and ``thinking`` from the source.
+        and ``reasoning`` from the source.
 
         Order matters: cubepi.fork() runs first so the destination
         ``cubepi_threads`` row (and its messages) exists before we publish
@@ -360,7 +366,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
             is_pinned=False,
             is_group_chat=False,
             model_key=src.model_key,
-            thinking=src.thinking,
+            reasoning=dict(src.reasoning or DEFAULT_REASONING),
         )
         return await self.add(conv)
 

@@ -7,8 +7,6 @@ added in Task A7 (chain length 1 only for PR 1) and Task B1 (length >1).
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from cubepi.providers.base import ThinkingLevel
-
 from cubebox.llm.resolver import parse_model_ref
 from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
 
@@ -82,15 +80,9 @@ def build_bound_model(
     snap: LLMSnapshot,
     ref: str,
     *,
-    thinking: ThinkingLevel = "off",
     cache_policy: "CacheMarkerPolicy | None" = None,
 ) -> Any:
-    """Build a cubepi BoundModel for `ref`, binding max_tokens / reasoning.
-
-    `thinking` is reserved for chain wrapping (Task B1) and Agent.prompt()
-    binding (Task C2); cubepi applies it at runtime, not at BoundModel build
-    time. Kept on the signature so callers stay stable across A7/B1/C2.
-    """
+    """Build a cubepi BoundModel for `ref`, binding model metadata."""
     slug, model_id = parse_model_ref(ref)
     cfg = snap.providers.get(slug)
     if cfg is None:
@@ -111,7 +103,6 @@ def build_chain_model(
     snap: LLMSnapshot,
     preset: ModelPreset,
     *,
-    thinking: ThinkingLevel = "off",
     cache_policy_factory: Callable[[str], "CacheMarkerPolicy | None"] | None = None,
     on_failover: OnFailoverCb | None = None,
 ) -> Any:
@@ -123,7 +114,7 @@ def build_chain_model(
         ref = preset.chain[0]
         slug, _ = parse_model_ref(ref)
         policy = cache_policy_factory(slug) if cache_policy_factory else None
-        return build_bound_model(snap, ref, thinking=thinking, cache_policy=policy)
+        return build_bound_model(snap, ref, cache_policy=policy)
 
     from cubepi.providers.fallback import FallbackBoundModel
 
@@ -131,6 +122,6 @@ def build_chain_model(
     for ref in preset.chain:
         slug, _ = parse_model_ref(ref)
         policy = cache_policy_factory(slug) if cache_policy_factory else None
-        bounds.append(build_bound_model(snap, ref, thinking=thinking, cache_policy=policy))
+        bounds.append(build_bound_model(snap, ref, cache_policy=policy))
 
     return FallbackBoundModel(chain=tuple(bounds), on_failover=on_failover)

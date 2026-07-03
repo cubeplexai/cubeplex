@@ -58,7 +58,7 @@ You can configure the following for each model:
 
 | Setting | Description |
 |---|---|
-| **Reasoning mode** | How the model handles extended thinking. Options vary by model: binary on/off, budget (token budget), effort level, or enum selection. |
+| **Reasoning capability** | How CubeBox maps the standard reasoning control (`mode`, `effort`, `summary`) to the provider's wire format. |
 | **Modalities** | Input/output capabilities — text, vision, tool use, etc. |
 | **Cost rates** | Per-token costs — input, output, and (where applicable) cache read / cache write — used for the [Cost Tracking](./cost-tracking.md) dashboard. |
 
@@ -81,3 +81,39 @@ If you want to stop offering a specific model to your team, disable it in the mo
 ### Add a self-hosted or proxy endpoint
 
 For models behind a reverse proxy, VPN, or self-hosted inference server, use the custom provider flow. Make sure the base URL is reachable from the CubeBox backend server.
+
+### Configure reasoning for a custom endpoint
+
+CubeBox stores one standard reasoning control for each conversation:
+
+| Field | Values |
+|---|---|
+| `mode` | `off`, `auto`, or `on` |
+| `effort` | `minimal`, `low`, `medium`, `high`, or `max` |
+| `summary` | `none`, `auto`, `detailed`, or `summarized` |
+
+Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages already translate that standard shape into each API's expected payload. For a custom or proxy endpoint, add a capability descriptor that tells CubeBox which fields to write:
+
+```json
+{
+  "reasoning": {
+    "mode_payloads": {
+      "off": { "extra_body": { "thinking": "disabled" } },
+      "on": { "extra_body": { "thinking": "enabled" } },
+      "auto": { "extra_body": { "thinking": "auto" } }
+    },
+    "effort_path": "reasoning_effort",
+    "effort_values": {
+      "minimal": "minimal",
+      "low": "low",
+      "medium": "medium",
+      "high": "high",
+      "max": "max"
+    },
+    "apply_effort_when_off": false,
+    "unsupported_mode_policy": "skip"
+  }
+}
+```
+
+Use `effort_path: "reasoning.effort"` for Responses-style nested payloads, or put provider-specific fields under `extra_body` for OpenAI-compatible gateways such as LiteLLM. If a model only supports reasoning on/off, omit `effort_path` and `effort_values`.

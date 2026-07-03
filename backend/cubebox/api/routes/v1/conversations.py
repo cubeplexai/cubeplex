@@ -10,10 +10,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
-from cubepi.providers.base import ThinkingLevel
+from cubepi.providers.base import ReasoningControl
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -216,7 +216,7 @@ async def _update_conversation_timestamp(
     org_id: str,
     workspace_id: str,
     user_id: str,
-    model_setting: tuple[str | None, str] | None = None,
+    model_setting: tuple[str | None, dict[str, Any]] | None = None,
 ) -> None:
     """Mark conversation as active and refresh its timestamp.
 
@@ -976,10 +976,12 @@ class AskUserAnswer(BaseModel):
 class SendMessageRequest(BaseModel):
     """Request body for sending a message."""
 
+    model_config = ConfigDict(extra="forbid")
+
     content: str = ""
     attachments: list[str] = []
     model_key: str | None = None
-    thinking: ThinkingLevel = "off"
+    reasoning: ReasoningControl = Field(default_factory=ReasoningControl)
 
 
 class SendMessageResponse(BaseModel):
@@ -1492,7 +1494,7 @@ async def send_message(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
         user_id=ctx.user.id,
-        model_setting=(effective_model_key, request_obj.thinking),
+        model_setting=(effective_model_key, request_obj.reasoning.model_dump()),
     )
 
     run_manager = raw_request.app.state.run_manager
@@ -1516,7 +1518,7 @@ async def send_message(
             attachments=list(request_obj.attachments),
             ctx=run_ctx,
             model_key=effective_model_key,
-            thinking=request_obj.thinking,
+            reasoning=request_obj.reasoning,
         )
     except RuntimeError as exc:
         raise HTTPException(

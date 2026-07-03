@@ -364,7 +364,7 @@ class TestConversationModelSetting:
 
     @pytest.mark.asyncio
     async def test_mark_active_persists_model_setting(self, _default_user_id: str) -> None:
-        """mark_active(model_setting=...) stores the key + thinking; a plain
+        """mark_active(model_setting=...) stores the key + reasoning; a plain
         mark_active afterwards leaves them untouched."""
         engine = create_async_engine(_build_database_url(), poolclass=NullPool)
         try:
@@ -378,17 +378,18 @@ class TestConversationModelSetting:
                 )
                 conv = await repo.create(title="model-setting", draft=True)
 
-                await repo.mark_active(conv.id, model_setting=("pro", "high"))
+                reasoning = {"mode": "on", "effort": "high", "summary": "none"}
+                await repo.mark_active(conv.id, model_setting=("pro", reasoning))
                 await session.refresh(conv)
                 assert conv.model_key == "pro"
-                assert conv.thinking == "high"
+                assert conv.reasoning == reasoning
 
                 # A timestamp-only mark_active (the install-fallback caller)
                 # must NOT clobber the previously stored model setting.
                 await repo.mark_active(conv.id)
                 await session.refresh(conv)
                 assert conv.model_key == "pro"
-                assert conv.thinking == "high"
+                assert conv.reasoning == reasoning
         finally:
             await engine.dispose()
 
@@ -396,7 +397,7 @@ class TestConversationModelSetting:
     async def test_get_conversation_returns_model_setting(
         self, async_client: httpx.AsyncClient, _default_user_id: str
     ) -> None:
-        """GET /conversations/{id} surfaces model_key + thinking."""
+        """GET /conversations/{id} surfaces model_key + reasoning."""
         engine = create_async_engine(_build_database_url(), poolclass=NullPool)
         try:
             maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -408,7 +409,8 @@ class TestConversationModelSetting:
                     user_id=_default_user_id,
                 )
                 conv = await repo.create(title="serialize-model-setting")
-                await repo.mark_active(conv.id, model_setting=("ultra", "low"))
+                reasoning = {"mode": "on", "effort": "low", "summary": "none"}
+                await repo.mark_active(conv.id, model_setting=("ultra", reasoning))
                 conv_id = conv.id
         finally:
             await engine.dispose()
@@ -417,4 +419,4 @@ class TestConversationModelSetting:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["model_key"] == "ultra"
-        assert data["thinking"] == "low"
+        assert data["reasoning"] == reasoning
