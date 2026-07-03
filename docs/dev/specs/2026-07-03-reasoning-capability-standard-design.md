@@ -1,7 +1,7 @@
 # Reasoning Capability Standard
 
 **Status:** Draft for review
-**Author:** Codex
+**Author:** xfgong
 **Date:** 2026-07-03
 **Scope:** Redesign the reasoning-control abstraction shared by cubepi and
 cubebox so official APIs work out of the box, while custom OpenAI-compatible
