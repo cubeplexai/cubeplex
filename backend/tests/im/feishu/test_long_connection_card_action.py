@@ -8,9 +8,13 @@ toast → CallBackToast mapping.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Any
 
 import pytest
+from websockets.exceptions import ConnectionClosedOK
+from websockets.frames import Close
 
 
 @pytest.mark.asyncio
@@ -141,3 +145,96 @@ async def test_lc_handler_tolerates_missing_event_data(
     # parse_action_payload raises InvalidAction → toast "未知操作".
     assert response is not None
     assert called[0]["event"] == {}
+
+
+@pytest.mark.asyncio
+async def test_long_connection_disconnect_disables_reconnect_and_closes_sdk_client() -> None:
+    from cubebox.im.feishu.long_connection import FeishuLongConnection
+
+    class _Client:
+        def __init__(self) -> None:
+            self._auto_reconnect = True
+            self.disconnected = False
+
+        async def _disconnect(self) -> None:
+            self.disconnected = True
+
+    client = _Client()
+    lc = object.__new__(FeishuLongConnection)
+    lc._client = client
+    lc._thread_loop = None
+    lc._ws_future = None
+
+    await lc.disconnect()
+
+    assert client._auto_reconnect is False
+    assert client.disconnected is True
+
+
+@pytest.mark.asyncio
+async def test_long_connection_disconnect_runs_sdk_disconnect_on_thread_loop() -> None:
+    from cubebox.im.feishu.long_connection import FeishuLongConnection
+
+    loop_ready = threading.Event()
+    worker_loop = asyncio.new_event_loop()
+
+    def run_loop() -> None:
+        asyncio.set_event_loop(worker_loop)
+        loop_ready.set()
+        worker_loop.run_forever()
+
+    thread = threading.Thread(target=run_loop)
+    thread.start()
+    assert loop_ready.wait(timeout=1.0)
+
+    class _Client:
+        def __init__(self) -> None:
+            self._auto_reconnect = True
+            self.disconnect_loop: asyncio.AbstractEventLoop | None = None
+
+        async def _disconnect(self) -> None:
+            self.disconnect_loop = asyncio.get_running_loop()
+
+    client = _Client()
+    lc = object.__new__(FeishuLongConnection)
+    lc._client = client
+    lc._thread_loop = worker_loop
+    lc._ws_future = None
+
+    try:
+        await lc.disconnect()
+
+        assert client._auto_reconnect is False
+        assert client.disconnect_loop is worker_loop
+    finally:
+        if worker_loop.is_running():
+            worker_loop.call_soon_threadsafe(worker_loop.stop)
+        thread.join(timeout=1.0)
+        worker_loop.close()
+
+
+@pytest.mark.asyncio
+async def test_graceful_receiver_suppresses_expected_shutdown_close() -> None:
+    from cubebox.im.feishu.long_connection import _install_graceful_shutdown_receiver
+
+    class _Conn:
+        async def recv(self) -> bytes:
+            close = Close(1000, "bye")
+            raise ConnectionClosedOK(close, close, False)
+
+    class _Client:
+        def __init__(self) -> None:
+            self._conn = _Conn()
+            self._auto_reconnect = False
+            self.disconnected = False
+
+        async def _disconnect(self) -> None:
+            self.disconnected = True
+            self._conn = None
+
+    client = _Client()
+    _install_graceful_shutdown_receiver(client, is_shutting_down=lambda: True)
+
+    await client._receive_message_loop()
+
+    assert client.disconnected is True

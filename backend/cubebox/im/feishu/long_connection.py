@@ -19,9 +19,11 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from types import MethodType
 from typing import Any, Protocol
 
 from loguru import logger
+from websockets.exceptions import ConnectionClosedOK
 
 from cubebox.api.routes.v1.im_ingress import _handle_card_action
 from cubebox.im.feishu.connector import FeishuConnector
@@ -46,6 +48,48 @@ class _IngestCallable(Protocol):
 
 
 IngestCallable = Callable[..., Awaitable[Any]]
+
+
+def _install_graceful_shutdown_receiver(
+    client: Any,
+    *,
+    is_shutting_down: Callable[[], bool],
+) -> None:
+    """Replace lark_oapi's receive loop with shutdown-aware semantics.
+
+    The SDK treats every ``recv()`` exception as an error. During our
+    deliberate shutdown, closing the WebSocket produces ``ConnectionClosedOK``
+    (code 1000), which should end the receive task quietly instead of logging
+    an error and re-raising into asyncio's default exception handler.
+    """
+
+    async def _receive_message_loop(self: Any) -> None:
+        try:
+            while True:
+                if self._conn is None:
+                    if is_shutting_down():
+                        return
+                    raise RuntimeError("connection is closed")
+                msg = await self._conn.recv()
+                asyncio.get_running_loop().create_task(self._handle_message(msg))
+        except ConnectionClosedOK:
+            if is_shutting_down():
+                with suppress(Exception):
+                    await self._disconnect()
+                return
+            await self._disconnect()
+            if getattr(self, "_auto_reconnect", False):
+                await self._reconnect()
+                return
+            raise
+        except Exception as exc:
+            await self._disconnect()
+            if getattr(self, "_auto_reconnect", False):
+                await self._reconnect()
+                return
+            raise exc
+
+    client._receive_message_loop = MethodType(_receive_message_loop, client)
 
 
 async def _lc_handle_card_action(event: Any, *, run_manager: Any, redis_key_prefix: str) -> Any:
@@ -333,11 +377,13 @@ class FeishuLongConnection:
         self._ws_future: asyncio.Future[Any] | None = None
         self._client: Any = None
         self._thread_loop: asyncio.AbstractEventLoop | None = None
+        self._disconnecting = False
 
     async def connect(self) -> None:
         assert lark is not None
         from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 
+        self._disconnecting = False
         domain = LARK_DOMAIN if self._domain == "lark" else FEISHU_DOMAIN
         # Capture loop NOW on the asyncio main thread; the handler closure
         # uses it via run_coroutine_threadsafe from the SDK worker.
@@ -370,6 +416,10 @@ class FeishuLongConnection:
             log_level=lark.LogLevel.INFO,
             domain=domain,
         )
+        _install_graceful_shutdown_receiver(
+            self._client,
+            is_shutting_down=lambda: self._disconnecting,
+        )
 
         def _start_in_thread() -> None:
             # ``lark_oapi.ws.client`` captures a module-level ``loop`` at
@@ -396,18 +446,44 @@ class FeishuLongConnection:
         self._ws_future = loop.run_in_executor(None, _start_in_thread)
 
     async def disconnect(self) -> None:
-        # The lark SDK has no stop() method. client.start() blocks on
-        # loop.run_until_complete(_select()) where _select is
-        # `while True: sleep(3600)`. Break out by stopping the thread's
-        # event loop, which unblocks run_until_complete and lets the
-        # executor thread exit. The WS socket is cleaned up when the
-        # loop closes in _start_in_thread's finally block.
+        self._disconnecting = True
+        # The lark SDK has no stop() method. Disable its reconnect path first;
+        # otherwise closing/stopping the loop makes _receive_message_loop catch
+        # "Event loop is closed" and immediately start a reconnect on shutdown.
+        client = self._client
+        if client is not None:
+            with suppress(Exception):
+                client._auto_reconnect = False
+
         tl = self._thread_loop
-        if tl is not None:
+        if client is not None and tl is not None and not tl.is_closed():
+
+            async def _shutdown_client() -> None:
+                await client._disconnect()
+
+            with suppress(Exception):
+                cfut = asyncio.run_coroutine_threadsafe(_shutdown_client(), tl)
+                await asyncio.wrap_future(cfut)
+        elif client is not None:
+            disconnect = getattr(client, "_disconnect", None)
+            if disconnect is not None:
+                with suppress(Exception):
+                    result = disconnect()
+                    if asyncio.iscoroutine(result):
+                        await result
+
+        # client.start() blocks on loop.run_until_complete(_select()) where
+        # _select is `while True: sleep(3600)`. Break it out after the socket
+        # is closed so the executor thread can leave start() and close its loop.
+        if tl is not None and not tl.is_closed():
             with suppress(Exception):
                 tl.call_soon_threadsafe(tl.stop)
+
         if self._ws_future is not None:
-            self._ws_future.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await asyncio.wait_for(asyncio.shield(self._ws_future), timeout=2.0)
+            if not self._ws_future.done():
+                self._ws_future.cancel()
 
     def is_open(self) -> bool:
         """True iff the WebSocket task is still running.
