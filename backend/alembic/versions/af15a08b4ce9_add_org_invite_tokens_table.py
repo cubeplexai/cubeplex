@@ -1,7 +1,7 @@
 """add org_invite_tokens table
 
 Revision ID: af15a08b4ce9
-Revises: ecb4ae85960c
+Revises: c2f1a7b9d340
 Create Date: 2026-06-30 15:21:11.824163
 
 """
@@ -14,7 +14,7 @@ import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString i
 
 # revision identifiers, used by Alembic.
 revision: str = 'af15a08b4ce9'
-down_revision: Union[str, Sequence[str], None] = 'ecb4ae85960c'
+down_revision: Union[str, Sequence[str], None] = 'c2f1a7b9d340'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
