@@ -22,6 +22,9 @@ from cubebox.models.provider import Model, Provider
 from cubebox.utils.slug import slugify
 
 _PROVIDER_KEY_KIND = "provider_api_key"
+_LEGACY_CAPABILITY_KEYS = frozenset(
+    {"reasoning_off_payload", "reasoning_on_payload", "reasoning_level"}
+)
 
 
 def _dedup_slug(base: str, taken: set[str]) -> str:
@@ -77,6 +80,12 @@ def _model_from_preset(m: ModelPreset, override: dict[str, Any] | None) -> dict[
             if knob in override:
                 out[knob] = override[knob]
     return out
+
+
+def _has_legacy_capability_shape(capability: dict[str, Any] | None) -> bool:
+    if not capability:
+        return False
+    return any(key in capability for key in _LEGACY_CAPABILITY_KEYS)
 
 
 def resolve_provider_config(name: str, cfg: dict[str, Any]) -> ResolvedProviderConfig:
@@ -268,9 +277,11 @@ async def seed_system_providers_from_config(
             logger.debug("System provider '{}' already exists, updated", name)
 
         # Backfill the cached capability snapshot + preset_key from the catalog.
-        # Only fill when the row's capability is still empty so re-seeding never
-        # clobbers admin edits. Custom providers (no preset) get no backfill.
-        if not provider.capability and resolved.preset_key:
+        # Fill empty rows and refresh rows previously seeded with the legacy
+        # reasoning_* capability keys. Preserve admin-authored current-shape JSON.
+        if resolved.preset_key and (
+            not provider.capability or _has_legacy_capability_shape(provider.capability)
+        ):
             provider.preset_slug = resolved.preset_key
             provider.capability = resolved.capability
             provider.model_capability_overrides = resolved.model_capability_overrides
