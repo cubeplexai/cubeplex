@@ -272,3 +272,27 @@ def test_catalog_to_api_shape():
         "reasoning",
         "pricing",
     } <= m.keys()
+
+
+def test_catalog_capabilities_use_standard_reasoning_shape():
+    from cubebox.llm.catalog import load_catalog
+
+    api = load_catalog().to_api()
+    endpoints = [ep for vendor in api for ep in vendor["endpoints"]]
+
+    assert endpoints, "catalog should expose provider endpoints"
+    for ep in endpoints:
+        capability = ep["capability"]
+        assert "reasoning_off_payload" not in capability
+        assert "reasoning_on_payload" not in capability
+        assert "reasoning_level" not in capability
+
+    anthropic = next(
+        ep for ep in endpoints if ep["preset_key"] == "anthropic/intl/anthropic-messages"
+    )
+    reasoning = anthropic["capability"]["reasoning"]
+    assert reasoning["mode_payloads"]["off"] == {"thinking": {"type": "disabled"}}
+    assert reasoning["mode_payloads"]["on"] == {"thinking": {"type": "enabled"}}
+    assert reasoning["effort_path"] == "thinking.budget_tokens"
+    assert reasoning["effort_values"]["max"] == 16384
+    assert reasoning["apply_effort_when_off"] is False

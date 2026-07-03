@@ -147,6 +147,53 @@ async def test_seed_backfills_capability_for_preset_ref(
     assert not house.capability
 
 
+async def test_seed_refreshes_legacy_seeded_capability(
+    clean_db: AsyncSession,
+    backend: FernetBackend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A previously seeded system provider with legacy capability keys is upgraded."""
+    provider = Provider(
+        org_id=None,
+        name="ds",
+        slug="ds",
+        provider_type="openai-completions",
+        base_url="https://old.example/v1",
+        auth_type="api_key",
+        enabled=True,
+        created_by_user_id=None,
+        preset_slug="deepseek/cn/openai-completions",
+        capability={
+            "reasoning_off_payload": {"extra_body": {"reasoning": {"exclude": True}}},
+            "reasoning_on_payload": {"extra_body": {"reasoning": {"exclude": False}}},
+        },
+    )
+    clean_db.add(provider)
+    await clean_db.commit()
+
+    fake_llm = {
+        "providers": {
+            "ds": {
+                "preset": "deepseek/cn/openai-completions",
+                "api_key": "k",
+            },
+        }
+    }
+    monkeypatch.setattr(
+        "cubebox.seeders.provider_seeder.settings",
+        {"llm": fake_llm},
+        raising=True,
+    )
+
+    await seed_system_providers_from_config(clean_db, backend)
+
+    refreshed = (await clean_db.execute(select(Provider).where(Provider.name == "ds"))).scalar_one()
+    assert "reasoning_off_payload" not in refreshed.capability
+    assert refreshed.capability["reasoning"]["mode_payloads"]["off"] == {
+        "extra_body": {"reasoning": {"exclude": True}}
+    }
+
+
 async def test_seed_dedups_colliding_slugs(
     clean_db: AsyncSession,
     backend: FernetBackend,
