@@ -31,3 +31,10 @@ def test_reasoning_defaults_to_off_medium_none() -> None:
 def test_request_rejects_legacy_thinking() -> None:
     with pytest.raises(ValidationError):
         SendMessageRequest.model_validate({"content": "hi", "thinking": "high"})
+
+
+def test_request_rejects_auto_reasoning_mode_until_presets_support_it() -> None:
+    with pytest.raises(ValidationError):
+        SendMessageRequest.model_validate(
+            {"content": "hi", "reasoning": {"mode": "auto", "effort": "medium"}}
+        )

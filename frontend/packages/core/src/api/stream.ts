@@ -1,4 +1,4 @@
-import type { AgentEvent, ThinkingLevel } from '../types'
+import type { AgentEvent, ReasoningControl } from '../types'
 import { toApiError, type ApiClient } from './client'
 import { CSRF_COOKIE_NAME } from './cookieNames'
 import { streamRun } from './runStreams'
@@ -8,7 +8,7 @@ import { streamRun } from './runStreams'
  *
  * ``model_key`` selects the model (a tier name or a custom label — the
  * resolved chain lives server-side). ``null`` or omitted means "use the
- * workspace default". ``thinking`` overrides the per-message reasoning depth
+ * workspace default". ``reasoning`` overrides the per-message reasoning control
  * and is sticky across messages on the composer side, so it is sent on every
  * request rather than only when it changes.
  */
@@ -16,7 +16,7 @@ export interface SendMessageRequest {
   content: string
   attachments?: string[]
   model_key?: string | null
-  thinking?: ThinkingLevel
+  reasoning?: ReasoningControl
 }
 
 export interface CancelRunResponse {
@@ -150,7 +150,7 @@ export async function* streamMessages(
   signal?: AbortSignal,
   options?: {
     model_key?: string | null
-    thinking?: ThinkingLevel
+    reasoning?: ReasoningControl
     /**
      * Fires as soon as the POST returns a run id, BEFORE any event is
      * yielded — only on the JSON-then-tail path (the production path
@@ -178,7 +178,7 @@ export async function* streamMessages(
   // (workspace default), but sending it explicitly lets us round-trip the
   // user's "no model chosen" choice when the prior turn had one.
   if (options?.model_key !== undefined) requestBody.model_key = options.model_key
-  if (options?.thinking !== undefined) requestBody.thinking = options.thinking
+  if (options?.reasoning !== undefined) requestBody.reasoning = options.reasoning
   try {
     const res = await fetch(`${client.baseUrl}${path}`, {
       method: 'POST',

@@ -7,7 +7,7 @@ anthropic-native:
       "off": { thinking: { type: disabled } }
       "on": { thinking: { type: enabled } }
     effort_path: thinking.budget_tokens
-    effort_values: { minimal: 0, low: 2048, medium: 8192, high: 16384, max: 16384 }
+    effort_values: { minimal: 1024, low: 2048, medium: 8192, high: 16384, max: 16384 }
     apply_effort_when_off: false
   temperature: { mode: free, min: 0.0, max: 1.0, default: 1.0 }
   max_tokens_field: max_tokens
@@ -22,6 +22,7 @@ openai-responses:
         include: [reasoning.encrypted_content]
     effort_path: reasoning.effort
     effort_values: { low: low, medium: medium, high: high, max: high }
+    apply_effort_when_off: false
   temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
   max_tokens_field: max_tokens
   supports_tools: true

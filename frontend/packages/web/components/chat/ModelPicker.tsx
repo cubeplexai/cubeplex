@@ -21,7 +21,7 @@ const THINKING_LABEL_KEY = {
   low: 'thinkingLevelLow',
   medium: 'thinkingLevelMedium',
   high: 'thinkingLevelHigh',
-  xhigh: 'thinkingLevelXhigh',
+  max: 'thinkingLevelMax',
 } as const satisfies Record<ThinkingLevel, string>
 
 /**

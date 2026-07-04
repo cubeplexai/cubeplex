@@ -317,7 +317,7 @@
     "thinkingLevelLow": "低",
     "thinkingLevelMedium": "中",
     "thinkingLevelHigh": "高",
-    "thinkingLevelXhigh": "超高",
+    "thinkingLevelMax": "最高",
     "modelPickerAria": "模型与思考深度",
     "modelSectionLabel": "模型",
     "effortLabel": "思考深度",

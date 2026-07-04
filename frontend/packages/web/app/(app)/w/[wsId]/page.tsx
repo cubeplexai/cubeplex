@@ -11,6 +11,7 @@ import {
 } from '@cubebox/core'
 import { InputBar } from '@/components/layout/InputBar'
 import { PromptCards } from '@/components/chat/PromptCards'
+import { reasoningFromThinking } from '@/lib/reasoning-control'
 import {
   getPresetSelectionStore,
   markConversationLocallyCreated,
@@ -90,7 +91,7 @@ export default function WorkspaceHomePage({
       const selection = getPresetSelectionStore(wsId).getState()
       const sendOptions = {
         model_key: validatedModelKey(selection),
-        thinking: selection.thinking,
+        reasoning: reasoningFromThinking(selection.thinking),
       }
       send(client, convId, content, attachedIds, optimisticAttachments, sendOptions).catch(
         (err) => {

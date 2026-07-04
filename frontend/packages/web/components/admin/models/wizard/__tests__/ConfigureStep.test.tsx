@@ -111,6 +111,30 @@ describe('ConfigureStep', () => {
     await waitFor(() => expect(onProviderCreated).toHaveBeenCalledWith('prv_new'))
   })
 
+  it('injects the standard reasoning capability template for custom providers', () => {
+    renderStep(makeVendor({ category: 'custom' }))
+
+    fireEvent.click(screen.getByRole('button', { name: en.adminModels.wizard.configure.advanced }))
+    fireEvent.click(
+      screen.getByRole('button', { name: en.adminModels.wizard.capability.useTemplate }),
+    )
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: en.adminModels.wizard.capability.templateReasoning,
+      }),
+    )
+
+    const text = String(
+      (screen.getByLabelText(en.adminModels.wizard.capability.label) as HTMLTextAreaElement).value,
+    )
+    const parsed = JSON.parse(text) as Record<string, unknown>
+    expect(parsed.reasoning).toMatchObject({
+      effort_path: 'reasoning_effort',
+      apply_effort_when_off: false,
+    })
+    expect(parsed.reasoning_on_payload).toBeUndefined()
+  })
+
   it('revisit: updates the existing provider instead of creating a second one', async () => {
     const { onProviderCreated } = renderStep(makeVendor(), vi.fn(), 'prv_existing')
     fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'sk-123' } })

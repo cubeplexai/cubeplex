@@ -29,7 +29,7 @@ The layout has three main areas:
 The input bar sits at the bottom. It includes:
 
 - **Model preset picker** — choose which model to use for this message.
-- **Thinking control** — set the reasoning depth (Off, Low, Medium, High, Extra High).
+- **Thinking control** — set the reasoning depth (Off, Low, Medium, High, Max).
 - **Attach button** (paperclip icon) — add files to your message.
 - **Text area** — type your message. Press **Enter** to send, **Shift+Enter** for a new line.
 - **Send / Stop button** — sends the message, or stops a running response.

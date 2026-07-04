@@ -22,14 +22,9 @@ from cubebox.models import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
 from cubebox.models.public_id import generate_public_id
 from cubebox.models.topic import Topic, TopicParticipant
+from cubebox.reasoning import DEFAULT_REASONING
 from cubebox.repositories.base import ScopedRepository
 from cubebox.utils.time import utc_isoformat
-
-DEFAULT_REASONING: dict[str, str] = {
-    "mode": "off",
-    "effort": "medium",
-    "summary": "none",
-}
 
 
 class ForkGroupChatError(Exception):
