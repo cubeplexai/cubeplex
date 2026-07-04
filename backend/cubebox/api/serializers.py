@@ -10,13 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from cubebox.models import Conversation
+from cubebox.reasoning import DEFAULT_REASONING
 from cubebox.utils.time import utc_isoformat
-
-DEFAULT_REASONING: dict[str, str] = {
-    "mode": "off",
-    "effort": "medium",
-    "summary": "none",
-}
 
 
 def serialize_conversation(c: Conversation) -> dict[str, Any]:

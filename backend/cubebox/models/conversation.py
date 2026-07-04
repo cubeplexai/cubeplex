@@ -7,6 +7,7 @@ from sqlalchemy import JSON, Column, DateTime, Index, text
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
+from cubebox.reasoning import DEFAULT_REASONING
 
 
 class Conversation(CubeboxBase, OrgScopedMixin, table=True):
@@ -50,7 +51,7 @@ class Conversation(CubeboxBase, OrgScopedMixin, table=True):
     # the provider-independent ReasoningControl JSON.
     model_key: str | None = Field(default=None, max_length=64)
     reasoning: dict[str, Any] = Field(
-        default_factory=lambda: {"mode": "off", "effort": "medium", "summary": "none"},
+        default_factory=lambda: dict(DEFAULT_REASONING),
         sa_column=Column(JSON),
     )
     # Source metadata (e.g. IM-bot linkage under an "im" key). Mirrors

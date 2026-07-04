@@ -12,11 +12,11 @@ import {
 } from '@cubebox/core'
 import { useTranslations } from 'next-intl'
 
+import { thinkingFromReasoning } from '@/lib/reasoning-control'
 import {
   consumeLocallyCreatedConversation,
   getPresetSelectionStore,
 } from '@/lib/stores/preset-selection'
-import type { ThinkingLevel } from '@/lib/types/presets'
 
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
@@ -91,7 +91,7 @@ export default function ChatPage({ params }: { params: Promise<{ wsId: string; i
             const store = getPresetSelectionStore(wsId).getState()
             if (store.modelKey === before.modelKey && store.thinking === before.thinking) {
               store.setModelKey(convo.model_key ?? null)
-              store.setThinking((convo.thinking ?? 'medium') as ThinkingLevel)
+              store.setThinking(thinkingFromReasoning(convo.reasoning))
             }
           }
         } catch {

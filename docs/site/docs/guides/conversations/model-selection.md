@@ -31,13 +31,13 @@ Some models support **extended thinking** — a mode where the agent reasons ste
 
 ### Thinking levels
 
-| Level | Behavior |
-|---|---|
-| **Off** | No extended thinking. The agent responds directly. |
-| **Low** | Brief internal reasoning. Fast, low cost. |
-| **Medium** | Moderate reasoning depth. Good default for most tasks. |
-| **High** | Deep reasoning. Better for complex analytical or coding tasks. |
-| **Extra High** | Maximum reasoning depth. Use for the hardest problems. |
+| Level      | Behavior                                                       |
+| ---------- | -------------------------------------------------------------- |
+| **Off**    | No extended thinking. The agent responds directly.             |
+| **Low**    | Brief internal reasoning. Fast, low cost.                      |
+| **Medium** | Moderate reasoning depth. Good default for most tasks.         |
+| **High**   | Deep reasoning. Better for complex analytical or coding tasks. |
+| **Max**    | Maximum reasoning effort. Use for the hardest problems.        |
 
 Higher thinking levels consume more tokens and take longer, but produce more thorough analysis for complex questions. For simple questions ("What is the capital of France?"), thinking adds cost without benefit.
 
@@ -65,13 +65,13 @@ If the entire fallback chain is exhausted (all models in the preset are unavaila
 
 There is no single best model. Here are practical guidelines:
 
-| Task type | Recommended approach |
-|---|---|
-| Quick questions, summarization, formatting | A fast, cost-efficient model (e.g., Haiku, GPT-4o-mini). Thinking off. |
-| Coding, debugging, code review | A capable model with thinking on medium or high. |
-| Complex analysis, multi-step reasoning | A top-tier model with thinking on high or extra high. |
-| Image understanding, screenshot analysis | A model with **vision** support. Check with your admin which presets support vision. |
-| Long documents, large context | A model with a large context window. |
+| Task type                                  | Recommended approach                                                                 |
+| ------------------------------------------ | ------------------------------------------------------------------------------------ |
+| Quick questions, summarization, formatting | A fast, cost-efficient model (e.g., Haiku, GPT-4o-mini). Thinking off.               |
+| Coding, debugging, code review             | A capable model with thinking on medium or high.                                     |
+| Complex analysis, multi-step reasoning     | A top-tier model with thinking on high or max.                                       |
+| Image understanding, screenshot analysis   | A model with **vision** support. Check with your admin which presets support vision. |
+| Long documents, large context              | A model with a large context window.                                                 |
 
 ## What org admins control
 

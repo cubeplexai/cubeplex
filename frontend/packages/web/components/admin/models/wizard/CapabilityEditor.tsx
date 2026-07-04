@@ -16,12 +16,20 @@ import { cn } from '@/lib/utils'
 
 // A minimal effort-style reasoning block users can drop into a custom preset.
 const REASONING_TEMPLATE = {
-  reasoning_on_payload: { reasoning_effort: 'medium' },
-  reasoning_off_payload: {},
-  reasoning_level: {
-    path: 'reasoning_effort',
-    kind: 'effort',
-    level_to_effort: { low: 'low', medium: 'medium', high: 'high' },
+  reasoning: {
+    mode_payloads: {
+      off: {},
+      on: {},
+    },
+    effort_path: 'reasoning_effort',
+    effort_values: {
+      minimal: 'minimal',
+      low: 'low',
+      medium: 'medium',
+      high: 'high',
+      max: 'high',
+    },
+    apply_effort_when_off: false,
   },
 }
 

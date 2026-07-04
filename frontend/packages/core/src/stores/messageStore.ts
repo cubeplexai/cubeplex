@@ -16,7 +16,7 @@ import type {
   Message,
   ReasoningEvent,
   TextDeltaEvent,
-  ThinkingLevel,
+  ReasoningControl,
   TodoItem,
   ToolCallDeltaEvent,
   ToolCallEvent,
@@ -156,7 +156,7 @@ export interface MessageStore {
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
-    options?: { model_key?: string | null; thinking?: ThinkingLevel },
+    options?: { model_key?: string | null; reasoning?: ReasoningControl },
   ): Promise<void>
   /**
    * Append a ``model_failover`` event to the conversation's banner list.
@@ -1530,7 +1530,7 @@ export const useMessageStore = create<MessageStore>((set, get) => ({
     content: string,
     attachmentIds?: string[],
     attachments?: import('../types').MessageAttachment[],
-    options?: { model_key?: string | null; thinking?: ThinkingLevel },
+    options?: { model_key?: string | null; reasoning?: ReasoningControl },
   ) {
     const isFirstTurn = (get().messages[conversationId] ?? []).length === 0
     if (isFirstTurn && content.trim()) {

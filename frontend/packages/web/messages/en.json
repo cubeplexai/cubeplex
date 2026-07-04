@@ -317,7 +317,7 @@
     "thinkingLevelLow": "Low",
     "thinkingLevelMedium": "Medium",
     "thinkingLevelHigh": "High",
-    "thinkingLevelXhigh": "Extra High",
+    "thinkingLevelMax": "Max",
     "modelPickerAria": "Model and thinking effort",
     "modelSectionLabel": "Model",
     "effortLabel": "Effort",

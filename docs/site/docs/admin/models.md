@@ -56,11 +56,11 @@ Each provider exposes one or more models. After adding a provider, its available
 
 You can configure the following for each model:
 
-| Setting | Description |
-|---|---|
-| **Reasoning capability** | How CubeBox maps the standard reasoning control (`mode`, `effort`, `summary`) to the provider's wire format. |
-| **Modalities** | Input/output capabilities — text, vision, tool use, etc. |
-| **Cost rates** | Per-token costs — input, output, and (where applicable) cache read / cache write — used for the [Cost Tracking](./cost-tracking.md) dashboard. |
+| Setting                  | Description                                                                                                                                    |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Reasoning capability** | How CubeBox maps the standard reasoning control (`mode`, `effort`, `summary`) to the provider's wire format.                                   |
+| **Modalities**           | Input/output capabilities — text, vision, tool use, etc.                                                                                       |
+| **Cost rates**           | Per-token costs — input, output, and (where applicable) cache read / cache write — used for the [Cost Tracking](./cost-tracking.md) dashboard. |
 
 ### How models reach workspaces
 
@@ -86,11 +86,11 @@ For models behind a reverse proxy, VPN, or self-hosted inference server, use the
 
 CubeBox stores one standard reasoning control for each conversation:
 
-| Field | Values |
-|---|---|
-| `mode` | `off`, `auto`, or `on` |
-| `effort` | `minimal`, `low`, `medium`, `high`, or `max` |
-| `summary` | `none`, `auto`, `detailed`, or `summarized` |
+| Field     | Values                                       |
+| --------- | -------------------------------------------- |
+| `mode`    | `off` or `on`                                |
+| `effort`  | `minimal`, `low`, `medium`, `high`, or `max` |
+| `summary` | `none`, `auto`, `detailed`, or `summarized`  |
 
 Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages already translate that standard shape into each API's expected payload. For a custom or proxy endpoint, add a capability descriptor that tells CubeBox which fields to write:
 
@@ -99,8 +99,7 @@ Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Ant
   "reasoning": {
     "mode_payloads": {
       "off": { "extra_body": { "thinking": "disabled" } },
-      "on": { "extra_body": { "thinking": "enabled" } },
-      "auto": { "extra_body": { "thinking": "auto" } }
+      "on": { "extra_body": { "thinking": "enabled" } }
     },
     "effort_path": "reasoning_effort",
     "effort_values": {

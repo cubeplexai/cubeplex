@@ -31,6 +31,12 @@ def _effort_key(level: str) -> str:
     return level
 
 
+def _effort_value(level: str, value: Any) -> Any:
+    if level == "off" and isinstance(value, int) and value <= 0:
+        return 1024
+    return value
+
+
 def _convert_legacy_capability(value: Any) -> Any:
     if not isinstance(value, dict) or not any(key in value for key in _LEGACY_KEYS):
         return value
@@ -58,7 +64,8 @@ def _convert_legacy_capability(value: Any) -> Any:
             raw_values = legacy_level.get("level_to_effort")
         if isinstance(raw_values, dict):
             reasoning["effort_values"] = {
-                _effort_key(str(level)): effort for level, effort in raw_values.items()
+                _effort_key(str(level)): _effort_value(str(level), effort)
+                for level, effort in raw_values.items()
             }
         reasoning["apply_effort_when_off"] = False
 
