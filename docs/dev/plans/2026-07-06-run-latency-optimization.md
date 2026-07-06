@@ -218,13 +218,37 @@ making the round-trip-count reductions the most valuable thing to verify.
 
 ### T8 (follow-up, not in this branch) — collapse the agent-build DB work
 
-The decomposition points the next effort at `_build_agent_for_conversation`:
-coalesce its ~4 independent `async_session_maker()` opens (MCP effective,
-membership role, org, skills-adapter) into one shared session and/or run
-the independent reads under `asyncio.gather`; evaluate dropping
-`pool_pre_ping` (or replacing it with a cheaper liveness check) for the
-hot pool. Deferred to a separate change — it is orthogonal to the
-send/done round-trip work here and wants its own measurement.
+**Verdict after co-located re-measurement (2026-07-06): NOT worth doing.**
+
+Re-ran the A/B on 215 where Postgres/Redis are co-located with the app
+(<5ms RTT vs the 210ms dev tunnel):
+
+| phase | dev tunnel (210ms) | 215 co-located (<5ms) |
+|---|---|---|
+| prep → loading_tools | ~3s | 0.02–0.04s |
+| build (loading_tools → starting) | 17–23s | **2.0–4.5s** |
+| TTFT (LLM) | 12–23s | 6–14.5s |
+| tail | 15–21s | 6–7.8s |
+
+End-to-end on 215: first feedback 21.6s → **0.22s** (status events),
+first token 21.6s → 14.8s, done 29.5s → 21.3s, tail 7.3s (flat).
+
+The build's ~85% collapse (17–23s → 2–4.5s) confirms the tunnel RTT was
+the amplifier the three DB-oriented changes would have targeted — and it
+is a test-environment artifact, not production. The residual 2–4.5s build
+cost **persists at <5ms RTT**, so it is not round-trip-count bound; it is
+CPU/setup bound (constructing 21 tool schemas + 11 middleware per send,
+credential/snapshot crypto). Dropping `pool_pre_ping`, merging sessions,
+or `asyncio.gather` all target I/O-wait, which is already near-zero on a
+co-located DB — they would move the production number by tens of
+milliseconds, against a real reliability cost (pre_ping) and added
+complexity. **Skip them.**
+
+If the residual 2–4.5s build is ever pursued, it needs CPU profiling of
+tool/middleware construction (cache tool schemas across turns; the tool
+set is stable per workspace), not DB-session surgery — a different effort
+with uncertain payoff, since build is ~15–20% of a TTFT dominated by the
+6–14s LLM call.
 
 ## Sequencing & PR split
 
