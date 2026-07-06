@@ -1322,10 +1322,10 @@ async def send_message(
                     workspace_id=ctx.workspace_id,
                     user_id=ctx.user.id,
                 )
-                from cubebox.agents.checkpointer import init_checkpointer
+                from cubebox.agents.checkpointer import shared_checkpointer
 
                 now = time.time()
-                async with init_checkpointer() as _cp:
+                async with shared_checkpointer() as _cp:
                     await _cp.append(
                         conversation_id,
                         [
@@ -1525,6 +1525,7 @@ async def send_message(
             ctx=run_ctx,
             model_key=effective_model_key,
             reasoning=request_obj.reasoning,
+            llm_snapshot=_snap,
         )
     except RuntimeError as exc:
         raise HTTPException(
@@ -1557,9 +1558,9 @@ async def _load_pending_hitl(
     conversation_id: str,
 ) -> tuple[Any, str | None]:
     """Read cubepi-persisted pending_request + persisted run_id in one checkpointer open."""
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.checkpointer import shared_checkpointer
 
-    async with init_checkpointer() as cp:
+    async with shared_checkpointer() as cp:
         pending_req = await cp.load_pending_request(conversation_id)
         persisted_run_id = await cp.load_pending_run_id(conversation_id)
     return pending_req, persisted_run_id
@@ -1910,7 +1911,7 @@ async def cancel_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
     )
 
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.checkpointer import shared_checkpointer
 
     run_manager = raw_request.app.state.run_manager
     run_ctx = RunContext(
@@ -1931,7 +1932,7 @@ async def cancel_active_run(
     if active_run is not None and active_run.status == "paused_hitl":
         paused_run_id = active_run.run_id
     elif active_run is None:
-        async with init_checkpointer() as _cp:
+        async with shared_checkpointer() as _cp:
             persisted_run_id = await _cp.load_pending_run_id(conversation_id)
         if persisted_run_id is not None:
             paused_run_id = persisted_run_id
@@ -2128,7 +2129,7 @@ async def submit_sandbox_confirm(
 
     from cubepi.hitl.types import ApproveAnswer
 
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.checkpointer import shared_checkpointer
 
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
@@ -2136,11 +2137,11 @@ async def submit_sandbox_confirm(
     if active_run is not None:
         run_id = active_run.run_id
     else:
-        async with init_checkpointer() as _cp:
+        async with shared_checkpointer() as _cp:
             persisted_run_id = await _cp.load_pending_run_id(conversation_id)
         if persisted_run_id is None:
             # Distinguish 404 no_pending vs 500 missing_run_id legacy row.
-            async with init_checkpointer() as _cp:
+            async with shared_checkpointer() as _cp:
                 if await _cp.load_pending_request(conversation_id) is None:
                     raise HTTPException(status_code=404, detail={"code": "no_pending"})
             raise HTTPException(
@@ -2234,7 +2235,7 @@ async def submit_ask_user_answer(
         _topic_creator_user_id,
     ) = await _resolve_topic_run_context(conversation, ctx, session=session)
 
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.checkpointer import shared_checkpointer
 
     active_run = await get_active_run(
         rds.client, prefix=rds.key_prefix, conversation_id=conversation_id
@@ -2242,11 +2243,11 @@ async def submit_ask_user_answer(
     if active_run is not None:
         run_id = active_run.run_id
     else:
-        async with init_checkpointer() as _cp:
+        async with shared_checkpointer() as _cp:
             persisted_run_id = await _cp.load_pending_run_id(conversation_id)
         if persisted_run_id is None:
             # Distinguish 404 no_pending vs 500 missing_run_id legacy row.
-            async with init_checkpointer() as _cp:
+            async with shared_checkpointer() as _cp:
                 if await _cp.load_pending_request(conversation_id) is None:
                     raise HTTPException(status_code=404, detail={"code": "no_pending"})
             raise HTTPException(
