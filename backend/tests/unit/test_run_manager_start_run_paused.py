@@ -66,7 +66,7 @@ def stub_no_db_pending(monkeypatch: pytest.MonkeyPatch) -> None:
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubebox.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
 
@@ -127,7 +127,7 @@ async def test_start_run_rejects_when_db_pending_present(
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubebox.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
 
@@ -175,7 +175,7 @@ async def test_start_run_succeeds_when_no_pending(
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubebox.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
 

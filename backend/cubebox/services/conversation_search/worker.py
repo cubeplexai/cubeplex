@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 
-from cubebox.agents.checkpointer import init_checkpointer
+from cubebox.agents.checkpointer import shared_checkpointer
 from cubebox.config import config
 from cubebox.db.engine import async_session_maker
 from cubebox.models.conversation_chunk import ConversationChunk
@@ -87,7 +87,7 @@ class EmbeddingWorker:
 
     async def _process(self, job: EmbeddingJob) -> None:
         # 1. Load all messages for the conversation (cubepi load is per-thread).
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             data = await cp.load(job.conversation_id)
         if data is None:
             return

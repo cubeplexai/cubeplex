@@ -55,10 +55,10 @@ async def recover_stranded_runs(redis: Redis, *, prefix: str) -> int:
 
 async def _stamp_cubepi_runs(pairs: list[tuple[str, str]]) -> None:
     """Mark stranded cubepi_runs rows as completed so history is consistent."""
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.checkpointer import shared_checkpointer
 
     try:
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             for thread_id, run_id in pairs:
                 try:
                     await cp.mark_run_complete(thread_id, run_id)

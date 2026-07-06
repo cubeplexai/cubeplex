@@ -241,7 +241,7 @@ async def run_consolidation(
     """
     from cubepi.providers.base import Message, TextContent, UserMessage
 
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.checkpointer import shared_checkpointer
     from cubebox.repositories.memory import MemoryRepository
 
     token = await acquire_lock(redis, prefix, conversation_id, ttl_s=LOCK_TTL_S)
@@ -250,7 +250,7 @@ async def run_consolidation(
     cutoff = time.time()
     consumed = await _counter(redis, prefix, conversation_id)
     try:
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             data = await cp.load(conversation_id)
         if data is None or not data.messages:
             await mark_consolidated(

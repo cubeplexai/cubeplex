@@ -210,9 +210,9 @@ async def resolve_full_question_id(run_id: str, short_qid: str) -> str:
             return short_qid
         conversation_id = resolved[0]
 
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.checkpointer import shared_checkpointer
 
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             pending = await cp.load_pending_request(conversation_id)
         if pending is not None and pending.question_id.startswith(short_qid):
             return pending.question_id

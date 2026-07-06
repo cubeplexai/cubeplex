@@ -59,7 +59,7 @@ def _patch_checkpointer(monkeypatch: pytest.MonkeyPatch, *, pending: Any) -> Asy
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubebox.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
     return load_mock

@@ -7,7 +7,7 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.agents.checkpointer import init_checkpointer
+from cubebox.agents.checkpointer import shared_checkpointer
 from cubebox.objectstore.client import get_objectstore_client
 
 _ATTACHMENT_KEEP_KEYS = {"filename", "mime_type", "size"}
@@ -53,7 +53,7 @@ async def build_snapshot(conversation_id: str) -> list[dict[str, Any]]:
     """Load messages from cubepi checkpointer, filter for public snapshot."""
     from cubebox.agents.stream import unwrap_deferred_in_message_dicts
 
-    async with init_checkpointer() as cp:
+    async with shared_checkpointer() as cp:
         data = await cp.load(conversation_id)
     if data is None:
         return []

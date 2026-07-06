@@ -107,7 +107,7 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
         cp.load = AsyncMock(return_value=MagicMock(messages=[]))
         yield cp
 
-    monkeypatch.setattr("cubebox.agents.checkpointer.init_checkpointer", _fake_init_checkpointer)
+    monkeypatch.setattr("cubebox.agents.checkpointer.shared_checkpointer", _fake_init_checkpointer)
 
     # Lock helpers — return a token so we pass acquire_lock guard.
     monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
@@ -141,7 +141,7 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubebox.agents.checkpointer.shared_checkpointer",
         _fake_init_checkpointer_nonempty,
     )
 
@@ -199,7 +199,7 @@ async def test_run_consolidation_fallback_uses_provider_generate(monkeypatch):
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubebox.agents.checkpointer.shared_checkpointer",
         _fake_init_checkpointer_nonempty,
     )
     monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
@@ -266,7 +266,7 @@ async def test_run_consolidation_fallback_treats_provider_error_as_failed_pass(
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.init_checkpointer",
+        "cubebox.agents.checkpointer.shared_checkpointer",
         _fake_init_checkpointer_nonempty,
     )
     monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))

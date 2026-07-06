@@ -17,7 +17,7 @@ from cubepi.checkpointer.exceptions import (
 from sqlalchemy import and_, case, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.agents.checkpointer import init_checkpointer
+from cubebox.agents.checkpointer import shared_checkpointer
 from cubebox.models import Conversation
 from cubebox.models.conversation_participant import ConversationParticipant
 from cubebox.models.public_id import generate_public_id
@@ -320,7 +320,7 @@ class ConversationRepository(ScopedRepository[Conversation]):
             "forked_at": utc_isoformat(datetime.now(UTC)),
         }
         try:
-            async with init_checkpointer() as cp:
+            async with shared_checkpointer() as cp:
                 await cp.fork(
                     src.id,
                     new_id,
