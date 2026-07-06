@@ -346,10 +346,7 @@
       "openPage": "Open memory",
       "openPageAria": "Go to memory page",
       "empty": "No memories yet"
-    },
-    "runPreparing": "Preparing...",
-    "runLoadingTools": "Loading tools...",
-    "runStarting": "Contacting model..."
+    }
   },
   "subagent": {
     "cluster": "Agent cluster",
