@@ -240,6 +240,9 @@ class MCPRuntimeConnectorSpec:
     # built from one ``list_runtime_specs`` call without re-reading
     # install rows.
     discovery_metadata: dict[str, Any] = field(default_factory=dict)
+    # When ``tools_cache`` was last refreshed; the runtime loader uses it
+    # to decide whether to kick a background re-discovery.
+    last_discovered_at: datetime | None = None
     # Static-auth shape (see ``MCPConnectorInstall``/``MCPConnectorTemplate``).
     # ``bearer`` (default) ⇒ ``Authorization: Bearer <token>``;
     # ``header`` ⇒ inject ``static_auth_header_name: <token>``;
@@ -352,6 +355,7 @@ class MCPEffectiveConnectorService:
                     grant=row.grant,
                     oauth_client_config=dict(install.oauth_client_config or {}),
                     discovery_metadata=dict(install.discovery_metadata or {}),
+                    last_discovered_at=install.last_discovered_at,
                     static_auth_style=install.static_auth_style or "bearer",
                     static_auth_header_name=install.static_auth_header_name,
                     static_auth_query_param=install.static_auth_query_param,

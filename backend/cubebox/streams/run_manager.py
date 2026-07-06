@@ -619,9 +619,9 @@ async def _repair_dangling_tool_calls(conversation_id: str) -> None:
         ToolResultMessage,
     )
 
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubebox.agents.checkpointer import shared_checkpointer
 
-    async with init_checkpointer() as cp:
+    async with shared_checkpointer() as cp:
         data = await cp.load(conversation_id)
         if data is None or not data.messages:
             return
@@ -902,6 +902,7 @@ class RunManager:
         model_key: str | None = None,
         reasoning: ReasoningControl | None = None,
         cancel_pending_hitl: bool = False,
+        llm_snapshot: Any | None = None,
     ) -> str:
         """Create and start a new background run.
 
@@ -921,9 +922,9 @@ class RunManager:
         # exceeds run_event_ttl_seconds the key disappears and create_run
         # below would otherwise succeed for a brand-new run_id, racing
         # the in-flight resume path and orphaning the pending answer.
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.checkpointer import shared_checkpointer
 
-        async with init_checkpointer() as _cp:
+        async with shared_checkpointer() as _cp:
             _db_pending = await _cp.load_pending(conversation_id)
         if _db_pending is not None:
             if not cancel_pending_hitl:
@@ -1002,6 +1003,7 @@ class RunManager:
                 ctx=ctx,
                 model_key=model_key,
                 reasoning=reasoning or ReasoningControl(),
+                llm_snapshot=llm_snapshot,
             ),
             name=f"run:{run_id}",
         )
@@ -1117,12 +1119,12 @@ class RunManager:
 
         Returns the run_id (echoed back so the route response carries it).
         """
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.checkpointer import shared_checkpointer
         from cubebox.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
         # 1. Authoritative: DB pending. load_pending_request shape unchanged
         #    per cubepi v3 prereq — returns HitlRequest | None.
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             pending = await cp.load_pending_request(conversation_id)
         if pending is None:
             raise ResumeNoPending(f"no pending for {conversation_id}")
@@ -1185,12 +1187,12 @@ class RunManager:
         question off-base? What did you have in mind?"). Run finalises
         as ``completed`` via the normal respond path.
         """
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.checkpointer import shared_checkpointer
         from cubebox.streams.hitl_resume import ClaimResumeOutcome, claim_resume
 
         # 1. DB pending recovers started_at — needed for claim_resume's
         #    rebuild branch (long-pause case where Redis meta has aged out).
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             pending = await cp.load_pending_request(conversation_id)
         if pending is None:
             raise ResumeNoPending(f"no pending for {conversation_id}")
@@ -1248,9 +1250,9 @@ class RunManager:
         Emits a terminal DoneEvent so any live OutboundRunTailer exits
         cleanly instead of polling until TTL expiry.
         """
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.checkpointer import shared_checkpointer
 
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             await cp.save_pending_request(conversation_id, None)
 
         await _repair_dangling_tool_calls(conversation_id)
@@ -1571,7 +1573,7 @@ class RunManager:
           - load_skill (catalog + workspace/org)
           - MCP tools (workspace-enabled HTTP MCP servers)
         """
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.checkpointer import shared_checkpointer
         from cubebox.agents.stream import StreamConverter
         from cubebox.middleware.citations.counter import citation_counter_var
 
@@ -1593,7 +1595,7 @@ class RunManager:
         # signals the drainer to exit so we can finish citation flushing.
         sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             # Seed the citation counter past any 【N-M】 markers already
             # persisted in this conversation's tool-result history so
             # cross-turn ids don't collide in the frontend store (which is
@@ -1608,6 +1610,15 @@ class RunManager:
                 if _counter is not None:
                     await _counter.seed_from_messages(_hist.messages)
 
+            with suppress(Exception):
+                await self._append_event(
+                    run_id,
+                    conversation_id,
+                    StatusEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data={"phase": "loading_tools"},
+                    ),
+                )
             # all_tools is part of the factory contract for future callers
             # (e.g. T8/T10) but the prompt path doesn't need it directly —
             # the agent already has the tools bound at construction time.
@@ -1627,6 +1638,17 @@ class RunManager:
                 model_key=model_key,
                 reasoning=reasoning or ReasoningControl(),
             )
+            # Hand the history already loaded for the citation seed to the
+            # agent (mirrors prompt()'s own restore: messages + extra).
+            # prompt() skips its checkpointer load when messages are already
+            # present, so each send reads the full thread once, not twice.
+            # In-place extra mutation keeps the dict identity that the
+            # extra_ref closures below capture.
+            if _hist is not None and _hist.messages:
+                agent._state.messages = list(_hist.messages)
+                agent._extra.clear()
+                agent._extra.update(_hist.extra)
+
             # Late-bind extra_ref to the live agent._extra dict so compaction /
             # skills / todo middleware can read and write persistent state.
             # The factory already populated the closure via extra_ref_holder;
@@ -1756,6 +1778,15 @@ class RunManager:
                 if v is not None
             }
             final_status: str = "completed"
+            with suppress(Exception):
+                await self._append_event(
+                    run_id,
+                    conversation_id,
+                    StatusEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data={"phase": "starting"},
+                    ),
+                )
             try:
                 with tracing_context(metadata=_trace_meta):
                     async with trace(tracer, agent):
@@ -2046,7 +2077,7 @@ class RunManager:
           :func:`finalize_run_meta_if_claim_matches` so we only clobber the
           meta row while our claim still owns it.
         """
-        from cubebox.agents.checkpointer import init_checkpointer
+        from cubebox.agents.checkpointer import shared_checkpointer
         from cubebox.agents.stream import StreamConverter
         from cubebox.middleware.citations.counter import citation_counter_var
         from cubebox.streams.hitl_resume import (
@@ -2064,7 +2095,7 @@ class RunManager:
 
         sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
 
-        async with init_checkpointer() as cp:
+        async with shared_checkpointer() as cp:
             # Seed the citation counter past markers already persisted in
             # this conversation. The respond turn appends new tool results,
             # so without seeding we'd collide with citations the original
@@ -2572,6 +2603,21 @@ class RunManager:
                 _mcp_specs = await _effective_service.list_runtime_specs(
                     ctx.workspace_id,
                     ctx.user_id,
+                )
+
+                # Detached TTL re-discovery for stale tools_cache entries so
+                # the cache-first loader below never serves a permanently
+                # stale schema. Fire-and-forget; never blocks the send.
+                from cubebox.mcp.cubepi_runtime import schedule_tools_cache_refresh
+
+                schedule_tools_cache_refresh(
+                    specs=_mcp_specs,
+                    actor_user_id=ctx.user_id,
+                    encryption_backend=self._app.state.encryption_backend,
+                    http_client=_http_client,
+                    metadata_discovery=_metadata,
+                    redis=self._redis,
+                    signer=self._app.state.mcp_user_token_signer,
                 )
 
                 import json as _json
@@ -3263,6 +3309,7 @@ class RunManager:
         ctx: RunContext,
         model_key: str | None = None,
         reasoning: ReasoningControl | None = None,
+        llm_snapshot: Any | None = None,
     ) -> None:
         from cubebox.api.routes.v1.conversations import (
             _enqueue_search_index,
@@ -3280,6 +3327,7 @@ class RunManager:
         sandbox_manager = None
         sandbox_create_task: asyncio.Task[Any] | None = None
         stream_task: asyncio.Task[None] | None = None
+        usage_task: asyncio.Task[Any] | None = None
         catalog_session_ctx: Any | None = None
         catalog_session: Any | None = None
         skill_catalog: Any | None = None
@@ -3378,6 +3426,12 @@ class RunManager:
             name=f"event_q_drainer:{run_id}",
         )
 
+        # First sign of life on the stream: the frontend renders these
+        # phases in the assistant placeholder instead of dead air while
+        # snapshots / tools / MCP are prepared below.
+        with suppress(Exception):
+            await emit_status("preparing")
+
         # Outer-scope default so `finally` can branch on terminal status.
         # The success path inside `try` overwrites this with the real
         # status returned by `_run_cubepi_path`; on exception the default
@@ -3452,18 +3506,23 @@ class RunManager:
             # actual cubepi.Provider construction happens inside _run_cubepi_path.
             # Stash the snapshot in extra_ref_holder so the subsequent
             # _build_agent_for_conversation call reuses it instead of loading
-            # the same providers/credentials again (Fix-8).
+            # the same providers/credentials again (Fix-8). The route already
+            # loaded a snapshot for preset validation — reuse it when passed
+            # in, skipping a second _load_providers + credential-decrypt pass.
             from cubebox.db.engine import async_session_maker
             from cubebox.llm.resolver import parse_model_ref, resolve_model_preset
-            from cubebox.llm.snapshot import load_llm_snapshot
+            from cubebox.llm.snapshot import LLMSnapshot, load_llm_snapshot
 
             context_window: int = 0
             try:
-                async with async_session_maker() as ctx_session:
-                    ctx_snap = await load_llm_snapshot(
-                        ctx_session, ctx.org_id, self._app.state.encryption_backend
-                    )
-                    await ctx_session.commit()
+                if isinstance(llm_snapshot, LLMSnapshot):
+                    ctx_snap = llm_snapshot
+                else:
+                    async with async_session_maker() as ctx_session:
+                        ctx_snap = await load_llm_snapshot(
+                            ctx_session, ctx.org_id, self._app.state.encryption_backend
+                        )
+                        await ctx_session.commit()
                 extra_ref_holder["llm_snapshot"] = ctx_snap
                 _ctx_preset = resolve_model_preset(ctx_snap, None)
                 _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
@@ -3549,24 +3608,21 @@ class RunManager:
                 model_key=model_key,
                 reasoning=reasoning or ReasoningControl(),
             )
-            await _update_conversation_timestamp(
-                conversation_id,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-            )
-            await self._bump_topic_activity(ctx)
-            # Indexing is enqueued AFTER the run finishes writing history to
-            # the checkpointer — see _enqueue_search_index docstring. The
-            # finally block re-enqueues on cancel/exception paths where
-            # cubepi may have written partial history before the failure.
-            await _enqueue_search_index(
-                conversation_id,
-                org_id=ctx.org_id,
-                workspace_id=ctx.workspace_id,
-                user_id=ctx.user_id,
-            )
-            search_index_enqueued = True
+            # Kick the session-usage aggregate NOW so it overlaps the queue
+            # drain below — both must finish before DoneEvent, so running
+            # them concurrently trims the last-token→done tail. The three
+            # bookkeeping writes (timestamp / topic bump / search-index
+            # enqueue) moved AFTER DoneEvent: nothing the frontend needs on
+            # `done` depends on them.
+            from cubebox.services.usage import SessionUsage, get_session_usage
+
+            async def _query_session_usage() -> SessionUsage:
+                from cubebox.db.engine import async_session_maker
+
+                async with async_session_maker() as billing_session:
+                    return await get_session_usage(billing_session, conversation_id)
+
+            usage_task = asyncio.create_task(_query_session_usage(), name=f"session_usage:{run_id}")
             # Drain the subagent/citation queue BEFORE DoneEvent: SSE
             # consumers (and the frontend) close on `done`, so any event
             # still sitting in the drainer after the final tool call would
@@ -3586,9 +3642,7 @@ class RunManager:
                         with suppress(asyncio.CancelledError, Exception):
                             await event_q_drainer
                 event_q_drainer = None
-            # --- Aggregate session-level token totals ---
-            from cubebox.services.usage import SessionUsage, get_session_usage
-
+            # --- Aggregate session-level token totals (kicked pre-drain) ---
             session_usage: SessionUsage = {
                 "total_input_tokens": 0,
                 "total_output_tokens": 0,
@@ -3596,10 +3650,7 @@ class RunManager:
                 "total_cache_write_tokens": 0,
             }
             try:
-                from cubebox.db.engine import async_session_maker
-
-                async with async_session_maker() as billing_session:
-                    session_usage = await get_session_usage(billing_session, conversation_id)
+                session_usage = await usage_task
             except Exception:
                 logger.warning("Failed to query session usage for done event")
 
@@ -3640,6 +3691,31 @@ class RunManager:
                 status=final_status,
             )
             await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
+            # Post-done bookkeeping: the stream is closed, so failures here
+            # must not surface as SSE error events — log and move on. The
+            # search-index enqueue still runs after cubepi finished writing
+            # history (that happened inside agent.prompt()); `done` never
+            # depended on it.
+            try:
+                await _update_conversation_timestamp(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                )
+                await self._bump_topic_activity(ctx)
+            except Exception:
+                logger.opt(exception=True).warning("post-done activity bookkeeping failed")
+            try:
+                await _enqueue_search_index(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                )
+                search_index_enqueued = True
+            except Exception:
+                logger.opt(exception=True).warning("post-done search-index enqueue failed")
             await self._maybe_consolidate_memory(
                 conversation_id=conversation_id,
                 ctx=ctx,
@@ -3725,6 +3801,13 @@ class RunManager:
                 with suppress(asyncio.CancelledError):
                     await stream_task
 
+            # Error/cancel paths can bail between kicking the usage query
+            # and awaiting it — reap it so the task doesn't leak.
+            if usage_task is not None and not usage_task.done():
+                usage_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await usage_task
+
             # Safety net for error/cancel paths that bypassed the
             # pre-DoneEvent drain — shut the drainer down so the task
             # doesn't leak. The success path nulls `event_q_drainer` after
@@ -3758,6 +3841,34 @@ class RunManager:
             except ValueError:
                 citation_event_queue.set(None)
 
+            self._agents.pop(run_id, None)
+            # Release the turn lock BEFORE the sandbox/session teardown below:
+            # `done` has already been emitted, and holding the active-run key
+            # through a (remote) sandbox release gave the next send a 409
+            # window. Sandbox release is only an activity-timestamp update —
+            # a new run re-acquiring the same scope sandbox is unaffected.
+            #
+            # paused_hitl: keep the Redis active-run key as the lock that
+            # blocks `start_run` from spawning a brand-new turn while the
+            # user still owes an answer. Clearing it here would let a
+            # racing send pass create_run() and skip the DB-pending guard
+            # in start_run (the guard only fires when create_run failed),
+            # orphaning the paused turn. The respond / cancel paths clear
+            # the lock when they terminate.
+            if final_status != "paused_hitl":
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
+                await expire_run_data(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )
+
             if sandbox:
                 from cubebox.sandbox.lazy import LazySandbox
 
@@ -3779,28 +3890,6 @@ class RunManager:
             if catalog_session_ctx is not None:
                 with suppress(Exception):
                     await catalog_session_ctx.__aexit__(None, None, None)
-
-            self._agents.pop(run_id, None)
-            # paused_hitl: keep the Redis active-run key as the lock that
-            # blocks `start_run` from spawning a brand-new turn while the
-            # user still owes an answer. Clearing it here would let a
-            # racing send pass create_run() and skip the DB-pending guard
-            # in start_run (the guard only fires when create_run failed),
-            # orphaning the paused turn. The respond / cancel paths clear
-            # the lock when they terminate.
-            if final_status != "paused_hitl":
-                await clear_active_run(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    conversation_id=conversation_id,
-                    run_id=run_id,
-                )
-                await expire_run_data(
-                    self._redis,
-                    prefix=self._key_prefix,
-                    run_id=run_id,
-                    ttl_seconds=self._run_event_ttl_seconds,
-                )
 
     async def _execute_respond_run(
         self,

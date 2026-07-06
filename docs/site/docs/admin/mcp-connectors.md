@@ -61,6 +61,12 @@ This is a deploy-time step, not something you enter in the admin UI. Until those
 
 For connectors that authenticate with a static API token or bearer token (for example, the search connectors Tavily, Exa, and Jina AI), the token is requested in the install form. CubeBox encrypts it into the credential vault.
 
+## Tool discovery & caching
+
+Installing a connector (or saving its credential) runs **tool discovery**: CubeBox connects to the MCP server, lists its tools, and stores the tool list on the install. Agent runs use this cached list to register the connector's tools — they do not re-contact the server on every message, which keeps chat start fast even with several connectors enabled. Actually *calling* a tool always goes to the live server.
+
+The cache refreshes automatically in the background when it is older than 24 hours (config key `mcp.tools_cache_ttl_hours`; set `0` to disable background refresh). If a server changed its tools and you don't want to wait, use **Retry discovery** on the install's detail page to refresh immediately.
+
 ## Install connectors
 
 Connectors can be installed at the **organization level** (available to all workspaces) or at the **workspace level** (available only to that workspace).

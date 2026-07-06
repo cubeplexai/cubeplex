@@ -123,6 +123,167 @@ async def load_workspace_mcp_tools_for_cubepi(
     )
 
 
+def _build_tools_from_cache(
+    *,
+    spec: MCPRuntimeConnectorSpec,
+    headers: dict[str, str],
+    server_url: str,
+) -> list[AgentTool[Any]] | None:
+    """Build executable AgentTools from the install's persisted ``tools_cache``.
+
+    Skips the per-send ``initialize`` + ``tools/list`` round trip: the cache
+    already carries every field the live loader would extract from the
+    descriptor (name / description / input_schema), and cubepi MCP tools
+    open a fresh session per ``tools/call`` anyway, so execution is
+    identical to a live-discovered tool.
+
+    Returns None when the cache is unusable (empty, or cubepi's private
+    helpers moved) — callers fall back to the live loader.
+
+    NOTE: reaches into ``cubepi.mcp``'s private modules for the session
+    opener and result serializer the live loader uses. cubepi doesn't yet
+    expose "build tool from cached descriptor" publicly; upstream that
+    instead of growing this.
+    """
+    if not spec.tools_cache:
+        return None
+    try:
+        from cubepi.mcp._adapter import make_mcp_agent_tool
+        from cubepi.mcp.http_loader import (
+            _open_session,
+            _serialize_call_tool_response,
+            _split_address,
+        )
+    except ImportError as exc:  # cubepi internals moved — live loader still works
+        logger.warning("tools_cache fast path unavailable (cubepi drift): %s", exc)
+        return None
+
+    timeout = spec.timeout
+    transport = cast(MCPTransport, spec.transport)
+
+    async def _call_remote(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+        # Mirrors cubepi.mcp.http_loader's per-call session semantics,
+        # including W3C traceparent propagation into the MCP server.
+        from cubepi.mcp._tracing import current_traceparent
+
+        call_headers = headers or None
+        tp = current_traceparent()
+        if tp is not None:
+            call_headers = {**(headers or {}), "traceparent": tp}
+        async with _open_session(
+            server_url, headers=call_headers, timeout=timeout, transport=transport
+        ) as (session, _get_session_id):
+            await asyncio.wait_for(session.initialize(), timeout=timeout)
+            resp = await asyncio.wait_for(session.call_tool(tool_name, args), timeout=timeout)
+            return _serialize_call_tool_response(resp)
+
+    address, port = _split_address(server_url)
+    tools: list[AgentTool[Any]] = []
+    for entry in spec.tools_cache:
+        name = entry.get("name")
+        if not name:
+            continue
+        try:
+            tools.append(
+                make_mcp_agent_tool(
+                    name=name,
+                    description=entry.get("description") or "",
+                    input_schema=entry.get("input_schema") or {"type": "object", "properties": {}},
+                    call_remote=_call_remote,
+                    server_address=address,
+                    server_port=port,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad cached schema must not sink the rest
+            logger.warning("tools_cache entry %s/%s failed to build: %s", spec.name, name, exc)
+    return tools or None
+
+
+_cache_refresh_in_flight: set[str] = set()
+
+
+def schedule_tools_cache_refresh(
+    *,
+    specs: list[MCPRuntimeConnectorSpec],
+    actor_user_id: str,
+    encryption_backend: Any,
+    http_client: Any,
+    metadata_discovery: Any,
+    redis: Any,
+    signer: MCPUserTokenSigner,
+) -> None:
+    """Kick detached re-discovery for installs whose ``tools_cache`` is stale.
+
+    Never blocks or raises into the send path. Debounced per install via an
+    in-process set; the TTL gate (``mcp.tools_cache_ttl_hours``, default 24)
+    bounds cross-process stampedes to one refresh per process per TTL.
+    """
+    from datetime import UTC, datetime
+    from datetime import timedelta as _td
+
+    from cubebox.config import config as _cfg
+
+    try:
+        ttl_hours = float(_cfg.get("mcp.tools_cache_ttl_hours", 24))
+    except Exception:  # noqa: BLE001
+        ttl_hours = 24.0
+    if ttl_hours <= 0:
+        return
+    now = datetime.now(UTC)
+
+    async def _refresh_one(spec: MCPRuntimeConnectorSpec) -> None:
+        from cubebox.credentials.dependencies import build_credential_service
+        from cubebox.db.engine import async_session_maker
+        from cubebox.repositories.credential import CredentialRepository
+        from cubebox.services.mcp_discovery import run_post_grant_discovery
+
+        try:
+            async with async_session_maker() as session:
+                cred_service = build_credential_service(
+                    session,
+                    encryption_backend,
+                    org_id=spec.org_id,
+                    actor_user_id=actor_user_id,
+                )
+                token_mgr = OAuthTokenManager(
+                    http_client=http_client,
+                    redis=redis,
+                    encryption_backend=encryption_backend,
+                    credential_repo=CredentialRepository(session, org_id=spec.org_id),
+                    metadata=metadata_discovery,
+                )
+                await run_post_grant_discovery(
+                    install_id=spec.install_id,
+                    workspace_id=spec.workspace_id or None,
+                    actor_user_id=actor_user_id,
+                    session=session,
+                    cred_service=cred_service,
+                    signer=signer,
+                    token_mgr=token_mgr,
+                )
+                await session.commit()
+        except Exception as exc:  # noqa: BLE001 — background refresh must never surface
+            logger.warning("tools_cache refresh failed for %s: %s", spec.install_id, exc)
+        finally:
+            _cache_refresh_in_flight.discard(spec.install_id)
+
+    for spec in specs:
+        if not spec.tools_cache:
+            continue  # nothing cached — the send path already live-loads
+        last = spec.last_discovered_at
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        if last is not None and now - last < _td(hours=ttl_hours):
+            continue
+        if spec.install_id in _cache_refresh_in_flight:
+            continue
+        _cache_refresh_in_flight.add(spec.install_id)
+        task = asyncio.create_task(_refresh_one(spec), name=f"mcp-cache-refresh:{spec.install_id}")
+        # Detached by design; reference kept alive by the event loop via the
+        # in-flight set lifecycle inside _refresh_one.
+        del task
+
+
 async def _load_tools_for_specs(
     *,
     specs: list[MCPRuntimeConnectorSpec],
@@ -186,24 +347,30 @@ async def _load_tools_for_specs(
             )
             continue
 
-        try:
-            discovery = await load_mcp_tools_http(
-                server_url,
-                headers=headers or None,
-                timeout=spec.timeout,
-                transport=cast(MCPTransport, spec.transport),
-            )
-            tools = discovery.tools
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Failed to load MCP install %s (%s): %s",
-                spec.name,
-                spec.install_id,
-                exc,
-            )
-            continue
+        # Cache-first: build tools from the persisted tools_cache and skip
+        # the live initialize+tools/list round trip. Falls back to live
+        # discovery when the cache is empty/unusable (e.g. first run before
+        # discovery persisted, or cubepi internals drifted).
+        tools = _build_tools_from_cache(spec=spec, headers=headers, server_url=server_url)
+        if tools is None:
+            try:
+                discovery = await load_mcp_tools_http(
+                    server_url,
+                    headers=headers or None,
+                    timeout=spec.timeout,
+                    transport=cast(MCPTransport, spec.transport),
+                )
+                tools = discovery.tools
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to load MCP install %s (%s): %s",
+                    spec.name,
+                    spec.install_id,
+                    exc,
+                )
+                continue
 
         slug = proposed_slugs[spec.install_id]
         explicit_collision = slug_counts[slug] > 1
