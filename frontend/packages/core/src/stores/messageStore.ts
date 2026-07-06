@@ -471,6 +471,10 @@ function applyStreamEvent(state: MessageStore, event: AgentEvent): Partial<Messa
     const prev = state.streamAgents[agentKey] ?? emptyStream(event.agent_name)
     return {
       ...base,
+      // Model output supersedes any build-phase hint (preparing /
+      // loading_tools / starting / sandbox_creating) — clear so the
+      // indicator falls back to the plain streaming dots.
+      statusPhase: null,
       streamAgents: {
         ...state.streamAgents,
         [agentKey]: {

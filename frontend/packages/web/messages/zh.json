@@ -346,7 +346,10 @@
       "openPage": "打开记忆页",
       "openPageAria": "跳转到记忆页面",
       "empty": "暂无记忆"
-    }
+    },
+    "runPreparing": "正在准备...",
+    "runLoadingTools": "正在加载工具...",
+    "runStarting": "正在请求模型..."
   },
   "subagent": {
     "cluster": "Agent 集群",
