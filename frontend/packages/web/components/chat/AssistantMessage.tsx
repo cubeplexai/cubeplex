@@ -739,15 +739,7 @@ export function AssistantMessage({
             )}
             {isStreaming && (
               <div data-testid="loading-indicator" className="flex items-center gap-1 pl-1 h-6">
-                {statusPhase === 'preparing' || statusPhase === 'loading_tools' ? (
-                  <span className="text-xs text-muted-foreground animate-pulse">
-                    {statusPhase === 'preparing' ? t('runPreparing') : t('runLoadingTools')}
-                  </span>
-                ) : statusPhase === 'starting' ? (
-                  <span className="text-xs text-muted-foreground animate-pulse">
-                    {t('runStarting')}
-                  </span>
-                ) : statusPhase === 'sandbox_creating' ? (
+                {statusPhase === 'sandbox_creating' ? (
                   <span className="text-xs text-muted-foreground animate-pulse">
                     {t('sandboxPreparing')}
                   </span>
