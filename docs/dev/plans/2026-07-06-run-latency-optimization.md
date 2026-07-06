@@ -177,6 +177,55 @@ produce a before/after table for both windows (fresh + long conversation,
 MCP on). Full pre-PR sweep (`make check-ci` equivalent + changed-module
 e2e).
 
+**Results (2026-07-06, fresh conversation, 5 runs each, no MCP connectors
+installed, dev DB via 215 tunnel ~210ms RTT):**
+
+| metric | baseline | optimized | delta |
+|---|---|---|---|
+| first backend feedback | 64.1s (== first token; no early events) | ~3s (`preparing`) | dead air removed |
+| time to first token | 64.1s | 51.4s | −20% |
+| time to `done` | 97.1s | 73.5s | −24% |
+| tail (last token → done) | 17.2s | 19.8s | ~flat |
+
+Per-run internal decomposition (Redis stream timestamps, one run) reveals
+where the remaining time sits — the send-side is now dominated by two
+costs **outside** what this change set targeted:
+
+| phase | cost | note |
+|---|---|---|
+| preparing → loading_tools | ~3s | route prep + early run setup |
+| **loading_tools → starting** | **15–23s** | `_build_agent_for_conversation` — serial DB round-trips |
+| starting → first token | 12–23s | LLM TTFT via the litellm proxy |
+| last token → usage event | ~7s | proxy stream finalization |
+| usage → done | ~14s | cubepi prompt finalization + drain + done |
+
+**Interpretation.** The wins that landed: dead-air before first feedback
+is gone (T5), and the removed-round-trip changes (shared checkpointer
+pool, snapshot reuse, single history load) plus the post-`done`
+bookkeeping move cut ~24s off total `done` time. What the decomposition
+exposes as the *next* bottleneck is `_build_agent_for_conversation`
+(15–23s) — and this workspace has **no MCP connectors**, so T1's cache is
+not even exercised here; the cost is the sheer count of serial DB session
+opens in the build path, each paying `pool_pre_ping` (`SELECT 1`, ~210ms)
++ the actual query (~210ms) under the 210ms tunnel RTT. Provider TTFT and
+the proxy's stream finalization (the 7s usage lag + tail) are
+environmental (litellm proxy on 215) and out of code scope.
+
+The 210ms RTT is a **test-environment artifact** (VM → VPN → 215). A
+co-located production Postgres (<5ms RTT) shrinks every serial-DB cost by
+~40×, so the absolute seconds here overstate the real deployment, while
+making the round-trip-count reductions the most valuable thing to verify.
+
+### T8 (follow-up, not in this branch) — collapse the agent-build DB work
+
+The decomposition points the next effort at `_build_agent_for_conversation`:
+coalesce its ~4 independent `async_session_maker()` opens (MCP effective,
+membership role, org, skills-adapter) into one shared session and/or run
+the independent reads under `asyncio.gather`; evaluate dropping
+`pool_pre_ping` (or replacing it with a cheaper liveness check) for the
+hot pool. Deferred to a separate change — it is orthogonal to the
+send/done round-trip work here and wants its own measurement.
+
 ## Sequencing & PR split
 
 T0 first (baseline before any change). Then T2 → T3 → T1 → T4 → T6 → T5
