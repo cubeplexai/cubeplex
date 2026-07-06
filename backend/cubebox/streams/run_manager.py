@@ -1789,7 +1789,11 @@ class RunManager:
                 )
             try:
                 with tracing_context(metadata=_trace_meta):
-                    async with trace(tracer, agent):
+                    # flush="background": span export must not gate the
+                    # turn's DoneEvent (it added seconds to the tail against
+                    # a slow OTLP collector); lifespan's tracer.shutdown()
+                    # settles pending flushes.
+                    async with trace(tracer, agent, flush="background"):
                         # Pass cubebox's run_id so cubepi stamps it onto
                         # cubepi_messages.run_id (instead of generating its own).
                         # Aligns the cubepi message ledger with cubebox's redis
@@ -2179,7 +2183,7 @@ class RunManager:
             try:
                 try:
                     with tracing_context(metadata=_trace_meta):
-                        async with trace(tracer, agent):
+                        async with trace(tracer, agent, flush="background"):
                             await agent.respond(question_id=question_id, answer=answer)
                             _raise_if_cubepi_agent_failed(agent)
                 except BaseException as _run_exc:
