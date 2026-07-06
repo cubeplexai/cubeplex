@@ -372,6 +372,16 @@ async def lifespan(_app: FastAPI):  # type: ignore
 
     await recover_stranded_runs(redis_client, prefix=_app.state.redis_key_prefix)
 
+    # Warm the process-wide cubepi checkpointer pool so the first send
+    # doesn't pay the pool-open round trips. Best-effort: on failure the
+    # first shared_checkpointer() call retries the open.
+    from cubebox.agents.checkpointer import get_shared_checkpointer
+
+    try:
+        await get_shared_checkpointer()
+    except Exception as exc:
+        logger.warning("Shared checkpointer warmup failed (will retry lazily): {}", exc)
+
     yield
 
     # ==================== Shutdown ====================
@@ -412,6 +422,12 @@ async def lifespan(_app: FastAPI):  # type: ignore
             await tracer.shutdown()
         except Exception as exc:  # tracing teardown must never break shutdown
             logger.warning("Tracer shutdown failed: {}", exc)
+    from cubebox.agents.checkpointer import close_shared_checkpointer
+
+    try:
+        await close_shared_checkpointer()
+    except Exception as exc:
+        logger.warning("Shared checkpointer close failed: {}", exc)
     if redis_client is not None:
         await redis_client.aclose()
     mcp_oauth_http_client = getattr(_app.state, "_mcp_oauth_http_client", None)
