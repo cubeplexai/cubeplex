@@ -32,6 +32,7 @@ class ProtectedResourceMetadata:
 
     resource: str
     authorization_servers: list[str]
+    scopes_supported: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class OAuthMetadataDiscovery:
         pr = ProtectedResourceMetadata(
             resource=resource,
             authorization_servers=authorization_servers,
+            scopes_supported=_opt_str_list(body.get("scopes_supported")),
         )
         self._cache_put(self._pr_cache, url, pr)
         return pr

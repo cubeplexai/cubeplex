@@ -10,12 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from cubebox.credentials.encryption import FernetBackend
+from cubebox.mcp._constants import server_url_hash
 from cubebox.mcp.template_seed import (
     CATALOG,
     MCPConnectorTemplateSeedEntry,
     seed_templates,
 )
-from cubebox.models import Credential, MCPConnectorTemplate
+from cubebox.models import Credential, MCPConnectorInstall, MCPConnectorTemplate
 from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
 
@@ -59,6 +60,71 @@ def test_intercom_catalog_declares_authorization_server_metadata_url() -> None:
     assert intercom.template_metadata["oauth_authorization_server_metadata_url"] == (
         "https://mcp.intercom.com/.well-known/oauth-authorization-server"
     )
+
+
+def test_atlassian_catalog_uses_rovo_mcp_authv2_endpoint() -> None:
+    atlassian = next(entry for entry in CATALOG if entry.slug == "atlassian")
+
+    assert atlassian.server_url == "https://mcp.atlassian.com/v1/mcp/authv2"
+    assert atlassian.transport == "streamable_http"
+    assert atlassian.supported_auth_methods == ["oauth", "static"]
+    assert atlassian.static_auth_header_template == "Basic {b64(email:api_token)}"
+    assert "atlassian-rovo-mcp-server" in atlassian.template_metadata["docs_url"]
+
+
+async def test_seed_updates_active_installs_materialized_from_template(
+    session: AsyncSession, backend: FernetBackend
+) -> None:
+    old_url = "https://mcp.atlassian.com/v1/sse"
+    old_template = MCPConnectorTemplate(
+        slug="atlassian",
+        name="Atlassian",
+        description="Atlassian MCP server: Jira and Confluence.",
+        provider="Atlassian",
+        server_url=old_url,
+        transport="sse",
+        supported_auth_methods=["oauth", "static"],
+        default_credential_policy="org",
+        oauth_dcr_supported=True,
+        static_auth_header_template="Basic {b64(email:api_token)}",
+        template_metadata={},
+        status="active",
+    )
+    session.add(old_template)
+    await session.flush()
+
+    install = MCPConnectorInstall(
+        org_id="org-1",
+        workspace_id="ws-1",
+        install_scope="workspace",
+        template_id=old_template.id,
+        name="Atlassian",
+        server_url=old_url,
+        server_url_hash=server_url_hash(old_url),
+        transport="sse",
+        auth_method="oauth",
+        default_credential_policy="org",
+        auth_status="pending",
+        install_state="active",
+    )
+    session.add(install)
+    await session.flush()
+    before_updated_at = install.updated_at
+
+    result = await seed_templates(session, backend, get_env=lambda _k: None)
+
+    assert result.upserted >= 1
+    refreshed_install = (
+        await session.execute(
+            select(MCPConnectorInstall).where(MCPConnectorInstall.id == install.id)
+        )
+    ).scalar_one()
+    assert refreshed_install.server_url == "https://mcp.atlassian.com/v1/mcp/authv2"
+    assert refreshed_install.server_url_hash == server_url_hash(
+        "https://mcp.atlassian.com/v1/mcp/authv2"
+    )
+    assert refreshed_install.transport == "streamable_http"
+    assert refreshed_install.updated_at > before_updated_at
 
 
 async def test_seed_with_full_env_writes_templates_and_credentials(

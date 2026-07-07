@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import fakeredis.aioredis
 import httpx
@@ -222,6 +223,24 @@ _FAKE_PR_METADATA = ProtectedResourceMetadata(
     resource="https://oauth-e2e.example.com/mcp",
     authorization_servers=["https://oauth-e2e.example.com"],
 )
+_FAKE_PR_METADATA_WITH_SCOPES = ProtectedResourceMetadata(
+    resource="https://oauth-e2e.example.com/mcp",
+    authorization_servers=["https://oauth-e2e.example.com"],
+    scopes_supported=["read:me", "search:confluence"],
+)
+
+_FAKE_AS_METADATA_WITHOUT_SCOPES = AuthorizationServerMetadata(
+    issuer="https://oauth-e2e.example.com",
+    authorization_endpoint="https://oauth-e2e.example.com/authorize",
+    token_endpoint="https://oauth-e2e.example.com/token",
+    revocation_endpoint=None,
+    registration_endpoint=None,
+    code_challenge_methods_supported=["S256"],
+    grant_types_supported=["authorization_code", "refresh_token"],
+    response_types_supported=["code"],
+    scopes_supported=None,
+    raw={},
+)
 
 
 class _StubDiscovery:
@@ -240,6 +259,15 @@ class _StubDcrDiscovery:
         self, resource_url: str
     ) -> tuple[ProtectedResourceMetadata, AuthorizationServerMetadata]:
         return _FAKE_PR_METADATA, _FAKE_AS_METADATA_WITH_DCR
+
+
+class _StubResourceScopesDiscovery:
+    """Simulates Atlassian: PR metadata has scopes, AS metadata omits them."""
+
+    async def discover_for_resource(
+        self, resource_url: str
+    ) -> tuple[ProtectedResourceMetadata, AuthorizationServerMetadata]:
+        return _FAKE_PR_METADATA_WITH_SCOPES, _FAKE_AS_METADATA_WITHOUT_SCOPES
 
 
 class _TemplateMetadataFallbackDiscovery:
@@ -296,7 +324,7 @@ async def encryption_backend() -> FernetBackend:
 
 @pytest_asyncio.fixture
 async def http_client() -> AsyncIterator[httpx.AsyncClient]:
-    async with httpx.AsyncClient(timeout=10.0) as c:
+    async with httpx.AsyncClient(timeout=10.0, trust_env=False) as c:
         yield c
 
 
@@ -483,6 +511,72 @@ async def test_start_oauth_flow_uses_template_authorization_server_metadata_url_
 
     assert result.authorize_url.startswith("https://oauth-e2e.example.com/authorize?")
     assert "client_id=test-client-id" in result.authorize_url
+
+
+async def test_start_oauth_flow_uses_resource_metadata_scopes_when_as_omits_scopes(
+    db_session: AsyncSession,
+    encryption_backend: FernetBackend,
+    oauth_state_store: OAuthStateStore,
+    http_client: httpx.AsyncClient,
+) -> None:
+    import secrets
+
+    from cubebox.repositories import OrganizationRepository, WorkspaceRepository
+
+    suffix = secrets.token_hex(4)
+    org = await OrganizationRepository(db_session).create(
+        name=f"Atlassian Org {suffix}",
+        slug=f"atlassian-org-{suffix}",
+    )
+    ws = await WorkspaceRepository(db_session).create(
+        org_id=org.id,
+        name=f"Atlassian WS {suffix}",
+    )
+    template = await MCPConnectorTemplateRepository(db_session).upsert_by_slug(
+        slug=f"atlassian-test-{suffix}",
+        name="Atlassian Test",
+        description="Atlassian Rovo MCP test connector",
+        provider="Atlassian",
+        server_url="https://mcp.atlassian.com/v1/mcp/authv2",
+        transport="streamable_http",
+        supported_auth_methods=["oauth"],
+        default_credential_policy="org",
+        oauth_dcr_supported=True,
+        oauth_default_scope=None,
+    )
+    await db_session.commit()
+
+    user_id = "usr-atlassian-actor"
+    install = await _seed_oauth_install(
+        db_session,
+        org_id=org.id,
+        workspace_id=ws.id,
+        template_id=template.id,
+        install_scope="workspace",
+        default_credential_policy="workspace",
+        created_by_user_id=None,
+    )
+    service = OAuthStartService(
+        session=db_session,
+        backend=encryption_backend,
+        state_store=oauth_state_store,
+        metadata=_StubResourceScopesDiscovery(),  # type: ignore[arg-type]
+        dcr=DCRClient(http_client),
+        http_client=http_client,
+    )
+
+    result = await service.start_oauth_flow(
+        install_id=install.id,
+        actor_user_id=user_id,
+        actor_org_id=org.id,
+        grant_scope="workspace",
+        workspace_id=ws.id,
+        user_id=None,
+    )
+
+    params = parse_qs(urlparse(result.authorize_url).query)
+    assert params["scope"] == ["read:me search:confluence"]
+    assert params["resource"] == ["https://oauth-e2e.example.com/mcp"]
 
 
 # ---------------------------------------------------------------------------

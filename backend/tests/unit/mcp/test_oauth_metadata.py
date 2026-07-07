@@ -52,6 +52,26 @@ async def test_fetch_protected_resource_happy_path() -> None:
     assert pr.authorization_servers == ["https://auth.example.com"]
 
 
+async def test_fetch_protected_resource_preserves_supported_scopes() -> None:
+    handler = _CountingHandler(
+        {
+            "https://mcp.example.com/.well-known/oauth-protected-resource": httpx.Response(
+                200,
+                json={
+                    "resource": "https://mcp.example.com/",
+                    "authorization_servers": ["https://auth.example.com"],
+                    "scopes_supported": ["read:me", "search:confluence"],
+                },
+            ),
+        }
+    )
+    async with _client_with(handler) as http:
+        discovery = OAuthMetadataDiscovery(http, cache_ttl_seconds=3600)
+        pr = await discovery.fetch_protected_resource("https://mcp.example.com")
+
+    assert pr.scopes_supported == ["read:me", "search:confluence"]
+
+
 async def test_fetch_protected_resource_missing_field_raises_not_found() -> None:
     handler = _CountingHandler(
         {

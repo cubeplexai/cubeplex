@@ -4,11 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   ArrowUpCircle,
+  Check,
   CheckCircle2,
   Loader2,
   PauseCircle,
   Plug,
+  Trash2,
   Wrench,
+  X,
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import {
@@ -18,6 +21,7 @@ import {
   useWorkspaceStore,
   wsListAvailable,
   wsListEffectiveConnectors,
+  wsDeleteInstall,
   wsPatchConnectorState,
   wsRefreshDiscovery,
   type MCPCredentialScope,
@@ -160,6 +164,8 @@ function ConnectorDetail({
 }) {
   const t = useTranslations('mcpAdmin')
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmUninstall, setConfirmUninstall] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const wsState = connector.workspace_state
@@ -178,6 +184,7 @@ function ConnectorDetail({
   const orgId = useWorkspaceStore((s) => s.workspaces.find((w) => w.id === wsId)?.org_id ?? null)
   const isOrgAdmin = useOrgAdminFlag(orgId)
   const canPromote = install.install_scope === 'workspace' && isOrgAdmin
+  const canUninstall = install.install_scope === 'workspace'
   const [promoteOpen, setPromoteOpen] = useState(false)
 
   async function handlePromote(distribution: PromoteDistribution): Promise<void> {
@@ -198,7 +205,22 @@ function ConnectorDetail({
     }
   }
 
+  async function handleUninstall(): Promise<void> {
+    setDeleting(true)
+    setError(null)
+    try {
+      await wsDeleteInstall(client, wsId, installId)
+      await onChanged()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setDeleting(false)
+      setConfirmUninstall(false)
+    }
+  }
+
   const discoveryError = install.discovery_status === 'error'
+  const busy = saving || refreshing || deleting
 
   async function toggle(): Promise<void> {
     setSaving(true)
@@ -247,6 +269,7 @@ function ConnectorDetail({
               size="sm"
               variant="outline"
               className="ml-auto"
+              disabled={busy}
               onClick={() => setPromoteOpen(true)}
               data-testid="mcp-promote-menu-item"
             >
@@ -259,12 +282,48 @@ function ConnectorDetail({
             size="sm"
             variant="outline"
             className={canPromote ? undefined : 'ml-auto'}
-            disabled={refreshing}
+            disabled={busy}
             onClick={() => void handleRefresh()}
           >
             {refreshing ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
             {t('refreshTools')}
           </Button>
+          {canUninstall && !confirmUninstall ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={busy}
+              onClick={() => setConfirmUninstall(true)}
+            >
+              <Trash2 className="mr-1.5 size-3.5" />
+              {t('uninstallButton')}
+            </Button>
+          ) : null}
+          {canUninstall && confirmUninstall ? (
+            <div className="flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5">
+              <span className="text-xs text-destructive">{t('confirmUninstallLabel')}</span>
+              <button
+                type="button"
+                aria-label="Confirm uninstall"
+                className="cursor-pointer rounded p-0.5 text-destructive hover:bg-destructive/20"
+                disabled={deleting}
+                onClick={() => void handleUninstall()}
+              >
+                <Check className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label="Cancel uninstall"
+                className="cursor-pointer rounded p-0.5 text-muted-foreground hover:bg-muted"
+                disabled={deleting}
+                onClick={() => setConfirmUninstall(false)}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ) : null}
         </div>
         {connector.template?.description && (
           <p className="text-sm text-muted-foreground">{connector.template.description}</p>

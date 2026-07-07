@@ -163,8 +163,10 @@ class OAuthStartService:
         # 500 + unhandled exception (httpx leaks the raw ConnectError
         # which is meaningless to the operator). Wrap it as a clean
         # OAuthStartError so the route maps to 400 with a typed code.
+        resource_scopes_supported: list[str] | None = None
         try:
-            _pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
+            pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
+            resource_scopes_supported = pr_meta.scopes_supported
         except OAuthMetadataNotFound as exc:
             as_metadata_url = _template_metadata_str(template, _OAUTH_AS_METADATA_URL_KEY)
             if as_metadata_url is None:
@@ -245,7 +247,10 @@ class OAuthStartService:
         #    `scopes_supported` in their well-known doc would hit the
         #    authorize endpoint without `scope=`, triggering invalid_scope
         #    or returning a token without the perms the catalog expects.
-        # 3. AS metadata `scopes_supported` (best-effort, all of them).
+        # 3. PR metadata `scopes_supported` (resource-specific OAuth 2.1 MCP
+        #    servers such as Atlassian Rovo publish scopes here, not on AS
+        #    metadata).
+        # 4. AS metadata `scopes_supported` (best-effort, all of them).
         scope_param: str | None = None
         cfg_default = install.oauth_client_config.get("default_scope")
         if isinstance(cfg_default, str) and cfg_default:
@@ -253,6 +258,8 @@ class OAuthStartService:
         elif install.template_id is not None:
             if template is not None and template.oauth_default_scope:
                 scope_param = template.oauth_default_scope
+        if scope_param is None and resource_scopes_supported:
+            scope_param = " ".join(resource_scopes_supported)
         if scope_param is None and as_meta.scopes_supported:
             scope_param = " ".join(as_meta.scopes_supported)
 

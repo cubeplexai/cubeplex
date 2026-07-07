@@ -24,14 +24,18 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET
-from cubebox.models import Credential
+from cubebox.mcp._constants import (
+    CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
+    server_url_hash,
+)
+from cubebox.models import Credential, MCPConnectorInstall
 from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
 
@@ -166,7 +170,7 @@ CATALOG: list[MCPConnectorTemplateSeedEntry] = [
         slug="atlassian",
         name="Atlassian",
         provider="Atlassian",
-        description="Atlassian MCP server: Jira and Confluence.",
+        description="Atlassian Rovo MCP server: Jira, Confluence, Bitbucket, and Compass.",
         server_url="https://mcp.atlassian.com/v1/mcp/authv2",
         transport="streamable_http",
         supported_auth_methods=["oauth", "static"],
@@ -177,7 +181,12 @@ CATALOG: list[MCPConnectorTemplateSeedEntry] = [
         oauth_static_client_secret_env=None,
         static_form_schema=_ATLASSIAN_FIELDS,
         static_auth_header_template="Basic {b64(email:api_token)}",
-        template_metadata={"docs_url": "https://developer.atlassian.com/"},
+        template_metadata={
+            "docs_url": (
+                "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/"
+                "getting-started-with-the-atlassian-remote-mcp-server/"
+            )
+        },
     ),
     MCPConnectorTemplateSeedEntry(
         slug="asana",
@@ -592,6 +601,39 @@ async def _upsert_oauth_client_secret(
     return existing.id
 
 
+async def _sync_active_template_installs(
+    session: AsyncSession,
+    *,
+    template_id: str,
+    server_url: str,
+    transport: str,
+    static_auth_style: str,
+    static_auth_header_name: str | None,
+    static_auth_query_param: str | None,
+) -> int:
+    """Keep active installs created from a catalog template aligned with the template row."""
+    stmt = select(MCPConnectorInstall).where(
+        MCPConnectorInstall.template_id == template_id,  # type: ignore[arg-type]
+        MCPConnectorInstall.install_state == "active",  # type: ignore[arg-type]
+    )
+    installs = list((await session.execute(stmt)).scalars().all())
+    if not installs:
+        return 0
+
+    for install in installs:
+        install.server_url = server_url
+        install.server_url_hash = server_url_hash(server_url)
+        install.transport = transport
+        install.static_auth_style = static_auth_style
+        install.static_auth_header_name = static_auth_header_name
+        install.static_auth_query_param = static_auth_query_param
+        install.updated_at = datetime.now(UTC)
+        session.add(install)
+
+    await session.flush()
+    return len(installs)
+
+
 async def seed_templates(
     session: AsyncSession,
     backend: EncryptionBackend,
@@ -640,7 +682,7 @@ async def seed_templates(
                 session, backend, slug=entry.slug, plaintext=raw_secret
             )
 
-        await repo.upsert_by_slug(
+        template_row = await repo.upsert_by_slug(
             slug=entry.slug,
             name=entry.name,
             description=entry.description,
@@ -664,6 +706,15 @@ async def seed_templates(
         )
         upserted += 1
         active_slugs.append(entry.slug)
+        await _sync_active_template_installs(
+            session,
+            template_id=template_row.id,
+            server_url=template_row.server_url,
+            transport=template_row.transport,
+            static_auth_style=template_row.static_auth_style,
+            static_auth_header_name=template_row.static_auth_header_name,
+            static_auth_query_param=template_row.static_auth_query_param,
+        )
 
     deprecated_rows = await repo.mark_deprecated_for_missing_slugs(kept_slugs=active_slugs)
 
