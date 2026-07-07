@@ -1,7 +1,8 @@
 {
   "auth": {
     "signIn": "登录",
-    "signInTitle": "登录到 cubebox",
+    "signInTitle": "欢迎回来",
+    "signInSubtitle": "进入工作区，继续处理中或等待确认的 Agent 任务。",
     "signUp": "创建账户",
     "signUpTitle": "创建您的 cubebox 账户",
     "email": "邮箱",
@@ -53,7 +54,21 @@
     "resendCode": "重新发送",
     "resendIn": "{seconds} 秒后重新发送",
     "passwordTooWeak": "密码不符合强度要求。",
-    "verifyEmailNow": "立即验证邮箱"
+    "verifyEmailNow": "立即验证邮箱",
+    "surfaceEyebrow": "Agent 工作区",
+    "surfaceTitle": "把 Agent、记忆、工具和审批放在同一个控制面。",
+    "surfaceSubtitle": "cubebox 让长时间运行的 Agent 任务与模型、连接器、成果库和团队权限保持在同一个工作区里。",
+    "surfacePanelTitle": "为可控的自动化而设计",
+    "surfacePanelDescription": "登录后检查运行状态、审阅工具访问，并带着完整工作区上下文继续任务。",
+    "surfaceFeatureMemoryTitle": "记忆",
+    "surfaceFeatureMemoryDescription": "保留有用上下文，不必每次重新组织提示词。",
+    "surfaceFeatureToolsTitle": "工具",
+    "surfaceFeatureToolsDescription": "连接 MCP 服务、沙盒环境和内部系统。",
+    "surfaceFeatureControlTitle": "控制",
+    "surfaceFeatureControlDescription": "通过审批、作用域和审计记录控制任务边界。",
+    "surfaceSignalRuns": "流式运行始终归属到工作区。",
+    "surfaceSignalScopes": "组织和工作区作用域保持隔离。",
+    "surfaceSignalAudit": "成果、引用和决策过程可追溯。"
   },
   "sidebar": {
     "newChat": "新建对话",

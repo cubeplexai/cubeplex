@@ -13,14 +13,14 @@ test.describe('i18n — language preference', () => {
       document.cookie = 'NEXT_LOCALE=zh; path=/'
     })
     await page.reload()
-    await expect(page.getByRole('heading', { name: '登录到 cubebox' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '登录' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '登录', exact: true })).toBeVisible()
   })
 
   test('login page shows English when browser prefers en', async ({ page }) => {
     await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' })
     await page.goto('/login')
-    await expect(page.getByRole('heading', { name: 'Sign in to cubebox' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible()
   })
 

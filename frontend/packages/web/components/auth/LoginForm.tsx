@@ -6,6 +6,11 @@ import Link from 'next/link'
 import { useTranslations } from 'next-intl'
 import { ApiError, createApiClient, loginUser, useAuthStore } from '@cubebox/core'
 import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
 import { GoogleLoginButton } from './GoogleLoginButton'
 import { SSOButton } from './SSOButton'
 
@@ -81,86 +86,96 @@ export function LoginForm({ nextPath = '/' }: { nextPath?: string }) {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="text-center mb-6">
-        <h1 className="text-xl font-semibold">{t('signInTitle')}</h1>
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-2xl font-semibold tracking-normal">{t('signInTitle')}</h2>
+        <p className="text-sm leading-6 text-muted-foreground">{t('signInSubtitle')}</p>
       </div>
-      <label className="block">
-        <span className="text-sm text-foreground/80">{t('email')}</span>
-        <input
-          type="email"
-          required
-          autoComplete="email"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-      </label>
-      <label className="block">
-        <span className="text-sm text-foreground/80">{t('password')}</span>
-        <input
-          type="password"
-          required
-          autoComplete="current-password"
-          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </label>
-      <div className="text-right">
-        <Link href="/forgot-password" className="text-xs text-muted-foreground underline">
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="login-email">{t('email')}</Label>
+          <Input
+            id="login-email"
+            type="email"
+            required
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="login-password">{t('password')}</Label>
+          <Input
+            id="login-password"
+            type="password"
+            required
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <Link
+          href="/forgot-password"
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
           {t('forgotPassword')}
         </Link>
       </div>
+
       {ssoRequired ? (
-        <div
-          role="alert"
-          className="space-y-2 rounded-md border border-border bg-muted/40 p-3 text-sm"
-        >
-          <div>{ssoRequired.message}</div>
-          <Link
-            href={ssoRequired.loginUrl}
-            className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-          >
-            {t('continueToSSO')}
-          </Link>
-        </div>
+        <Alert>
+          <AlertDescription className="flex flex-col gap-3">
+            <span>{ssoRequired.message}</span>
+            <Link href={ssoRequired.loginUrl} className={buttonVariants({ className: 'w-full' })}>
+              {t('continueToSSO')}
+            </Link>
+          </AlertDescription>
+        </Alert>
       ) : emailNotVerified ? (
-        <div
-          role="alert"
-          className="space-y-2 rounded-md border border-border bg-muted/40 p-3 text-sm"
-        >
-          <div>{emailNotVerified.message}</div>
-          <Link
-            href={`/verify-otp?email=${encodeURIComponent(email)}&next=${encodeURIComponent(nextPath)}`}
-            className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-          >
-            {t('verifyEmailNow')}
-          </Link>
-        </div>
+        <Alert>
+          <AlertDescription className="flex flex-col gap-3">
+            <span>{emailNotVerified.message}</span>
+            <Link
+              href={`/verify-otp?email=${encodeURIComponent(email)}&next=${encodeURIComponent(nextPath)}`}
+              className={buttonVariants({ className: 'w-full' })}
+            >
+              {t('verifyEmailNow')}
+            </Link>
+          </AlertDescription>
+        </Alert>
       ) : (
-        error && <div className="text-sm text-destructive">{error}</div>
+        error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )
       )}
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
-      >
+
+      <Button type="submit" disabled={submitting} size="lg" className="w-full">
         {submitting ? t('signingIn') : t('signIn')}
-      </button>
-      <div className="relative my-2">
-        <div className="absolute inset-0 flex items-center" aria-hidden="true">
-          <span className="w-full border-t border-border" />
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">{t('or')}</span>
-        </div>
+      </Button>
+
+      <div className="flex items-center gap-3">
+        <Separator className="flex-1" />
+        <span className="text-xs text-muted-foreground">{t('or')}</span>
+        <Separator className="flex-1" />
       </div>
-      <GoogleLoginButton />
-      <SSOButton singleTenant={singleTenant} />
-      <div className="text-center text-sm text-foreground/60">
+
+      <div className="flex flex-col gap-2">
+        <GoogleLoginButton />
+        <SSOButton singleTenant={singleTenant} />
+      </div>
+
+      <div className="text-center text-sm text-muted-foreground">
         {t('newHere')}{' '}
-        <Link href={`/register?next=${encodeURIComponent(nextPath)}`} className="underline">
+        <Link
+          href={`/register?next=${encodeURIComponent(nextPath)}`}
+          className="font-medium text-foreground hover:text-primary"
+        >
           {t('createAccount')}
         </Link>
       </div>

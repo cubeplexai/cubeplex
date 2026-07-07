@@ -1,7 +1,8 @@
 {
   "auth": {
     "signIn": "Sign in",
-    "signInTitle": "Sign in to cubebox",
+    "signInTitle": "Welcome back",
+    "signInSubtitle": "Open your workspace and continue the runs already in motion.",
     "signUp": "Create account",
     "signUpTitle": "Create your cubebox account",
     "email": "Email",
@@ -53,7 +54,21 @@
     "resendCode": "Resend code",
     "resendIn": "Resend in {seconds}s",
     "passwordTooWeak": "Password doesn't meet the strength requirements.",
-    "verifyEmailNow": "Verify email now"
+    "verifyEmailNow": "Verify email now",
+    "surfaceEyebrow": "Agent workspace",
+    "surfaceTitle": "Run agents with memory, tools, and approvals in one place.",
+    "surfaceSubtitle": "Cubebox keeps long-running agent work inside the same workspace as your models, connectors, artifacts, and team controls.",
+    "surfacePanelTitle": "Built for controlled autonomy",
+    "surfacePanelDescription": "Sign in to inspect active runs, review tool access, and resume work with full workspace context.",
+    "surfaceFeatureMemoryTitle": "Memory",
+    "surfaceFeatureMemoryDescription": "Keep useful context available without rebuilding every prompt.",
+    "surfaceFeatureToolsTitle": "Tools",
+    "surfaceFeatureToolsDescription": "Connect MCP services, sandbox work, and internal systems.",
+    "surfaceFeatureControlTitle": "Control",
+    "surfaceFeatureControlDescription": "Use approvals, scopes, and audit trails before work leaves the box.",
+    "surfaceSignalRuns": "Streaming runs stay attached to their workspace.",
+    "surfaceSignalScopes": "Org and workspace scopes stay separate.",
+    "surfaceSignalAudit": "Artifacts, citations, and decisions stay reviewable."
   },
   "sidebar": {
     "newChat": "New Chat",
