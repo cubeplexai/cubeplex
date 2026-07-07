@@ -3,9 +3,12 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { createApiClient, initiateSsoLogin } from '@cubebox/core'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 interface SSOButtonProps {
-  /** When provided, click goes straight to SSO for this org — no slug input. */
+  /** When provided, click goes straight to SSO for this org, no slug input. */
   orgSlug?: string
   /** In single-tenant mode, no slug input is needed. */
   singleTenant?: boolean
@@ -41,53 +44,64 @@ export function SSOButton({ orgSlug, singleTenant }: SSOButtonProps) {
 
   if (showInput) {
     return (
-      <div className="space-y-2">
-        <input
+      <div className="flex flex-col gap-2">
+        <Input
           type="text"
           placeholder={t('orgSlugPlaceholder')}
           aria-label={t('orgSlugPlaceholder')}
           autoComplete="off"
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
           autoFocus
         />
-        {error && <div className="text-sm text-destructive">{error}</div>}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
         <div className="flex gap-2">
-          <button
+          <Button
             type="button"
+            size="lg"
             onClick={() => startSSO(slug.trim())}
             disabled={loading || !slug.trim()}
-            className="flex-1 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:opacity-50"
+            className="flex-1"
           >
             {loading ? t('redirecting') : t('continue')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
+            size="lg"
             onClick={() => {
               setShowInput(false)
               setError(null)
             }}
-            className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
           >
             {t('back')}
-          </button>
+          </Button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="space-y-2">
-      <button
+    <div className="flex flex-col gap-2">
+      <Button
         type="button"
+        variant="outline"
+        size="lg"
         onClick={onClick}
         disabled={loading}
-        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-medium hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:opacity-50"
+        className="w-full"
       >
         {loading ? t('redirecting') : t('loginWithSSO')}
-      </button>
-      {error && <div className="text-sm text-destructive">{error}</div>}
+      </Button>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
     </div>
   )
 }
