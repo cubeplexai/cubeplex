@@ -166,6 +166,7 @@ class OAuthStartService:
             as_meta,
             cred_service,
             install_repo,
+            frontend_origin=frontend_origin,
         )
 
         pkce = generate_pkce()
@@ -208,7 +209,7 @@ class OAuthStartService:
         authorize_url = _build_authorize_url(
             authorize_endpoint=as_meta.authorization_endpoint,
             client_id=client_id,
-            redirect_uri=_redirect_uri(),
+            redirect_uri=_redirect_uri(frontend_origin),
             code_challenge=pkce.challenge,
             state=state,
             scope=scope_param,
@@ -228,6 +229,7 @@ class OAuthStartService:
         as_meta: AuthorizationServerMetadata,
         cred_service: CredentialService,
         install_repo: MCPConnectorInstallRepository,
+        frontend_origin: str | None = None,
     ) -> tuple[str, str | None]:
         """Read or create OAuth client.
 
@@ -283,7 +285,7 @@ class OAuthStartService:
         dcr_resp = await self._dcr.register(
             as_meta.registration_endpoint,
             DCRRequest(
-                redirect_uris=[_redirect_uri()],
+                redirect_uris=[_redirect_uri(frontend_origin)],
                 client_name=f"cubebox:{install.id}",
             ),
         )
@@ -302,7 +304,9 @@ class OAuthStartService:
         return dcr_resp.client_id, secret_id
 
 
-def _redirect_uri() -> str:
+def _redirect_uri(frontend_origin: str | None = None) -> str:
+    if frontend_origin:
+        return f"{frontend_origin.rstrip('/')}{_REDIRECT_PATH}"
     base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     return f"{base}{_REDIRECT_PATH}"
 

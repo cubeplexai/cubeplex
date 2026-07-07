@@ -173,7 +173,9 @@ class OAuthCallbackHandler:
         grant_repo = MCPCredentialGrantRepository(self._session, org_id=install.org_id)
 
         try:
-            token = await self._post_token_exchange(install, code, verifier, cred_service)
+            token = await self._post_token_exchange(
+                install, code, verifier, cred_service, payload.frontend_origin
+            )
         except httpx.HTTPError as exc:
             return OAuthCallbackResult(
                 status="error",
@@ -237,6 +239,7 @@ class OAuthCallbackHandler:
         code: str,
         verifier: str,
         cred_service: CredentialService,
+        frontend_origin: str | None = None,
     ) -> dict[str, Any]:
         # Token endpoint lives in AS metadata, not on the install row.
         _pr, as_meta = await self._metadata.discover_for_resource(install.server_url)
@@ -245,7 +248,7 @@ class OAuthCallbackHandler:
             {
                 "grant_type": "authorization_code",
                 "code": code,
-                "redirect_uri": _redirect_uri(),
+                "redirect_uri": _redirect_uri(frontend_origin),
                 "client_id": client_id,
                 "code_verifier": verifier,
                 # RFC 8707 audience binding — must match the `resource`
@@ -357,7 +360,9 @@ class OAuthCallbackHandler:
             await install_repo.update(install)
 
 
-def _redirect_uri() -> str:
+def _redirect_uri(frontend_origin: str | None = None) -> str:
+    if frontend_origin:
+        return f"{frontend_origin.rstrip('/')}/api/v1/oauth/mcp/callback"
     base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     return f"{base}/api/v1/oauth/mcp/callback"
 
