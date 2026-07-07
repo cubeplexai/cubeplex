@@ -642,7 +642,10 @@ async def my_user_grant_oauth_start(
             frontend_origin=body.frontend_origin,
         )
     except OAuthStartError as exc:
-        raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
     return MCPOAuthStartOut(
         authorize_url=result.authorize_url,
         state=result.state,
@@ -764,7 +767,10 @@ async def workspace_grant_oauth_start(
             frontend_origin=body.frontend_origin,
         )
     except OAuthStartError as exc:
-        raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc
+        raise HTTPException(
+            status_code=400,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
     return MCPOAuthStartOut(
         authorize_url=result.authorize_url,
         state=result.state,

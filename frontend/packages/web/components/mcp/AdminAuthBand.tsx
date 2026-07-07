@@ -39,7 +39,14 @@ export interface AdminAuthBandProps {
 export function AdminAuthBand(props: AdminAuthBandProps) {
   const { connector, client, onChanged } = props
   const synthesized = toEffectiveForAdmin(connector)
-  return <AdminBandInner connector={synthesized} client={client} onChanged={onChanged} />
+  return (
+    <AdminBandInner
+      key={connector.install.install_id}
+      connector={synthesized}
+      client={client}
+      onChanged={onChanged}
+    />
+  )
 }
 
 // Bridge between the new admin DTO and the shared band-state computer.
@@ -105,10 +112,11 @@ function AdminBandInner({
   const installId = connector.install.install_id
 
   const onConnect = async (): Promise<void> => {
+    const flowInstallId = installId
     setInFlight(true)
     setErrorMessage(undefined)
     const result = await runOAuthFlow({
-      startPost: () => adminOrgGrantOAuthStart(client, installId),
+      startPost: () => adminOrgGrantOAuthStart(client, flowInstallId),
     })
     setInFlight(false)
     if (result.status === 'ok') {
@@ -120,8 +128,9 @@ function AdminBandInner({
   }
 
   const onSaveStaticToken = async (token: string): Promise<void> => {
+    const flowInstallId = installId
     try {
-      await adminCreateOrgGrant(client, installId, { credential_plaintext: token })
+      await adminCreateOrgGrant(client, flowInstallId, { credential_plaintext: token })
       await onChanged()
     } catch (err) {
       setErrorMessage(`save_failed:${(err as Error).message}`)
@@ -129,7 +138,8 @@ function AdminBandInner({
   }
 
   const onDelete = async (): Promise<void> => {
-    await adminDeleteOrgGrant(client, installId)
+    const flowInstallId = installId
+    await adminDeleteOrgGrant(client, flowInstallId)
     await onChanged()
   }
 

@@ -35,6 +35,7 @@ from cubebox.config import config
 from cubebox.credentials.dependencies import build_credential_service
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET
+from cubebox.mcp.exceptions import DCRError, OAuthMetadataFetchError, OAuthMetadataNotFound
 from cubebox.mcp.oauth.dcr import DCRClient, DCRRequest
 from cubebox.mcp.oauth.metadata import (
     AuthorizationServerMetadata,
@@ -42,7 +43,7 @@ from cubebox.mcp.oauth.metadata import (
 )
 from cubebox.mcp.oauth.pkce import generate_pkce
 from cubebox.mcp.oauth.state import OAuthStateStore
-from cubebox.models.mcp import MCPConnectorInstall
+from cubebox.models.mcp import MCPConnectorInstall, MCPConnectorTemplate
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
     MCPConnectorTemplateRepository,
@@ -50,6 +51,7 @@ from cubebox.repositories.mcp import (
 from cubebox.services.credential import CredentialService
 
 _REDIRECT_PATH: Final[str] = "/api/v1/oauth/mcp/callback"
+_OAUTH_AS_METADATA_URL_KEY: Final[str] = "oauth_authorization_server_metadata_url"
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,11 @@ class OAuthStartResult:
 
 class OAuthStartError(ValueError):
     """Surface-friendly error type. Route layer maps to HTTPException."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = code
+        self.message = message or code
+        super().__init__(self.message)
 
 
 class OAuthStartService:
@@ -139,6 +146,10 @@ class OAuthStartService:
             actor_user_id=actor_user_id,
         )
         install_repo = MCPConnectorInstallRepository(self._session, org_id=install.org_id)
+        template: MCPConnectorTemplate | None = None
+        if install.template_id is not None:
+            tpl_repo = MCPConnectorTemplateRepository(self._session)
+            template = await tpl_repo.get(install.template_id)
 
         # AS metadata: discovery is internally cached per server_url, so no
         # snapshot is persisted on the install row (the install model has
@@ -154,6 +165,32 @@ class OAuthStartService:
         # OAuthStartError so the route maps to 400 with a typed code.
         try:
             _pr_meta, as_meta = await self._metadata.discover_for_resource(install.server_url)
+        except OAuthMetadataNotFound as exc:
+            as_metadata_url = _template_metadata_str(template, _OAUTH_AS_METADATA_URL_KEY)
+            if as_metadata_url is None:
+                raise OAuthStartError(
+                    "oauth_metadata_not_found",
+                    f"oauth_metadata_not_found: {exc}",
+                ) from exc
+            logger.info(
+                "OAuth start: using template AS metadata URL fallback for {}: {}",
+                install.server_url,
+                as_metadata_url,
+            )
+            try:
+                as_meta = await self._metadata.fetch_authorization_server_metadata_url(
+                    as_metadata_url
+                )
+            except OAuthMetadataNotFound as fallback_exc:
+                raise OAuthStartError(
+                    "oauth_metadata_not_found",
+                    f"oauth_metadata_not_found: {fallback_exc}",
+                ) from fallback_exc
+            except OAuthMetadataFetchError as fallback_exc:
+                raise OAuthStartError(
+                    "oauth_metadata_fetch_failed",
+                    f"oauth_metadata_fetch_failed: {fallback_exc}",
+                ) from fallback_exc
         except httpx.HTTPError as exc:
             logger.warning(
                 "OAuth start: AS metadata fetch failed for {}: {}",
@@ -161,13 +198,28 @@ class OAuthStartService:
                 exc,
             )
             raise OAuthStartError(f"as_metadata_unreachable: {type(exc).__name__}") from exc
-        client_id, _client_secret_id = await self._ensure_client(
-            install,
-            as_meta,
-            cred_service,
-            install_repo,
-            frontend_origin=frontend_origin,
-        )
+        except OAuthMetadataFetchError as exc:
+            raise OAuthStartError(
+                "oauth_metadata_fetch_failed",
+                f"oauth_metadata_fetch_failed: {exc}",
+            ) from exc
+        try:
+            client_id, _client_secret_id = await self._ensure_client(
+                install,
+                as_meta,
+                cred_service,
+                install_repo,
+                frontend_origin=frontend_origin,
+            )
+        except DCRError as exc:
+            code = exc.error or "dcr_failed"
+            message = f"{code}: {exc.error_description}" if exc.error_description else code
+            logger.warning(
+                "OAuth start: DCR failed for {}: {}",
+                install.server_url,
+                exc,
+            )
+            raise OAuthStartError(code, message) from exc
 
         pkce = generate_pkce()
         state = await self._state_store.issue(
@@ -199,8 +251,6 @@ class OAuthStartService:
         if isinstance(cfg_default, str) and cfg_default:
             scope_param = cfg_default
         elif install.template_id is not None:
-            tpl_repo = MCPConnectorTemplateRepository(self._session)
-            template = await tpl_repo.get(install.template_id)
             if template is not None and template.oauth_default_scope:
                 scope_param = template.oauth_default_scope
         if scope_param is None and as_meta.scopes_supported:
@@ -322,6 +372,18 @@ class OAuthStartService:
         install.oauth_client_config = cfg
         await install_repo.update(install)
         return dcr_resp.client_id, secret_id
+
+
+def _template_metadata_str(
+    template: MCPConnectorTemplate | None,
+    key: str,
+) -> str | None:
+    if template is None:
+        return None
+    value = template.template_metadata.get(key)
+    if not isinstance(value, str) or not value:
+        return None
+    return value
 
 
 def _redirect_uri(frontend_origin: str | None = None) -> str:

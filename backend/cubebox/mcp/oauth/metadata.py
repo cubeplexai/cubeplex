@@ -104,10 +104,26 @@ class OAuthMetadataDiscovery:
 
     async def fetch_authorization_server(self, issuer_url: str) -> AuthorizationServerMetadata:
         url = self._join(issuer_url, _AS_WELL_KNOWN)
+        return await self.fetch_authorization_server_metadata_url(url)
+
+    async def fetch_authorization_server_metadata_url(
+        self,
+        metadata_url: str,
+    ) -> AuthorizationServerMetadata:
+        url = metadata_url
         cached = self._cache_get(self._as_cache, url)
         if cached is not None:
             return cached
         body = await self._get_json(url)
+        as_meta = self._parse_authorization_server_metadata(body, url)
+        self._cache_put(self._as_cache, url, as_meta)
+        return as_meta
+
+    def _parse_authorization_server_metadata(
+        self,
+        body: dict[str, Any],
+        url: str,
+    ) -> AuthorizationServerMetadata:
         try:
             issuer = str(body["issuer"])
             authorization_endpoint = str(body["authorization_endpoint"])
@@ -131,7 +147,6 @@ class OAuthMetadataDiscovery:
             scopes_supported=_opt_str_list(body.get("scopes_supported")),
             raw=dict(body),
         )
-        self._cache_put(self._as_cache, url, as_meta)
         return as_meta
 
     async def _get_json(self, url: str) -> dict[str, Any]:

@@ -300,5 +300,8 @@ function errorReasonCopy(t: BandT, reason: string | undefined): string {
   if (!reason) return ''
   if (reason === 'popup_blocked') return t('errorPopupBlocked')
   if (reason === 'timeout') return t('errorTimeout')
+  if (reason.startsWith('start_failed:')) {
+    return reason.slice('start_failed:'.length)
+  }
   return reason
 }

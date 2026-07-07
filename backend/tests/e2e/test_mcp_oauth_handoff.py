@@ -16,8 +16,9 @@ from cubebox.config import config as _cubebox_config
 from cubebox.credentials.encryption import FernetBackend
 from cubebox.db.engine import _build_database_url
 from cubebox.mcp._constants import server_url_hash
+from cubebox.mcp.exceptions import DCRError, OAuthMetadataNotFound
 from cubebox.mcp.oauth.callback import OAuthCallbackHandler
-from cubebox.mcp.oauth.dcr import DCRClient
+from cubebox.mcp.oauth.dcr import DCRClient, DCRRequest
 from cubebox.mcp.oauth.metadata import (
     AuthorizationServerMetadata,
     ProtectedResourceMetadata,
@@ -27,6 +28,7 @@ from cubebox.mcp.oauth.state import OAuthStateStore
 from cubebox.models.mcp import MCPConnectorInstall
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
 )
 
@@ -106,6 +108,7 @@ async def _seed_oauth_install(
     *,
     org_id: str,
     workspace_id: str | None,
+    template_id: str | None = None,
     install_scope: str = "workspace",
     default_credential_policy: str = "user",
     created_by_user_id: str | None = None,
@@ -121,7 +124,7 @@ async def _seed_oauth_install(
         org_id=org_id,
         workspace_id=workspace_id,
         install_scope=install_scope,
-        template_id=None,
+        template_id=template_id,
         name="oauth-e2e-install",
         server_url="https://oauth-e2e.example.com/mcp",
         server_url_hash=server_url_hash("https://oauth-e2e.example.com/mcp"),
@@ -131,11 +134,32 @@ async def _seed_oauth_install(
         auth_status="pending",
         install_state="active",
         oauth_client_config={"client_id": "test-client-id"},
-        created_by_user_id=created_by_user_id or "usr-test-actor",
+        created_by_user_id=created_by_user_id,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
     session.add(install)
+    await session.commit()
+    await session.refresh(install)
+    return install
+
+
+async def _seed_oauth_install_needing_dcr(
+    session: AsyncSession,
+    *,
+    org_id: str,
+    workspace_id: str,
+    created_by_user_id: str,
+) -> MCPConnectorInstall:
+    install = await _seed_oauth_install(
+        session,
+        org_id=org_id,
+        workspace_id=workspace_id,
+        install_scope="workspace",
+        default_credential_policy="workspace",
+        created_by_user_id=None,
+    )
+    install.oauth_client_config = {}
     await session.commit()
     await session.refresh(install)
     return install
@@ -181,6 +205,19 @@ _FAKE_AS_METADATA = AuthorizationServerMetadata(
     raw={},
 )
 
+_FAKE_AS_METADATA_WITH_DCR = AuthorizationServerMetadata(
+    issuer="https://oauth-e2e.example.com",
+    authorization_endpoint="https://oauth-e2e.example.com/authorize",
+    token_endpoint="https://oauth-e2e.example.com/token",
+    revocation_endpoint=None,
+    registration_endpoint="https://oauth-e2e.example.com/register",
+    code_challenge_methods_supported=["S256"],
+    grant_types_supported=["authorization_code", "refresh_token"],
+    response_types_supported=["code"],
+    scopes_supported=["read"],
+    raw={},
+)
+
 _FAKE_PR_METADATA = ProtectedResourceMetadata(
     resource="https://oauth-e2e.example.com/mcp",
     authorization_servers=["https://oauth-e2e.example.com"],
@@ -194,6 +231,39 @@ class _StubDiscovery:
         self, resource_url: str
     ) -> tuple[ProtectedResourceMetadata, AuthorizationServerMetadata]:
         return _FAKE_PR_METADATA, _FAKE_AS_METADATA
+
+
+class _StubDcrDiscovery:
+    """Stand-in that forces the OAuth start path through DCR."""
+
+    async def discover_for_resource(
+        self, resource_url: str
+    ) -> tuple[ProtectedResourceMetadata, AuthorizationServerMetadata]:
+        return _FAKE_PR_METADATA, _FAKE_AS_METADATA_WITH_DCR
+
+
+class _TemplateMetadataFallbackDiscovery:
+    """Simulates Intercom: no PR metadata, but a direct AS metadata URL works."""
+
+    async def discover_for_resource(
+        self, resource_url: str
+    ) -> tuple[ProtectedResourceMetadata, AuthorizationServerMetadata]:
+        raise OAuthMetadataNotFound(f"Metadata not found at {resource_url}")
+
+    async def fetch_authorization_server_metadata_url(
+        self, metadata_url: str
+    ) -> AuthorizationServerMetadata:
+        assert metadata_url == "https://mcp.intercom.com/.well-known/oauth-authorization-server"
+        return _FAKE_AS_METADATA
+
+
+class _RejectingDCRClient:
+    async def register(self, registration_endpoint: str, request: DCRRequest) -> Any:
+        raise DCRError(
+            status=400,
+            error="invalid_redirect_uri",
+            error_description="Plaintext HTTP is allowed only for loopback addresses.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +363,126 @@ async def test_start_oauth_flow_rejects_cross_tenant_install_id(
             workspace_id=ws_id,
             user_id=user_id,
         )
+
+
+async def test_start_oauth_flow_maps_dcr_error_to_oauth_start_error(
+    db_session: AsyncSession,
+    encryption_backend: FernetBackend,
+    oauth_state_store: OAuthStateStore,
+    http_client: httpx.AsyncClient,
+) -> None:
+    import secrets
+
+    from cubebox.repositories import OrganizationRepository, WorkspaceRepository
+
+    suffix = secrets.token_hex(4)
+    org = await OrganizationRepository(db_session).create(
+        name=f"DCR Org {suffix}",
+        slug=f"dcr-org-{suffix}",
+    )
+    ws = await WorkspaceRepository(db_session).create(org_id=org.id, name=f"DCR WS {suffix}")
+    await db_session.commit()
+
+    user_id = "usr-dcr-test-actor"
+    install = await _seed_oauth_install_needing_dcr(
+        db_session,
+        org_id=org.id,
+        workspace_id=ws.id,
+        created_by_user_id=user_id,
+    )
+    service = OAuthStartService(
+        session=db_session,
+        backend=encryption_backend,
+        state_store=oauth_state_store,
+        metadata=_StubDcrDiscovery(),  # type: ignore[arg-type]
+        dcr=_RejectingDCRClient(),  # type: ignore[arg-type]
+        http_client=http_client,
+    )
+
+    with pytest.raises(OAuthStartError, match="Plaintext HTTP") as exc_info:
+        await service.start_oauth_flow(
+            install_id=install.id,
+            actor_user_id=user_id,
+            actor_org_id=org.id,
+            grant_scope="workspace",
+            workspace_id=ws.id,
+            user_id=None,
+            frontend_origin="http://192.168.1.215:3000",
+        )
+    assert exc_info.value.code == "invalid_redirect_uri"
+    assert exc_info.value.message == (
+        "invalid_redirect_uri: Plaintext HTTP is allowed only for loopback addresses."
+    )
+
+
+async def test_start_oauth_flow_uses_template_authorization_server_metadata_url_fallback(
+    db_session: AsyncSession,
+    encryption_backend: FernetBackend,
+    oauth_state_store: OAuthStateStore,
+    http_client: httpx.AsyncClient,
+) -> None:
+    import secrets
+
+    from cubebox.repositories import OrganizationRepository, WorkspaceRepository
+
+    suffix = secrets.token_hex(4)
+    org = await OrganizationRepository(db_session).create(
+        name=f"Intercom Org {suffix}",
+        slug=f"intercom-org-{suffix}",
+    )
+    ws = await WorkspaceRepository(db_session).create(
+        org_id=org.id,
+        name=f"Intercom WS {suffix}",
+    )
+    template = await MCPConnectorTemplateRepository(db_session).upsert_by_slug(
+        slug=f"intercom-test-{suffix}",
+        name="Intercom Test",
+        description="Intercom test connector",
+        provider="Intercom",
+        server_url="https://mcp.intercom.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["oauth"],
+        default_credential_policy="org",
+        oauth_dcr_supported=True,
+        oauth_default_scope=None,
+        template_metadata={
+            "oauth_authorization_server_metadata_url": (
+                "https://mcp.intercom.com/.well-known/oauth-authorization-server"
+            )
+        },
+    )
+    await db_session.commit()
+
+    user_id = "usr-intercom-actor"
+    install = await _seed_oauth_install(
+        db_session,
+        org_id=org.id,
+        workspace_id=ws.id,
+        template_id=template.id,
+        install_scope="workspace",
+        default_credential_policy="workspace",
+        created_by_user_id=None,
+    )
+    service = OAuthStartService(
+        session=db_session,
+        backend=encryption_backend,
+        state_store=oauth_state_store,
+        metadata=_TemplateMetadataFallbackDiscovery(),  # type: ignore[arg-type]
+        dcr=DCRClient(http_client),
+        http_client=http_client,
+    )
+
+    result = await service.start_oauth_flow(
+        install_id=install.id,
+        actor_user_id=user_id,
+        actor_org_id=org.id,
+        grant_scope="workspace",
+        workspace_id=ws.id,
+        user_id=None,
+    )
+
+    assert result.authorize_url.startswith("https://oauth-e2e.example.com/authorize?")
+    assert "client_id=test-client-id" in result.authorize_url
 
 
 # ---------------------------------------------------------------------------

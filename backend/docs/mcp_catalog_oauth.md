@@ -155,9 +155,9 @@ read / refresh / persist cycle for OAuth-scoped installs. Behavior:
 Invocation (from `backend/`):
 
 ```bash
-python -m cubebox.cli seed-mcp-catalog            # apply
-python -m cubebox.cli seed-mcp-catalog --dry-run  # preview only
-python -m cubebox.cli seed-mcp-catalog --quiet    # warnings only
+python -m cubebox.cli seed-mcp-templates            # apply
+python -m cubebox.cli seed-mcp-templates --dry-run  # preview only
+python -m cubebox.cli seed-mcp-templates --quiet    # warnings only
 ```
 
 The seeder:
@@ -186,7 +186,7 @@ that includes catalog changes:
 ```bash
 cd backend
 alembic upgrade head
-python -m cubebox.cli seed-mcp-catalog
+python -m cubebox.cli seed-mcp-templates
 ```
 
 The seeder is idempotent: re-running with no changes is a no-op.
@@ -203,7 +203,7 @@ sent to authorization servers and the post-callback browser
 redirect; OAuth flows fail (or break the user's session) if either
 points at `localhost` in a deployed environment.
 
-Run `python -m cubebox.cli seed-mcp-catalog --dry-run` to see what
+Run `python -m cubebox.cli seed-mcp-templates --dry-run` to see what
 would change without committing.
 
 ## Operator runbook
@@ -216,9 +216,15 @@ would change without committing.
    vendor's developer console with redirect URI
    `${CUBEBOX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`. Place the
    credentials in env (see env-var convention above).
-3. Deploy the new code.
-4. Run the seeder: `python -m cubebox.cli seed-mcp-catalog`.
-5. Verify `GET /api/v1/ws/{ws}/mcp/catalog` (from any workspace) lists
+3. If the vendor exposes OAuth authorization-server metadata but does
+   not expose the MCP protected-resource metadata endpoint, add
+   `oauth_authorization_server_metadata_url` to the template's
+   `template_metadata`. OAuth start first tries the standard MCP
+   protected-resource discovery path and uses this URL only as a
+   provider compatibility fallback.
+4. Deploy the new code.
+5. Run the seeder: `python -m cubebox.cli seed-mcp-templates`.
+6. Verify `GET /api/v1/ws/{ws}/mcp/catalog` (from any workspace) lists
    the new connector with `status="active"`.
 
 ### Removing a catalog connector

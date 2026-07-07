@@ -42,6 +42,10 @@ export interface WsAuthBandProps {
 }
 
 export function WsAuthBand(props: WsAuthBandProps) {
+  return <WsBandInner key={props.connector.install.install_id} {...props} />
+}
+
+function WsBandInner(props: WsAuthBandProps) {
   const { connector, client, wsId, callerRole, onChanged } = props
   const t = useTranslations('mcp.auth')
   const state = computeAuthBandState({ connector, callerRole, isOrgAdmin: false })
@@ -52,9 +56,10 @@ export function WsAuthBand(props: WsAuthBandProps) {
   const installId = connector.install.install_id
 
   const onConnect = async (): Promise<void> => {
+    const flowInstallId = installId
     setInFlight(true)
     setErrorMessage(undefined)
-    const startPost = oauthStartFn(scope, client, wsId, installId)
+    const startPost = oauthStartFn(scope, client, wsId, flowInstallId)
     const result = await runOAuthFlow({ startPost })
     setInFlight(false)
     if (result.status === 'ok') {
@@ -66,12 +71,13 @@ export function WsAuthBand(props: WsAuthBandProps) {
   }
 
   const onSaveStaticToken = async (token: string): Promise<void> => {
+    const flowInstallId = installId
     try {
       const body = { credential_plaintext: token }
       if (scope === 'workspace') {
-        await wsCreateWorkspaceGrant(client, wsId, installId, body)
+        await wsCreateWorkspaceGrant(client, wsId, flowInstallId, body)
       } else {
-        await wsCreateMyGrant(client, wsId, installId, body)
+        await wsCreateMyGrant(client, wsId, flowInstallId, body)
       }
       await onChanged()
     } catch (err) {
@@ -80,10 +86,11 @@ export function WsAuthBand(props: WsAuthBandProps) {
   }
 
   const onDelete = async (target: WsScope): Promise<void> => {
+    const flowInstallId = installId
     if (target === 'workspace') {
-      await wsDeleteWorkspaceGrant(client, wsId, installId)
+      await wsDeleteWorkspaceGrant(client, wsId, flowInstallId)
     } else {
-      await wsDeleteMyGrant(client, wsId, installId)
+      await wsDeleteMyGrant(client, wsId, flowInstallId)
     }
     await onChanged()
   }

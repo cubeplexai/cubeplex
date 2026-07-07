@@ -144,6 +144,22 @@ async def test_fetch_authorization_server_minimal_payload() -> None:
     assert meta.response_types_supported == []
 
 
+async def test_fetch_authorization_server_metadata_url_uses_exact_url() -> None:
+    body = {
+        "issuer": "https://mcp.intercom.com",
+        "authorization_endpoint": "https://app.intercom.com/oauth",
+        "token_endpoint": "https://api.intercom.io/auth/eagle/token",
+    }
+    metadata_url = "https://mcp.intercom.com/.well-known/oauth-authorization-server"
+    handler = _CountingHandler({metadata_url: httpx.Response(200, json=body)})
+    async with _client_with(handler) as http:
+        discovery = OAuthMetadataDiscovery(http)
+        meta = await discovery.fetch_authorization_server_metadata_url(metadata_url)
+    assert meta.issuer == "https://mcp.intercom.com"
+    assert meta.authorization_endpoint == "https://app.intercom.com/oauth"
+    assert handler.calls == [metadata_url]
+
+
 async def test_fetch_authorization_server_missing_required_raises_not_found() -> None:
     body = {
         "issuer": "https://auth.example.com",

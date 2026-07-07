@@ -53,6 +53,14 @@ def _make_get_env(values: dict[str, str]) -> Callable[[str], str | None]:
     return _getter
 
 
+def test_intercom_catalog_declares_authorization_server_metadata_url() -> None:
+    intercom = next(entry for entry in CATALOG if entry.slug == "intercom")
+
+    assert intercom.template_metadata["oauth_authorization_server_metadata_url"] == (
+        "https://mcp.intercom.com/.well-known/oauth-authorization-server"
+    )
+
+
 async def test_seed_with_full_env_writes_templates_and_credentials(
     session: AsyncSession, backend: FernetBackend
 ) -> None:

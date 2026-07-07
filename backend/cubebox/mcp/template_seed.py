@@ -335,7 +335,12 @@ CATALOG: list[MCPConnectorTemplateSeedEntry] = [
         oauth_static_client_secret_env=None,
         static_form_schema=None,
         static_auth_header_template=None,
-        template_metadata={"docs_url": "https://developers.intercom.com/"},
+        template_metadata={
+            "docs_url": "https://developers.intercom.com/",
+            "oauth_authorization_server_metadata_url": (
+                "https://mcp.intercom.com/.well-known/oauth-authorization-server"
+            ),
+        },
     ),
     MCPConnectorTemplateSeedEntry(
         slug="gws",
