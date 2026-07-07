@@ -25,8 +25,12 @@ _CALLBACK_COOKIE_PATH = "/api/v1/oauth/mcp/callback"
 oauth_callback_router = APIRouter(prefix="/oauth/mcp", tags=["mcp-oauth-callback"])
 
 
-def _frontend_return_url() -> str:
-    base = str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
+def _frontend_return_url(frontend_origin: str | None = None) -> str:
+    base = (
+        frontend_origin.rstrip("/")
+        if frontend_origin
+        else str(config.get("frontend_base_url", "http://localhost:3000")).rstrip("/")
+    )
     return f"{base}/oauth/mcp/return"
 
 
@@ -53,7 +57,7 @@ async def oauth_callback(
     }
     if result.reason:
         params["reason"] = result.reason
-    url = f"{_frontend_return_url()}?{urlencode(params)}"
+    url = f"{_frontend_return_url(result.frontend_origin)}?{urlencode(params)}"
     response = RedirectResponse(url=url, status_code=302)
     _strip_ticket_cookie(response)
     return response

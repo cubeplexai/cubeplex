@@ -626,7 +626,7 @@ async def delete_my_user_grant(
 async def my_user_grant_oauth_start(
     workspace_id: str,
     install_id: str,
-    body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
+    body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> MCPOAuthStartOut:
@@ -639,6 +639,7 @@ async def my_user_grant_oauth_start(
             grant_scope="user",
             workspace_id=workspace_id,
             user_id=ctx.user.id,
+            frontend_origin=body.frontend_origin,
         )
     except OAuthStartError as exc:
         raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc
@@ -747,7 +748,7 @@ async def delete_workspace_grant(
 async def workspace_grant_oauth_start(
     workspace_id: str,
     install_id: str,
-    body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
+    body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> MCPOAuthStartOut:
@@ -760,6 +761,7 @@ async def workspace_grant_oauth_start(
             grant_scope="workspace",
             workspace_id=workspace_id,
             user_id=None,
+            frontend_origin=body.frontend_origin,
         )
     except OAuthStartError as exc:
         raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc

@@ -54,6 +54,7 @@ export function AvailableConnectorRow({
       if (row.source === 'org_install' && row.install) {
         await wsPatchConnectorState(client, wsId, row.install.install_id, {
           enabled: true,
+          credential_policy: 'workspace',
         })
         installId = row.install.install_id
       } else if (row.source === 'template' && row.template) {
@@ -62,12 +63,7 @@ export function AvailableConnectorRow({
           tpl.supported_auth_methods.find((m) => m === 'oauth') ??
           tpl.supported_auth_methods.find((m) => m === 'static') ??
           tpl.supported_auth_methods[0]
-        const policy: MCPCredentialScope =
-          method === 'none'
-            ? 'none'
-            : tpl.default_credential_policy === 'none'
-              ? 'user'
-              : tpl.default_credential_policy
+        const policy: MCPCredentialScope = method === 'none' ? 'none' : 'workspace'
         const created = await wsCreateInstall(client, wsId, {
           template_id: tpl.template_id,
           install_scope: 'workspace',

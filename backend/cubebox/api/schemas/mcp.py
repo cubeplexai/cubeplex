@@ -10,7 +10,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class MCPOAuthStartIn(BaseModel):
-    """Empty body for ``POST .../oauth/start`` — present for OpenAPI clarity."""
+    """Body for ``POST .../oauth/start``.
+
+    ``frontend_origin`` lets the callback redirect the popup back to the
+    browser's actual origin (e.g. ``http://192.168.1.215:3000``) instead
+    of the static ``frontend_base_url`` config.  Carried through the
+    HMAC-signed state token so it cannot be tampered with after issuance.
+    """
+
+    frontend_origin: str | None = None
 
 
 class MCPOAuthStartOut(BaseModel):

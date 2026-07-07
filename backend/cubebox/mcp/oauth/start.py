@@ -102,6 +102,7 @@ class OAuthStartService:
         grant_scope: str,
         workspace_id: str | None,
         user_id: str | None,
+        frontend_origin: str | None = None,
     ) -> OAuthStartResult:
         # Org-scoped install lookup. The unauthenticated callback later
         # builds repos and credential service from ``install.org_id``, so
@@ -174,6 +175,7 @@ class OAuthStartService:
             grant_scope=grant_scope,
             workspace_id=workspace_id,
             user_id=user_id,
+            frontend_origin=frontend_origin,
         )
 
         # Persist the per-flow PKCE verifier alongside the state token so

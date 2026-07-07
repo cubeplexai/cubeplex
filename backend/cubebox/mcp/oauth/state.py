@@ -55,6 +55,7 @@ class OAuthStatePayload:
     grant_scope: str | None = None
     workspace_id: str | None = None
     user_id: str | None = None
+    frontend_origin: str | None = None
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -92,6 +93,7 @@ class OAuthStateStore:
         grant_scope: str | None = None,
         workspace_id: str | None = None,
         user_id: str | None = None,
+        frontend_origin: str | None = None,
     ) -> str:
         """Mint a new state token and persist it for one-shot consumption."""
         ts_ms = int(datetime.now(tz=UTC).timestamp() * 1000)
@@ -108,6 +110,8 @@ class OAuthStateStore:
             payload["workspace_id"] = workspace_id
         if user_id is not None:
             payload["user_id"] = user_id
+        if frontend_origin is not None:
+            payload["frontend_origin"] = frontend_origin
         # ``sort_keys`` keeps the canonical bytes deterministic across runs.
         payload_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         sig = hmac.new(self._secret_key, payload_bytes, hashlib.sha256).digest()
@@ -137,6 +141,7 @@ class OAuthStateStore:
         raw_grant_scope = payload.get("grant_scope") if isinstance(payload, dict) else None
         raw_ws_id = payload.get("workspace_id") if isinstance(payload, dict) else None
         raw_user_id = payload.get("user_id") if isinstance(payload, dict) else None
+        raw_fe_origin = payload.get("frontend_origin") if isinstance(payload, dict) else None
         return OAuthStatePayload(
             install_id=install_id,
             actor_user_id=actor_user_id,
@@ -144,6 +149,7 @@ class OAuthStateStore:
             grant_scope=str(raw_grant_scope) if raw_grant_scope is not None else None,
             workspace_id=str(raw_ws_id) if raw_ws_id is not None else None,
             user_id=str(raw_user_id) if raw_user_id is not None else None,
+            frontend_origin=str(raw_fe_origin) if raw_fe_origin is not None else None,
         )
 
     async def attach_pkce(self, *, state: str, verifier: str) -> None:

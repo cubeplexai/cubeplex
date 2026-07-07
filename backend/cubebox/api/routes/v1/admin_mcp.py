@@ -887,7 +887,7 @@ async def delete_admin_org_grant(
 )
 async def admin_org_grant_oauth_start(
     install_id: str,
-    body: MCPOAuthStartIn,  # noqa: ARG001 — present for OpenAPI clarity
+    body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
 ) -> MCPOAuthStartOut:
@@ -900,6 +900,7 @@ async def admin_org_grant_oauth_start(
             grant_scope="org",
             workspace_id=None,
             user_id=None,
+            frontend_origin=body.frontend_origin,
         )
     except OAuthStartError as exc:
         raise HTTPException(status_code=400, detail={"code": str(exc)}) from exc

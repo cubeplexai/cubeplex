@@ -57,6 +57,7 @@ class OAuthCallbackResult:
     install_id: str  # may be empty string when state could not be decoded
     state: str  # the original state token; required so the parent can match
     reason: str | None = None
+    frontend_origin: str | None = None
 
 
 class OAuthCallbackHandler:
@@ -112,6 +113,7 @@ class OAuthCallbackHandler:
                 install_id=payload.install_id,
                 state=state,
                 reason=error,
+                frontend_origin=payload.frontend_origin,
             )
 
         if code is None:
@@ -137,6 +139,7 @@ class OAuthCallbackHandler:
                 install_id=payload.install_id,
                 state=state,
                 reason="pkce_missing",
+                frontend_origin=payload.frontend_origin,
             )
 
         # We need org-scoped repos to honor multi-tenant isolation, but we
@@ -156,6 +159,7 @@ class OAuthCallbackHandler:
                 install_id=payload.install_id,
                 state=state,
                 reason="install_not_found",
+                frontend_origin=payload.frontend_origin,
             )
 
         # Now build the org-scoped service surface for the rest of the work.
@@ -176,6 +180,7 @@ class OAuthCallbackHandler:
                 install_id=install.id,
                 state=state,
                 reason=f"token_exchange_failed:{exc.__class__.__name__}",
+                frontend_origin=payload.frontend_origin,
             )
 
         grant = await self._upsert_grant(
@@ -219,7 +224,12 @@ class OAuthCallbackHandler:
             token_mgr=token_mgr,
         )
 
-        return OAuthCallbackResult(status="ok", install_id=install.id, state=state)
+        return OAuthCallbackResult(
+            status="ok",
+            install_id=install.id,
+            state=state,
+            frontend_origin=payload.frontend_origin,
+        )
 
     async def _post_token_exchange(
         self,

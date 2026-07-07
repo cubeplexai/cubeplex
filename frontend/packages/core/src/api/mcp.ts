@@ -140,13 +140,18 @@ export async function adminDeleteOrgGrant(client: ApiClient, installId: string):
   if (!res.ok) throw await toApiError(res)
 }
 
+function oauthStartBody(): { frontend_origin?: string } {
+  if (typeof window !== 'undefined') return { frontend_origin: window.location.origin }
+  return {}
+}
+
 export async function adminOrgGrantOAuthStart(
   client: ApiClient,
   installId: string,
 ): Promise<MCPOAuthStartResult> {
   const res = await client.post(
     `/api/v1/admin/mcp/installs/${installId}/grants/org/oauth/start`,
-    {},
+    oauthStartBody(),
   )
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPOAuthStartResult
@@ -184,7 +189,7 @@ export async function wsWorkspaceGrantOAuthStart(
 ): Promise<MCPOAuthStartResult> {
   const res = await client.post(
     `/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/workspace/oauth/start`,
-    {},
+    oauthStartBody(),
   )
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPOAuthStartResult
@@ -219,7 +224,7 @@ export async function wsMyGrantOAuthStart(
 ): Promise<MCPOAuthStartResult> {
   const res = await client.post(
     `/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/me/oauth/start`,
-    {},
+    oauthStartBody(),
   )
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPOAuthStartResult
