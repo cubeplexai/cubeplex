@@ -77,9 +77,7 @@ def test_cache_built_tool_matches_live_loader_shape() -> None:
 
     assert cached.name == live.name
     assert cached.description == live.description
-    assert (
-        cached.parameters.model_json_schema() == live.parameters.model_json_schema()
-    )
+    assert cached.parameters.model_json_schema() == live.parameters.model_json_schema()
 
 
 def test_cache_entry_without_schema_gets_empty_object_schema() -> None:
