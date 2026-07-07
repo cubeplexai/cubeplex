@@ -309,30 +309,6 @@
     - { region: local, protocol: openai-completions, path: /v1, capability: oss-no-tools }
   models: []
 
-- vendor: anthropic-claude-code
-  display_name: Anthropic Claude Code (Max plan)
-  short_name: Claude Code
-  logo: anthropic
-  category: saas
-  description: Claude Code via Claude Pro/Max subscription. OAuth (no API key billing).
-  regions:
-    intl: { host: https://api.anthropic.com }
-  endpoints:
-    - { region: intl, protocol: anthropic-messages, capability: anthropic-native }
-  models: []
-
-- vendor: openai-codex
-  display_name: OpenAI Codex (ChatGPT plan)
-  short_name: Codex
-  logo: openai
-  category: saas
-  description: Codex CLI via ChatGPT Plus/Pro/Business subscription. OAuth login.
-  regions:
-    intl: { host: https://chatgpt.com }
-  endpoints:
-    - { region: intl, protocol: openai-responses, path: /backend-api/codex, capability: openai-responses }
-  models: []
-
 - vendor: custom-openai
   display_name: Custom OpenAI-compatible
   short_name: Custom

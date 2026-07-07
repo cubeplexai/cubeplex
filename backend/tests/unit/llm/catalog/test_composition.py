@@ -85,6 +85,10 @@ def test_every_flat_base_url_is_reproduced():
     # flat slug -> reason. The consolidated catalog folds coding plans into their
     # parent vendor and uses the real coding host; these flat URLs were placeholders.
     intentional_divergence = {
+        "anthropic-claude-code": "Claude Code subscription preset is intentionally not "
+        "exposed in the provider catalog.",
+        "openai-codex": "Codex ChatGPT subscription preset is intentionally not exposed "
+        "in the provider catalog.",
         "qwen-coding-cn": "Aliyun coding plan lives on coding.dashscope.aliyuncs.com "
         "(real deployment, folded into aliyun/cn/.../coding), not the flat placeholder "
         "dashscope.aliyuncs.com/compatible-mode/v1",

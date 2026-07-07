@@ -274,6 +274,19 @@ def test_catalog_to_api_shape():
     } <= m.keys()
 
 
+def test_catalog_excludes_cli_subscription_presets():
+    from cubebox.llm.catalog import load_catalog
+
+    api = load_catalog().to_api()
+    vendors = {v["vendor"] for v in api}
+    preset_keys = {ep["preset_key"] for v in api for ep in v["endpoints"]}
+
+    assert "anthropic-claude-code" not in vendors
+    assert "openai-codex" not in vendors
+    assert "anthropic-claude-code/intl/anthropic-messages" not in preset_keys
+    assert "openai-codex/intl/openai-responses" not in preset_keys
+
+
 def test_catalog_capabilities_use_standard_reasoning_shape():
     from cubebox.llm.catalog import load_catalog
 
