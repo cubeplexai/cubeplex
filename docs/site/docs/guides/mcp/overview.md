@@ -23,7 +23,7 @@ CubeBox ships with templates for a growing list of services:
 
 | Category | Connectors |
 |---|---|
-| **Development** | GitHub, Linear, Sentry, Atlassian (Jira/Confluence) |
+| **Development** | GitHub, Linear, Sentry, Atlassian Rovo (Jira, Confluence, Bitbucket, Compass) |
 | **Productivity** | Notion, Asana, Google Workspace, Slack, Intercom |
 | **Web search** | Tavily, Exa, Jina AI, WebTools |
 | **Infrastructure** | Cloudflare (API, Workers, Observability, Logs, Radar) |
