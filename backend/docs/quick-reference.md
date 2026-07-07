@@ -123,6 +123,26 @@ Missing files surface as:
   DB before running migrations — the alembic baseline is incompatible with
   prior revisions.
 
+### Datetime columns (tz-aware, always)
+
+All `datetime` model fields use `sa_column=Column(DateTime(timezone=True), ...)`
+(Postgres `timestamptz`). Application code writes `datetime.now(UTC)`
+(tz-aware). Frontend gets ISO 8601 with `+00:00` (via `utc_isoformat()`) or
+`Z` (via Pydantic default) — both valid. No naive `datetime` ever crosses the
+DB or service-API boundary.
+
+**Migration trap:** when introducing a new datetime column or converting an
+existing one, the alembic migration must hand-add
+`postgresql_using="<col> AT TIME ZONE 'UTC'"` on each `alter_column` call —
+autogen omits it, and the default cast applies the session `TimeZone`
+(wrong for our stored UTC values).
+
+### Migration head conflicts after rebase
+
+When rebasing onto main introduces a second alembic head, do NOT use
+`alembic merge heads`. Instead, edit the branch's first migration file to
+change its `down_revision` to main's new head. This keeps the history linear.
+
 ### Short prefixed public IDs
 
 All business tables use short prefixed string PKs (e.g.
