@@ -241,10 +241,29 @@ class OAuthStartService:
         3. DCR via ``as_meta.registration_endpoint``.
         """
         cfg = dict(install.oauth_client_config or {})
+        current_redirect = _redirect_uri(frontend_origin)
         existing_client_id = cfg.get("client_id")
         if isinstance(existing_client_id, str) and existing_client_id:
-            secret = cfg.get("client_secret_credential_id")
-            return existing_client_id, secret if isinstance(secret, str) else None
+            registered_redirect = cfg.get("registered_redirect_uri")
+            if registered_redirect == current_redirect:
+                secret = cfg.get("client_secret_credential_id")
+                return existing_client_id, secret if isinstance(secret, str) else None
+            # redirect_uri changed since DCR — re-register so the AS
+            # accepts the new callback origin.
+            if as_meta.registration_endpoint:
+                logger.info(
+                    "Re-registering OAuth client for install {} (redirect_uri changed: {} → {})",
+                    install.id,
+                    registered_redirect,
+                    current_redirect,
+                )
+                cfg.pop("client_id", None)
+                cfg.pop("client_secret_credential_id", None)
+                cfg.pop("registered_redirect_uri", None)
+            else:
+                # Static client or no DCR — keep the existing client_id.
+                secret = cfg.get("client_secret_credential_id")
+                return existing_client_id, secret if isinstance(secret, str) else None
 
         # Step 2: try the template's static OAuth client.
         if install.template_id is not None:
@@ -297,6 +316,7 @@ class OAuthStartService:
                 plaintext=dcr_resp.client_secret,
             )
         cfg["client_id"] = dcr_resp.client_id
+        cfg["registered_redirect_uri"] = current_redirect
         if secret_id is not None:
             cfg["client_secret_credential_id"] = secret_id
         install.oauth_client_config = cfg
