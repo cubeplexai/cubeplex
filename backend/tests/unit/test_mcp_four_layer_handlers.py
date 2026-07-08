@@ -368,6 +368,9 @@ def test_patch_admin_install_server_url_change_recomputes_hash() -> None:
             self._install_repo = repo
             self._has_install_conflict = _no_conflict
 
+        async def _connector_id_for_install(self, _install: Any) -> str:
+            return "mcpco-test"
+
     async def _fake_install_svc() -> Any:
         return _Svc()
 
@@ -440,6 +443,9 @@ def test_patch_admin_install_server_url_unchanged_keeps_hash() -> None:
         def __init__(self) -> None:
             self._install_repo = repo
             self._has_install_conflict = _no_conflict
+
+        async def _connector_id_for_install(self, _install: Any) -> str:
+            return "mcpco-test"
 
     async def _fake_install_svc() -> Any:
         return _Svc()
@@ -564,7 +570,8 @@ def test_workspace_create_install_forbids_unknown_keys() -> None:
 
 
 def _make_fake_install_for_workspace(template_id: str, workspace_id: str) -> Any:
-    """Stand-in MCPConnectorInstall row with the surface ``_install_to_out`` reads."""
+    """Stand-in InstallWithConnector with the surface the route reads."""
+    from cubebox.services.mcp_installs import InstallWithConnector
 
     class _Row:
         def __init__(self) -> None:
@@ -587,7 +594,7 @@ def _make_fake_install_for_workspace(template_id: str, workspace_id: str) -> Any
             self.auto_enroll_new_workspaces = False
             self.headers: dict[str, str] = {}
 
-    return _Row()
+    return InstallWithConnector(install=_Row(), connector_id="mcpco-test")  # type: ignore[arg-type]
 
 
 def test_post_workspace_install_with_workspace_scope_returns_201() -> None:

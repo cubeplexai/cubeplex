@@ -189,11 +189,14 @@ WHERE g.install_id = ic.install_id
 
 
 TOMBSTONE_WORKSPACE_INSTALLS_SQL = """
-UPDATE mcp_connector_installs
+UPDATE mcp_connector_installs i
 SET install_state = 'uninstalled',
     updated_at = now()
-WHERE install_state = 'active'
-  AND workspace_id IS NOT NULL
+FROM mcp_workspace_connector_states s
+WHERE s.install_id = i.id
+  AND s.connector_id IS NOT NULL
+  AND i.install_state = 'active'
+  AND i.workspace_id IS NOT NULL
 """
 
 

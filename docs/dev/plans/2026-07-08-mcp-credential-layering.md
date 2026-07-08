@@ -8,6 +8,10 @@
 
 **Tech Stack:** FastAPI, SQLModel, Alembic, Postgres, pytest, Next.js, React 19, TypeScript, Vitest, `@cubebox/core`.
 
+## Scope
+
+This plan is a multi-PR roadmap. Tasks 1–6 (backend: identity table, migrations, service/OAuth/runtime cutover) and Task 9 (user docs) are delivered in the initial PRs. Tasks 7–8 (admin UI flows, workspace UI credential source selection) and Task 10 (final sweep) are follow-ups.
+
 ## Global Constraints
 
 - Do not ship the current template-hiding workaround as final behavior.

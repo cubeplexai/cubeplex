@@ -63,6 +63,7 @@ from cubebox.models import MCPConnectorInstall, User
 from cubebox.models.mcp import MCPCredentialGrant
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
@@ -110,7 +111,7 @@ def _template_to_out(
 def _install_to_out(
     install: MCPConnectorInstall,
     *,
-    connector_id: str | None = None,
+    connector_id: str,
 ) -> MCPConnectorInstallOut:
     tools_cache = install.tools_cache or []
     tool_entries = [
@@ -124,7 +125,7 @@ def _install_to_out(
     ]
     return MCPConnectorInstallOut(
         install_id=install.id,
-        connector_id=connector_id or getattr(install, "_connector_id", None),
+        connector_id=connector_id,
         template_id=install.template_id,
         install_scope=install.install_scope,  # type: ignore[arg-type]
         workspace_id=install.workspace_id,
@@ -227,7 +228,9 @@ async def create_admin_install(
       transport + name). The schema validator enforces the required
       custom-install fields.
     """
-    install: MCPConnectorInstall
+    from cubebox.services.mcp_installs import InstallWithConnector
+
+    result: InstallWithConnector
     template_id_for_audit: str | None = None
     if body.template_id is None:
         # Custom install. The schema validator already guaranteed
@@ -236,7 +239,7 @@ async def create_admin_install(
         assert body.server_url is not None
         assert body.transport is not None
         try:
-            install = await svc.create_custom_install_for_org(
+            result = await svc.create_custom_install_for_org(
                 name=body.name,
                 server_url=body.server_url,
                 transport=body.transport,
@@ -259,7 +262,7 @@ async def create_admin_install(
             ) from exc
 
         try:
-            install = await svc.create_from_template_for_org(
+            result = await svc.create_from_template_for_org(
                 template=template,
                 auth_method=body.auth_method,
                 credential_policy=body.default_credential_policy,
@@ -280,6 +283,7 @@ async def create_admin_install(
     # ``credential_plaintext`` the install is born with a usable grant.
     # Schema validator already enforces auth_method='static' and
     # default_credential_policy='org'.
+    install = result.install
     if body.credential_plaintext is not None:
         try:
             await svc.create_static_grant(
@@ -312,7 +316,7 @@ async def create_admin_install(
         target_id=install.id,
         details={"scope": "org", "template_id": template_id_for_audit},
     )
-    return _install_to_out(install, connector_id=getattr(install, "_connector_id", None))
+    return _install_to_out(install, connector_id=result.connector_id)
 
 
 @router.get(
@@ -326,7 +330,8 @@ async def get_admin_install(
     install = await svc._install_repo.get(install_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-    return _install_to_out(install)
+    connector_id = await svc._connector_id_for_install(install) or ""
+    return _install_to_out(install, connector_id=connector_id)
 
 
 @router.post(
@@ -406,7 +411,9 @@ async def admin_refresh_discovery(
         raise HTTPException(400, detail={"code": str(exc)}) from exc
     refreshed = await install_repo.get(install_id)
     assert refreshed is not None
-    return _install_to_out(refreshed)
+    connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    cid = await connector_repo.get_connector_id_for_install(refreshed) or ""
+    return _install_to_out(refreshed, connector_id=cid)
 
 
 @router.post(
@@ -449,7 +456,8 @@ async def admin_promote_install_to_org(
         target_id=install_id,
         details={"distribution_mode": body.distribution.mode},
     )
-    return _install_to_out(install)
+    connector_id = await svc._connector_id_for_install(install) or ""
+    return _install_to_out(install, connector_id=connector_id)
 
 
 @router.put(
@@ -476,7 +484,8 @@ async def admin_upsert_tool_citation(
         current[body.tool_name] = body.config
     install.tool_citations = current
     saved = await svc._install_repo.update(install)
-    return _install_to_out(saved)
+    connector_id = await svc._connector_id_for_install(saved) or ""
+    return _install_to_out(saved, connector_id=connector_id)
 
 
 # ---------------------------------------------------------------------------
@@ -770,7 +779,8 @@ async def patch_admin_install(
         org_id=ctx.org_id,
         target_id=install_id,
     )
-    return _install_to_out(saved)
+    connector_id = await svc._connector_id_for_install(saved) or ""
+    return _install_to_out(saved, connector_id=connector_id)
 
 
 @router.delete(
@@ -857,6 +867,7 @@ async def create_admin_org_grant(
     )
     return MCPCredentialGrantStatusOut(
         install_id=install_id,
+        connector_id=grant.connector_id,
         grant_scope="org",
         workspace_id=None,
         user_id=None,
@@ -987,6 +998,7 @@ async def list_admin_connectors(
     template_repo = MCPConnectorTemplateRepository(session)
     eligible = len(await workspace_repo.list_for_org(ctx.org_id))
 
+    connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
     items: list[AdminOrgConnectorOut] = []
     for install in org_installs:
         org_grant = await grant_repo.get_org_grant(install.id)
@@ -1002,9 +1014,10 @@ async def list_admin_connectors(
             template = await template_repo.get(install.template_id)
             if template is not None:
                 template_out = _template_to_out(template)
+        cid = await connector_repo.get_connector_id_for_install(install) or ""
         items.append(
             AdminOrgConnectorOut(
-                install=_install_to_out(install),
+                install=_install_to_out(install, connector_id=cid),
                 template=template_out,
                 org_effective=eff,
                 workspace_distribution=dist,

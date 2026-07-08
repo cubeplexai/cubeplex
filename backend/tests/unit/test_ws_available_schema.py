@@ -9,6 +9,7 @@ def test_ws_available_org_install_row():
             "source": "org_install",
             "install": {
                 "install_id": "mcins-1",
+                "connector_id": "mcpco-1",
                 "template_id": "mctpl-1",
                 "install_scope": "org",
                 "workspace_id": None,

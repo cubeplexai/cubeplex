@@ -85,9 +85,6 @@ class _FakeStateRepo:
     def __init__(self) -> None:
         self.upserts: list[dict[str, Any]] = []
 
-    async def upsert(self, **kwargs: Any) -> None:
-        self.upserts.append(kwargs)
-
     async def upsert_for_connector(self, **kwargs: Any) -> None:
         self.upserts.append(kwargs)
 
@@ -162,7 +159,7 @@ async def test_create_org_install_selected_disables_auto_enroll() -> None:
         credential_policy="org",
         distribution={"mode": "selected", "workspace_ids": ["ws-a"]},
     )
-    assert saved.auto_enroll_new_workspaces is False
+    assert saved.install.auto_enroll_new_workspaces is False
     assert install_repo.added[0].auto_enroll_new_workspaces is False
 
 
@@ -181,7 +178,7 @@ async def test_create_org_install_none_disables_auto_enroll() -> None:
         credential_policy="org",
         distribution={"mode": "none"},
     )
-    assert saved.auto_enroll_new_workspaces is False
+    assert saved.install.auto_enroll_new_workspaces is False
     assert install_repo.added[0].auto_enroll_new_workspaces is False
 
 
@@ -199,7 +196,7 @@ async def test_create_org_install_all_enables_auto_enroll() -> None:
         credential_policy="org",
         distribution={"mode": "all"},
     )
-    assert saved.auto_enroll_new_workspaces is True
+    assert saved.install.auto_enroll_new_workspaces is True
     assert install_repo.added[0].auto_enroll_new_workspaces is True
 
 

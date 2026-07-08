@@ -8,6 +8,10 @@
 
 **Tech Stack:** FastAPI, SQLModel, SQLAlchemy async, Alembic, Postgres, pytest e2e tests, Next.js, React 19, TypeScript, pnpm.
 
+## Scope
+
+**PR #308 delivers Tasks 1–5 and 7** (backend connector model, migrations, service/OAuth/runtime cutover, frontend type/schema alignment, and docs). Task 6 (drop `mcp_connector_installs` table) is deferred — the install table remains as an administrative ledger while `connector_id` is the runtime identity.
+
 ## Global Constraints
 
 - Work in a feature worktree; first command inside the worktree is `cat .worktree.env`.

@@ -66,6 +66,14 @@ class MCPInstallDefaults:
     credential_policy: str
 
 
+@dataclass(frozen=True)
+class InstallWithConnector:
+    """An install paired with its connector identity."""
+
+    install: MCPConnectorInstall
+    connector_id: str
+
+
 def install_defaults_for_auth_method(auth_method: str, requested_policy: str) -> MCPInstallDefaults:
     """Translate user intent into the install row's stored defaults.
 
@@ -136,7 +144,7 @@ class MCPConnectorInstallService:
         workspace_id: str,
         auth_method: str,
         credential_policy: str,
-    ) -> MCPConnectorInstall:
+    ) -> InstallWithConnector:
         """Materialize a workspace-scope install + its enablement state.
 
         The state row is upserted with ``enabled=True`` and
@@ -172,16 +180,16 @@ class MCPConnectorInstallService:
             exclude_id=None,
         )
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
-        if conflict is not None and conflict.workspace_id == workspace_id:
-            conflict = await self.promote_workspace_install_to_org(
-                install_id=conflict.id,
-                distribution={"mode": "none"},
-            )
-        if conflict is not None and conflict.workspace_id is not None:
-            raise ValueError("install_already_exists")
-        if conflict is not None and conflict.template_id != template.id:
-            raise ValueError("install_already_exists")
         if conflict is not None:
+            if conflict.workspace_id == workspace_id:
+                conflict = await self.promote_workspace_install_to_org(
+                    install_id=conflict.id,
+                    distribution={"mode": "none"},
+                )
+            if conflict.workspace_id is not None:
+                raise ValueError("install_already_exists")
+            if conflict.template_id != template.id:
+                raise ValueError("install_already_exists")
             await self._state_repo.upsert_for_connector(
                 workspace_id=workspace_id,
                 install_id=conflict.id,
@@ -191,8 +199,7 @@ class MCPConnectorInstallService:
                 enablement_source="workspace_manual",
                 updated_by_user_id=self._actor_user_id,
             )
-            conflict.__dict__["_connector_id"] = connector.id
-            return conflict
+            return InstallWithConnector(install=conflict, connector_id=connector.id)
         install = MCPConnectorInstall(
             org_id=self._org_id,
             workspace_id=None,
@@ -213,7 +220,6 @@ class MCPConnectorInstallService:
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
-        saved.__dict__["_connector_id"] = connector.id
         await self._state_repo.upsert_for_connector(
             workspace_id=workspace_id,
             install_id=saved.id,
@@ -223,7 +229,7 @@ class MCPConnectorInstallService:
             enablement_source="workspace_manual",
             updated_by_user_id=self._actor_user_id,
         )
-        return saved
+        return InstallWithConnector(install=saved, connector_id=connector.id)
 
     async def create_from_template_for_org(
         self,
@@ -232,7 +238,7 @@ class MCPConnectorInstallService:
         auth_method: str,
         credential_policy: str,
         distribution: dict[str, Any],
-    ) -> MCPConnectorInstall:
+    ) -> InstallWithConnector:
         """Materialize an org-scope install + zero/many enablement rows.
 
         ``distribution`` shape:
@@ -284,7 +290,6 @@ class MCPConnectorInstallService:
             conflict.static_auth_query_param = template.static_auth_query_param
             conflict.auto_enroll_new_workspaces = mode == "all"
             saved = await self._install_repo.update(conflict)
-            saved.__dict__["_connector_id"] = connector.id
             await self._fan_out_state_rows(
                 install=saved,
                 connector_id=connector.id,
@@ -292,7 +297,7 @@ class MCPConnectorInstallService:
                 credential_policy=defaults.credential_policy,
                 enablement_source=enablement_source,
             )
-            return saved
+            return InstallWithConnector(install=saved, connector_id=connector.id)
         if conflict is not None:
             conflict.auth_method = auth_method
             conflict.default_credential_policy = defaults.credential_policy
@@ -305,8 +310,7 @@ class MCPConnectorInstallService:
                 install_id=conflict.id,
                 distribution=distribution,
             )
-            promoted.__dict__["_connector_id"] = connector.id
-            return promoted
+            return InstallWithConnector(install=promoted, connector_id=connector.id)
         # Derive ``auto_enroll_new_workspaces`` from the requested distribution
         # mode rather than relying on the model's ``server_default=true``. The
         # default is right for ``mode='all'`` (admin asked for "every workspace
@@ -334,7 +338,6 @@ class MCPConnectorInstallService:
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
-        saved.__dict__["_connector_id"] = connector.id
         await self._fan_out_state_rows(
             install=saved,
             connector_id=connector.id,
@@ -342,7 +345,7 @@ class MCPConnectorInstallService:
             credential_policy=defaults.credential_policy,
             enablement_source=enablement_source,
         )
-        return saved
+        return InstallWithConnector(install=saved, connector_id=connector.id)
 
     async def _ensure_connector_from_template(
         self,
@@ -382,18 +385,11 @@ class MCPConnectorInstallService:
         )
 
     async def _connector_id_for_install(self, install: MCPConnectorInstall) -> str | None:
-        """Best-effort connector identity lookup for compatibility install routes."""
-
         repo = self._connector_repo or MCPConnectorRepository(
             self._install_repo.session,
             org_id=self._org_id,
         )
-        existing = await repo.get_active_by_identity(
-            template_id=install.template_id,
-            server_url_hash=install.server_url_hash,
-            slug_name=slugify_for_namespace(install.name),
-        )
-        return existing.id if existing is not None else None
+        return await repo.get_connector_id_for_install(install)
 
     async def _resolve_distribution(
         self, distribution: dict[str, Any]
@@ -468,7 +464,7 @@ class MCPConnectorInstallService:
         default_credential_policy: str,
         headers: dict[str, str] | None,
         distribution: dict[str, Any],
-    ) -> MCPConnectorInstall:
+    ) -> InstallWithConnector:
         """Custom (no template) install at ``install_scope='org'``.
 
         Mirrors :meth:`create_from_template_for_org` but skips the
@@ -530,7 +526,6 @@ class MCPConnectorInstallService:
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
-        saved.__dict__["_connector_id"] = connector.id
         await self._fan_out_state_rows(
             install=saved,
             connector_id=connector.id,
@@ -538,7 +533,7 @@ class MCPConnectorInstallService:
             credential_policy=defaults.credential_policy,
             enablement_source=enablement_source,
         )
-        return saved
+        return InstallWithConnector(install=saved, connector_id=connector.id)
 
     async def _has_install_conflict(
         self,

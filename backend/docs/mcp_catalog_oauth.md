@@ -1,16 +1,15 @@
 # MCP Catalog + OAuth (M2)
 
-This document describes how cubebox installs and runs remote MCP
-connectors after the M2 catalog rework. It is a working reference for
-operators and engineers; the authoritative source for design decisions
-remains the spec at
+This document describes how cubebox manages and runs remote MCP
+connectors. It is a working reference for operators and engineers; the
+authoritative source for design decisions remains the spec at
 `docs/dev/specs/2026-05-08-mcp-catalog-oauth-design.md`.
 
 ## Architecture
 
 There are two layers:
 
-1. **Catalog layer (system-wide).** A curated list of installable
+1. **Catalog layer (system-wide).** A curated list of available
    connectors lives in `mcp_catalog_connectors`. Catalog rows are
    templates: server URL, transport, supported auth methods, OAuth
    metadata (DCR-supported flag, default scope, optional pre-registered
@@ -19,42 +18,41 @@ There are two layers:
    from a Python source-of-truth (`cubebox.mcp.catalog_seed.CATALOG`)
    via an explicit deploy step (see "Deploy: catalog seed step" below).
 
-2. **Install layer (org / workspace / user).** When an admin or
-   workspace user "installs" a catalog connector, an `mcp_servers` row
-   is created. Three install patterns:
-   - **Org-wide install** (`owner_workspace_id = NULL`): visible in
-     every workspace under the org; an admin acted on behalf of the
-     organization.
-   - **Workspace-private install** (`owner_workspace_id = <ws>`):
-     visible only inside that workspace; created from the workspace
-     integrations page.
-   - **User-scope credential** (`credential_scope = "user"`): the
-     server itself may be org-wide or workspace-private, but each user
-     authorizes their own OAuth grant; the runtime resolves credentials
-     via `user_mcp_credentials` keyed by `(user_id, mcp_server_id)`.
+2. **Connector identity layer (org-owned).** When an admin adds a
+   catalog connector, an `mcp_connectors` row is created. This is the
+   connector identity — org-owned, keyed by `connector_id`, and shared
+   across workspaces. Workspace state and credential grants reference
+   this identity:
+   - **`MCPWorkspaceConnectorState`** — per-workspace enablement,
+     keyed by `connector_id`. Controls whether a workspace sees the
+     connector's tools.
+   - **`MCPCredentialGrant`** — per-scope credential pointers, keyed
+     by `connector_id`. Credentials can be scoped to the org, a
+     workspace, or an individual user; there is no implicit fallback
+     between scopes.
 
 The runtime (`cubebox/mcp/runtime.py`) walks both layers when listing
-servers for a workspace: catalog rows describe what *could* be
-installed, server rows describe what *is* installed, and the union of
-"my workspace's private servers + non-overridden org-wide servers"
-yields the workspace's effective MCP toolset.
+connectors for a workspace: catalog rows describe what *could* be
+added, connector rows describe what *is* added, and the workspace
+state rows determine which connectors are enabled for a given
+workspace.
 
 ## Data model
 
-Four tables, three new and one modified. Field-level details live in
-spec §4; this is the operator-level summary.
+Field-level details live in spec §4; this is the operator-level summary.
 
 | Table | Purpose |
 | --- | --- |
-| `mcp_catalog_connectors` | System catalog. Keyed by `slug`. Holds the connector template, OAuth metadata, and (for static-client connectors) a FK to a system-level `Credential` row that stores the encrypted client secret. |
-| `mcp_servers` | A specific install. References a catalog row (`catalog_connector_id`) when materialized via the catalog. Either `owner_workspace_id IS NULL` (org-wide) or set to a workspace id. Stores the chosen `auth_method`, `credential_scope`, the tools cache, and last-discovered metadata. |
-| `workspace_mcp_credentials` / `user_mcp_credentials` | Per-scope credential pointers. One row per `(scope-id, mcp_server_id)`; FKs into `credentials` (the credential vault). User-scope rows additionally hold the OAuth refresh-token credential id and `oauth_expires_at`. |
-| `workspace_mcp_overrides` | Workspace-level override of an *org-wide* install. Absence means inherit. Presence with `enabled=false` is a soft disable; `enabled=true` is reserved for future use. |
+| `mcp_connector_templates` | System catalog. Keyed by `slug`. Holds the connector template, OAuth metadata, and (for static-client connectors) a FK to a system-level `Credential` row that stores the encrypted client secret. |
+| `mcp_connector_installs` | A specific install. References a catalog row (`template_id`). Stores the chosen `auth_method`, `credential_scope`, the tools cache, and last-discovered metadata. |
+| `mcp_connectors` | The connector identity table. Org-owned, keyed by `connector_id`. Groups credentials and per-workspace state under a single identity shared across workspaces. |
+| `mcp_workspace_connector_states` | Per-workspace enablement state, keyed by `connector_id`. Controls whether a workspace sees and can use the connector's tools. |
+| `mcp_credential_grants` | Per-scope credential pointers, keyed by `connector_id`. One row per `(connector_id, scope)`. FKs into `credentials` (the credential vault). User-scope rows additionally hold the OAuth refresh-token credential id and `oauth_expires_at`. |
 
 The credential vault (`credentials` table) is shared across kinds. New
 MCP-related kinds: `mcp_oauth_client_secret` (system row, `org_id IS
 NULL`), `mcp_oauth_access_token`, `mcp_oauth_refresh_token`, and the
-existing `mcp_static_token` for non-OAuth installs.
+existing `mcp_static_token` for non-OAuth connectors.
 
 ## API endpoints
 
@@ -64,23 +62,23 @@ High-level summary; route bodies live in
 - **Catalog (workspace):** `GET /api/v1/ws/{ws}/mcp/catalog` — the
   single catalog read endpoint. The catalog is intentionally
   workspace-scoped (not exposed under `/admin/...`) because each entry
-  carries per-`(workspace, user)` status fields — `installed_org_wide`,
-  `installed_workspace_private`, `disabled`, and (for OAuth) `authed`
+  carries per-`(workspace, user)` status fields — `connector_added`,
+  `enabled`, `disabled`, and (for OAuth) `authed`
   — that only make sense in workspace context. Org admins use the same
   endpoint by selecting a workspace.
-- **Static install:** `POST /api/v1/admin/mcp/installs` and
-  `POST /api/v1/ws/{ws}/mcp/installs` — create an `mcp_servers` row,
-  encrypt the static credential, kick off discovery.
+- **Static add:** `POST /api/v1/admin/mcp/installs` and
+  `POST /api/v1/ws/{ws}/mcp/installs` — create an `mcp_connectors`
+  row, encrypt the static credential, kick off discovery.
 - **OAuth start:** `POST /api/v1/admin/mcp/installs/oauth/start` and
   `POST /api/v1/ws/{ws}/mcp/installs/oauth/start` — return the
   authorization URL with PKCE + state. The callback ticket is set as
   an HttpOnly cookie scoped to `/api/v1/oauth/mcp/callback`.
 - **OAuth callback:** `GET /api/v1/oauth/mcp/callback` — single,
   unscoped callback that demultiplexes via state. Exchanges the code,
-  writes vault rows, finalizes the install, and 302s back to
+  writes vault rows, finalizes the connector, and 302s back to
   `${frontend_base_url}/oauth/mcp/return`.
-- **Disable / enable:** workspace-level overrides for org-wide
-  installs; full delete for workspace-private installs.
+- **Disable / enable:** per-workspace enablement state for org-owned
+  connectors.
 
 All scoped routes require workspace membership; admin routes require
 org admin.
@@ -105,13 +103,14 @@ org admin.
            ├─ verify state signature, age, actor matches ticket cookie
            ├─ exchange code+verifier at the token endpoint
            ├─ encrypt access_token (+ refresh_token if returned) into
-           │  vault rows, link via credentials FKs on the install row
+           │  vault rows, link via credential grant on the connector
            ├─ flip authed=true, run tool discovery, populate tools_cache
            └─ 302 to ${frontend_base_url}/oauth/mcp/return?install_id=...
 
 [runtime]  agent step, request tools for a workspace
-           ├─ resolve mcp_server rows (private + non-overridden org-wide)
-           ├─ pick the right credential row by credential_scope
+           ├─ resolve mcp_connectors rows for the workspace
+           ├─ check MCPWorkspaceConnectorState (enabled?)
+           ├─ pick the right MCPCredentialGrant by scope
            └─ if access_token expired: refresh (see below)
 ```
 
@@ -119,9 +118,9 @@ org admin.
 
 - **DCR-supported connectors** (Notion, Linear, Atlassian, Asana,
   Sentry, Intercom, Cloudflare, Google Workspace*): no env vars
-  required. The first install hits the AS `/register` endpoint and
+  required. The first add hits the AS `/register` endpoint and
   stores the resulting `client_id` plus an encrypted `client_secret`
-  on the install row's `oauth_client_config`.
+  on the connector row's `oauth_client_config`.
 - **Static-client connectors** (GitHub, Slack, Google Workspace): the
   vendor does not expose DCR. An OAuth App must be registered out-of-
   band in the vendor's developer console, the `client_id` and
@@ -134,7 +133,7 @@ static-client.)
 ## Token refresh
 
 `cubebox.mcp.oauth.token_manager.OAuthTokenManager` encapsulates the
-read / refresh / persist cycle for OAuth-scoped installs. Behavior:
+read / refresh / persist cycle for OAuth-scoped connectors. Behavior:
 
 - On every tool call that needs an OAuth bearer, the runtime asks the
   manager for a "valid for at least 60s" access token.
@@ -143,7 +142,7 @@ read / refresh / persist cycle for OAuth-scoped installs. Behavior:
   endpoint with `grant_type=refresh_token`, encrypts the new pair, and
   swaps in the new credential ids inside a single DB transaction.
 - If refresh fails (HTTP 4xx, network error, etc.), the manager flips
-  `mcp_servers.authed = false`, records `last_error`, and surfaces a
+  `mcp_connectors.authed = false`, records `last_error`, and surfaces a
   reauthorization-required signal to the UI; the user gets a
   "Reconnect" prompt at the next interaction with the connector.
 
@@ -174,9 +173,9 @@ The seeder:
    `kind = mcp_oauth_client_secret`) and links it via
    `oauth_static_client_secret_credential_id`.
 3. Marks any DB row whose slug is no longer in the in-code list as
-   `status='deprecated'`. The row is preserved so existing installs
-   keep working; new installs of deprecated slugs are rejected by the
-   API.
+   `status='deprecated'`. The row is preserved so existing connectors
+   keep working; new connectors from deprecated slugs are rejected by
+   the API.
 
 ## Deploy: catalog seed step
 
@@ -231,11 +230,11 @@ would change without committing.
 
 1. Delete the entry from `CATALOG`.
 2. Deploy and run the seeder. The slug is marked
-   `status="deprecated"`; existing installs continue to work, new
-   installs are blocked at the API layer.
-3. (Optional, follow-up release.) Audit existing installs of that slug
-   and notify owners; do NOT delete `mcp_catalog_connectors` rows
-   directly — installs reference them by FK.
+   `status="deprecated"`; existing connectors continue to work, new
+   connectors from this slug are blocked at the API layer.
+3. (Optional, follow-up release.) Audit existing connectors from that
+   slug and notify owners; do NOT delete `mcp_catalog_connectors` rows
+   directly — connector rows reference them by FK.
 
 ### Rotating an OAuth App's client secret
 
@@ -244,8 +243,8 @@ would change without committing.
    env var.
 3. Re-run the seeder: it re-encrypts and updates the system-level
    credential row in place. New OAuth flows immediately use the new
-   secret; existing user grants are unaffected (refresh tokens were
-   minted by the AS, not this secret).
+   secret; existing credential grants are unaffected (refresh tokens
+   were minted by the AS, not this secret).
 
 ### Troubleshooting
 
@@ -256,15 +255,16 @@ would change without committing.
   the vendor exactly matches `${CUBEBOX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`.
   Path mismatch (trailing slash, scheme) is the most common cause.
 - **Refresh fails repeatedly**: a server-side revocation by the user
-  is the typical cause. The install row's `last_error` will record the
-  AS response. The UI surfaces a "Reauthorize" affordance — clicking
-  re-enters the OAuth start route and overwrites the credential.
-- **Tools missing after install**: discovery runs once at install /
-  reauthorize. Re-trigger by hitting
-  `POST /api/v1/admin/mcp/servers/{server_id}/refresh-tools` (org-wide
-  installs) or `POST /api/v1/ws/{ws}/mcp/servers/{server_id}/refresh-tools`
-  (workspace-private installs); the tools cache is repopulated from the
-  server's `tools/list` response.
+  is the typical cause. The connector row's `last_error` will record
+  the AS response. The UI surfaces a "Reauthorize" affordance —
+  clicking re-enters the OAuth start route and overwrites the
+  credential.
+- **Tools missing after adding a connector**: discovery runs once when
+  the connector is added or reauthorized. Re-trigger by hitting
+  `POST /api/v1/admin/mcp/installs/{install_id}/refresh-discovery`
+  or `POST /api/v1/ws/{ws}/mcp/installs/{install_id}/refresh-discovery`;
+  the tools cache is repopulated from the server's `tools/list`
+  response.
 
 ## Manual staging verification
 

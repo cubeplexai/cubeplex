@@ -74,6 +74,9 @@ def test_ws_available_lists_org_install_without_state_row() -> None:
             _install_repo = _InstallRepo()
             _state_repo = _StateRepo()
 
+            async def _connector_id_for_install(self, _install: Any) -> str:
+                return "mcpco-test"
+
         return _S()
 
     app = create_app()
