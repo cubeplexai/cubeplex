@@ -78,6 +78,10 @@ async def _add_workspace_install(
     return install
 
 
+def _connector_id_for_install(install_id: str) -> str:
+    return f"mcpco-{install_id.removeprefix('mcins-')}"
+
+
 async def _add_org_install(
     session: AsyncSession,
     *,
@@ -120,9 +124,10 @@ async def test_workspace_local_install_only_visible_to_owning_workspace(
     )
 
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id="ws-a",
         install_id="mcins-ws-a-1",
+        connector_id=_connector_id_for_install("mcins-ws-a-1"),
         enabled=True,
         credential_policy="none",
         enablement_source="workspace_manual",
@@ -147,9 +152,10 @@ async def test_org_install_requires_workspace_state_to_surface(
     await _add_org_install(session, install_id="mcins-org-1", org_id=org_id)
 
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id="ws-a",
         install_id="mcins-org-1",
+        connector_id=_connector_id_for_install("mcins-org-1"),
         enabled=True,
         credential_policy="none",
         enablement_source="admin_manual",
@@ -184,17 +190,19 @@ async def test_uninstalled_rows_are_filtered(session: AsyncSession) -> None:
     )
 
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id="ws-a",
         install_id="mcins-active",
+        connector_id=_connector_id_for_install("mcins-active"),
         enabled=True,
         credential_policy="none",
         enablement_source="workspace_manual",
         updated_by_user_id="u1",
     )
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id="ws-a",
         install_id="mcins-tombstone",
+        connector_id=_connector_id_for_install("mcins-tombstone"),
         enabled=True,
         credential_policy="none",
         enablement_source="workspace_manual",
@@ -227,25 +235,28 @@ async def test_list_for_workspace_user_excludes_disabled_org_installs(
     await _add_org_install(session, install_id="mcins-org-no-state", org_id=org_id)
 
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id=workspace_id,
         install_id="mcins-ws-local",
+        connector_id=_connector_id_for_install("mcins-ws-local"),
         enabled=True,
         credential_policy="none",
         enablement_source="workspace_manual",
         updated_by_user_id="u1",
     )
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id=workspace_id,
         install_id="mcins-org-enabled",
+        connector_id=_connector_id_for_install("mcins-org-enabled"),
         enabled=True,
         credential_policy="none",
         enablement_source="admin_manual",
         updated_by_user_id="u1",
     )
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id=workspace_id,
         install_id="mcins-org-disabled",
+        connector_id=_connector_id_for_install("mcins-org-disabled"),
         enabled=False,
         credential_policy="none",
         enablement_source="admin_manual",
@@ -277,9 +288,10 @@ async def test_list_for_workspace_user_default_keeps_disabled_org_installs(
     await _add_org_install(session, install_id="mcins-org-disabled", org_id=org_id)
 
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id=workspace_id,
         install_id="mcins-org-disabled",
+        connector_id=_connector_id_for_install("mcins-org-disabled"),
         enabled=False,
         credential_policy="none",
         enablement_source="admin_manual",
@@ -315,9 +327,10 @@ async def test_list_runtime_specs_drops_unusable_rows(session: AsyncSession) -> 
         workspace_id="ws-a",
     )
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
-    await state_repo.upsert(
+    await state_repo.upsert_for_connector(
         workspace_id="ws-a",
         install_id="mcins-good",
+        connector_id=_connector_id_for_install("mcins-good"),
         enabled=True,
         credential_policy="none",
         enablement_source="workspace_manual",
