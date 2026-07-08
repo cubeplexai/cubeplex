@@ -322,6 +322,18 @@ class MCPWorkspaceConnectorStateRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_by_connector(
+        self,
+        workspace_id: str,
+        connector_id: str,
+    ) -> MCPWorkspaceConnectorState | None:
+        stmt = select(MCPWorkspaceConnectorState).where(
+            MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.workspace_id == workspace_id,  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.connector_id == connector_id,  # type: ignore[arg-type]
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
     async def list_for_workspace(self, workspace_id: str) -> list[MCPWorkspaceConnectorState]:
         stmt = select(MCPWorkspaceConnectorState).where(
             MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
@@ -400,6 +412,44 @@ class MCPWorkspaceConnectorStateRepository:
         await self.session.refresh(row)
         return row
 
+    async def upsert_for_connector(
+        self,
+        *,
+        workspace_id: str,
+        connector_id: str,
+        install_id: str,
+        enabled: bool,
+        credential_policy: str,
+        enablement_source: str,
+        updated_by_user_id: str,
+    ) -> MCPWorkspaceConnectorState:
+        existing = await self.get_by_connector(workspace_id, connector_id)
+        if existing is not None:
+            existing.install_id = install_id
+            existing.enabled = enabled
+            existing.credential_policy = credential_policy
+            existing.enablement_source = enablement_source
+            existing.updated_by_user_id = updated_by_user_id
+            existing.updated_at = datetime.now(UTC)
+            self.session.add(existing)
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+        row = MCPWorkspaceConnectorState(
+            org_id=self.org_id,
+            workspace_id=workspace_id,
+            install_id=install_id,
+            connector_id=connector_id,
+            enabled=enabled,
+            credential_policy=credential_policy,
+            enablement_source=enablement_source,
+            updated_by_user_id=updated_by_user_id,
+        )
+        self.session.add(row)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return row
+
 
 class MCPCredentialGrantRepository:
     """Org-scoped repository for ``mcp_credential_grants``.
@@ -453,6 +503,17 @@ class MCPCredentialGrantRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_org_grant_for_connector(
+        self,
+        connector_id: str,
+    ) -> MCPCredentialGrant | None:
+        stmt = select(MCPCredentialGrant).where(
+            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.connector_id == connector_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.grant_scope == "org",  # type: ignore[arg-type]
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
     async def has_any_grant(self, install_id: str) -> bool:
         """True if any grant (any scope) exists for this install.
 
@@ -477,6 +538,19 @@ class MCPCredentialGrantRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_workspace_grant_for_connector(
+        self,
+        connector_id: str,
+        workspace_id: str,
+    ) -> MCPCredentialGrant | None:
+        stmt = select(MCPCredentialGrant).where(
+            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.connector_id == connector_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.workspace_id == workspace_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.grant_scope == "workspace",  # type: ignore[arg-type]
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
     async def get_user_grant(
         self,
         install_id: str,
@@ -495,6 +569,22 @@ class MCPCredentialGrantRepository:
                 MCPCredentialGrant.workspace_id == workspace_id,  # type: ignore[arg-type]
             )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_user_grant_for_connector(
+        self,
+        connector_id: str,
+        user_id: str,
+        *,
+        workspace_id: str,
+    ) -> MCPCredentialGrant | None:
+        stmt = select(MCPCredentialGrant).where(
+            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.connector_id == connector_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.workspace_id == workspace_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.user_id == user_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.grant_scope == "user",  # type: ignore[arg-type]
+        )
+        return (await self.session.execute(stmt)).scalars().first()
 
     async def get_for_scope(
         self,
