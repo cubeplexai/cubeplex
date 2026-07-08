@@ -21,10 +21,11 @@ not an oversight.
 """
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import ColumnElement
 
 from cubebox.models import (
     MCPConnector,
@@ -189,8 +190,8 @@ class MCPConnectorRepository:
 
     async def get(self, connector_id: str) -> MCPConnector | None:
         stmt = select(MCPConnector).where(
-            MCPConnector.id == connector_id,  # type: ignore[arg-type]
-            MCPConnector.org_id == self.org_id,  # type: ignore[arg-type]
+            cast("ColumnElement[bool]", MCPConnector.id == connector_id),
+            cast("ColumnElement[bool]", MCPConnector.org_id == self.org_id),
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -201,16 +202,18 @@ class MCPConnectorRepository:
         server_url_hash: str,
         slug_name: str,
     ) -> MCPConnector | None:
-        identity_matches = [
-            MCPConnector.server_url_hash == server_url_hash,  # type: ignore[arg-type]
-            MCPConnector.slug_name == slug_name,  # type: ignore[arg-type]
+        identity_matches: list[ColumnElement[bool]] = [
+            cast("ColumnElement[bool]", MCPConnector.server_url_hash == server_url_hash),
+            cast("ColumnElement[bool]", MCPConnector.slug_name == slug_name),
         ]
         if template_id is not None:
-            identity_matches.append(MCPConnector.template_id == template_id)  # type: ignore[arg-type]
+            identity_matches.append(
+                cast("ColumnElement[bool]", MCPConnector.template_id == template_id)
+            )
 
         stmt = select(MCPConnector).where(
-            MCPConnector.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPConnector.status == "active",  # type: ignore[arg-type]
+            cast("ColumnElement[bool]", MCPConnector.org_id == self.org_id),
+            cast("ColumnElement[bool]", MCPConnector.status == "active"),
             or_(*identity_matches),
         )
         return (await self.session.execute(stmt)).scalars().first()
