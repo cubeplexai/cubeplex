@@ -164,15 +164,30 @@ class MCPConnectorInstallService:
         """
         if auth_method not in template.supported_auth_methods:
             raise ValueError("auth_method_not_supported_by_template")
-        # R1/R2/R3 cross-scope uniqueness preflight (see _has_install_conflict).
-        if await self._has_install_conflict(
+        connector = await self._ensure_connector_from_template(template, auth_method=auth_method)
+        conflict = await self._get_install_conflict(
             server_url_hash=server_url_hash(template.server_url),
             name=template.name,
             template_id=template.id,
             exclude_id=None,
-        ):
+        )
+        if conflict is not None and conflict.workspace_id == workspace_id:
             raise ValueError("install_already_exists")
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
+        if conflict is not None and conflict.workspace_id is None:
+            await self._state_repo.upsert(
+                workspace_id=workspace_id,
+                install_id=conflict.id,
+                connector_id=connector.id,
+                enabled=True,
+                credential_policy=defaults.credential_policy,
+                enablement_source="workspace_manual",
+                updated_by_user_id=self._actor_user_id,
+            )
+            conflict.__dict__["_connector_id"] = connector.id
+            return conflict
+        if conflict is not None:
+            raise ValueError("install_already_exists")
         install = MCPConnectorInstall(
             org_id=self._org_id,
             workspace_id=workspace_id,
@@ -192,9 +207,11 @@ class MCPConnectorInstallService:
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
+        saved.__dict__["_connector_id"] = connector.id
         await self._state_repo.upsert(
             workspace_id=workspace_id,
             install_id=saved.id,
+            connector_id=connector.id,
             enabled=True,
             credential_policy=defaults.credential_policy,
             enablement_source="workspace_manual",
@@ -337,6 +354,21 @@ class MCPConnectorInstallService:
                 created_by_user_id=self._actor_user_id,
             )
         )
+
+    async def _connector_id_for_install(self, install: MCPConnectorInstall) -> str | None:
+        """Best-effort connector identity lookup for compatibility install routes."""
+        from cubebox.mcp._constants import slugify_for_namespace
+
+        repo = self._connector_repo or MCPConnectorRepository(
+            self._install_repo.session,
+            org_id=self._org_id,
+        )
+        existing = await repo.get_active_by_identity(
+            template_id=install.template_id,
+            server_url_hash=install.server_url_hash,
+            slug_name=slugify_for_namespace(install.name),
+        )
+        return existing.id if existing is not None else None
 
     async def _resolve_distribution(
         self, distribution: dict[str, Any]
@@ -710,6 +742,7 @@ class MCPConnectorInstallService:
             # so this failure mode cannot land in the DB.
             raise ValueError("static_grant_only_valid_for_static_auth")
 
+        connector_id = await self._connector_id_for_install(install)
         credential_name = name or f"mcp:{install_id}:{grant_scope}"
         # Upsert (not create) so a "replace credential" flow — disconnect
         # the old grant, then submit a new token — works even if the old
@@ -737,6 +770,7 @@ class MCPConnectorInstallService:
             grant = MCPCredentialGrant(
                 org_id=self._org_id,
                 install_id=install_id,
+                connector_id=connector_id,
                 grant_scope=grant_scope,
                 workspace_id=workspace_id,
                 user_id=user_id,
@@ -745,6 +779,8 @@ class MCPConnectorInstallService:
                 created_by_user_id=self._actor_user_id,
             )
             return await self._grant_repo.add(grant)
+        if connector_id is not None:
+            existing.connector_id = connector_id
         existing.credential_id = credential_id
         existing.refresh_credential_id = None
         existing.expires_at = None

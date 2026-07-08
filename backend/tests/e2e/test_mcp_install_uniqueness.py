@@ -165,17 +165,27 @@ async def test_org_install_blocks_workspace_install_with_same_url(
 # ---------------------------------------------------------------------------
 
 
-async def test_org_install_blocks_workspace_install_from_same_template(
+async def test_org_install_allows_workspace_enable_from_same_template(
     admin_client: tuple[httpx.AsyncClient, str],
-    noauth_template_id: str,
 ) -> None:
-    """Org install of template T → workspace install of T rejected."""
+    """Org install of template T → workspace enablement of T reuses identity."""
+    import secrets
+
+    from tests.e2e.conftest import _seed_four_layer_template
+
+    suffix = secrets.token_hex(4)
+    template_id = await _seed_four_layer_template(
+        slug=f"same-template-layering-{suffix}",
+        name=f"Same Template Layering {suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+    )
     client, ws_id = admin_client
     # 1. Admin installs the template at org scope.
     res = await client.post(
         "/api/v1/admin/mcp/installs",
         json={
-            "template_id": noauth_template_id,
+            "template_id": template_id,
             "install_scope": "org",
             "auth_method": "none",
             "default_credential_policy": "none",
@@ -183,19 +193,20 @@ async def test_org_install_blocks_workspace_install_from_same_template(
         },
     )
     assert res.status_code == 201, res.text
+    connector_id = res.json()["connector_id"]
 
-    # 2. Workspace admin tries the same template → 409
+    # 2. Workspace admin enables the same template → same connector identity.
     res = await client.post(
         f"/api/v1/ws/{ws_id}/mcp/installs",
         json={
-            "template_id": noauth_template_id,
+            "template_id": template_id,
             "install_scope": "workspace",
             "auth_method": "none",
             "default_credential_policy": "none",
         },
     )
-    assert res.status_code == 409, res.text
-    assert res.json()["detail"]["code"] == "install_already_exists"
+    assert res.status_code == 201, res.text
+    assert res.json()["connector_id"] == connector_id
 
 
 # ---------------------------------------------------------------------------
