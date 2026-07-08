@@ -144,3 +144,18 @@ def test_migration_slug_rewrite_ref_deepseek_collision() -> None:
     assert _rewrite_ref("Unknown/m-1", name_to_slug) == "Unknown/m-1"
     # Malformed ref (no slash) is left unchanged
     assert _rewrite_ref("no-slash", name_to_slug) == "no-slash"
+
+
+def test_mcp_connector_backfill_migration_preserves_workspace_credential_policy() -> None:
+    """MCP backfill creates connector state before tombstoning workspace installs."""
+    m = _load_migration("7959ed1b3e5c")
+
+    create_state_sql = m.CREATE_WORKSPACE_STATES_SQL  # type: ignore[attr-defined]
+    tombstone_sql = m.TOMBSTONE_WORKSPACE_INSTALLS_SQL  # type: ignore[attr-defined]
+
+    assert "mcp_connectors" in m.BACKFILL_CONNECTORS_SQL  # type: ignore[attr-defined]
+    assert "i.default_credential_policy" in create_state_sql
+    assert "'workspace_install'" in create_state_sql
+    assert "i.workspace_id IS NOT NULL" in create_state_sql
+    assert "install_state = 'uninstalled'" in tombstone_sql
+    assert "workspace_id IS NOT NULL" in tombstone_sql
