@@ -85,13 +85,13 @@ def _compute_namespaced_tool_names(
     all_specs: list[MCPRuntimeConnectorSpec],
 ) -> list[str]:
     """Predict namespaced tool names using the same logic as the runtime loader."""
-    proposed_slugs = {s.install_id: slugify_for_namespace(s.name) for s in all_specs}
+    proposed_slugs = {s.connector_id: slugify_for_namespace(s.name) for s in all_specs}
     slug_counts: Counter[str] = Counter(proposed_slugs.values())
-    slug = proposed_slugs[spec.install_id]
+    slug = proposed_slugs[spec.connector_id]
     explicit_collision = slug_counts[slug] > 1
     risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
     if explicit_collision or risky_truncation:
-        safe = spec.install_id.replace("-", "")
+        safe = spec.connector_id.replace("-", "")
         suffix = f"_{safe[-4:] if len(safe) >= 4 else safe}"
     else:
         suffix = ""
@@ -121,15 +121,15 @@ def build_deferred_groups(
     shared_citations: dict[str, CitationConfig] = {}
     groups: list[DeferredToolGroup] = []
 
-    proposed_slugs = {s.install_id: slugify_for_namespace(s.name) for s in all_specs}
+    proposed_slugs = {s.connector_id: slugify_for_namespace(s.name) for s in all_specs}
     slug_counts: Counter[str] = Counter(proposed_slugs.values())
 
     for spec in specs:
-        slug = proposed_slugs[spec.install_id]
+        slug = proposed_slugs[spec.connector_id]
         tool_names = _compute_namespaced_tool_names(spec, all_specs)
 
         if slug_counts[slug] > 1:
-            safe = spec.install_id.replace("-", "")
+            safe = spec.connector_id.replace("-", "")
             gid = f"mcp:{slug}_{safe[-4:] if len(safe) >= 4 else safe}"
         else:
             gid = f"mcp:{slug}"

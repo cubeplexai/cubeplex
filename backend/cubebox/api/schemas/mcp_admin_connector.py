@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from cubebox.api.schemas.mcp import MCPConnectorInstallOut, MCPConnectorTemplateOut
+from cubebox.api.schemas.mcp import MCPConnectorOut, MCPConnectorTemplateOut
 
 AdminOrgReason = Literal[
     "usable",
@@ -51,7 +51,7 @@ class WorkspaceDistributionOut(BaseModel):
 class AdminOrgConnectorOut(BaseModel):
     """One row of GET /admin/mcp/connectors."""
 
-    install: MCPConnectorInstallOut
+    install: MCPConnectorOut
     template: MCPConnectorTemplateOut | None
     org_effective: AdminOrgEffectiveOut
     workspace_distribution: WorkspaceDistributionOut

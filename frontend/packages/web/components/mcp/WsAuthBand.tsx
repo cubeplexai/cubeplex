@@ -42,7 +42,7 @@ export interface WsAuthBandProps {
 }
 
 export function WsAuthBand(props: WsAuthBandProps) {
-  return <WsBandInner key={props.connector.install.install_id} {...props} />
+  return <WsBandInner key={props.connector.install.connector_id} {...props} />
 }
 
 function WsBandInner(props: WsAuthBandProps) {
@@ -53,10 +53,10 @@ function WsBandInner(props: WsAuthBandProps) {
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 
   const scope = wsScopeForBand(connector)
-  const installId = connector.install.install_id
+  const connectorId = connector.install.connector_id
 
   const onConnect = async (): Promise<void> => {
-    const flowInstallId = installId
+    const flowInstallId = connectorId
     setInFlight(true)
     setErrorMessage(undefined)
     const startPost = oauthStartFn(scope, client, wsId, flowInstallId)
@@ -71,7 +71,7 @@ function WsBandInner(props: WsAuthBandProps) {
   }
 
   const onSaveStaticToken = async (token: string): Promise<void> => {
-    const flowInstallId = installId
+    const flowInstallId = connectorId
     try {
       const body = { credential_plaintext: token }
       if (scope === 'workspace') {
@@ -86,7 +86,7 @@ function WsBandInner(props: WsAuthBandProps) {
   }
 
   const onDelete = async (target: WsScope): Promise<void> => {
-    const flowInstallId = installId
+    const flowInstallId = connectorId
     if (target === 'workspace') {
       await wsDeleteWorkspaceGrant(client, wsId, flowInstallId)
     } else {
@@ -140,12 +140,12 @@ function oauthStartFn(
   scope: WsScope,
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
 ): () => Promise<MCPOAuthStartResult> {
   if (scope === 'workspace') {
-    return () => wsWorkspaceGrantOAuthStart(client, wsId, installId)
+    return () => wsWorkspaceGrantOAuthStart(client, wsId, connectorId)
   }
-  return () => wsMyGrantOAuthStart(client, wsId, installId)
+  return () => wsMyGrantOAuthStart(client, wsId, connectorId)
 }
 
 function providerLabel(connector: MCPEffectiveConnector): string {

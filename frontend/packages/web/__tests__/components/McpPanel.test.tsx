@@ -53,7 +53,7 @@ function workspaceConnector() {
       supported_auth_methods: ['oauth', 'static'],
     },
     install: {
-      install_id: 'mcins_atlassian',
+      connector_id: 'mcins_atlassian',
       template_id: 'mcptpl_atlassian',
       install_scope: 'workspace',
       workspace_id: 'ws_1',
@@ -68,7 +68,7 @@ function workspaceConnector() {
       last_error: null,
       auto_enroll_new_workspaces: false,
     },
-    workspace_state: { workspace_id: 'ws_1', install_id: 'mcins_atlassian', enabled: true },
+    workspace_state: { workspace_id: 'ws_1', connector_id: 'mcins_atlassian', enabled: true },
     credential_policy: 'workspace',
     required_grant_scope: 'workspace',
     credential_availability: 'missing',

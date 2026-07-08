@@ -2,7 +2,7 @@
 
 import type {
   MCPAuthMethod,
-  MCPConnectorInstall,
+  MCPConnector,
   MCPConnectorTemplate,
   MCPCredentialGrantStatus,
   MCPEffectiveConnector,
@@ -41,36 +41,33 @@ export async function adminListTemplates(
 
 // ---------------- Installs (admin org-scope + workspace-scope) ---------------- //
 
-export async function adminCreateInstall(
-  client: ApiClient,
-  body: unknown,
-): Promise<MCPConnectorInstall> {
+export async function adminCreateInstall(client: ApiClient, body: unknown): Promise<MCPConnector> {
   const res = await client.post('/api/v1/admin/mcp/installs', body)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
 export async function adminGetInstall(
   client: ApiClient,
-  installId: string,
-): Promise<MCPConnectorInstall> {
-  const res = await client.get(`/api/v1/admin/mcp/installs/${installId}`)
+  connectorId: string,
+): Promise<MCPConnector> {
+  const res = await client.get(`/api/v1/admin/mcp/installs/${connectorId}`)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
 export async function adminPatchInstall(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
   body: unknown,
-): Promise<MCPConnectorInstall> {
-  const res = await client.patch(`/api/v1/admin/mcp/installs/${installId}`, body)
+): Promise<MCPConnector> {
+  const res = await client.patch(`/api/v1/admin/mcp/installs/${connectorId}`, body)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
-export async function adminDeleteInstall(client: ApiClient, installId: string): Promise<void> {
-  const res = await client.del(`/api/v1/admin/mcp/installs/${installId}`)
+export async function adminDeleteInstall(client: ApiClient, connectorId: string): Promise<void> {
+  const res = await client.del(`/api/v1/admin/mcp/installs/${connectorId}`)
   if (!res.ok) throw await toApiError(res)
 }
 
@@ -78,18 +75,18 @@ export async function wsCreateInstall(
   client: ApiClient,
   wsId: string,
   body: unknown,
-): Promise<MCPConnectorInstall> {
+): Promise<MCPConnector> {
   const res = await client.post(`/api/v1/ws/${wsId}/mcp/installs`, body)
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
 export async function wsDeleteInstall(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
 ): Promise<void> {
-  const res = await client.del(`/api/v1/ws/${wsId}/mcp/installs/${installId}`)
+  const res = await client.del(`/api/v1/ws/${wsId}/mcp/installs/${connectorId}`)
   if (!res.ok) throw await toApiError(res)
 }
 
@@ -107,10 +104,10 @@ export async function wsListEffectiveConnectors(
 export async function wsPatchConnectorState(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
   body: Partial<MCPWorkspaceConnectorState>,
 ): Promise<MCPWorkspaceConnectorState> {
-  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/connectors/${installId}/state`, body)
+  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/connectors/${connectorId}/state`, body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPWorkspaceConnectorState
 }
@@ -127,16 +124,16 @@ export interface CreateGrantBody {
 
 export async function adminCreateOrgGrant(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
   body: CreateGrantBody,
 ): Promise<MCPCredentialGrantStatus> {
-  const res = await client.post(`/api/v1/admin/mcp/installs/${installId}/grants/org`, body)
+  const res = await client.post(`/api/v1/admin/mcp/installs/${connectorId}/grants/org`, body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPCredentialGrantStatus
 }
 
-export async function adminDeleteOrgGrant(client: ApiClient, installId: string): Promise<void> {
-  const res = await client.del(`/api/v1/admin/mcp/installs/${installId}/grants/org`)
+export async function adminDeleteOrgGrant(client: ApiClient, connectorId: string): Promise<void> {
+  const res = await client.del(`/api/v1/admin/mcp/installs/${connectorId}/grants/org`)
   if (!res.ok) throw await toApiError(res)
 }
 
@@ -147,10 +144,10 @@ function oauthStartBody(): { frontend_origin?: string } {
 
 export async function adminOrgGrantOAuthStart(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
 ): Promise<MCPOAuthStartResult> {
   const res = await client.post(
-    `/api/v1/admin/mcp/installs/${installId}/grants/org/oauth/start`,
+    `/api/v1/admin/mcp/installs/${connectorId}/grants/org/oauth/start`,
     oauthStartBody(),
   )
   if (!res.ok) throw await toApiError(res)
@@ -162,11 +159,11 @@ export async function adminOrgGrantOAuthStart(
 export async function wsCreateWorkspaceGrant(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
   body: CreateGrantBody,
 ): Promise<MCPCredentialGrantStatus> {
   const res = await client.post(
-    `/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/workspace`,
+    `/api/v1/ws/${wsId}/mcp/installs/${connectorId}/grants/workspace`,
     body,
   )
   if (!res.ok) throw await toApiError(res)
@@ -176,19 +173,19 @@ export async function wsCreateWorkspaceGrant(
 export async function wsDeleteWorkspaceGrant(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
 ): Promise<void> {
-  const res = await client.del(`/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/workspace`)
+  const res = await client.del(`/api/v1/ws/${wsId}/mcp/installs/${connectorId}/grants/workspace`)
   if (!res.ok) throw await toApiError(res)
 }
 
 export async function wsWorkspaceGrantOAuthStart(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
 ): Promise<MCPOAuthStartResult> {
   const res = await client.post(
-    `/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/workspace/oauth/start`,
+    `/api/v1/ws/${wsId}/mcp/installs/${connectorId}/grants/workspace/oauth/start`,
     oauthStartBody(),
   )
   if (!res.ok) throw await toApiError(res)
@@ -200,10 +197,10 @@ export async function wsWorkspaceGrantOAuthStart(
 export async function wsCreateMyGrant(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
   body: CreateGrantBody,
 ): Promise<MCPCredentialGrantStatus> {
-  const res = await client.post(`/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/me`, body)
+  const res = await client.post(`/api/v1/ws/${wsId}/mcp/installs/${connectorId}/grants/me`, body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPCredentialGrantStatus
 }
@@ -211,19 +208,19 @@ export async function wsCreateMyGrant(
 export async function wsDeleteMyGrant(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
 ): Promise<void> {
-  const res = await client.del(`/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/me`)
+  const res = await client.del(`/api/v1/ws/${wsId}/mcp/installs/${connectorId}/grants/me`)
   if (!res.ok) throw await toApiError(res)
 }
 
 export async function wsMyGrantOAuthStart(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
 ): Promise<MCPOAuthStartResult> {
   const res = await client.post(
-    `/api/v1/ws/${wsId}/mcp/installs/${installId}/grants/me/oauth/start`,
+    `/api/v1/ws/${wsId}/mcp/installs/${connectorId}/grants/me/oauth/start`,
     oauthStartBody(),
   )
   if (!res.ok) throw await toApiError(res)
@@ -233,16 +230,16 @@ export async function wsMyGrantOAuthStart(
 // ---------------- Admin install effective lookup ---------------- //
 
 export interface MCPAdminInstallEffective {
-  install_id: string
+  connector_id: string
   usable: boolean
   reason: 'usable' | 'pending_oauth' | 'missing_org_grant' | 'grant_expired' | 'discovery_failed'
 }
 
 export async function adminGetInstallEffective(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
 ): Promise<MCPAdminInstallEffective> {
-  const res = await client.get(`/api/v1/admin/mcp/installs/${installId}/effective`)
+  const res = await client.get(`/api/v1/admin/mcp/installs/${connectorId}/effective`)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPAdminInstallEffective
 }
@@ -251,27 +248,27 @@ export async function adminGetInstallEffective(
 
 export async function adminRefreshDiscovery(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
   workspaceId?: string | null,
-): Promise<MCPConnectorInstall> {
-  const res = await client.post(`/api/v1/admin/mcp/installs/${installId}/refresh-discovery`, {
+): Promise<MCPConnector> {
+  const res = await client.post(`/api/v1/admin/mcp/installs/${connectorId}/refresh-discovery`, {
     workspace_id: workspaceId ?? null,
   })
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
 export async function wsRefreshDiscovery(
   client: ApiClient,
   wsId: string,
-  installId: string,
-): Promise<MCPConnectorInstall> {
+  connectorId: string,
+): Promise<MCPConnector> {
   const res = await client.post(
-    `/api/v1/ws/${wsId}/mcp/installs/${installId}/refresh-discovery`,
+    `/api/v1/ws/${wsId}/mcp/installs/${connectorId}/refresh-discovery`,
     {},
   )
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
 // ---------------- Try It (admin + ws) ---------------- //
@@ -285,13 +282,13 @@ export interface ToolInvokeResult {
 
 export async function adminInvokeTool(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
   toolName: string,
   args: Record<string, unknown>,
   workspaceId?: string | null,
 ): Promise<ToolInvokeResult> {
   const res = await client.post(
-    `/api/v1/admin/mcp/installs/${installId}/tools/${encodeURIComponent(toolName)}/invoke`,
+    `/api/v1/admin/mcp/installs/${connectorId}/tools/${encodeURIComponent(toolName)}/invoke`,
     { arguments: args, workspace_id: workspaceId ?? null },
   )
   if (!res.ok) throw await toApiError(res)
@@ -301,12 +298,12 @@ export async function adminInvokeTool(
 export async function wsInvokeTool(
   client: ApiClient,
   wsId: string,
-  installId: string,
+  connectorId: string,
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<ToolInvokeResult> {
   const res = await client.post(
-    `/api/v1/ws/${wsId}/mcp/installs/${installId}/tools/${encodeURIComponent(toolName)}/invoke`,
+    `/api/v1/ws/${wsId}/mcp/installs/${connectorId}/tools/${encodeURIComponent(toolName)}/invoke`,
     { arguments: args },
   )
   if (!res.ok) throw await toApiError(res)
@@ -348,30 +345,30 @@ export interface PromoteDistribution {
 
 export async function adminPromoteToOrg(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
   distribution: PromoteDistribution,
-): Promise<MCPConnectorInstall> {
-  const res = await client.post(`/api/v1/admin/mcp/installs/${installId}/promote-to-org`, {
+): Promise<MCPConnector> {
+  const res = await client.post(`/api/v1/admin/mcp/installs/${connectorId}/promote-to-org`, {
     distribution,
   })
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
 // ---------------- Tool citation upsert (admin) ---------------- //
 
 export async function adminUpsertToolCitation(
   client: ApiClient,
-  installId: string,
+  connectorId: string,
   toolName: string,
   config: Record<string, unknown> | null,
-): Promise<MCPConnectorInstall> {
-  const res = await client.put(`/api/v1/admin/mcp/installs/${installId}/tool-citations`, {
+): Promise<MCPConnector> {
+  const res = await client.put(`/api/v1/admin/mcp/installs/${connectorId}/tool-citations`, {
     tool_name: toolName,
     config,
   })
   if (!res.ok) throw await toApiError(res)
-  return (await res.json()) as MCPConnectorInstall
+  return (await res.json()) as MCPConnector
 }
 
 // ---------------- Admin org connectors + workspace available ---------------- //
@@ -410,7 +407,7 @@ export interface MCPActiveTool {
   namespaced_name: string
   /** Original (bare) tool name from the MCP server's tools/list. */
   bare_name: string
-  install_id: string
+  connector_id: string
   /** Install display name (the slug source for namespacing). */
   server_name: string
   server_icons: MCPToolIcon[]

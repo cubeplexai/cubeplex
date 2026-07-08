@@ -1,4 +1,4 @@
-import type { MCPConnectorInstall, MCPConnectorTemplate } from './mcp'
+import type { MCPConnector, MCPConnectorTemplate } from './mcp'
 
 export type AdminOrgReason =
   | 'usable'
@@ -23,7 +23,7 @@ export interface WorkspaceDistribution {
 }
 
 export interface AdminOrgConnector {
-  install: MCPConnectorInstall
+  install: MCPConnector
   template: MCPConnectorTemplate | null
   org_effective: AdminOrgEffective
   workspace_distribution: WorkspaceDistribution

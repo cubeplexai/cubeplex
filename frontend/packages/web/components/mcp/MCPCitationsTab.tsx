@@ -6,7 +6,7 @@ import {
   adminUpsertToolCitation,
   type ApiClient,
   type CitationConfigJSON,
-  type MCPConnectorInstall,
+  type MCPConnector,
   type MCPToolEntry,
 } from '@cubebox/core'
 
@@ -15,9 +15,9 @@ import { MCPCitationEditor } from './MCPCitationEditor'
 import { getProperties, type SchemaNode } from '@/lib/jsonSchemaTypes'
 
 export interface MCPCitationsTabProps {
-  install: MCPConnectorInstall
+  install: MCPConnector
   client: ApiClient
-  onUpdated: (install: MCPConnectorInstall) => void
+  onUpdated: (install: MCPConnector) => void
 }
 
 function extractOutputFieldCandidates(tool: MCPToolEntry): string[] {
@@ -52,7 +52,7 @@ export function MCPCitationsTab({ install, client, onUpdated }: MCPCitationsTabP
     try {
       const updated = await adminUpsertToolCitation(
         client,
-        install.install_id,
+        install.connector_id,
         selectedTool.name,
         next as Record<string, unknown> | null,
       )

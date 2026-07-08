@@ -48,8 +48,8 @@ interface MCPAdminDetailPanelProps {
   installTemplate: MCPConnectorTemplate | null
   client: ApiClient
   onRefresh: () => Promise<void>
-  onDelete: (installId: string) => Promise<void>
-  onInstalled: (installId: string) => void
+  onDelete: (connectorId: string) => Promise<void>
+  onInstalled: (connectorId: string) => void
 }
 
 export function MCPAdminDetailPanel({
@@ -96,7 +96,7 @@ export function MCPAdminDetailPanel({
     return (
       <MCPCustomCreatePanel
         client={client}
-        onCreated={(install) => onInstalled(install.install_id)}
+        onCreated={(install) => onInstalled(install.connector_id)}
       />
     )
   }
@@ -112,7 +112,7 @@ export function MCPAdminDetailPanel({
   const install = connector.install
   const orgEff = connector.org_effective
   const isOrgWide = install.install_scope === 'org'
-  const installId = install.install_id
+  const connectorId = install.connector_id
   const connected = orgEff.usable
   const policy = install.default_credential_policy
 
@@ -130,7 +130,7 @@ export function MCPAdminDetailPanel({
       //   'workspace_id_required_for_scoped_policy' so the user
       //   understands they need a picker selection.
       const lens = policy === 'org' || policy === 'none' ? null : tryItScopedWsId
-      await adminRefreshDiscovery(client, installId, lens)
+      await adminRefreshDiscovery(client, connectorId, lens)
       await onRefresh()
     } catch (err) {
       setActionError((err as Error).message)
@@ -143,7 +143,7 @@ export function MCPAdminDetailPanel({
     setDeleting(true)
     setActionError(null)
     try {
-      await onDelete(installId)
+      await onDelete(connectorId)
     } catch (err) {
       setActionError((err as Error).message)
     } finally {
@@ -153,7 +153,7 @@ export function MCPAdminDetailPanel({
   }
 
   async function handlePromote(distribution: PromoteDistribution): Promise<void> {
-    await adminPromoteToOrg(client, installId, distribution)
+    await adminPromoteToOrg(client, connectorId, distribution)
     await onRefresh()
   }
 
@@ -166,7 +166,7 @@ export function MCPAdminDetailPanel({
     setReplacingCredential(true)
     setActionError(null)
     try {
-      await adminDeleteOrgGrant(client, installId)
+      await adminDeleteOrgGrant(client, connectorId)
       await onRefresh()
     } catch (err) {
       setActionError((err as Error).message)
@@ -221,7 +221,7 @@ export function MCPAdminDetailPanel({
               {connected ? t('ready') : t('needsCredential')}
             </span>
             <h1 className="truncate text-2xl font-semibold">
-              {install.name || connector.template?.name || installId}
+              {install.name || connector.template?.name || connectorId}
             </h1>
             <Badge variant="outline" className="text-[11px]">
               {isOrgWide ? t('scopeOrg') : t('scopeWorkspace')}
@@ -335,7 +335,7 @@ export function MCPAdminDetailPanel({
           <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-card/40 p-4 text-sm">
             <dl className="grid grid-cols-[180px_1fr] gap-y-2">
               <dt className="text-muted-foreground">{t('installs')}</dt>
-              <dd className="font-mono text-xs">{installId}</dd>
+              <dd className="font-mono text-xs">{connectorId}</dd>
               <dt className="text-muted-foreground">{t('credentialPolicy')}</dt>
               <dd>{policy}</dd>
               <dt className="text-muted-foreground">{t('authStatus')}</dt>
@@ -351,7 +351,7 @@ export function MCPAdminDetailPanel({
         <TabsContent value="tools" className="mt-4">
           <AdminToolsPanel
             tools={install.tools}
-            installId={installId}
+            connectorId={connectorId}
             client={client}
             // Admin page has no workspace lens. For credentialed scoped
             // policies the Try It picker drives wsId; for org/none
@@ -376,7 +376,7 @@ export function MCPAdminDetailPanel({
 
         {isOrgWide && (
           <TabsContent value="workspaces" className="mt-4">
-            <MCPWorkspacesTab installId={installId} client={client} />
+            <MCPWorkspacesTab connectorId={connectorId} client={client} />
           </TabsContent>
         )}
       </Tabs>
@@ -433,7 +433,7 @@ function AuthMethodSwitcher({
           : connector.install.default_credential_policy === 'none'
             ? 'org'
             : connector.install.default_credential_policy
-      await adminPatchInstall(client, connector.install.install_id, {
+      await adminPatchInstall(client, connector.install.connector_id, {
         auth_method: method,
         default_credential_policy: nextPolicy,
       })

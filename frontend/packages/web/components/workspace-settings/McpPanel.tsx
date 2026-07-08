@@ -110,7 +110,7 @@ function ConnectorRow({
   onClick: () => void
 }) {
   const t = useTranslations('mcpAdmin')
-  const name = connector.install.name || connector.template?.name || connector.install.install_id
+  const name = connector.install.name || connector.template?.name || connector.install.connector_id
   const provider = connector.template?.provider ?? ''
   const description = connector.template?.description ?? ''
   return (
@@ -118,7 +118,7 @@ function ConnectorRow({
       type="button"
       onClick={onClick}
       aria-current={active ? 'true' : undefined}
-      data-testid={`ws-connector-row-${connector.install.install_id}`}
+      data-testid={`ws-connector-row-${connector.install.connector_id}`}
       className={cn(
         'group flex w-full flex-col gap-1.5 rounded-lg border p-3 text-left transition-all',
         active
@@ -170,7 +170,7 @@ function ConnectorDetail({
   const [error, setError] = useState<string | null>(null)
   const wsState = connector.workspace_state
   const install = connector.install
-  const installId = install.install_id
+  const connectorId = install.connector_id
 
   const client = useMemo(() => {
     const c = createApiClient('')
@@ -188,7 +188,7 @@ function ConnectorDetail({
   const [promoteOpen, setPromoteOpen] = useState(false)
 
   async function handlePromote(distribution: PromoteDistribution): Promise<void> {
-    await adminPromoteToOrg(client, installId, distribution)
+    await adminPromoteToOrg(client, connectorId, distribution)
     await onChanged()
   }
 
@@ -196,7 +196,7 @@ function ConnectorDetail({
     setRefreshing(true)
     setError(null)
     try {
-      await wsRefreshDiscovery(client, wsId, installId)
+      await wsRefreshDiscovery(client, wsId, connectorId)
       await onChanged()
     } catch (err) {
       setError((err as Error).message)
@@ -209,7 +209,7 @@ function ConnectorDetail({
     setDeleting(true)
     setError(null)
     try {
-      await wsDeleteInstall(client, wsId, installId)
+      await wsDeleteInstall(client, wsId, connectorId)
       await onChanged()
     } catch (err) {
       setError((err as Error).message)
@@ -226,7 +226,7 @@ function ConnectorDetail({
     setSaving(true)
     setError(null)
     try {
-      await wsPatchConnectorState(client, wsId, installId, { enabled: !wsState?.enabled })
+      await wsPatchConnectorState(client, wsId, connectorId, { enabled: !wsState?.enabled })
       await onChanged()
     } catch (err) {
       setError((err as Error).message)
@@ -239,7 +239,7 @@ function ConnectorDetail({
     setSaving(true)
     setError(null)
     try {
-      await wsPatchConnectorState(client, wsId, installId, { credential_policy: next })
+      await wsPatchConnectorState(client, wsId, connectorId, { credential_policy: next })
       await onChanged()
     } catch (err) {
       setError((err as Error).message)
@@ -260,7 +260,7 @@ function ConnectorDetail({
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-xl font-semibold tracking-tight">
-            {install.name || connector.template?.name || installId}
+            {install.name || connector.template?.name || connectorId}
           </h3>
           <StatusPill status={statusOf(connector)} />
           {canPromote ? (
@@ -387,7 +387,12 @@ function ConnectorDetail({
         </TabsContent>
 
         <TabsContent value="tools" className="mt-4">
-          <WsToolsPanel tools={install.tools} installId={installId} client={client} wsId={wsId} />
+          <WsToolsPanel
+            tools={install.tools}
+            connectorId={connectorId}
+            client={client}
+            wsId={wsId}
+          />
         </TabsContent>
       </Tabs>
 
@@ -455,8 +460,8 @@ export function McpPanel({ wsId }: McpPanelProps) {
           .includes(q)
       })
       .sort((a, b) => {
-        const an = a.install.name || a.template?.name || a.install.install_id
-        const bn = b.install.name || b.template?.name || b.install.install_id
+        const an = a.install.name || a.template?.name || a.install.connector_id
+        const bn = b.install.name || b.template?.name || b.install.connector_id
         return an.localeCompare(bn)
       })
   }, [connectors, search])
@@ -479,7 +484,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
   }, [available, search])
 
   const selected = useMemo(
-    () => connectors.find((c) => c.install.install_id === selectedId) ?? null,
+    () => connectors.find((c) => c.install.connector_id === selectedId) ?? null,
     [connectors, selectedId],
   )
 
@@ -523,10 +528,10 @@ export function McpPanel({ wsId }: McpPanelProps) {
                     <div className="flex flex-col gap-1.5">
                       {filteredConnectors.map((c) => (
                         <ConnectorRow
-                          key={c.install.install_id}
+                          key={c.install.connector_id}
                           connector={c}
-                          active={c.install.install_id === selectedId}
-                          onClick={() => setSelectedId(c.install.install_id)}
+                          active={c.install.connector_id === selectedId}
+                          onClick={() => setSelectedId(c.install.connector_id)}
                         />
                       ))}
                     </div>
@@ -544,13 +549,15 @@ export function McpPanel({ wsId }: McpPanelProps) {
                       <div className="flex flex-col gap-1.5">
                         {filteredAvailable.map((row) => (
                           <AvailableConnectorRow
-                            key={row.install?.install_id ?? row.template?.template_id ?? 'unknown'}
+                            key={
+                              row.install?.connector_id ?? row.template?.template_id ?? 'unknown'
+                            }
                             row={row}
                             client={client}
                             wsId={wsId}
-                            onConnected={async (installId: string) => {
+                            onConnected={async (connectorId: string) => {
                               await load()
-                              setSelectedId(installId)
+                              setSelectedId(connectorId)
                             }}
                           />
                         ))}

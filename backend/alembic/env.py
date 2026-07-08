@@ -20,7 +20,7 @@ from cubebox.models import (  # noqa: F401
     Credential,
     EgressRef,
     LlmBillingEvent,
-    MCPConnectorInstall,
+    MCPConnector,
     MCPConnectorTemplate,
     MCPCredentialGrant,
     MCPWorkspaceConnectorState,

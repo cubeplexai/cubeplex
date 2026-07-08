@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-from cubebox.api.schemas.mcp import MCPConnectorInstallOut, MCPConnectorTemplateOut
+from cubebox.api.schemas.mcp import MCPConnectorOut, MCPConnectorTemplateOut
 
 WsAvailableSource = Literal["org_install", "template"]
 WsAvailableReason = Literal[
@@ -35,7 +35,7 @@ class WsAvailableOut(BaseModel):
     """
 
     source: WsAvailableSource
-    install: MCPConnectorInstallOut | None
+    install: MCPConnectorOut | None
     template: MCPConnectorTemplateOut | None
     reason: WsAvailableReason
 

@@ -3,7 +3,7 @@
 Holds the per-workspace persona prompt (and, post-M4, the model selection).
 The skill set and MCP connector set are *not* stored here — skills live in
 WorkspaceSkillBinding / OrgSkillInstall, and MCP connectors live in the
-four-layer ``MCPConnectorInstall`` + ``MCPWorkspaceConnectorState`` rows.
+four-layer ``MCPConnector`` + ``MCPWorkspaceConnectorState`` rows.
 """
 
 from typing import ClassVar

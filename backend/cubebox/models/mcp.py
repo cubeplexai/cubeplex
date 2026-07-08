@@ -1,6 +1,6 @@
 """MCP connector models — four-layer schema.
 
-These models intentionally do NOT inherit ``OrgScopedMixin``: installs and
+These models intentionally do NOT inherit ``OrgScopedMixin``: connectors and
 grants carry nullable scope columns (``workspace_id``, ``user_id``) that the
 mixin's NOT NULL contract forbids. Each model declares its own scope FKs
 explicitly.
@@ -29,8 +29,8 @@ from cubebox.models.public_id import PREFIX_MCP_CONNECTOR
 class MCPConnectorTemplate(CubeboxBase, table=True):
     """Global catalog of installable remote MCP connectors (templates only).
 
-    No credentials and no runtime tool state live here. Installs materialize
-    as :class:`MCPConnectorInstall` rows referencing ``template_id``.
+    No credentials and no runtime tool state live here. Organizations add
+    templates as :class:`MCPConnector` identity rows referencing ``template_id``.
     """
 
     _PREFIX: ClassVar[str] = "mctpl"
@@ -87,155 +87,6 @@ class MCPConnectorTemplate(CubeboxBase, table=True):
     status: str = Field(default="active", max_length=16)
 
 
-class MCPConnectorInstall(CubeboxBase, table=True):
-    """Concrete install of a connector at org or workspace scope.
-
-    Uniqueness for nullable-scope (URL × org/ws, name × org/ws, template ×
-    org/ws) is enforced via partial unique indexes that exclude
-    ``install_state='uninstalled'`` rows — those are tombstones and must not
-    block reinstalling the same template/URL/name. The partial indexes are
-    declared in the alembic migration (postgresql_where) because
-    SQLAlchemy's Index ``postgresql_where`` round-trips inconsistently from
-    autogenerate reflection on some versions; the migration is the source of
-    truth.
-    """
-
-    _PREFIX: ClassVar[str] = "mcins"
-    __tablename__ = "mcp_connector_installs"
-    __table_args__ = (
-        CheckConstraint(
-            "install_scope IN ('org','workspace')",
-            name="ck_mcp_connector_installs_scope",
-        ),
-        CheckConstraint(
-            "auth_method IN ('oauth','static','none')",
-            name="ck_mcp_connector_installs_auth_method",
-        ),
-        # Partial unique indexes: only ACTIVE installs are unique per org. These
-        # match the DB created by migration 3fcdfc800664 — declared here (not
-        # migration-only) so autogenerate sees no drift.
-        Index(
-            "uq_mcp_connector_install_slug_per_org",
-            "org_id",
-            "slug_name",
-            unique=True,
-            postgresql_where="install_state = 'active'",
-        ),
-        Index(
-            "uq_mcp_connector_install_template_per_org",
-            "org_id",
-            "template_id",
-            unique=True,
-            postgresql_where="install_state = 'active' AND template_id IS NOT NULL",
-        ),
-        Index(
-            "uq_mcp_connector_install_url_per_org",
-            "org_id",
-            "server_url_hash",
-            unique=True,
-            postgresql_where="install_state = 'active'",
-        ),
-    )
-
-    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    workspace_id: str | None = Field(
-        default=None, foreign_key="workspaces.id", max_length=20, index=True, nullable=True
-    )
-    install_scope: str = Field(max_length=16)
-    template_id: str | None = Field(
-        default=None, foreign_key="mcp_connector_templates.id", max_length=20, index=True
-    )
-
-    name: str = Field(max_length=64)
-    # Canonical namespace slug — the LLM-facing tool name prefix
-    # ``{slug}__{tool_name}``. Same algorithm as
-    # :func:`cubebox.mcp._constants.slugify_for_namespace`. Uniqueness is
-    # enforced on this column, not ``name``, so display names differing
-    # only by characters the runtime strips/replaces (``Web Tools`` vs
-    # ``Web-Tools``) still collide. Populated by a ``before_insert`` /
-    # ``before_update`` event listener (see bottom of this module) so
-    # the value never drifts from ``name`` on ORM writes. A
-    # server-side default of ``'mcp'`` keeps the column NOT NULL on
-    # historical inserts that bypassed the ORM.
-    slug_name: str = Field(
-        default="mcp",
-        sa_column=Column(
-            String(length=72),
-            nullable=False,
-            server_default=text("'mcp'"),
-        ),
-    )
-    server_url: str = Field(max_length=2048)
-    server_url_hash: str = Field(max_length=64)
-    transport: str = Field(max_length=16)
-
-    auth_method: str = Field(max_length=16)
-    default_credential_policy: str = Field(max_length=16)
-
-    auth_status: str = Field(default="not_required", max_length=16)
-    discovery_status: str = Field(default="not_run", max_length=16)
-    install_state: str = Field(
-        default="active",
-        max_length=16,
-        sa_column_kwargs={"server_default": text("'active'")},
-    )
-
-    oauth_client_config: dict[str, Any] = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
-    )
-    headers: dict[str, str] = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
-    )
-    tools_cache: list[dict[str, Any]] = Field(
-        default_factory=list,
-        sa_column=Column(JSON, nullable=False, server_default=text("'[]'")),
-    )
-    tool_citations: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
-    )
-    # Display metadata captured from the MCP ``initialize`` handshake +
-    # per-tool ``Tool.icons`` (MCP spec rev 2025-11-25). Shape:
-    # ``{"server": MCPServerInfo dict | None, "tool_icons": {tool_name: [icon_dict, ...]}}``.
-    # Separate from ``tools_cache`` so citation editing (which reads
-    # ``input_schema`` / ``output_schema`` from ``tools_cache``) stays
-    # decoupled from icon metadata; the frontend tool registry endpoint
-    # reads this column directly.
-    discovery_metadata: dict[str, Any] = Field(
-        default_factory=dict,
-        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
-    )
-
-    last_error: str | None = Field(default=None, max_length=2048)
-    last_discovered_at: datetime | None = Field(
-        default=None,
-        sa_column=Column(DateTime(timezone=True), nullable=True),
-    )
-    timeout: float = Field(default=30.0)
-    sse_read_timeout: float = Field(default=300.0)
-
-    # Snapshot of the template's static-auth style at install time. The
-    # workspace can override per-install (e.g. switch ``x-api-key`` to a
-    # custom header name) without touching the catalog row. Same snapshot
-    # pattern as ``tool_citations``.
-    static_auth_style: str = Field(
-        default="bearer",
-        max_length=16,
-        sa_column_kwargs={"server_default": text("'bearer'")},
-    )
-    static_auth_header_name: str | None = Field(default=None, max_length=64)
-    static_auth_query_param: str | None = Field(default=None, max_length=64)
-
-    auto_enroll_new_workspaces: bool = Field(
-        default=True, sa_column_kwargs={"server_default": text("true")}
-    )
-    created_by_user_id: str | None = Field(
-        default=None, foreign_key="users.id", max_length=20, nullable=True
-    )
-
-
 class MCPConnector(CubeboxBase, table=True):
     """Organization-owned connector identity, independent of credentials."""
 
@@ -288,6 +139,16 @@ class MCPConnector(CubeboxBase, table=True):
     transport: str = Field(max_length=16)
 
     auth_method: str = Field(max_length=16)
+    default_credential_policy: str = Field(
+        default="org",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'org'")},
+    )
+    auth_status: str = Field(
+        default="pending",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'pending'")},
+    )
     oauth_client_config: dict[str, Any] = Field(
         default_factory=dict,
         sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
@@ -299,6 +160,10 @@ class MCPConnector(CubeboxBase, table=True):
     )
     static_auth_header_name: str | None = Field(default=None, max_length=64)
     static_auth_query_param: str | None = Field(default=None, max_length=64)
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
 
     tools_cache: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -309,7 +174,20 @@ class MCPConnector(CubeboxBase, table=True):
         sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
     )
     discovery_status: str = Field(default="not_run", max_length=16)
+    discovery_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
     last_error: str | None = Field(default=None, max_length=2048)
+    last_discovered_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    timeout: float = Field(default=30.0)
+    sse_read_timeout: float = Field(default=300.0)
+    auto_enroll_new_workspaces: bool = Field(
+        default=True, sa_column_kwargs={"server_default": text("true")}
+    )
     status: str = Field(
         default="active",
         max_length=16,
@@ -319,9 +197,25 @@ class MCPConnector(CubeboxBase, table=True):
         default=None, foreign_key="users.id", max_length=20, nullable=True
     )
 
+    @property
+    def install_scope(self) -> str:
+        return "org"
+
+    @property
+    def workspace_id(self) -> str | None:
+        return None
+
+    @property
+    def install_state(self) -> str:
+        return self.status
+
+    @install_state.setter
+    def install_state(self, value: str) -> None:
+        self.status = value
+
 
 class MCPWorkspaceConnectorState(CubeboxBase, table=True):
-    """Per-workspace enablement and credential policy override for an install."""
+    """Per-workspace enablement and credential policy override for a connector."""
 
     _PREFIX: ClassVar[str] = "mcwcs"
     __tablename__ = "mcp_workspace_connector_states"
@@ -335,7 +229,6 @@ class MCPWorkspaceConnectorState(CubeboxBase, table=True):
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
-    install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
     connector_id: str = Field(foreign_key="mcp_connectors.id", max_length=20, index=True)
     enabled: bool = Field(default=True, sa_column_kwargs={"server_default": text("true")})
     credential_policy: str = Field(max_length=16)
@@ -346,10 +239,10 @@ class MCPWorkspaceConnectorState(CubeboxBase, table=True):
 
 
 class MCPCredentialGrant(CubeboxBase, table=True):
-    """Credential binding for an install at org / workspace / user scope.
+    """Credential binding for a connector at org / workspace / user scope.
 
-    Uniqueness across scopes (one org grant per install; one workspace grant
-    per (install, workspace); one user grant per (install, workspace, user))
+    Uniqueness across scopes (one org grant per connector; one workspace grant
+    per (connector, workspace); one user grant per (connector, workspace, user))
     is enforced via partial unique indexes declared in the alembic migration,
     because Postgres treats NULL as distinct in plain ``UNIQUE`` and we need
     NULL ``workspace_id``/``user_id`` to collide on the same scope.
@@ -398,7 +291,6 @@ class MCPCredentialGrant(CubeboxBase, table=True):
     )
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
     connector_id: str = Field(foreign_key="mcp_connectors.id", max_length=20, index=True)
     grant_scope: str = Field(max_length=16)
     workspace_id: str | None = Field(
@@ -431,18 +323,14 @@ class MCPCredentialGrant(CubeboxBase, table=True):
 # ---------------------------------------------------------------------------
 
 
-@event.listens_for(MCPConnectorInstall, "before_insert")
-@event.listens_for(MCPConnectorInstall, "before_update")
 @event.listens_for(MCPConnector, "before_insert")
 @event.listens_for(MCPConnector, "before_update")
-def _populate_slug_name(
-    _mapper: Any, _connection: Any, target: MCPConnectorInstall | MCPConnector
-) -> None:
+def _populate_slug_name(_mapper: Any, _connection: Any, target: MCPConnector) -> None:
     """Mirror connector display names into ``slug_name``.
 
     Keeps the canonical namespace slug in sync with the display name so
-    the org-wide ``uq_mcp_connector_install_slug_per_org`` partial unique
-    index catches any pair of installs whose names slugify to the same
+    the org-wide ``uq_mcp_connector_slug_per_org`` partial unique
+    index catches any pair of connectors whose names slugify to the same
     value (e.g. ``Web Tools`` vs ``Web-Tools``). The matching service
     preflight queries this column too — both layers stay correct by
     using one shared helper.

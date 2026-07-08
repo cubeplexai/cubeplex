@@ -10,7 +10,7 @@ import { ToolList } from './ToolList'
 
 export interface AdminToolsPanelProps {
   tools: MCPToolEntry[]
-  installId: string
+  connectorId: string
   client: ApiClient
   /** Panel lens workspace id; null when the install has no state row
    * in the current lens. */
@@ -24,7 +24,7 @@ export interface AdminToolsPanelProps {
 
 export function AdminToolsPanel({
   tools,
-  installId,
+  connectorId,
   client,
   wsId,
   adminWorkspaceOptions,
@@ -87,7 +87,7 @@ export function AdminToolsPanel({
             tryItSlot={
               <AdminTryItView
                 key={selected.name}
-                installId={installId}
+                connectorId={connectorId}
                 toolName={selected.name}
                 inputSchema={(selected.input_schema as Record<string, unknown> | null) ?? null}
                 client={client}

@@ -16,7 +16,7 @@ interface MCPConnectorListProps {
 }
 
 function nameOf(c: AdminOrgConnector): string {
-  return c.install.name || c.template?.name || c.install.install_id
+  return c.install.name || c.template?.name || c.install.connector_id
 }
 
 function providerOf(c: AdminOrgConnector): string {
@@ -136,7 +136,7 @@ export function MCPConnectorList({
   return (
     <div className="flex flex-col gap-1.5 p-3">
       {filtered.map((c) => {
-        const id = c.install.install_id
+        const id = c.install.connector_id
         const active = id === selectedId
         const dist = c.workspace_distribution
         return (

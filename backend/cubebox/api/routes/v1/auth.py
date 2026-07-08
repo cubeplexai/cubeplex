@@ -485,7 +485,7 @@ async def delete_account(
     from cubebox.models.credential import Credential
     from cubebox.models.egress_ref import EgressRef
     from cubebox.models.mcp import (
-        MCPConnectorInstall,
+        MCPConnector,
         MCPCredentialGrant,
         MCPWorkspaceConnectorState,
     )
@@ -507,7 +507,7 @@ async def delete_account(
         (Provider, "created_by_user_id"),
         (SkillRegistry, "created_by_user_id"),
         (SkillVersion, "uploaded_by_user_id"),
-        (MCPConnectorInstall, "created_by_user_id"),
+        (MCPConnector, "created_by_user_id"),
         (MCPWorkspaceConnectorState, "updated_by_user_id"),
         (MCPCredentialGrant, "created_by_user_id"),
         (SandboxEnvVar, "created_by_user_id"),

@@ -5,16 +5,22 @@ import { wsInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubebox/co
 import { TryItForm } from './TryItForm'
 
 export interface WsTryItViewProps {
-  installId: string
+  connectorId: string
   toolName: string
   inputSchema: Record<string, unknown> | null
   client: ApiClient
   wsId: string
 }
 
-export function WsTryItView({ installId, toolName, inputSchema, client, wsId }: WsTryItViewProps) {
+export function WsTryItView({
+  connectorId,
+  toolName,
+  inputSchema,
+  client,
+  wsId,
+}: WsTryItViewProps) {
   const onRun = async (args: Record<string, unknown>): Promise<ToolInvokeResult> =>
-    wsInvokeTool(client, wsId, installId, toolName, args)
+    wsInvokeTool(client, wsId, connectorId, toolName, args)
 
   return <TryItForm toolName={toolName} inputSchema={inputSchema} onRun={onRun} />
 }

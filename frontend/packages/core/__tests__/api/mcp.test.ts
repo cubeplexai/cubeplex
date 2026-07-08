@@ -35,7 +35,7 @@ describe('MCP four-layer API', () => {
 
   it('wsCreateInstall POSTs to workspace install endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ install_id: 'mcins-1', connector_id: 'mcpco-1' }), {
+      new Response(JSON.stringify({ connector_id: 'mcpco-1' }), {
         status: 201,
       }),
     )
@@ -48,7 +48,7 @@ describe('MCP four-layer API', () => {
 
   it('adminCreateInstall POSTs to admin install endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ install_id: 'mcins-1', connector_id: 'mcpco-1' }), {
+      new Response(JSON.stringify({ connector_id: 'mcpco-1' }), {
         status: 201,
       }),
     )
@@ -76,7 +76,7 @@ describe('MCP four-layer API', () => {
 
   it('wsCreateMyGrant posts to the per-user grant endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ install_id: 'mcins-1', connector_id: 'mcpco-1' }), {
+      new Response(JSON.stringify({ connector_id: 'mcpco-1' }), {
         status: 201,
       }),
     )

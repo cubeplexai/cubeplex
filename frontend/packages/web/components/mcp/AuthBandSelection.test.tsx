@@ -26,11 +26,11 @@ function renderWithIntl(node: React.ReactNode): ReturnType<typeof render> {
   )
 }
 
-function adminConnector(installId: string, name: string) {
+function adminConnector(connectorId: string, name: string) {
   return {
     template: { provider: name, name },
     install: {
-      install_id: installId,
+      connector_id: connectorId,
       name,
       auth_method: 'oauth',
       auth_status: 'pending',
@@ -44,11 +44,11 @@ function adminConnector(installId: string, name: string) {
   } as any
 }
 
-function workspaceConnector(installId: string, name: string) {
+function workspaceConnector(connectorId: string, name: string) {
   return {
     template: { provider: name, name },
     install: {
-      install_id: installId,
+      connector_id: connectorId,
       name,
       auth_method: 'oauth',
       auth_status: 'pending',

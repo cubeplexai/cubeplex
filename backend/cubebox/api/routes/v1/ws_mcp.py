@@ -1,7 +1,7 @@
 """Workspace MCP routes: four-layer connector surface.
 
 All routes live under ``/ws/{workspace_id}/mcp`` and operate on the
-four-layer model — ``MCPConnectorTemplate`` / ``MCPConnectorInstall`` /
+four-layer model — ``MCPConnectorTemplate`` / ``MCPConnector`` /
 ``MCPWorkspaceConnectorState`` / ``MCPCredentialGrant``.
 
 Authorization recap (per spec §User Roles And Permissions):
@@ -31,7 +31,7 @@ from cubebox.api.schemas.mcp import (
     CreateGrantIn,
     McpActiveToolListOut,
     McpActiveToolOut,
-    MCPConnectorInstallOut,
+    MCPConnectorOut,
     MCPConnectorTemplateListOut,
     MCPConnectorTemplateOut,
     MCPCredentialGrantStatusOut,
@@ -77,7 +77,6 @@ from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.models import User
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
     MCPConnectorRepository,
     MCPCredentialGrantRepository,
 )
@@ -87,7 +86,7 @@ from cubebox.services.mcp_discovery import (
     discover_tools_for_install,
     run_post_grant_discovery,
 )
-from cubebox.services.mcp_installs import MCPConnectorInstallService
+from cubebox.services.mcp_installs import MCPConnectorService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
 router = APIRouter(prefix="/ws/{workspace_id}/mcp", tags=["workspace-mcp"])
@@ -103,7 +102,6 @@ def _dto_to_effective_out(dto: MCPEffectiveConnectorDTO) -> MCPEffectiveConnecto
         connector_id = dto.workspace_state.connector_id
         state_out = MCPWorkspaceConnectorStateOut(
             workspace_id=dto.workspace_state.workspace_id,
-            install_id=dto.workspace_state.install_id,
             connector_id=connector_id,
             enabled=dto.workspace_state.enabled,
             credential_policy=dto.workspace_state.credential_policy,  # type: ignore[arg-type]
@@ -188,7 +186,7 @@ async def list_workspace_active_tools(
 
     specs = await effective_svc.list_runtime_specs(workspace_id, ctx.user.id)
     proposed_slugs: dict[str, str] = {
-        spec.install_id: _slugify_for_namespace(spec.name) for spec in specs
+        spec.connector_id: _slugify_for_namespace(spec.name) for spec in specs
     }
     slug_counts: Counter[str] = Counter(proposed_slugs.values())
 
@@ -197,11 +195,11 @@ async def list_workspace_active_tools(
 
     items: list[McpActiveToolOut] = []
     for spec in specs:
-        slug = proposed_slugs[spec.install_id]
+        slug = proposed_slugs[spec.connector_id]
         explicit_collision = slug_counts[slug] > 1
         risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
         if explicit_collision or risky_truncation:
-            safe = spec.install_id.replace("-", "")
+            safe = spec.connector_id.replace("-", "")
             suffix = f"_{safe[-4:] if len(safe) >= 4 else safe}"
         else:
             suffix = ""
@@ -220,7 +218,7 @@ async def list_workspace_active_tools(
                 McpActiveToolOut(
                     namespaced_name=namespaced,
                     bare_name=bare,
-                    install_id=spec.install_id,
+                    connector_id=spec.connector_id,
                     server_name=spec.name,
                     server_icons=server_icons,
                     tool_icons=_icons_for(tool_icons_map.get(bare)),
@@ -234,7 +232,7 @@ async def list_workspace_active_tools(
 async def list_workspace_available(
     workspace_id: str,
     _ctx: Annotated[RequestContext, Depends(require_member)],
-    install_svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    install_svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
 ) -> WsAvailableListOut:
     """Connectors the workspace can opt into.
@@ -270,10 +268,10 @@ async def list_workspace_available(
     for row in rows:
         install_out = (
             _install_to_out(
-                installs_by_id[row.install_id],
-                connector_id=connector_ids.get(row.install_id, ""),
+                installs_by_id[row.connector_id],
+                connector_id=connector_ids.get(row.connector_id, ""),
             )
-            if row.source == "org_install" and row.install_id is not None
+            if row.source == "org_install" and row.connector_id is not None
             else None
         )
         template_out = (
@@ -295,16 +293,16 @@ async def list_workspace_available(
 @router.post(
     "/installs",
     status_code=status.HTTP_201_CREATED,
-    response_model=MCPConnectorInstallOut,
+    response_model=MCPConnectorOut,
 )
 async def create_workspace_install(
     workspace_id: str,
     body: WorkspaceCreateInstallIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
-) -> MCPConnectorInstallOut:
+) -> MCPConnectorOut:
     """Workspace-local install creation. Admin-only.
 
     Uses :class:`WorkspaceCreateInstallIn` — ``install_scope`` is pinned
@@ -357,58 +355,58 @@ async def create_workspace_install(
 
 
 @router.delete(
-    "/installs/{install_id}",
+    "/installs/{connector_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_workspace_install(
     workspace_id: str,
-    install_id: str,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    connector_id: str,
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> None:
-    install = await svc._install_repo.get(install_id)
+    install = await svc._install_repo.get(connector_id)
     if install is None or install.workspace_id != workspace_id:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     try:
-        await svc.uninstall(install_id)
+        await svc.uninstall(connector_id)
     except ValueError as exc:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"}) from exc
     await audit.record(
         event="mcp.install.uninstalled",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"workspace_id": workspace_id},
     )
 
 
 @router.post(
-    "/installs/{install_id}/refresh-discovery",
-    response_model=MCPConnectorInstallOut,
+    "/installs/{connector_id}/refresh-discovery",
+    response_model=MCPConnectorOut,
 )
 async def ws_refresh_discovery(
     workspace_id: str,
-    install_id: str,
+    connector_id: str,
     body: WsInstallRefreshIn,  # noqa: ARG001 — keep empty body for OpenAPI clarity
     session: Annotated[AsyncSession, Depends(get_session)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
     signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
     token_mgr: Annotated[OAuthTokenManager, Depends(get_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
-) -> MCPConnectorInstallOut:
+) -> MCPConnectorOut:
     """Re-discover tools for one install scoped to this workspace lens.
 
     The workspace path pins the credential policy lookup; no body
     argument needed (compare admin which needs ``workspace_id``).
     """
-    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
-    install = await install_repo.get(install_id)
+    install_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     try:
         await discover_tools_for_install(
-            install_id=install_id,
+            connector_id=connector_id,
             workspace_id=workspace_id,
             actor_user_id=ctx.user.id,
             session=session,
@@ -422,7 +420,7 @@ async def ws_refresh_discovery(
         ) from exc
     except ValueError as exc:
         raise HTTPException(400, detail={"code": str(exc)}) from exc
-    refreshed = await install_repo.get(install_id)
+    refreshed = await install_repo.get(connector_id)
     assert refreshed is not None
     connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
     cid = await connector_repo.get_connector_id_for_install(refreshed) or ""
@@ -430,14 +428,14 @@ async def ws_refresh_discovery(
 
 
 @router.patch(
-    "/connectors/{install_id}/state",
+    "/connectors/{connector_id}/state",
     response_model=MCPWorkspaceConnectorStateOut,
 )
 async def patch_workspace_connector_state(
     workspace_id: str,
-    install_id: str,
+    connector_id: str,
     body: PatchWorkspaceStateIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPWorkspaceConnectorStateOut:
@@ -447,11 +445,11 @@ async def patch_workspace_connector_state(
     per spec, install-lifecycle operations stay under ``/installs`` while
     per-workspace state edits sit under the effective-connector view.
     """
-    install = await svc._install_repo.get(install_id)
+    install = await svc._install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
 
-    current = await svc._state_repo.get(workspace_id, install_id)
+    current = await svc._state_repo.get(workspace_id, connector_id)
     if current is None:
         # No state row exists. For org-scope installs in the caller's org this
         # is the normal shape when ``auto_enable.mode`` was ``none`` or only
@@ -480,12 +478,9 @@ async def patch_workspace_connector_state(
         )
         new_enabled = body.enabled if body.enabled is not None else True
 
-        connector_id = await svc._connector_id_for_install(install)
-        if connector_id is None:
-            raise HTTPException(500, detail={"code": "mcp_connector_identity_missing"})
+        connector_id = install.id
         saved = await svc._state_repo.upsert_for_connector(
             workspace_id=workspace_id,
-            install_id=install_id,
             connector_id=connector_id,
             enabled=new_enabled,
             credential_policy=new_policy,
@@ -496,12 +491,11 @@ async def patch_workspace_connector_state(
             event="mcp.workspace_state.patched",
             actor_user_id=ctx.user.id,
             org_id=ctx.org_id,
-            target_id=install_id,
+            target_id=connector_id,
             details={"workspace_id": workspace_id, "created": True},
         )
         return MCPWorkspaceConnectorStateOut(
             workspace_id=saved.workspace_id,
-            install_id=saved.install_id,
             connector_id=saved.connector_id,
             enabled=saved.enabled,
             credential_policy=saved.credential_policy,  # type: ignore[arg-type]
@@ -521,7 +515,6 @@ async def patch_workspace_connector_state(
 
     saved = await svc._state_repo.upsert_for_connector(
         workspace_id=workspace_id,
-        install_id=install_id,
         connector_id=current.connector_id,
         enabled=new_enabled,
         credential_policy=new_policy,
@@ -532,12 +525,11 @@ async def patch_workspace_connector_state(
         event="mcp.workspace_state.patched",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"workspace_id": workspace_id},
     )
     return MCPWorkspaceConnectorStateOut(
         workspace_id=saved.workspace_id,
-        install_id=saved.install_id,
         connector_id=saved.connector_id,
         enabled=saved.enabled,
         credential_policy=saved.credential_policy,  # type: ignore[arg-type]
@@ -549,15 +541,15 @@ async def patch_workspace_connector_state(
 
 
 @router.post(
-    "/installs/{install_id}/grants/me",
+    "/installs/{connector_id}/grants/me",
     response_model=MCPCredentialGrantStatusOut,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_my_user_grant(
     workspace_id: str,
-    install_id: str,
+    connector_id: str,
     body: CreateGrantIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
     signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
@@ -579,7 +571,7 @@ async def create_my_user_grant(
         )
     try:
         grant = await svc.create_static_grant(
-            install_id=install_id,
+            connector_id=connector_id,
             grant_scope="user",
             plaintext=body.credential_plaintext,
             workspace_id=workspace_id,
@@ -592,11 +584,11 @@ async def create_my_user_grant(
         event="mcp.grant.created",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"scope": "user", "workspace_id": workspace_id},
     )
     await run_post_grant_discovery(
-        install_id=install_id,
+        connector_id=connector_id,
         workspace_id=workspace_id,
         actor_user_id=ctx.user.id,
         session=session,
@@ -605,7 +597,6 @@ async def create_my_user_grant(
         token_mgr=token_mgr,
     )
     return MCPCredentialGrantStatusOut(
-        install_id=install_id,
         connector_id=grant.connector_id,
         grant_scope="user",
         workspace_id=workspace_id,
@@ -617,18 +608,18 @@ async def create_my_user_grant(
 
 
 @router.delete(
-    "/installs/{install_id}/grants/me",
+    "/installs/{connector_id}/grants/me",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_my_user_grant(
     workspace_id: str,
-    install_id: str,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    connector_id: str,
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     ctx: Annotated[RequestContext, Depends(require_member)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> None:
     await svc.disconnect_grant(
-        install_id=install_id,
+        connector_id=connector_id,
         grant_scope="user",
         workspace_id=workspace_id,
         user_id=ctx.user.id,
@@ -637,18 +628,18 @@ async def delete_my_user_grant(
         event="mcp.grant.deleted",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"scope": "user", "workspace_id": workspace_id},
     )
 
 
 @router.post(
-    "/installs/{install_id}/grants/me/oauth/start",
+    "/installs/{connector_id}/grants/me/oauth/start",
     response_model=MCPOAuthStartOut,
 )
 async def my_user_grant_oauth_start(
     workspace_id: str,
-    install_id: str,
+    connector_id: str,
     body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
     ctx: Annotated[RequestContext, Depends(require_member)],
@@ -656,7 +647,7 @@ async def my_user_grant_oauth_start(
     """Start an OAuth flow that produces a user-scope grant."""
     try:
         result = await svc.start_oauth_flow(
-            install_id=install_id,
+            connector_id=connector_id,
             actor_user_id=ctx.user.id,
             actor_org_id=ctx.org_id,
             grant_scope="user",
@@ -677,15 +668,15 @@ async def my_user_grant_oauth_start(
 
 
 @router.post(
-    "/installs/{install_id}/grants/workspace",
+    "/installs/{connector_id}/grants/workspace",
     response_model=MCPCredentialGrantStatusOut,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_workspace_grant(
     workspace_id: str,
-    install_id: str,
+    connector_id: str,
     body: CreateGrantIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     cred_service: Annotated[CredentialService, Depends(get_credential_service)],
     signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
@@ -707,7 +698,7 @@ async def create_workspace_grant(
         )
     try:
         grant = await svc.create_static_grant(
-            install_id=install_id,
+            connector_id=connector_id,
             grant_scope="workspace",
             plaintext=body.credential_plaintext,
             workspace_id=workspace_id,
@@ -719,11 +710,11 @@ async def create_workspace_grant(
         event="mcp.grant.created",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"scope": "workspace", "workspace_id": workspace_id},
     )
     await run_post_grant_discovery(
-        install_id=install_id,
+        connector_id=connector_id,
         workspace_id=workspace_id,
         actor_user_id=ctx.user.id,
         session=session,
@@ -732,7 +723,6 @@ async def create_workspace_grant(
         token_mgr=token_mgr,
     )
     return MCPCredentialGrantStatusOut(
-        install_id=install_id,
         connector_id=grant.connector_id,
         grant_scope="workspace",
         workspace_id=workspace_id,
@@ -744,18 +734,18 @@ async def create_workspace_grant(
 
 
 @router.delete(
-    "/installs/{install_id}/grants/workspace",
+    "/installs/{connector_id}/grants/workspace",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_workspace_grant(
     workspace_id: str,
-    install_id: str,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_ws_install_service)],
+    connector_id: str,
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> None:
     await svc.disconnect_grant(
-        install_id=install_id,
+        connector_id=connector_id,
         grant_scope="workspace",
         workspace_id=workspace_id,
     )
@@ -763,18 +753,18 @@ async def delete_workspace_grant(
         event="mcp.grant.deleted",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"scope": "workspace", "workspace_id": workspace_id},
     )
 
 
 @router.post(
-    "/installs/{install_id}/grants/workspace/oauth/start",
+    "/installs/{connector_id}/grants/workspace/oauth/start",
     response_model=MCPOAuthStartOut,
 )
 async def workspace_grant_oauth_start(
     workspace_id: str,
-    install_id: str,
+    connector_id: str,
     body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
@@ -782,7 +772,7 @@ async def workspace_grant_oauth_start(
     """Start an OAuth flow that produces a workspace-scope grant."""
     try:
         result = await svc.start_oauth_flow(
-            install_id=install_id,
+            connector_id=connector_id,
             actor_user_id=ctx.user.id,
             actor_org_id=ctx.org_id,
             grant_scope="workspace",
@@ -883,14 +873,14 @@ async def _invoke_tool_via_cubepi(
     # `tool_name:path` captures slash-containing names (some MCP
     # servers expose tools like `repos/list`). See admin_mcp.py
     # equivalent for the rationale.
-    "/installs/{install_id}/tools/{tool_name:path}/invoke",
+    "/installs/{connector_id}/tools/{tool_name:path}/invoke",
     response_model=ToolInvokeOut,
 )
 @limiter.limit("30/minute", key_func=_invoke_rate_key)
 async def ws_invoke_tool(
     request: Request,  # noqa: ARG001
     workspace_id: str,
-    install_id: str,
+    connector_id: str,
     tool_name: str,
     body: WsInstallInvokeIn,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -904,14 +894,14 @@ async def ws_invoke_tool(
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> ToolInvokeOut:
     """Invoke a single tool on an installed connector (workspace surface)."""
-    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
-    install = await install_repo.get(install_id)
+    install_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     dtos = await effective_svc.list_for_workspace_user(
         workspace_id, ctx.user.id, include_unusable=True
     )
-    dto = next((d for d in dtos if d.install.id == install_id), None)
+    dto = next((d for d in dtos if d.install.id == connector_id), None)
     if dto is None or not dto.usable:
         raise HTTPException(
             400,
@@ -942,7 +932,7 @@ async def ws_invoke_tool(
             event="mcp.tool.invoked",
             actor_user_id=ctx.user.id,
             org_id=ctx.org_id,
-            target_id=install_id,
+            target_id=connector_id,
             details={
                 "tool_name": tool_name,
                 "workspace_id": workspace_id,
@@ -973,7 +963,7 @@ async def ws_invoke_tool(
             event="mcp.tool.invoked",
             actor_user_id=ctx.user.id,
             org_id=ctx.org_id,
-            target_id=install_id,
+            target_id=connector_id,
             details={
                 "tool_name": tool_name,
                 "workspace_id": workspace_id,
@@ -986,7 +976,7 @@ async def ws_invoke_tool(
         event="mcp.tool.invoked",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={
             "tool_name": tool_name,
             "workspace_id": workspace_id,

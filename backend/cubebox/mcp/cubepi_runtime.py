@@ -52,7 +52,7 @@ length cap can otherwise collapse them to the same final prefix.
 
 
 # Canonical definition lives in ``cubebox.mcp._constants`` so the
-# event-listener that populates ``MCPConnectorInstall.slug_name`` and
+# event-listener that populates ``MCPConnector.slug_name`` and
 # this runtime namespacing math share one helper. The leading
 # underscore is preserved as a private alias inside this module so
 # existing in-module call sites keep their style.
@@ -253,7 +253,7 @@ def schedule_tools_cache_refresh(
                     metadata=metadata_discovery,
                 )
                 await run_post_grant_discovery(
-                    install_id=spec.install_id,
+                    connector_id=spec.connector_id,
                     workspace_id=spec.workspace_id or None,
                     actor_user_id=actor_user_id,
                     session=session,
@@ -263,9 +263,9 @@ def schedule_tools_cache_refresh(
                 )
                 await session.commit()
         except Exception as exc:  # noqa: BLE001 — background refresh must never surface
-            logger.warning("tools_cache refresh failed for %s: %s", spec.install_id, exc)
+            logger.warning("tools_cache refresh failed for %s: %s", spec.connector_id, exc)
         finally:
-            _cache_refresh_in_flight.discard(spec.install_id)
+            _cache_refresh_in_flight.discard(spec.connector_id)
 
     for spec in specs:
         if not spec.tools_cache:
@@ -275,10 +275,12 @@ def schedule_tools_cache_refresh(
             last = last.replace(tzinfo=UTC)
         if last is not None and now - last < _td(hours=ttl_hours):
             continue
-        if spec.install_id in _cache_refresh_in_flight:
+        if spec.connector_id in _cache_refresh_in_flight:
             continue
-        _cache_refresh_in_flight.add(spec.install_id)
-        task = asyncio.create_task(_refresh_one(spec), name=f"mcp-cache-refresh:{spec.install_id}")
+        _cache_refresh_in_flight.add(spec.connector_id)
+        task = asyncio.create_task(
+            _refresh_one(spec), name=f"mcp-cache-refresh:{spec.connector_id}"
+        )
         # Detached by design; reference kept alive by the event loop via the
         # in-flight set lifecycle inside _refresh_one.
         del task
@@ -302,7 +304,7 @@ async def _load_tools_for_specs(
     detection; ``specs`` is the subset to actually load.
     """
     proposed_slugs: dict[str, str] = {
-        s.install_id: _slugify_for_namespace(s.name) for s in all_specs
+        s.connector_id: _slugify_for_namespace(s.name) for s in all_specs
     }
     slug_counts: Counter[str] = Counter(proposed_slugs.values())
 
@@ -367,16 +369,16 @@ async def _load_tools_for_specs(
                 logger.warning(
                     "Failed to load MCP install %s (%s): %s",
                     spec.name,
-                    spec.install_id,
+                    spec.connector_id,
                     exc,
                 )
                 continue
 
-        slug = proposed_slugs[spec.install_id]
+        slug = proposed_slugs[spec.connector_id]
         explicit_collision = slug_counts[slug] > 1
         risky_truncation = len(slug) > _NS_LENGTH_DEFENCE
         if explicit_collision or risky_truncation:
-            safe = spec.install_id.replace("-", "")
+            safe = spec.connector_id.replace("-", "")
             suffix = f"_{safe[-4:] if len(safe) >= 4 else safe}"
         else:
             suffix = ""
@@ -550,7 +552,7 @@ async def _resolve_auth_from_spec(
             user_id=user_id,
             org_id=org_id,
             workspace_id=workspace_id,
-            mcp_server_id=spec.install_id,
+            mcp_server_id=spec.connector_id,
             ttl=_USER_TOKEN_TTL,
         )
         headers["Authorization"] = f"Bearer {token}"

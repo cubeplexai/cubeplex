@@ -34,7 +34,6 @@ from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
 from cubebox.models import Role, User
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
@@ -42,7 +41,7 @@ from cubebox.repositories.mcp import (
 )
 from cubebox.repositories.workspace import WorkspaceRepository
 from cubebox.services.credential import CredentialService
-from cubebox.services.mcp_installs import MCPConnectorInstallService
+from cubebox.services.mcp_installs import MCPConnectorService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
 
@@ -150,7 +149,7 @@ async def get_ws_install_service(
     session: AsyncSession = Depends(get_session),
     cred_service: CredentialService = Depends(get_credential_service),
     ctx: RequestContext = Depends(request_context),
-) -> MCPConnectorInstallService:
+) -> MCPConnectorService:
     """Install service bound to the caller's workspace membership org.
 
     Workspace routes construct the three org-scoped repos with the
@@ -160,8 +159,7 @@ async def get_ws_install_service(
     fan-out — keeping the wiring uniform across both providers lets
     the service code stay free of "is this admin or member" branching.
     """
-    return MCPConnectorInstallService(
-        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
+    return MCPConnectorService(
         state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
         grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
         cred_service=cred_service,
@@ -184,7 +182,7 @@ async def get_ws_effective_service(
     """
     return MCPEffectiveConnectorService(
         template_repo=MCPConnectorTemplateRepository(session),
-        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
+        connector_repo=MCPConnectorRepository(session, org_id=ctx.org_id),
         state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
         grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
         org_id=ctx.org_id,
@@ -195,7 +193,7 @@ async def get_admin_install_service(
     session: AsyncSession = Depends(get_session),
     backend: EncryptionBackend = Depends(get_encryption_backend),
     ctx: RequestContext = Depends(get_admin_request_context),
-) -> MCPConnectorInstallService:
+) -> MCPConnectorService:
     """Install service for org admin routes.
 
     Admin routes don't carry a ``workspace_id`` in the path, so we
@@ -209,8 +207,7 @@ async def get_admin_install_service(
         org_id=ctx.org_id,
         actor_user_id=ctx.user.id,
     )
-    return MCPConnectorInstallService(
-        install_repo=MCPConnectorInstallRepository(session, org_id=ctx.org_id),
+    return MCPConnectorService(
         state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
         grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
         cred_service=cred_service,

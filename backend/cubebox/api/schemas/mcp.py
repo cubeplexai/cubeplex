@@ -61,7 +61,7 @@ CitationConfigJSON = dict[str, Any]  # opaque shape; agent runtime validates
 
 
 class MCPToolEntry(BaseModel):
-    """Single entry from ``MCPConnectorInstall.tools_cache``."""
+    """Single entry from ``MCPConnector.tools_cache``."""
 
     name: str
     description: str | None = None
@@ -69,10 +69,9 @@ class MCPToolEntry(BaseModel):
     output_schema: dict[str, Any] | None = None
 
 
-class MCPConnectorInstallOut(BaseModel):
-    """One ``MCPConnectorInstall`` row."""
+class MCPConnectorOut(BaseModel):
+    """One ``MCPConnector`` row."""
 
-    install_id: str
     connector_id: str
     template_id: str | None
     install_scope: Literal["org", "workspace"]
@@ -96,7 +95,6 @@ class MCPWorkspaceConnectorStateOut(BaseModel):
     """One ``MCPWorkspaceConnectorState`` row."""
 
     workspace_id: str
-    install_id: str
     connector_id: str
     enabled: bool
     credential_policy: CredentialPolicyLiteral
@@ -106,7 +104,6 @@ class MCPWorkspaceConnectorStateOut(BaseModel):
 class MCPCredentialGrantStatusOut(BaseModel):
     """Status of one ``MCPCredentialGrant`` (or absence thereof)."""
 
-    install_id: str
     connector_id: str
     grant_scope: Literal["org", "workspace", "user"]
     workspace_id: str | None
@@ -120,7 +117,7 @@ class MCPEffectiveConnectorOut(BaseModel):
     """One effective connector row as returned by GET /ws/{ws}/mcp/connectors."""
 
     template: MCPConnectorTemplateOut | None
-    install: MCPConnectorInstallOut
+    install: MCPConnectorOut
     workspace_state: MCPWorkspaceConnectorStateOut | None
     credential_policy: CredentialPolicyLiteral
     required_grant_scope: str | None
@@ -148,7 +145,7 @@ class MCPAdminInstallEffectiveOut(BaseModel):
     Bypasses the workspace lens — see spec §4 admin row.
     """
 
-    install_id: str
+    connector_id: str
     usable: bool
     reason: Literal[
         "usable",
@@ -249,7 +246,7 @@ class WorkspaceCreateInstallIn(BaseModel):
 
 
 class PatchInstallIn(BaseModel):
-    """Body of PATCH /api/v1/admin/mcp/installs/{install_id}.
+    """Body of PATCH /api/v1/admin/mcp/installs/{connector_id}.
 
     Reject unknown keys via ``extra="forbid"``. The auth_method ↔ policy
     pairing cannot be validated here (body may omit one); the service layer
@@ -268,7 +265,7 @@ class PatchInstallIn(BaseModel):
 
 
 class PatchWorkspaceStateIn(BaseModel):
-    """Body of PATCH /api/v1/ws/{ws}/mcp/connectors/{install_id}/state.
+    """Body of PATCH /api/v1/ws/{ws}/mcp/connectors/{connector_id}/state.
 
     ``extra="forbid"`` keeps the contract narrow. The auth_method ↔ policy
     pairing is re-validated server-side against the loaded install row.
@@ -430,7 +427,7 @@ class McpActiveToolOut(BaseModel):
 
     namespaced_name: str
     bare_name: str
-    install_id: str
+    connector_id: str
     server_name: str
     server_icons: list[McpIconOut] = Field(default_factory=list)
     tool_icons: list[McpIconOut] = Field(default_factory=list)

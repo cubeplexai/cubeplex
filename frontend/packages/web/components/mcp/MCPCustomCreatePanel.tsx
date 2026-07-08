@@ -8,7 +8,7 @@ import {
   adminTestConnection,
   type ApiClient,
   type MCPAuthMethod,
-  type MCPConnectorInstall,
+  type MCPConnector,
   type MCPCredentialScope,
   type MCPTransport,
   type TestConnectionResult,
@@ -27,7 +27,7 @@ import {
 
 interface MCPCustomCreatePanelProps {
   client: ApiClient
-  onCreated: (install: MCPConnectorInstall) => void
+  onCreated: (install: MCPConnector) => void
 }
 
 export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanelProps) {

@@ -14,7 +14,7 @@ from cubebox.api.schemas.mcp_admin_connector import (
     WorkspaceDistributionOut,
 )
 from cubebox.models.mcp import (
-    MCPConnectorInstall,
+    MCPConnector,
     MCPWorkspaceConnectorState,
 )
 
@@ -81,7 +81,7 @@ def derive_admin_org_effective(
 
 def build_workspace_distribution(
     *,
-    install: MCPConnectorInstall,
+    install: MCPConnector,
     state_rows: list[MCPWorkspaceConnectorState],
     eligible_workspace_count: int,
 ) -> WorkspaceDistributionOut:
