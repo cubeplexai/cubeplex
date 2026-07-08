@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import secrets
 
+import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.mcp._constants import server_url_hash
@@ -13,6 +15,7 @@ from cubebox.models import (
     MCPConnector,
     MCPConnectorInstall,
     MCPCredentialGrant,
+    MCPWorkspaceConnectorState,
     Organization,
     User,
     Workspace,
@@ -207,3 +210,220 @@ async def test_credential_grants_are_keyed_by_connector_id(
     assert user_grant.install_id == install_id
     assert user_grant.connector_id == connector_id
     assert user_grant.credential_id == credentials[2].id
+
+
+async def test_workspace_enable_uses_connector_state_without_workspace_install(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+) -> None:
+    from tests.e2e.conftest import _seed_four_layer_template
+
+    suffix = secrets.token_hex(4)
+    template_id = await _seed_four_layer_template(
+        slug=f"cleanup-org-first-{suffix}",
+        name=f"Cleanup Org First {suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+    )
+    client, workspace_id = admin_client
+
+    org_add = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": template_id,
+            "install_scope": "org",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert org_add.status_code == 201, org_add.text
+    connector_id = org_add.json()["connector_id"]
+
+    ws_enable = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": template_id,
+            "install_scope": "workspace",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert ws_enable.status_code == 201, ws_enable.text
+    assert ws_enable.json()["connector_id"] == connector_id
+
+    workspace_installs = (
+        (
+            await db_session.execute(
+                select(MCPConnectorInstall).where(
+                    MCPConnectorInstall.template_id == template_id,
+                    MCPConnectorInstall.workspace_id == workspace_id,
+                    MCPConnectorInstall.install_state == "active",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    states = (
+        (
+            await db_session.execute(
+                select(MCPWorkspaceConnectorState).where(
+                    MCPWorkspaceConnectorState.workspace_id == workspace_id,
+                    MCPWorkspaceConnectorState.connector_id == connector_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    assert list(workspace_installs) == []
+    assert len(list(states)) == 1
+
+
+async def test_workspace_first_enable_does_not_create_workspace_install(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+) -> None:
+    from tests.e2e.conftest import _seed_four_layer_template
+
+    suffix = secrets.token_hex(4)
+    template_id = await _seed_four_layer_template(
+        slug=f"cleanup-ws-enable-{suffix}",
+        name=f"Cleanup WS Enable {suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+    )
+    client, workspace_id = admin_client
+
+    ws_enable = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": template_id,
+            "install_scope": "workspace",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert ws_enable.status_code == 201, ws_enable.text
+    connector_id = ws_enable.json()["connector_id"]
+
+    workspace_installs = (
+        (
+            await db_session.execute(
+                select(MCPConnectorInstall).where(
+                    MCPConnectorInstall.template_id == template_id,
+                    MCPConnectorInstall.workspace_id == workspace_id,
+                    MCPConnectorInstall.install_state == "active",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    org_installs = (
+        (
+            await db_session.execute(
+                select(MCPConnectorInstall).where(
+                    MCPConnectorInstall.template_id == template_id,
+                    MCPConnectorInstall.workspace_id.is_(None),
+                    MCPConnectorInstall.install_state == "active",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    state = (
+        await db_session.execute(
+            select(MCPWorkspaceConnectorState).where(
+                MCPWorkspaceConnectorState.workspace_id == workspace_id,
+                MCPWorkspaceConnectorState.connector_id == connector_id,
+            )
+        )
+    ).scalar_one()
+
+    assert list(workspace_installs) == []
+    assert len(list(org_installs)) == 1
+    assert state.install_id == org_installs[0].id
+
+
+async def test_org_add_promotes_workspace_install_without_leaving_workspace_install(
+    admin_client: tuple[httpx.AsyncClient, str],
+    db_session: AsyncSession,
+) -> None:
+    from tests.e2e.conftest import _seed_four_layer_template
+
+    suffix = secrets.token_hex(4)
+    template_id = await _seed_four_layer_template(
+        slug=f"cleanup-ws-first-{suffix}",
+        name=f"Cleanup WS First {suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+    )
+    client, workspace_id = admin_client
+
+    ws_enable = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/installs",
+        json={
+            "template_id": template_id,
+            "install_scope": "workspace",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert ws_enable.status_code == 201, ws_enable.text
+    connector_id = ws_enable.json()["connector_id"]
+
+    org_add = await client.post(
+        "/api/v1/admin/mcp/installs",
+        json={
+            "template_id": template_id,
+            "install_scope": "org",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+            "auto_enable": {"mode": "none"},
+        },
+    )
+    assert org_add.status_code == 201, org_add.text
+    assert org_add.json()["connector_id"] == connector_id
+
+    workspace_installs = (
+        (
+            await db_session.execute(
+                select(MCPConnectorInstall).where(
+                    MCPConnectorInstall.template_id == template_id,
+                    MCPConnectorInstall.workspace_id == workspace_id,
+                    MCPConnectorInstall.install_state == "active",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    org_installs = (
+        (
+            await db_session.execute(
+                select(MCPConnectorInstall).where(
+                    MCPConnectorInstall.template_id == template_id,
+                    MCPConnectorInstall.workspace_id.is_(None),
+                    MCPConnectorInstall.install_state == "active",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    state = (
+        await db_session.execute(
+            select(MCPWorkspaceConnectorState).where(
+                MCPWorkspaceConnectorState.workspace_id == workspace_id,
+                MCPWorkspaceConnectorState.connector_id == connector_id,
+            )
+        )
+    ).scalar_one()
+
+    assert list(workspace_installs) == []
+    assert len(list(org_installs)) == 1
+    assert state.install_id == org_installs[0].id
