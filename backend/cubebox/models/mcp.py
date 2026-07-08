@@ -23,6 +23,7 @@ from sqlalchemy import (
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
+from cubebox.models.public_id import PREFIX_MCP_CONNECTOR
 
 
 class MCPConnectorTemplate(CubeboxBase, table=True):
@@ -235,6 +236,90 @@ class MCPConnectorInstall(CubeboxBase, table=True):
     )
 
 
+class MCPConnector(CubeboxBase, table=True):
+    """Organization-owned connector identity, independent of credentials."""
+
+    _PREFIX: ClassVar[str] = PREFIX_MCP_CONNECTOR
+    __tablename__ = "mcp_connectors"
+    __table_args__ = (
+        CheckConstraint(
+            "auth_method IN ('oauth','static','none')",
+            name="ck_mcp_connectors_auth_method",
+        ),
+        Index(
+            "uq_mcp_connector_slug_per_org",
+            "org_id",
+            "slug_name",
+            unique=True,
+            postgresql_where="status = 'active'",
+        ),
+        Index(
+            "uq_mcp_connector_template_per_org",
+            "org_id",
+            "template_id",
+            unique=True,
+            postgresql_where="status = 'active' AND template_id IS NOT NULL",
+        ),
+        Index(
+            "uq_mcp_connector_url_per_org",
+            "org_id",
+            "server_url_hash",
+            unique=True,
+            postgresql_where="status = 'active'",
+        ),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    template_id: str | None = Field(
+        default=None, foreign_key="mcp_connector_templates.id", max_length=20, index=True
+    )
+
+    name: str = Field(max_length=64)
+    slug_name: str = Field(
+        default="mcp",
+        sa_column=Column(
+            String(length=72),
+            nullable=False,
+            server_default=text("'mcp'"),
+        ),
+    )
+    server_url: str = Field(max_length=2048)
+    server_url_hash: str = Field(max_length=64)
+    transport: str = Field(max_length=16)
+
+    auth_method: str = Field(max_length=16)
+    oauth_client_config: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    static_auth_style: str = Field(
+        default="bearer",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'bearer'")},
+    )
+    static_auth_header_name: str | None = Field(default=None, max_length=64)
+    static_auth_query_param: str | None = Field(default=None, max_length=64)
+
+    tools_cache: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, server_default=text("'[]'")),
+    )
+    tool_citations: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    discovery_status: str = Field(default="not_run", max_length=16)
+    last_error: str | None = Field(default=None, max_length=2048)
+    status: str = Field(
+        default="active",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'active'")},
+    )
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
+
+
 class MCPWorkspaceConnectorState(CubeboxBase, table=True):
     """Per-workspace enablement and credential policy override for an install."""
 
@@ -251,6 +336,9 @@ class MCPWorkspaceConnectorState(CubeboxBase, table=True):
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
     install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
+    connector_id: str | None = Field(
+        default=None, foreign_key="mcp_connectors.id", max_length=20, index=True, nullable=True
+    )
     enabled: bool = Field(default=True, sa_column_kwargs={"server_default": text("true")})
     credential_policy: str = Field(max_length=16)
     enablement_source: str = Field(max_length=32)
@@ -313,6 +401,9 @@ class MCPCredentialGrant(CubeboxBase, table=True):
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
+    connector_id: str | None = Field(
+        default=None, foreign_key="mcp_connectors.id", max_length=20, index=True, nullable=True
+    )
     grant_scope: str = Field(max_length=16)
     workspace_id: str | None = Field(
         default=None, foreign_key="workspaces.id", max_length=20, index=True, nullable=True
@@ -346,8 +437,12 @@ class MCPCredentialGrant(CubeboxBase, table=True):
 
 @event.listens_for(MCPConnectorInstall, "before_insert")
 @event.listens_for(MCPConnectorInstall, "before_update")
-def _populate_slug_name(_mapper: Any, _connection: Any, target: MCPConnectorInstall) -> None:
-    """Mirror ``MCPConnectorInstall.name`` into ``slug_name``.
+@event.listens_for(MCPConnector, "before_insert")
+@event.listens_for(MCPConnector, "before_update")
+def _populate_slug_name(
+    _mapper: Any, _connection: Any, target: MCPConnectorInstall | MCPConnector
+) -> None:
+    """Mirror connector display names into ``slug_name``.
 
     Keeps the canonical namespace slug in sync with the display name so
     the org-wide ``uq_mcp_connector_install_slug_per_org`` partial unique

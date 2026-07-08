@@ -23,10 +23,11 @@ not an oversight.
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.models import (
+    MCPConnector,
     MCPConnectorInstall,
     MCPConnectorTemplate,
     MCPCredentialGrant,
@@ -177,6 +178,60 @@ class MCPConnectorTemplateRepository:
             for row in changed:
                 await self.session.refresh(row)
         return changed
+
+
+class MCPConnectorRepository:
+    """Org-scoped repository for connector identity rows."""
+
+    def __init__(self, session: AsyncSession, *, org_id: str) -> None:
+        self.session = session
+        self.org_id = org_id
+
+    async def get(self, connector_id: str) -> MCPConnector | None:
+        stmt = select(MCPConnector).where(
+            MCPConnector.id == connector_id,  # type: ignore[arg-type]
+            MCPConnector.org_id == self.org_id,  # type: ignore[arg-type]
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_active_by_identity(
+        self,
+        *,
+        template_id: str | None,
+        server_url_hash: str,
+        slug_name: str,
+    ) -> MCPConnector | None:
+        identity_matches = [
+            MCPConnector.server_url_hash == server_url_hash,  # type: ignore[arg-type]
+            MCPConnector.slug_name == slug_name,  # type: ignore[arg-type]
+        ]
+        if template_id is not None:
+            identity_matches.append(MCPConnector.template_id == template_id)  # type: ignore[arg-type]
+
+        stmt = select(MCPConnector).where(
+            MCPConnector.org_id == self.org_id,  # type: ignore[arg-type]
+            MCPConnector.status == "active",  # type: ignore[arg-type]
+            or_(*identity_matches),
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
+    async def add(self, connector: MCPConnector) -> MCPConnector:
+        connector.org_id = self.org_id
+        self.session.add(connector)
+        await self.session.commit()
+        await self.session.refresh(connector)
+        return connector
+
+    async def update(self, connector: MCPConnector) -> MCPConnector:
+        if connector.org_id != self.org_id:
+            raise RuntimeError(
+                "MCPConnectorRepository.update: connector belongs to a different org"
+            )
+        connector.updated_at = datetime.now(UTC)
+        self.session.add(connector)
+        await self.session.commit()
+        await self.session.refresh(connector)
+        return connector
 
 
 class MCPConnectorInstallRepository:
