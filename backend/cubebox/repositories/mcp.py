@@ -218,6 +218,19 @@ class MCPConnectorRepository:
         )
         return (await self.session.execute(stmt)).scalars().first()
 
+    async def get_connector_id_for_install(
+        self,
+        install: MCPConnectorInstall,
+    ) -> str | None:
+        from cubebox.mcp._constants import slugify_for_namespace
+
+        existing = await self.get_active_by_identity(
+            template_id=install.template_id,
+            server_url_hash=install.server_url_hash,
+            slug_name=slugify_for_namespace(install.name),
+        )
+        return existing.id if existing is not None else None
+
     async def add(self, connector: MCPConnector) -> MCPConnector:
         connector.org_id = self.org_id
         self.session.add(connector)
@@ -372,45 +385,6 @@ class MCPWorkspaceConnectorStateRepository:
         if rows:
             await self.session.commit()
         return len(rows)
-
-    async def upsert(
-        self,
-        *,
-        workspace_id: str,
-        install_id: str,
-        connector_id: str | None = None,
-        enabled: bool,
-        credential_policy: str,
-        enablement_source: str,
-        updated_by_user_id: str,
-    ) -> MCPWorkspaceConnectorState:
-        existing = await self.get(workspace_id, install_id)
-        if existing is not None:
-            existing.enabled = enabled
-            existing.credential_policy = credential_policy
-            existing.enablement_source = enablement_source
-            if connector_id is not None:
-                existing.connector_id = connector_id
-            existing.updated_by_user_id = updated_by_user_id
-            existing.updated_at = datetime.now(UTC)
-            self.session.add(existing)
-            await self.session.commit()
-            await self.session.refresh(existing)
-            return existing
-        row = MCPWorkspaceConnectorState(
-            org_id=self.org_id,
-            workspace_id=workspace_id,
-            install_id=install_id,
-            connector_id=connector_id,
-            enabled=enabled,
-            credential_policy=credential_policy,
-            enablement_source=enablement_source,
-            updated_by_user_id=updated_by_user_id,
-        )
-        self.session.add(row)
-        await self.session.commit()
-        await self.session.refresh(row)
-        return row
 
     async def upsert_for_connector(
         self,

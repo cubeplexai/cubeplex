@@ -78,6 +78,7 @@ from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.models import User
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPCredentialGrantRepository,
 )
 from cubebox.services.credential import CredentialService
@@ -97,17 +98,20 @@ def _dto_to_effective_out(dto: MCPEffectiveConnectorDTO) -> MCPEffectiveConnecto
     if dto.template is not None:
         template_out = _template_to_out(dto.template)
     state_out: MCPWorkspaceConnectorStateOut | None = None
+    connector_id = ""
     if dto.workspace_state is not None:
+        connector_id = dto.workspace_state.connector_id
         state_out = MCPWorkspaceConnectorStateOut(
             workspace_id=dto.workspace_state.workspace_id,
             install_id=dto.workspace_state.install_id,
+            connector_id=connector_id,
             enabled=dto.workspace_state.enabled,
             credential_policy=dto.workspace_state.credential_policy,  # type: ignore[arg-type]
             enablement_source=dto.workspace_state.enablement_source,
         )
     return MCPEffectiveConnectorOut(
         template=template_out,
-        install=_install_to_out(dto.install),
+        install=_install_to_out(dto.install, connector_id=connector_id),
         workspace_state=state_out,
         credential_policy=dto.credential_policy,
         required_grant_scope=dto.required_grant_scope,
@@ -256,10 +260,19 @@ async def list_workspace_available(
     installs_by_id = {i.id: i for i in org_installs}
     templates_by_id = {t.id: t for t in templates}
 
+    connector_ids: dict[str, str] = {}
+    for inst in org_installs:
+        cid = await install_svc._connector_id_for_install(inst)
+        if cid is not None:
+            connector_ids[inst.id] = cid
+
     items: list[WsAvailableOut] = []
     for row in rows:
         install_out = (
-            _install_to_out(installs_by_id[row.install_id])
+            _install_to_out(
+                installs_by_id[row.install_id],
+                connector_id=connector_ids.get(row.install_id, ""),
+            )
             if row.source == "org_install" and row.install_id is not None
             else None
         )
@@ -318,7 +331,7 @@ async def create_workspace_install(
         raise HTTPException(404, detail={"code": "connector_template_not_found"}) from exc
 
     try:
-        install = await svc.create_from_template_for_workspace(
+        result = await svc.create_from_template_for_workspace(
             template=template,
             workspace_id=workspace_id,
             auth_method=body.auth_method,
@@ -337,10 +350,10 @@ async def create_workspace_install(
         event="mcp.install.created",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install.id,
+        target_id=result.install.id,
         details={"scope": "workspace", "workspace_id": workspace_id},
     )
-    return _install_to_out(install)
+    return _install_to_out(result.install, connector_id=result.connector_id)
 
 
 @router.delete(
@@ -411,7 +424,9 @@ async def ws_refresh_discovery(
         raise HTTPException(400, detail={"code": str(exc)}) from exc
     refreshed = await install_repo.get(install_id)
     assert refreshed is not None
-    return _install_to_out(refreshed)
+    connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    cid = await connector_repo.get_connector_id_for_install(refreshed) or ""
+    return _install_to_out(refreshed, connector_id=cid)
 
 
 @router.patch(
@@ -465,9 +480,13 @@ async def patch_workspace_connector_state(
         )
         new_enabled = body.enabled if body.enabled is not None else True
 
-        saved = await svc._state_repo.upsert(
+        connector_id = await svc._connector_id_for_install(install)
+        if connector_id is None:
+            raise HTTPException(500, detail={"code": "mcp_connector_identity_missing"})
+        saved = await svc._state_repo.upsert_for_connector(
             workspace_id=workspace_id,
             install_id=install_id,
+            connector_id=connector_id,
             enabled=new_enabled,
             credential_policy=new_policy,
             enablement_source="workspace_manual",
@@ -483,6 +502,7 @@ async def patch_workspace_connector_state(
         return MCPWorkspaceConnectorStateOut(
             workspace_id=saved.workspace_id,
             install_id=saved.install_id,
+            connector_id=saved.connector_id,
             enabled=saved.enabled,
             credential_policy=saved.credential_policy,  # type: ignore[arg-type]
             enablement_source=saved.enablement_source,
@@ -499,9 +519,10 @@ async def patch_workspace_connector_state(
         )
     new_enabled = body.enabled if body.enabled is not None else current.enabled
 
-    saved = await svc._state_repo.upsert(
+    saved = await svc._state_repo.upsert_for_connector(
         workspace_id=workspace_id,
         install_id=install_id,
+        connector_id=current.connector_id,
         enabled=new_enabled,
         credential_policy=new_policy,
         enablement_source=current.enablement_source,
@@ -517,6 +538,7 @@ async def patch_workspace_connector_state(
     return MCPWorkspaceConnectorStateOut(
         workspace_id=saved.workspace_id,
         install_id=saved.install_id,
+        connector_id=saved.connector_id,
         enabled=saved.enabled,
         credential_policy=saved.credential_policy,  # type: ignore[arg-type]
         enablement_source=saved.enablement_source,
@@ -584,6 +606,7 @@ async def create_my_user_grant(
     )
     return MCPCredentialGrantStatusOut(
         install_id=install_id,
+        connector_id=grant.connector_id,
         grant_scope="user",
         workspace_id=workspace_id,
         user_id=ctx.user.id,
@@ -710,6 +733,7 @@ async def create_workspace_grant(
     )
     return MCPCredentialGrantStatusOut(
         install_id=install_id,
+        connector_id=grant.connector_id,
         grant_scope="workspace",
         workspace_id=workspace_id,
         user_id=None,

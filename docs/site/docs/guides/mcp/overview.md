@@ -9,12 +9,13 @@ MCP (Model Context Protocol) connectors let the CubeBox agent call external serv
 
 ## How it works
 
-CubeBox organizes MCP tools into a simple lifecycle:
+CubeBox organizes MCP tools into a five-stage lifecycle:
 
 1. **Templates (Catalog)** — A system-wide catalog of available connector definitions. Each template describes a service (for example, "GitHub" or "Slack") and how to authenticate with it. Admins manage the catalog.
-2. **Connector identity** — When an org admin adds a template to the organization, CubeBox creates one connector identity for that service inside the org. This identity defines the MCP server URL, transport, tool namespace, and discovered tools.
-3. **Credential source** — Org admins, workspace admins, or users can provide credentials for the same connector identity. A workspace chooses whether calls use the organization credential, a workspace credential, or each user's own credential.
-4. **Active tools** — Once a workspace enables the connector and has the selected credential source, the agent can call the connector's tools whenever they are relevant to the conversation.
+2. **Connector identity** — When an admin adds a connector from the catalog, they create an org-owned connector identity. This identity is shared across workspaces and groups credentials and workspace state under a single entry.
+3. **Workspace enablement** — Each workspace opts into the connectors it needs. Enabling a connector in a workspace does not create a new identity — the workspace references the existing org-owned connector.
+4. **Credential source** — Credentials can exist at org, workspace, or user scope for the same connector. Each workspace chooses which credential to use: the org-level credential, a workspace-specific credential, or per-user OAuth. There is no implicit fallback between scopes — each workspace explicitly selects its credential source.
+5. **Active tools** — Once a connector is enabled and has a valid credential, its tools become available to workspace members. The agent can call them whenever they are relevant to the conversation.
 
 You do not need to understand the MCP protocol itself. From your perspective, connectors are just tools the agent can use.
 
@@ -22,18 +23,18 @@ You do not need to understand the MCP protocol itself. From your perspective, co
 
 CubeBox ships with templates for a growing list of services:
 
-| Category           | Connectors                                                                    |
-| ------------------ | ----------------------------------------------------------------------------- |
-| **Development**    | GitHub, Linear, Sentry, Atlassian Rovo (Jira, Confluence, Bitbucket, Compass) |
-| **Productivity**   | Notion, Asana, Google Workspace, Slack, Intercom                              |
-| **Web search**     | Tavily, Exa, Jina AI, WebTools                                                |
-| **Infrastructure** | Cloudflare (API, Workers, Observability, Logs, Radar)                         |
-| **Knowledge**      | Microsoft Learn                                                               |
+| Category | Connectors |
+|---|---|
+| **Development** | GitHub, Linear, Sentry, Atlassian Rovo (Jira, Confluence, Bitbucket, Compass) |
+| **Productivity** | Notion, Asana, Google Workspace, Slack, Intercom |
+| **Web search** | Tavily, Exa, Jina AI, WebTools |
+| **Infrastructure** | Cloudflare (API, Workers, Observability, Logs, Radar) |
+| **Knowledge** | Microsoft Learn |
 
-Your admin may have additional connectors available. Open the **MCP** page in your workspace sidebar to see what is installed and what is available to add.
+Your admin may have additional connectors available. Open the **MCP** page in your workspace sidebar to see what is enabled and what is available.
 
 :::info 📸 Screenshot placeholder
-**Capture:** The workspace **MCP** page showing the **Installed** and **Available** connector sections, with at least one connector in each (one ready, one showing a "Connect" action).
+**Capture:** The workspace **MCP** page showing the **Enabled** and **Available** connector sections, with at least one connector in each (one ready, one showing a "Connect" action).
 **Asset:** `/img/mcp/workspace-mcp-page.png`
 :::
 
@@ -45,23 +46,17 @@ Different connectors use different authentication methods:
 - **API key** — You or your admin provides a static API key. Common for search connectors like Tavily and Exa.
 - **Bearer token** — A pre-issued token, similar to an API key. Used by connectors that issue long-lived access tokens.
 
-As a workspace member, you typically do not need to worry about authentication — your admin can provide an organization or workspace credential. For connectors with user-scoped credentials (like personal OAuth), you will be prompted to authorize when you first use the connector.
+As a workspace member, you typically do not need to worry about authentication — your admin handles it when adding the connector. For connectors with user-scoped credentials (like personal OAuth), you will be prompted to authorize when you first use the connector.
 
 ## Tool citations
 
 When the agent uses an MCP tool in its response, CubeBox shows a **citation** indicating which connector provided the information and what source it came from. This helps you verify the agent's claims and trace data back to the original service.
 
-## Scoping: org-wide vs. workspace-private
+## Scoping
 
-Connectors have one organization-level identity, but credentials can be supplied at multiple levels:
-
-- **Organization credential** — Provided by an org admin and usable by workspaces that choose organization-managed access.
-- **Workspace credential** — Provided by a workspace admin and used only in that workspace.
-- **User credential** — Provided by each user, often through OAuth, and used for that user's calls.
-
-Workspace admins can disable an organization connector for their workspace or choose a workspace/user credential instead of the organization credential when policy allows it.
+Connector identities are org-owned. An org admin adds a connector once, and it becomes available for any workspace to enable. Workspace admins can enable or disable the connector for their workspace and choose which credential source to use (org credential, workspace credential, or per-user OAuth).
 
 ## Next steps
 
-- [Installing Connectors](./installing-connectors.md) — Add, enable, and connect MCP connectors.
+- [Installing Connectors](./installing-connectors.md) — Enable a connector for your workspace.
 - [Using Tools](./using-tools.md) — Learn how the agent uses tools during conversations.

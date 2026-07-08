@@ -71,6 +71,9 @@ class _FakeSession:
                     def all(self) -> list[Any]:
                         return []
 
+                    def first(self) -> Any:
+                        return None
+
                 return _Scalars()
 
             def scalar_one_or_none(self) -> Any:

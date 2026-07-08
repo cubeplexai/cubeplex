@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.config import config
 from cubebox.credentials.dependencies import build_credential_service
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET, slugify_for_namespace
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET
 from cubebox.mcp.exceptions import DCRError, OAuthMetadataFetchError, OAuthMetadataNotFound
 from cubebox.mcp.oauth.dcr import DCRClient, DCRRequest
 from cubebox.mcp.oauth.metadata import (
@@ -292,12 +292,7 @@ class OAuthStartService:
 
     async def _connector_id_for_install(self, install: MCPConnectorInstall) -> str | None:
         repo = MCPConnectorRepository(self._session, org_id=install.org_id)
-        connector = await repo.get_active_by_identity(
-            template_id=install.template_id,
-            server_url_hash=install.server_url_hash,
-            slug_name=slugify_for_namespace(install.name),
-        )
-        return connector.id if connector is not None else None
+        return await repo.get_connector_id_for_install(install)
 
     async def _ensure_client(
         self,

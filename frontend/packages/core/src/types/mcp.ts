@@ -51,7 +51,7 @@ export interface MCPConnectorTemplate {
 
 export interface MCPConnectorInstall {
   install_id: string
-  connector_id: string | null
+  connector_id: string
   template_id: string | null
   install_scope: 'org' | 'workspace'
   workspace_id: string | null
@@ -73,7 +73,7 @@ export interface MCPConnectorInstall {
 export interface MCPWorkspaceConnectorState {
   workspace_id: string
   install_id: string
-  connector_id?: string | null
+  connector_id: string
   enabled: boolean
   credential_policy: MCPCredentialScope
   enablement_source?: string
@@ -95,6 +95,7 @@ export type MCPConnectorFilter = 'all' | 'installed' | 'available' | 'custom'
 
 export interface MCPCredentialGrantStatus {
   install_id: string
+  connector_id: string
   grant_scope: 'org' | 'workspace' | 'user'
   workspace_id: string | null
   user_id: string | null

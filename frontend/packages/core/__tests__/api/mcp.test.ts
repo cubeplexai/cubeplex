@@ -35,7 +35,9 @@ describe('MCP four-layer API', () => {
 
   it('wsCreateInstall POSTs to workspace install endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ install_id: 'mcins-1' }), { status: 201 }),
+      new Response(JSON.stringify({ install_id: 'mcins-1', connector_id: 'mcpco-1' }), {
+        status: 201,
+      }),
     )
     const client = createApiClient('')
     await wsCreateInstall(client, 'ws-x', { template_id: 'mctpl-1' })
@@ -74,7 +76,9 @@ describe('MCP four-layer API', () => {
 
   it('wsCreateMyGrant posts to the per-user grant endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ install_id: 'mcins-1' }), { status: 201 }),
+      new Response(JSON.stringify({ install_id: 'mcins-1', connector_id: 'mcpco-1' }), {
+        status: 201,
+      }),
     )
     const client = createApiClient('')
     await wsCreateMyGrant(client, 'ws-x', 'mcins-1', { credential_plaintext: 'tok' })

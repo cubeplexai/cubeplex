@@ -517,34 +517,20 @@ class MCPEffectiveConnectorService:
         if policy == "none":
             return None
         connector_id = state.connector_id if state is not None else None
+        if connector_id is None:
+            return None
         if policy == "org":
-            grant = (
-                await self._grant_repo.get_org_grant_for_connector(connector_id)
-                if connector_id is not None
-                else await self._grant_repo.get_org_grant(install.id)
-            )
+            grant = await self._grant_repo.get_org_grant_for_connector(connector_id)
         elif policy == "workspace":
-            grant = (
-                await self._grant_repo.get_workspace_grant_for_connector(
-                    connector_id,
-                    workspace_id,
-                )
-                if connector_id is not None
-                else await self._grant_repo.get_workspace_grant(install.id, workspace_id)
+            grant = await self._grant_repo.get_workspace_grant_for_connector(
+                connector_id,
+                workspace_id,
             )
         elif policy == "user":
-            grant = (
-                await self._grant_repo.get_user_grant_for_connector(
-                    connector_id,
-                    user_id,
-                    workspace_id=workspace_id,
-                )
-                if connector_id is not None
-                else await self._grant_repo.get_user_grant(
-                    install.id,
-                    user_id,
-                    workspace_id=workspace_id,
-                )
+            grant = await self._grant_repo.get_user_grant_for_connector(
+                connector_id,
+                user_id,
+                workspace_id=workspace_id,
             )
         else:
             return None

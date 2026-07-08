@@ -73,7 +73,7 @@ class MCPConnectorInstallOut(BaseModel):
     """One ``MCPConnectorInstall`` row."""
 
     install_id: str
-    connector_id: str | None = None
+    connector_id: str
     template_id: str | None
     install_scope: Literal["org", "workspace"]
     workspace_id: str | None
@@ -97,6 +97,7 @@ class MCPWorkspaceConnectorStateOut(BaseModel):
 
     workspace_id: str
     install_id: str
+    connector_id: str
     enabled: bool
     credential_policy: CredentialPolicyLiteral
     enablement_source: str
@@ -106,6 +107,7 @@ class MCPCredentialGrantStatusOut(BaseModel):
     """Status of one ``MCPCredentialGrant`` (or absence thereof)."""
 
     install_id: str
+    connector_id: str
     grant_scope: Literal["org", "workspace", "user"]
     workspace_id: str | None
     user_id: str | None
