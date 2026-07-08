@@ -16,8 +16,9 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.mcp._constants import slugify_for_namespace
 from cubebox.models import MCPConnectorInstall
-from cubebox.repositories.mcp import MCPWorkspaceConnectorStateRepository
+from cubebox.repositories.mcp import MCPConnectorRepository, MCPWorkspaceConnectorStateRepository
 
 
 async def enroll_workspace_in_org_wide_mcp(
@@ -45,10 +46,19 @@ async def enroll_workspace_in_org_wide_mcp(
         return
 
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=org_id)
+    connector_repo = MCPConnectorRepository(session, org_id=org_id)
     for install in installs:
-        await state_repo.upsert(
+        connector = await connector_repo.get_active_by_identity(
+            template_id=install.template_id,
+            server_url_hash=install.server_url_hash,
+            slug_name=slugify_for_namespace(install.name),
+        )
+        if connector is None:
+            continue
+        await state_repo.upsert_for_connector(
             workspace_id=workspace_id,
             install_id=install.id,
+            connector_id=connector.id,
             enabled=True,
             credential_policy=install.default_credential_policy,
             enablement_source="org_auto_enroll",

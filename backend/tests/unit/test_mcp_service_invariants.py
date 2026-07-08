@@ -17,6 +17,7 @@ import pytest
 
 from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
 from cubebox.models import (
+    MCPConnector,
     MCPConnectorInstall,
     MCPConnectorTemplate,
 )
@@ -68,11 +69,26 @@ class _FakeInstallRepo:
         return install
 
 
+class _FakeConnectorRepo:
+    def __init__(self) -> None:
+        self.added: list[MCPConnector] = []
+
+    async def get_active_by_identity(self, **_kwargs: Any) -> None:
+        return None
+
+    async def add(self, connector: MCPConnector) -> MCPConnector:
+        self.added.append(connector)
+        return connector
+
+
 class _FakeStateRepo:
     def __init__(self) -> None:
         self.upserts: list[dict[str, Any]] = []
 
     async def upsert(self, **kwargs: Any) -> None:
+        self.upserts.append(kwargs)
+
+    async def upsert_for_connector(self, **kwargs: Any) -> None:
         self.upserts.append(kwargs)
 
 
@@ -108,6 +124,7 @@ def _make_service(
     workspace_ids: list[str] | None = None,
 ) -> tuple[MCPConnectorInstallService, _FakeInstallRepo, _FakeStateRepo]:
     install_repo = _FakeInstallRepo()
+    connector_repo = _FakeConnectorRepo()
     state_repo = _FakeStateRepo()
     grant_repo = object()  # not used by these paths
     cred_service = object()  # not used by these paths
@@ -120,6 +137,7 @@ def _make_service(
         org_id="org-1",
         actor_user_id="usr-1",
         workspace_repo=workspace_repo,  # type: ignore[arg-type]
+        connector_repo=connector_repo,
     )
     return svc, install_repo, state_repo
 
@@ -275,12 +293,34 @@ async def test_bootstrap_hook_skips_install_with_auto_enroll_disabled(
         def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
             pass
 
-        async def upsert(self, **kwargs: Any) -> None:
+        async def upsert_for_connector(self, **kwargs: Any) -> None:
             upserts.append(kwargs)
+
+    class _FakeConnectorRepoBootstrap:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
+            pass
+
+        async def get_active_by_identity(self, **_kwargs: Any) -> MCPConnector:
+            return MCPConnector(
+                id="mcpco-auto",
+                org_id="org-1",
+                template_id="mctpl-y",
+                name="on-install",
+                server_url="https://b.example.com/mcp",
+                server_url_hash="hash-b",
+                transport="streamable_http",
+                auth_method="static",
+                status="active",
+                created_by_user_id="usr-1",
+            )
 
     monkeypatch.setattr(
         "cubebox.mcp.workspace_bootstrap.MCPWorkspaceConnectorStateRepository",
         _FakeStateRepoBootstrap,
+    )
+    monkeypatch.setattr(
+        "cubebox.mcp.workspace_bootstrap.MCPConnectorRepository",
+        _FakeConnectorRepoBootstrap,
     )
 
     session = _FakeSession([install_off, install_on])
@@ -295,4 +335,5 @@ async def test_bootstrap_hook_skips_install_with_auto_enroll_disabled(
     # produced a state-row upsert for the new workspace.
     assert len(upserts) == 1, upserts
     assert upserts[0]["install_id"] == install_on.id
+    assert upserts[0]["connector_id"] == "mcpco-auto"
     assert upserts[0]["workspace_id"] == "ws-new"
