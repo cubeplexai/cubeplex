@@ -171,11 +171,18 @@ class MCPConnectorInstallService:
             template_id=template.id,
             exclude_id=None,
         )
-        if conflict is not None and conflict.workspace_id == workspace_id:
-            raise ValueError("install_already_exists")
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
-        if conflict is not None and conflict.workspace_id is None:
-            await self._state_repo.upsert(
+        if conflict is not None and conflict.workspace_id == workspace_id:
+            conflict = await self.promote_workspace_install_to_org(
+                install_id=conflict.id,
+                distribution={"mode": "none"},
+            )
+        if conflict is not None and conflict.workspace_id is not None:
+            raise ValueError("install_already_exists")
+        if conflict is not None and conflict.template_id != template.id:
+            raise ValueError("install_already_exists")
+        if conflict is not None:
+            await self._state_repo.upsert_for_connector(
                 workspace_id=workspace_id,
                 install_id=conflict.id,
                 connector_id=connector.id,
@@ -186,12 +193,10 @@ class MCPConnectorInstallService:
             )
             conflict.__dict__["_connector_id"] = connector.id
             return conflict
-        if conflict is not None:
-            raise ValueError("install_already_exists")
         install = MCPConnectorInstall(
             org_id=self._org_id,
-            workspace_id=workspace_id,
-            install_scope="workspace",
+            workspace_id=None,
+            install_scope="org",
             template_id=template.id,
             name=template.name,
             server_url=template.server_url,
@@ -204,11 +209,12 @@ class MCPConnectorInstallService:
             static_auth_style=template.static_auth_style,
             static_auth_header_name=template.static_auth_header_name,
             static_auth_query_param=template.static_auth_query_param,
+            auto_enroll_new_workspaces=False,
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
         saved.__dict__["_connector_id"] = connector.id
-        await self._state_repo.upsert(
+        await self._state_repo.upsert_for_connector(
             workspace_id=workspace_id,
             install_id=saved.id,
             connector_id=connector.id,
@@ -263,10 +269,29 @@ class MCPConnectorInstallService:
             template_id=template.id,
             exclude_id=None,
         )
-        if conflict is not None and conflict.workspace_id is None:
-            raise ValueError("install_already_exists")
         workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
+        if conflict is not None and conflict.workspace_id is None:
+            existing_states = await self._state_repo.list_for_install(conflict.id)
+            if not any(state.enablement_source == "workspace_manual" for state in existing_states):
+                raise ValueError("install_already_exists")
+            conflict.auth_method = auth_method
+            conflict.default_credential_policy = defaults.credential_policy
+            conflict.auth_status = defaults.auth_status
+            conflict.tool_citations = dict(template.tool_citation_defaults)
+            conflict.static_auth_style = template.static_auth_style
+            conflict.static_auth_header_name = template.static_auth_header_name
+            conflict.static_auth_query_param = template.static_auth_query_param
+            conflict.auto_enroll_new_workspaces = mode == "all"
+            saved = await self._install_repo.update(conflict)
+            saved.__dict__["_connector_id"] = connector.id
+            await self._fan_out_state_rows(
+                install=saved,
+                workspace_ids=workspace_ids,
+                credential_policy=defaults.credential_policy,
+                enablement_source=enablement_source,
+            )
+            return saved
         if conflict is not None:
             conflict.auth_method = auth_method
             conflict.default_credential_policy = defaults.credential_policy
