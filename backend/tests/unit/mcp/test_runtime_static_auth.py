@@ -26,7 +26,7 @@ def _make_spec(
     server_url: str = "https://mcp.example.com/mcp",
 ) -> MCPRuntimeConnectorSpec:
     return MCPRuntimeConnectorSpec(
-        install_id="mcins_test",
+        connector_id="mcins_test",
         name="test",
         server_url=server_url,
         transport="streamable_http",

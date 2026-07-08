@@ -27,7 +27,7 @@ async def test_run_post_grant_discovery_swallows_unexpected_exception(
     monkeypatch.setattr(mcp_discovery, "discover_tools_for_install", _boom)
 
     await mcp_discovery.run_post_grant_discovery(
-        install_id="mci_test",
+        connector_id="mcpco-test",
         workspace_id=None,
         actor_user_id="usr_test",
         session=None,  # type: ignore[arg-type]
@@ -50,7 +50,7 @@ async def test_run_post_grant_discovery_does_not_swallow_cancelled(
 
     with pytest.raises(asyncio.CancelledError):
         await mcp_discovery.run_post_grant_discovery(
-            install_id="mci_test",
+            connector_id="mcpco-test",
             workspace_id=None,
             actor_user_id="usr_test",
             session=None,  # type: ignore[arg-type]

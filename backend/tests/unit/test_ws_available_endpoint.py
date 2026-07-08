@@ -32,7 +32,7 @@ async def _fake_member() -> RequestContext:
 
 
 class _FakeOrgInstall:
-    id = "mcins-1"
+    id = "mcpco-1"
     template_id = "mctpl-1"
     install_scope = "org"
     workspace_id = None
@@ -75,7 +75,7 @@ def test_ws_available_lists_org_install_without_state_row() -> None:
             _state_repo = _StateRepo()
 
             async def _connector_id_for_install(self, _install: Any) -> str:
-                return "mcpco-test"
+                return "mcpco-1"
 
         return _S()
 
@@ -91,5 +91,5 @@ def test_ws_available_lists_org_install_without_state_row() -> None:
     body = res.json()
     assert len(body["items"]) == 1
     assert body["items"][0]["source"] == "org_install"
-    assert body["items"][0]["install"]["install_id"] == "mcins-1"
+    assert body["items"][0]["install"]["connector_id"] == "mcpco-1"
     assert body["items"][0]["reason"] == "no_state_row"

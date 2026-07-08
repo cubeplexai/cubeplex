@@ -19,7 +19,7 @@ from cubebox.mcp.effective import MCPRuntimeConnectorSpec
 
 def _make_spec(
     *,
-    install_id: str = "inst-001",
+    connector_id: str = "inst-001",
     name: str = "GitHub",
     server_url: str = "https://mcp.example.com/github",
     transport: str = "streamable_http",
@@ -29,7 +29,7 @@ def _make_spec(
     tool_citations: dict[str, dict[str, Any]] | None = None,
 ) -> MCPRuntimeConnectorSpec:
     return MCPRuntimeConnectorSpec(
-        install_id=install_id,
+        connector_id=connector_id,
         name=name,
         server_url=server_url,
         transport=transport,
@@ -170,12 +170,12 @@ class TestComputeNamespacedToolNames:
 
     def test_slug_collision_appends_suffix(self) -> None:
         spec_a = _make_spec(
-            install_id="inst-aaaa",
+            connector_id="inst-aaaa",
             name="GitHub",
             tools_cache=[{"name": "create_issue"}],
         )
         spec_b = _make_spec(
-            install_id="inst-bbbb",
+            connector_id="inst-bbbb",
             name="GitHub",
             tools_cache=[{"name": "list_repos"}],
         )
@@ -320,12 +320,12 @@ class TestBuildDeferredGroups:
 
     def test_multiple_specs_produce_multiple_groups(self) -> None:
         spec_a = _make_spec(
-            install_id="inst-a",
+            connector_id="inst-a",
             name="GitHub",
             tools_cache=[{"name": "create_issue"}],
         )
         spec_b = _make_spec(
-            install_id="inst-b",
+            connector_id="inst-b",
             name="Slack",
             tools_cache=[{"name": "post_message"}],
         )
@@ -340,12 +340,12 @@ class TestBuildDeferredGroups:
 
     def test_slug_collision_disambiguates_group_id(self) -> None:
         spec_a = _make_spec(
-            install_id="inst-aaaa",
+            connector_id="inst-aaaa",
             name="GitHub",
             tools_cache=[{"name": "create_issue"}],
         )
         spec_b = _make_spec(
-            install_id="inst-bbbb",
+            connector_id="inst-bbbb",
             name="GitHub",
             tools_cache=[{"name": "list_repos"}],
         )

@@ -570,12 +570,12 @@ def test_workspace_create_install_forbids_unknown_keys() -> None:
 
 
 def _make_fake_install_for_workspace(template_id: str, workspace_id: str) -> Any:
-    """Stand-in InstallWithConnector with the surface the route reads."""
-    from cubebox.services.mcp_installs import InstallWithConnector
+    """Stand-in ConnectorWithIdentity with the surface the route reads."""
+    from cubebox.services.mcp_installs import ConnectorWithIdentity
 
     class _Row:
         def __init__(self) -> None:
-            self.id = "mcins-ws-1"
+            self.id = "mcpco-ws-1"
             self.template_id = template_id
             self.install_scope = "workspace"
             self.workspace_id = workspace_id
@@ -594,7 +594,7 @@ def _make_fake_install_for_workspace(template_id: str, workspace_id: str) -> Any
             self.auto_enroll_new_workspaces = False
             self.headers: dict[str, str] = {}
 
-    return InstallWithConnector(install=_Row(), connector_id="mcpco-test")  # type: ignore[arg-type]
+    return ConnectorWithIdentity(connector=_Row(), connector_id="mcpco-ws-1")  # type: ignore[arg-type]
 
 
 def test_post_workspace_install_with_workspace_scope_returns_201() -> None:

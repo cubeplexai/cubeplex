@@ -32,7 +32,7 @@ _WEATHER_SCHEMA: dict[str, Any] = {
 
 def _make_spec(tools_cache: list[dict[str, Any]]) -> MCPRuntimeConnectorSpec:
     return MCPRuntimeConnectorSpec(
-        install_id="mcins_cache",
+        connector_id="mcins_cache",
         name="weather",
         server_url="https://mcp.example.com/mcp",
         transport="streamable_http",

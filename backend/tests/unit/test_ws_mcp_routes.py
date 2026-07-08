@@ -23,16 +23,22 @@ def test_workspace_mcp_four_layer_routes_are_registered() -> None:
         ("GET", "/api/v1/ws/{workspace_id}/mcp/templates"),
         ("GET", "/api/v1/ws/{workspace_id}/mcp/connectors"),
         ("POST", "/api/v1/ws/{workspace_id}/mcp/installs"),
-        ("DELETE", "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}"),
-        ("PATCH", "/api/v1/ws/{workspace_id}/mcp/connectors/{install_id}/state"),
-        ("POST", "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me"),
-        ("DELETE", "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me"),
-        ("POST", "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/me/oauth/start"),
-        ("POST", "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace"),
-        ("DELETE", "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace"),
+        ("DELETE", "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}"),
+        ("PATCH", "/api/v1/ws/{workspace_id}/mcp/connectors/{connector_id}/state"),
+        ("POST", "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/me"),
+        ("DELETE", "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/me"),
         (
             "POST",
-            "/api/v1/ws/{workspace_id}/mcp/installs/{install_id}/grants/workspace/oauth/start",
+            "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/me/oauth/start",
+        ),
+        ("POST", "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/workspace"),
+        (
+            "DELETE",
+            "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/workspace",
+        ),
+        (
+            "POST",
+            "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/workspace/oauth/start",
         ),
     ]
     for method, path in expected:
