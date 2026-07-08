@@ -16,7 +16,7 @@ from cubebox.mcp.template_seed import (
     MCPConnectorTemplateSeedEntry,
     seed_templates,
 )
-from cubebox.models import Credential, MCPConnectorInstall, MCPConnectorTemplate
+from cubebox.models import Credential, MCPConnector, MCPConnectorTemplate
 from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
 
@@ -72,7 +72,7 @@ def test_atlassian_catalog_uses_rovo_mcp_authv2_endpoint() -> None:
     assert "atlassian-rovo-mcp-server" in atlassian.template_metadata["docs_url"]
 
 
-async def test_seed_updates_active_installs_materialized_from_template(
+async def test_seed_updates_active_connectors_materialized_from_template(
     session: AsyncSession, backend: FernetBackend
 ) -> None:
     old_url = "https://mcp.atlassian.com/v1/sse"
@@ -93,10 +93,8 @@ async def test_seed_updates_active_installs_materialized_from_template(
     session.add(old_template)
     await session.flush()
 
-    install = MCPConnectorInstall(
+    connector = MCPConnector(
         org_id="org-1",
-        workspace_id="ws-1",
-        install_scope="workspace",
         template_id=old_template.id,
         name="Atlassian",
         server_url=old_url,
@@ -105,26 +103,24 @@ async def test_seed_updates_active_installs_materialized_from_template(
         auth_method="oauth",
         default_credential_policy="org",
         auth_status="pending",
-        install_state="active",
+        status="active",
     )
-    session.add(install)
+    session.add(connector)
     await session.flush()
-    before_updated_at = install.updated_at
+    before_updated_at = connector.updated_at
 
     result = await seed_templates(session, backend, get_env=lambda _k: None)
 
     assert result.upserted >= 1
-    refreshed_install = (
-        await session.execute(
-            select(MCPConnectorInstall).where(MCPConnectorInstall.id == install.id)
-        )
+    refreshed_connector = (
+        await session.execute(select(MCPConnector).where(MCPConnector.id == connector.id))
     ).scalar_one()
-    assert refreshed_install.server_url == "https://mcp.atlassian.com/v1/mcp/authv2"
-    assert refreshed_install.server_url_hash == server_url_hash(
+    assert refreshed_connector.server_url == "https://mcp.atlassian.com/v1/mcp/authv2"
+    assert refreshed_connector.server_url_hash == server_url_hash(
         "https://mcp.atlassian.com/v1/mcp/authv2"
     )
-    assert refreshed_install.transport == "streamable_http"
-    assert refreshed_install.updated_at > before_updated_at
+    assert refreshed_connector.transport == "streamable_http"
+    assert refreshed_connector.updated_at > before_updated_at
 
 
 async def test_seed_with_full_env_writes_templates_and_credentials(

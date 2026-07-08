@@ -1,12 +1,12 @@
-"""Service-layer invariants for ``MCPConnectorInstallService``.
+"""Service-layer invariants for ``MCPConnectorService``.
 
 These tests exercise the pure service logic with fake repositories so the
 invariants documented inside ``cubebox/services/mcp_installs.py`` are
 guarded without a real DB session. The focus is the
 ``auto_enroll_new_workspaces`` derivation from ``distribution.mode`` at
-install create time — a wrong default here causes the
+connector create time — a wrong default here causes the
 ``workspace_bootstrap.enroll_workspace_in_org_wide_mcp`` hook to silently
-fan an explicitly-scoped install out into every newly-created workspace.
+fan an explicitly-scoped connector out into every newly-created workspace.
 """
 
 from __future__ import annotations
@@ -18,10 +18,9 @@ import pytest
 from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
 from cubebox.models import (
     MCPConnector,
-    MCPConnectorInstall,
     MCPConnectorTemplate,
 )
-from cubebox.services.mcp_installs import MCPConnectorInstallService
+from cubebox.services.mcp_installs import MCPConnectorService
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -31,10 +30,9 @@ from cubebox.services.mcp_installs import MCPConnectorInstallService
 class _NoConflictSession:
     """Stub session whose ``execute()`` always reports no conflict.
 
-    ``MCPConnectorInstallService._has_install_conflict`` runs a SELECT
-    through ``install_repo.session.execute(...)``; for these auto-enroll
-    invariant tests we just need the preflight to find nothing and let
-    the real ``add()`` capture the install row.
+    ``MCPConnectorService`` may call through repository-backed preflights; for
+    these auto-enroll invariant tests we just need any such preflight to find
+    nothing and let the fake connector repository capture the connector row.
     """
 
     async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
@@ -57,21 +55,10 @@ class _NoConflictSession:
         return None
 
 
-class _FakeInstallRepo:
-    """Capture the row passed to ``add`` so tests can inspect it."""
-
-    def __init__(self) -> None:
-        self.added: list[MCPConnectorInstall] = []
-        self.session = _NoConflictSession()
-
-    async def add(self, install: MCPConnectorInstall) -> MCPConnectorInstall:
-        self.added.append(install)
-        return install
-
-
 class _FakeConnectorRepo:
     def __init__(self) -> None:
         self.added: list[MCPConnector] = []
+        self.session = _NoConflictSession()
 
     async def get_active_by_identity(self, **_kwargs: Any) -> None:
         return None
@@ -119,15 +106,13 @@ def _make_template() -> MCPConnectorTemplate:
 def _make_service(
     *,
     workspace_ids: list[str] | None = None,
-) -> tuple[MCPConnectorInstallService, _FakeInstallRepo, _FakeStateRepo]:
-    install_repo = _FakeInstallRepo()
+) -> tuple[MCPConnectorService, _FakeConnectorRepo, _FakeStateRepo]:
     connector_repo = _FakeConnectorRepo()
     state_repo = _FakeStateRepo()
     grant_repo = object()  # not used by these paths
     cred_service = object()  # not used by these paths
     workspace_repo = _FakeWorkspaceRepo(workspace_ids) if workspace_ids is not None else None
-    svc = MCPConnectorInstallService(
-        install_repo=install_repo,  # type: ignore[arg-type]
+    svc = MCPConnectorService(
         state_repo=state_repo,  # type: ignore[arg-type]
         grant_repo=grant_repo,  # type: ignore[arg-type]
         cred_service=cred_service,  # type: ignore[arg-type]
@@ -136,72 +121,72 @@ def _make_service(
         workspace_repo=workspace_repo,  # type: ignore[arg-type]
         connector_repo=connector_repo,
     )
-    return svc, install_repo, state_repo
+    return svc, connector_repo, state_repo
 
 
 # ---------------------------------------------------------------------------
-# auto_enroll_new_workspaces derivation at install create time
+# auto_enroll_new_workspaces derivation at connector create time
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_create_org_install_selected_disables_auto_enroll() -> None:
+async def test_create_org_connector_selected_disables_auto_enroll() -> None:
     """``distribution.mode='selected'`` must persist ``auto_enroll_new_workspaces=False``.
 
     An admin asking for a curated workspace list does NOT want the install
     to silently fan out to workspaces created later. Without this, the
     model's ``server_default=true`` leaks the scope.
     """
-    svc, install_repo, _ = _make_service(workspace_ids=["ws-a"])
+    svc, connector_repo, _ = _make_service(workspace_ids=["ws-a"])
     saved = await svc.create_from_template_for_org(
         template=_make_template(),
         auth_method="static",
         credential_policy="org",
         distribution={"mode": "selected", "workspace_ids": ["ws-a"]},
     )
-    assert saved.install.auto_enroll_new_workspaces is False
-    assert install_repo.added[0].auto_enroll_new_workspaces is False
+    assert saved.connector.auto_enroll_new_workspaces is False
+    assert connector_repo.added[0].auto_enroll_new_workspaces is False
 
 
 @pytest.mark.asyncio
-async def test_create_org_install_none_disables_auto_enroll() -> None:
+async def test_create_org_connector_none_disables_auto_enroll() -> None:
     """``distribution.mode='none'`` must persist ``auto_enroll_new_workspaces=False``.
 
     Mode 'none' means "install row only, no state rows yet"; the admin will
     enable workspaces by hand later. Auto-enrolling into newly-created
     workspaces would contradict that intent.
     """
-    svc, install_repo, _ = _make_service(workspace_ids=[])
+    svc, connector_repo, _ = _make_service(workspace_ids=[])
     saved = await svc.create_from_template_for_org(
         template=_make_template(),
         auth_method="static",
         credential_policy="org",
         distribution={"mode": "none"},
     )
-    assert saved.install.auto_enroll_new_workspaces is False
-    assert install_repo.added[0].auto_enroll_new_workspaces is False
+    assert saved.connector.auto_enroll_new_workspaces is False
+    assert connector_repo.added[0].auto_enroll_new_workspaces is False
 
 
 @pytest.mark.asyncio
-async def test_create_org_install_all_enables_auto_enroll() -> None:
+async def test_create_org_connector_all_enables_auto_enroll() -> None:
     """``distribution.mode='all'`` must persist ``auto_enroll_new_workspaces=True``.
 
     'all' is the only mode where future workspaces should inherit the
     install automatically — the admin explicitly opted into org-wide reach.
     """
-    svc, install_repo, _ = _make_service(workspace_ids=["ws-a", "ws-b"])
+    svc, connector_repo, _ = _make_service(workspace_ids=["ws-a", "ws-b"])
     saved = await svc.create_from_template_for_org(
         template=_make_template(),
         auth_method="static",
         credential_policy="org",
         distribution={"mode": "all"},
     )
-    assert saved.install.auto_enroll_new_workspaces is True
-    assert install_repo.added[0].auto_enroll_new_workspaces is True
+    assert saved.connector.auto_enroll_new_workspaces is True
+    assert connector_repo.added[0].auto_enroll_new_workspaces is True
 
 
 # ---------------------------------------------------------------------------
-# workspace_bootstrap hook: skips installs with auto_enroll_new_workspaces=False
+# workspace_bootstrap hook: skips connectors with auto_enroll_new_workspaces=False
 # ---------------------------------------------------------------------------
 
 
@@ -216,49 +201,21 @@ class _FakeScalarResult:
         return list(self._rows)
 
 
-class _FakeSession:
-    """Minimal AsyncSession stand-in: ``execute(stmt)`` returns the pre-baked rows.
-
-    The actual SQL filter (``auto_enroll_new_workspaces.is_(True)``) is the
-    contract under test, so the fake session must apply that filter rather
-    than blindly returning everything — otherwise the test would pass for
-    the wrong reason.
-    """
-
-    def __init__(self, installs: list[MCPConnectorInstall]) -> None:
-        self._installs = installs
-        self.upserts: list[dict[str, Any]] = []
-
-    async def execute(self, stmt: Any) -> _FakeScalarResult:  # noqa: ARG002
-        # Mirror the SQL WHERE clauses in ``enroll_workspace_in_org_wide_mcp``:
-        # org_id match, workspace_id IS NULL, install_state == 'active',
-        # auto_enroll_new_workspaces IS TRUE.
-        filtered = [
-            i
-            for i in self._installs
-            if i.workspace_id is None
-            and i.install_state == "active"
-            and i.auto_enroll_new_workspaces is True
-        ]
-        return _FakeScalarResult(filtered)
-
-
 @pytest.mark.asyncio
-async def test_bootstrap_hook_skips_install_with_auto_enroll_disabled(
+async def test_bootstrap_hook_skips_connector_with_auto_enroll_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``enroll_workspace_in_org_wide_mcp`` must skip installs flagged False.
+    """``enroll_workspace_in_org_wide_mcp`` must skip connectors flagged False.
 
     Belt-and-suspenders with the create-time test above: even if some
     future refactor regresses the create-side default, the bootstrap hook
-    itself must not enroll an install whose flag was explicitly turned off.
+    itself must not enroll a connector whose flag was explicitly turned off.
     """
-    install_off = MCPConnectorInstall(
+    connector_off = MCPConnector(
+        id="mcpco-off",
         org_id="org-1",
-        workspace_id=None,
-        install_scope="org",
         template_id="mctpl-x",
-        name="off-install",
+        name="off-connector",
         server_url="https://a.example.com/mcp",
         server_url_hash="hash-a",
         transport="streamable_http",
@@ -268,12 +225,11 @@ async def test_bootstrap_hook_skips_install_with_auto_enroll_disabled(
         auto_enroll_new_workspaces=False,
         created_by_user_id="usr-1",
     )
-    install_on = MCPConnectorInstall(
+    connector_on = MCPConnector(
+        id="mcpco-on",
         org_id="org-1",
-        workspace_id=None,
-        install_scope="org",
         template_id="mctpl-y",
-        name="on-install",
+        name="on-connector",
         server_url="https://b.example.com/mcp",
         server_url_hash="hash-b",
         transport="streamable_http",
@@ -297,19 +253,12 @@ async def test_bootstrap_hook_skips_install_with_auto_enroll_disabled(
         def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
             pass
 
-        async def get_active_by_identity(self, **_kwargs: Any) -> MCPConnector:
-            return MCPConnector(
-                id="mcpco-auto",
-                org_id="org-1",
-                template_id="mctpl-y",
-                name="on-install",
-                server_url="https://b.example.com/mcp",
-                server_url_hash="hash-b",
-                transport="streamable_http",
-                auth_method="static",
-                status="active",
-                created_by_user_id="usr-1",
-            )
+        async def list_auto_enroll_active(self) -> list[MCPConnector]:
+            return [
+                connector
+                for connector in [connector_off, connector_on]
+                if connector.status == "active" and connector.auto_enroll_new_workspaces is True
+            ]
 
     monkeypatch.setattr(
         "cubebox.mcp.workspace_bootstrap.MCPWorkspaceConnectorStateRepository",
@@ -320,7 +269,7 @@ async def test_bootstrap_hook_skips_install_with_auto_enroll_disabled(
         _FakeConnectorRepoBootstrap,
     )
 
-    session = _FakeSession([install_off, install_on])
+    session = object()
     await enroll_workspace_in_org_wide_mcp(
         session,  # type: ignore[arg-type]
         org_id="org-1",
@@ -328,9 +277,8 @@ async def test_bootstrap_hook_skips_install_with_auto_enroll_disabled(
         actor_user_id="usr-1",
     )
 
-    # Only the install with auto_enroll_new_workspaces=True should have
+    # Only the connector with auto_enroll_new_workspaces=True should have
     # produced a state-row upsert for the new workspace.
     assert len(upserts) == 1, upserts
-    assert upserts[0]["install_id"] == install_on.id
-    assert upserts[0]["connector_id"] == "mcpco-auto"
+    assert upserts[0]["connector_id"] == connector_on.id
     assert upserts[0]["workspace_id"] == "ws-new"

@@ -23,12 +23,12 @@ def test_admin_mcp_four_layer_routes_are_registered() -> None:
     expected: list[tuple[str, str]] = [
         ("GET", "/api/v1/admin/mcp/templates"),
         ("POST", "/api/v1/admin/mcp/installs"),
-        ("GET", "/api/v1/admin/mcp/installs/{install_id}"),
-        ("PATCH", "/api/v1/admin/mcp/installs/{install_id}"),
-        ("DELETE", "/api/v1/admin/mcp/installs/{install_id}"),
-        ("POST", "/api/v1/admin/mcp/installs/{install_id}/grants/org"),
-        ("DELETE", "/api/v1/admin/mcp/installs/{install_id}/grants/org"),
-        ("POST", "/api/v1/admin/mcp/installs/{install_id}/grants/org/oauth/start"),
+        ("GET", "/api/v1/admin/mcp/installs/{connector_id}"),
+        ("PATCH", "/api/v1/admin/mcp/installs/{connector_id}"),
+        ("DELETE", "/api/v1/admin/mcp/installs/{connector_id}"),
+        ("POST", "/api/v1/admin/mcp/installs/{connector_id}/grants/org"),
+        ("DELETE", "/api/v1/admin/mcp/installs/{connector_id}/grants/org"),
+        ("POST", "/api/v1/admin/mcp/installs/{connector_id}/grants/org/oauth/start"),
     ]
     for method, path in expected:
         assert (method, path) in pairs, f"missing route: {method} {path}"
