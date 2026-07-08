@@ -159,3 +159,22 @@ def test_mcp_connector_backfill_migration_preserves_workspace_credential_policy(
     assert "i.workspace_id IS NOT NULL" in create_state_sql
     assert "install_state = 'uninstalled'" in tombstone_sql
     assert "workspace_id IS NOT NULL" in tombstone_sql
+
+
+def test_mcp_connector_state_and_grants_are_rekeyed_by_connector_id() -> None:
+    """Connector cleanup must make connector_id the DB-enforced runtime key."""
+    m = _load_migration("bdf4b31f91d2")
+
+    upgrade_consts = [const for const in m.upgrade.__code__.co_consts if isinstance(const, str)]
+    upgrade_text = "\n".join(upgrade_consts)
+
+    assert "mcp_workspace_connector_states" in upgrade_text
+    assert "connector_id" in upgrade_text
+    assert "uq_mcp_workspace_connector_state" in upgrade_text
+    assert "mcp_credential_grants" in upgrade_text
+    assert "uq_mcp_credential_grant_org" in upgrade_text
+    assert "uq_mcp_credential_grant_workspace" in upgrade_text
+    assert "uq_mcp_credential_grant_user" in upgrade_text
+    assert "grant_scope = 'org'" in upgrade_text
+    assert "grant_scope = 'workspace'" in upgrade_text
+    assert "grant_scope = 'user'" in upgrade_text

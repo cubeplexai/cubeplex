@@ -326,7 +326,7 @@ class MCPWorkspaceConnectorState(CubeboxBase, table=True):
     _PREFIX: ClassVar[str] = "mcwcs"
     __tablename__ = "mcp_workspace_connector_states"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "install_id", name="uq_mcp_workspace_connector_state"),
+        UniqueConstraint("workspace_id", "connector_id", name="uq_mcp_workspace_connector_state"),
         CheckConstraint(
             "credential_policy IN ('org','workspace','user','none')",
             name="ck_mcp_workspace_connector_states_policy",
@@ -336,9 +336,7 @@ class MCPWorkspaceConnectorState(CubeboxBase, table=True):
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
     install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
-    connector_id: str | None = Field(
-        default=None, foreign_key="mcp_connectors.id", max_length=20, index=True, nullable=True
-    )
+    connector_id: str = Field(foreign_key="mcp_connectors.id", max_length=20, index=True)
     enabled: bool = Field(default=True, sa_column_kwargs={"server_default": text("true")})
     credential_policy: str = Field(max_length=16)
     enablement_source: str = Field(max_length=32)
@@ -378,20 +376,20 @@ class MCPCredentialGrant(CubeboxBase, table=True):
         # migration-only) so autogenerate sees no drift.
         Index(
             "uq_mcp_credential_grant_org",
-            "install_id",
+            "connector_id",
             unique=True,
             postgresql_where="grant_scope = 'org'",
         ),
         Index(
             "uq_mcp_credential_grant_workspace",
-            "install_id",
+            "connector_id",
             "workspace_id",
             unique=True,
             postgresql_where="grant_scope = 'workspace'",
         ),
         Index(
             "uq_mcp_credential_grant_user",
-            "install_id",
+            "connector_id",
             "workspace_id",
             "user_id",
             unique=True,
@@ -401,9 +399,7 @@ class MCPCredentialGrant(CubeboxBase, table=True):
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     install_id: str = Field(foreign_key="mcp_connector_installs.id", max_length=20, index=True)
-    connector_id: str | None = Field(
-        default=None, foreign_key="mcp_connectors.id", max_length=20, index=True, nullable=True
-    )
+    connector_id: str = Field(foreign_key="mcp_connectors.id", max_length=20, index=True)
     grant_scope: str = Field(max_length=16)
     workspace_id: str | None = Field(
         default=None, foreign_key="workspaces.id", max_length=20, index=True, nullable=True
