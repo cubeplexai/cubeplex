@@ -5,18 +5,18 @@ title: Installing Connectors
 
 # Installing Connectors
 
-This guide walks you through adding MCP connectors to your workspace. You need **admin** permissions (org admin or workspace admin) to install connectors.
+This guide walks you through adding MCP connectors to an organization and enabling them in a workspace. You need **admin** permissions (org admin or workspace admin) to manage connectors.
 
 ## Browse the catalog
 
-1. Open the **MCP** page from your workspace sidebar (for workspace-level installs). Org admins install org-wide connectors from **Admin > MCP Connectors** (`/admin/mcp`).
+1. Open the **MCP** page from your workspace sidebar. Org admins add organization connectors from **Admin > MCP Connectors** (`/admin/mcp`).
 2. You will see the connector catalog. The page splits into an **Installed** section (connectors already set up for your workspace) and an **Available** section (connectors you can add), each showing names, descriptions, and authentication requirements.
 
 Each catalog entry shows its current status for your workspace:
 
-- **Not installed** — the template is available but has not been set up yet.
-- **Installed (org-wide)** — an org admin installed this connector for all workspaces.
-- **Installed (workspace)** — this connector is installed in your workspace specifically.
+- **Available** — the template is available but has not been enabled for this workspace.
+- **Added to organization** — an org admin added this connector identity for the organization.
+- **Enabled in workspace** — this workspace can use the connector.
 - **Disabled** — an org-wide connector has been turned off for this workspace.
 
 ## Install with an API key
@@ -26,9 +26,9 @@ For connectors that use static credentials (like Tavily, Exa, or Jina AI):
 1. Click the connector in the catalog.
 2. Select **API Key** as the authentication method.
 3. Paste your API key or token in the form field.
-4. Click **Install**.
+4. Click **Connect** or **Save credential**.
 
-CubeBox encrypts the credential and stores it securely. The connector's tools become available to workspace members immediately.
+CubeBox encrypts the credential and stores it securely. If the workspace is enabled for the connector, its tools become available to workspace members immediately.
 
 :::tip Where to get API keys
 Each connector's install form includes a link to the service's developer console where you can generate an API key.
@@ -59,20 +59,22 @@ Some connectors may be configured so that each user authorizes their own account
 
 OAuth tokens can expire. If a connector loses its authorization, its card on the **MCP** page shows a **Needs your credential** state with a **Re-authenticate** action. Click it to re-run the OAuth flow and restore access.
 
-## Org-wide vs. workspace installs
+## Organization connector vs. credential source
 
-| Scope | Who can install | Visible in |
-|---|---|---|
-| **Org-wide** | Org admin (via **Admin > MCP Connectors**) | All workspaces in the organization |
-| **Workspace** | Workspace admin (via the workspace **MCP** page) | That workspace only |
+| Layer                       | Who manages it                             | What it controls                                                                         |
+| --------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Organization connector**  | Org admin (via **Admin > MCP Connectors**) | The shared connector identity: template, server URL, tool namespace, and discovery cache |
+| **Organization credential** | Org admin                                  | The credential workspaces may choose to use                                              |
+| **Workspace credential**    | Workspace admin                            | A credential used only in that workspace                                                 |
+| **User credential**         | Each user                                  | A personal OAuth grant or token used for that user's calls                               |
 
-- Org-wide installs are useful for connectors the whole team needs (e.g., a shared GitHub integration).
-- Workspace installs are useful for project-specific tools or when different workspaces need different credentials.
+- Adding a connector at the organization level does **not** erase existing workspace credentials.
+- A workspace can use the organization credential, provide its own workspace credential, require each user to connect their own account, or disable the connector.
 
 ## Disable or remove a connector
 
-- **Disable an org-wide connector** for your workspace: open the workspace **MCP** page, find the connector, and turn it off. The connector remains installed org-wide but is hidden from your workspace.
-- **Remove a workspace connector**: open the workspace **MCP** page, find the connector, and choose **Uninstall**. This deletes the install and its credentials.
+- **Disable an organization connector** for your workspace: open the workspace **MCP** page, find the connector, and turn it off. The connector remains available to other workspaces.
+- **Remove a workspace credential**: open the workspace **MCP** page, find the connector, and disconnect the workspace credential. The organization connector remains available.
 
 ## Verifying the install
 

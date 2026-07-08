@@ -51,6 +51,7 @@ export interface MCPConnectorTemplate {
 
 export interface MCPConnectorInstall {
   install_id: string
+  connector_id: string | null
   template_id: string | null
   install_scope: 'org' | 'workspace'
   workspace_id: string | null
@@ -72,6 +73,7 @@ export interface MCPConnectorInstall {
 export interface MCPWorkspaceConnectorState {
   workspace_id: string
   install_id: string
+  connector_id?: string | null
   enabled: boolean
   credential_policy: MCPCredentialScope
   enablement_source?: string
