@@ -107,7 +107,11 @@ def _template_to_out(
     )
 
 
-def _install_to_out(install: MCPConnectorInstall) -> MCPConnectorInstallOut:
+def _install_to_out(
+    install: MCPConnectorInstall,
+    *,
+    connector_id: str | None = None,
+) -> MCPConnectorInstallOut:
     tools_cache = install.tools_cache or []
     tool_entries = [
         MCPToolEntry(
@@ -120,6 +124,7 @@ def _install_to_out(install: MCPConnectorInstall) -> MCPConnectorInstallOut:
     ]
     return MCPConnectorInstallOut(
         install_id=install.id,
+        connector_id=connector_id or getattr(install, "_connector_id", None),
         template_id=install.template_id,
         install_scope=install.install_scope,  # type: ignore[arg-type]
         workspace_id=install.workspace_id,
@@ -307,7 +312,7 @@ async def create_admin_install(
         target_id=install.id,
         details={"scope": "org", "template_id": template_id_for_audit},
     )
-    return _install_to_out(install)
+    return _install_to_out(install, connector_id=getattr(install, "_connector_id", None))
 
 
 @router.get(

@@ -35,6 +35,7 @@ from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
 from cubebox.models import Role, User
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
@@ -167,6 +168,7 @@ async def get_ws_install_service(
         org_id=ctx.org_id,
         actor_user_id=ctx.user.id,
         workspace_repo=WorkspaceRepository(session),
+        connector_repo=MCPConnectorRepository(session, org_id=ctx.org_id),
     )
 
 
@@ -215,6 +217,7 @@ async def get_admin_install_service(
         org_id=ctx.org_id,
         actor_user_id=ctx.user.id,
         workspace_repo=WorkspaceRepository(session),
+        connector_repo=MCPConnectorRepository(session, org_id=ctx.org_id),
     )
 
 
