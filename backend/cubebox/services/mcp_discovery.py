@@ -34,6 +34,7 @@ from cubepi.mcp.http_loader import _open_session
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cubebox.mcp._constants import slugify_for_namespace
 from cubebox.mcp.cubepi_runtime import MCPTransport
 from cubebox.mcp.effective import MCPEffectiveConnectorService
 from cubebox.mcp.exceptions import MCPDiscoveryFailed
@@ -41,6 +42,7 @@ from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
@@ -297,6 +299,12 @@ async def discover_tools_for_install(
         raise ValueError("connector_install_not_found")
     if install.install_state != "active":
         raise ValueError("connector_install_not_active")
+    connector_repo = MCPConnectorRepository(session, org_id=install.org_id)
+    connector = await connector_repo.get_active_by_identity(
+        template_id=install.template_id,
+        server_url_hash=install.server_url_hash,
+        slug_name=slugify_for_namespace(install.name),
+    )
 
     state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=install.org_id)
     grant_repo = MCPCredentialGrantRepository(session, org_id=install.org_id)
@@ -383,6 +391,10 @@ async def discover_tools_for_install(
     except Exception as exc:  # noqa: BLE001
         install.discovery_status = "error"
         install.last_error = f"credential_resolution_failed: {_format_discovery_error(exc)}"[:2048]
+        if connector is not None:
+            connector.discovery_status = install.discovery_status
+            connector.last_error = install.last_error
+            await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
             install_id=install_id,
@@ -394,6 +406,10 @@ async def discover_tools_for_install(
     if resolved is None:
         install.discovery_status = "error"
         install.last_error = "Auth header resolution failed"
+        if connector is not None:
+            connector.discovery_status = install.discovery_status
+            connector.last_error = install.last_error
+            await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
             install_id=install_id,
@@ -419,6 +435,10 @@ async def discover_tools_for_install(
         logger.warning("MCP discovery failed for {}: {}", install_id, formatted)
         install.discovery_status = "error"
         install.last_error = formatted[:2048]
+        if connector is not None:
+            connector.discovery_status = install.discovery_status
+            connector.last_error = install.last_error
+            await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
             install_id=install_id,
@@ -443,6 +463,11 @@ async def discover_tools_for_install(
     install.discovery_metadata = _build_discovery_metadata(discovered)
     install.discovery_status = "ok"
     install.last_error = None
+    if connector is not None:
+        connector.tools_cache = tools_cache_raw
+        connector.discovery_status = install.discovery_status
+        connector.last_error = install.last_error
+        await connector_repo.update(connector)
     await install_repo.update(install)
     return DiscoveryResult(
         install_id=install_id,

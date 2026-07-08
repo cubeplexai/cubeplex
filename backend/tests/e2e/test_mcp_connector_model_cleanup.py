@@ -6,10 +6,12 @@ import secrets
 
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.mcp._constants import server_url_hash
+from cubebox.mcp.effective import MCPEffectiveConnectorService
 from cubebox.models import (
     Credential,
     MCPConnector,
@@ -23,6 +25,7 @@ from cubebox.models import (
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
     MCPConnectorRepository,
+    MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
 )
@@ -210,6 +213,168 @@ async def test_credential_grants_are_keyed_by_connector_id(
     assert user_grant.install_id == install_id
     assert user_grant.connector_id == connector_id
     assert user_grant.credential_id == credentials[2].id
+
+
+async def test_effective_runtime_resolves_workspace_grant_by_connector_id(
+    db_session: AsyncSession,
+) -> None:
+    (
+        org_id,
+        workspace_id,
+        user_id,
+        connector_id,
+        install_id,
+        suffix,
+    ) = await _create_connector_fixture(db_session)
+    install_repo = MCPConnectorInstallRepository(db_session, org_id=org_id)
+    legacy_install = await install_repo.add(
+        MCPConnectorInstall(
+            org_id=org_id,
+            workspace_id=None,
+            install_scope="org",
+            template_id=None,
+            name=f"Legacy Grant Owner {suffix}",
+            server_url=f"https://legacy-grant-owner-{suffix}.example.com/mcp",
+            server_url_hash=server_url_hash(f"https://legacy-grant-owner-{suffix}.example.com/mcp"),
+            transport="streamable_http",
+            auth_method="static",
+            default_credential_policy="workspace",
+            install_state="uninstalled",
+            created_by_user_id=user_id,
+        )
+    )
+
+    credential = Credential(
+        org_id=org_id,
+        kind="mcp_server",
+        name=f"cleanup-effective-workspace-{suffix}",
+        value_encrypted=b"workspace-secret",
+    )
+    db_session.add(credential)
+    await db_session.flush()
+
+    await MCPWorkspaceConnectorStateRepository(db_session, org_id=org_id).upsert_for_connector(
+        workspace_id=workspace_id,
+        connector_id=connector_id,
+        install_id=install_id,
+        enabled=True,
+        credential_policy="workspace",
+        enablement_source="workspace_manual",
+        updated_by_user_id=user_id,
+    )
+    await MCPCredentialGrantRepository(db_session, org_id=org_id).add(
+        MCPCredentialGrant(
+            org_id=org_id,
+            install_id=legacy_install.id,
+            connector_id=connector_id,
+            grant_scope="workspace",
+            workspace_id=workspace_id,
+            credential_id=credential.id,
+            created_by_user_id=user_id,
+        )
+    )
+
+    service = MCPEffectiveConnectorService(
+        template_repo=MCPConnectorTemplateRepository(db_session),
+        install_repo=install_repo,
+        state_repo=MCPWorkspaceConnectorStateRepository(db_session, org_id=org_id),
+        grant_repo=MCPCredentialGrantRepository(db_session, org_id=org_id),
+        org_id=org_id,
+    )
+
+    rows = await service.list_for_workspace_user(workspace_id, user_id)
+
+    assert len(rows) == 1
+    assert rows[0].install.id == install_id
+    assert rows[0].grant is not None
+    assert rows[0].grant.connector_id == connector_id
+    assert rows[0].grant.install_id == legacy_install.id
+    assert rows[0].usable is True
+
+
+async def test_static_grant_replace_uses_connector_scope_key(
+    db_session: AsyncSession,
+) -> None:
+    from cubebox.credentials.encryption import FernetBackend
+    from cubebox.repositories.credential import CredentialRepository
+    from cubebox.services.credential import CredentialService
+    from cubebox.services.mcp_installs import MCPConnectorInstallService
+
+    (
+        org_id,
+        workspace_id,
+        user_id,
+        connector_id,
+        install_id,
+        suffix,
+    ) = await _create_connector_fixture(db_session)
+    install_repo = MCPConnectorInstallRepository(db_session, org_id=org_id)
+    old_owner = await install_repo.add(
+        MCPConnectorInstall(
+            org_id=org_id,
+            workspace_id=None,
+            install_scope="org",
+            template_id=None,
+            name=f"Old Static Grant Owner {suffix}",
+            server_url=f"https://old-static-grant-owner-{suffix}.example.com/mcp",
+            server_url_hash=server_url_hash(
+                f"https://old-static-grant-owner-{suffix}.example.com/mcp"
+            ),
+            transport="streamable_http",
+            auth_method="static",
+            default_credential_policy="workspace",
+            install_state="uninstalled",
+            created_by_user_id=user_id,
+        )
+    )
+    old_credential = Credential(
+        org_id=org_id,
+        kind="mcp_server",
+        name=f"cleanup-static-old-{suffix}",
+        value_encrypted=b"old-secret",
+    )
+    db_session.add(old_credential)
+    await db_session.flush()
+
+    grant_repo = MCPCredentialGrantRepository(db_session, org_id=org_id)
+    existing = await grant_repo.add(
+        MCPCredentialGrant(
+            org_id=org_id,
+            install_id=old_owner.id,
+            connector_id=connector_id,
+            grant_scope="workspace",
+            workspace_id=workspace_id,
+            credential_id=old_credential.id,
+            created_by_user_id=user_id,
+        )
+    )
+    service = MCPConnectorInstallService(
+        install_repo=install_repo,
+        state_repo=MCPWorkspaceConnectorStateRepository(db_session, org_id=org_id),
+        grant_repo=grant_repo,
+        cred_service=CredentialService(
+            CredentialRepository(db_session, org_id=org_id),
+            FernetBackend([Fernet.generate_key()]),
+            org_id=org_id,
+            actor_user_id=user_id,
+        ),
+        org_id=org_id,
+        actor_user_id=user_id,
+        connector_repo=MCPConnectorRepository(db_session, org_id=org_id),
+    )
+
+    updated = await service.create_static_grant(
+        install_id=install_id,
+        grant_scope="workspace",
+        workspace_id=workspace_id,
+        plaintext="new-secret",
+        name=f"cleanup-static-new-{suffix}",
+    )
+
+    assert updated.id == existing.id
+    assert updated.install_id == install_id
+    assert updated.connector_id == connector_id
+    assert updated.credential_id != old_credential.id
 
 
 async def test_workspace_enable_uses_connector_state_without_workspace_install(

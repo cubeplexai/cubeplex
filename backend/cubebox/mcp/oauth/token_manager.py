@@ -203,16 +203,21 @@ class OAuthTokenManager:
     ) -> MCPCredentialGrant | None:
         """Re-fetch ``grant`` from the right scope-keyed lookup."""
         if grant.grant_scope == "org":
-            return await grant_repo.get_org_grant(grant.install_id)
+            return await grant_repo.get_org_grant_for_connector(grant.connector_id)
         if grant.grant_scope == "workspace":
             if grant.workspace_id is None:
                 return None
-            return await grant_repo.get_workspace_grant(grant.install_id, grant.workspace_id)
+            return await grant_repo.get_workspace_grant_for_connector(
+                grant.connector_id,
+                grant.workspace_id,
+            )
         if grant.grant_scope == "user":
-            if grant.user_id is None:
+            if grant.user_id is None or grant.workspace_id is None:
                 return None
-            return await grant_repo.get_user_grant(
-                grant.install_id, grant.user_id, workspace_id=grant.workspace_id
+            return await grant_repo.get_user_grant_for_connector(
+                grant.connector_id,
+                grant.user_id,
+                workspace_id=grant.workspace_id,
             )
         return None
 

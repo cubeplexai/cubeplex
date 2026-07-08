@@ -31,7 +31,7 @@ from typing import Any, cast
 
 from loguru import logger
 
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash, slugify_for_namespace
 from cubebox.models import (
     MCPConnector,
     MCPConnectorInstall,
@@ -287,6 +287,7 @@ class MCPConnectorInstallService:
             saved.__dict__["_connector_id"] = connector.id
             await self._fan_out_state_rows(
                 install=saved,
+                connector_id=connector.id,
                 workspace_ids=workspace_ids,
                 credential_policy=defaults.credential_policy,
                 enablement_source=enablement_source,
@@ -336,6 +337,7 @@ class MCPConnectorInstallService:
         saved.__dict__["_connector_id"] = connector.id
         await self._fan_out_state_rows(
             install=saved,
+            connector_id=connector.id,
             workspace_ids=workspace_ids,
             credential_policy=defaults.credential_policy,
             enablement_source=enablement_source,
@@ -349,7 +351,6 @@ class MCPConnectorInstallService:
         auth_method: str,
     ) -> MCPConnector:
         """Create or reuse the org-owned connector identity for a template."""
-        from cubebox.mcp._constants import slugify_for_namespace
 
         repo = self._connector_repo or MCPConnectorRepository(
             self._install_repo.session,
@@ -382,7 +383,6 @@ class MCPConnectorInstallService:
 
     async def _connector_id_for_install(self, install: MCPConnectorInstall) -> str | None:
         """Best-effort connector identity lookup for compatibility install routes."""
-        from cubebox.mcp._constants import slugify_for_namespace
 
         repo = self._connector_repo or MCPConnectorRepository(
             self._install_repo.session,
@@ -438,6 +438,7 @@ class MCPConnectorInstallService:
         self,
         *,
         install: MCPConnectorInstall,
+        connector_id: str,
         workspace_ids: list[str],
         credential_policy: str,
         enablement_source: str,
@@ -447,9 +448,10 @@ class MCPConnectorInstallService:
         No-op when ``workspace_ids`` is empty (``mode='none'``).
         """
         for ws_id in workspace_ids:
-            await self._state_repo.upsert(
+            await self._state_repo.upsert_for_connector(
                 workspace_id=ws_id,
                 install_id=install.id,
+                connector_id=connector_id,
                 enabled=True,
                 credential_policy=credential_policy,
                 enablement_source=enablement_source,
@@ -491,6 +493,23 @@ class MCPConnectorInstallService:
             raise ValueError("install_already_exists")
         defaults = install_defaults_for_auth_method(auth_method, default_credential_policy)
         auto_enroll = mode == "all"
+        connector_repo = self._connector_repo or MCPConnectorRepository(
+            self._install_repo.session,
+            org_id=self._org_id,
+        )
+        connector = await connector_repo.add(
+            MCPConnector(
+                org_id=self._org_id,
+                template_id=None,
+                name=name,
+                server_url=server_url,
+                server_url_hash=server_url_hash(server_url),
+                transport=transport,
+                auth_method=auth_method,
+                status="active",
+                created_by_user_id=self._actor_user_id,
+            )
+        )
         install = MCPConnectorInstall(
             org_id=self._org_id,
             template_id=None,
@@ -511,8 +530,10 @@ class MCPConnectorInstallService:
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
+        saved.__dict__["_connector_id"] = connector.id
         await self._fan_out_state_rows(
             install=saved,
+            connector_id=connector.id,
             workspace_ids=workspace_ids,
             credential_policy=defaults.credential_policy,
             enablement_source=enablement_source,
@@ -566,7 +587,6 @@ class MCPConnectorInstallService:
         from sqlalchemy.sql import ColumnElement
         from sqlmodel import select
 
-        from cubebox.mcp._constants import slugify_for_namespace
         from cubebox.models.mcp import MCPConnectorInstall as _Install
 
         or_clauses: list[ColumnElement[bool]] = [
@@ -670,10 +690,14 @@ class MCPConnectorInstallService:
         install.workspace_id = None
         install.auto_enroll_new_workspaces = mode == "all"
         saved = await self._install_repo.update(install)
+        connector_id = await self._connector_id_for_install(saved)
+        if connector_id is None:
+            raise ValueError("connector_identity_not_found")
 
         if all_ws_ids:
             await self._fan_out_state_rows(
                 install=saved,
+                connector_id=connector_id,
                 workspace_ids=all_ws_ids,
                 credential_policy=saved.default_credential_policy,
                 enablement_source=enablement_source,
@@ -768,6 +792,8 @@ class MCPConnectorInstallService:
             raise ValueError("static_grant_only_valid_for_static_auth")
 
         connector_id = await self._connector_id_for_install(install)
+        if connector_id is None:
+            raise ValueError("connector_identity_not_found")
         credential_name = name or f"mcp:{install_id}:{grant_scope}"
         # Upsert (not create) so a "replace credential" flow — disconnect
         # the old grant, then submit a new token — works even if the old
@@ -785,8 +811,8 @@ class MCPConnectorInstallService:
         # 500 to the client; without this, the retry would collide with
         # ``uq_mcp_credential_grant_{org,workspace,user}``. Mirrors the OAuth
         # callback's get_for_scope → add/update pattern.
-        existing = await self._grant_repo.get_for_scope(
-            install_id=install_id,
+        existing = await self._grant_repo.get_for_connector_scope(
+            connector_id=connector_id,
             grant_scope=grant_scope,
             workspace_id=workspace_id,
             user_id=user_id,
@@ -804,8 +830,8 @@ class MCPConnectorInstallService:
                 created_by_user_id=self._actor_user_id,
             )
             return await self._grant_repo.add(grant)
-        if connector_id is not None:
-            existing.connector_id = connector_id
+        existing.install_id = install_id
+        existing.connector_id = connector_id
         existing.credential_id = credential_id
         existing.refresh_credential_id = None
         existing.expires_at = None

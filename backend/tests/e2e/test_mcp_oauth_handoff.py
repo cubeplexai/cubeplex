@@ -16,7 +16,7 @@ from sqlalchemy.pool import NullPool
 from cubebox.config import config as _cubebox_config
 from cubebox.credentials.encryption import FernetBackend
 from cubebox.db.engine import _build_database_url
-from cubebox.mcp._constants import server_url_hash
+from cubebox.mcp._constants import server_url_hash, slugify_for_namespace
 from cubebox.mcp.exceptions import DCRError, OAuthMetadataNotFound
 from cubebox.mcp.oauth.callback import OAuthCallbackHandler
 from cubebox.mcp.oauth.dcr import DCRClient, DCRRequest
@@ -26,9 +26,10 @@ from cubebox.mcp.oauth.metadata import (
 )
 from cubebox.mcp.oauth.start import OAuthStartError, OAuthStartResult, OAuthStartService
 from cubebox.mcp.oauth.state import OAuthStateStore
-from cubebox.models.mcp import MCPConnectorInstall
+from cubebox.models.mcp import MCPConnector, MCPConnectorInstall
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
 )
@@ -140,9 +141,33 @@ async def _seed_oauth_install(
         updated_at=datetime.now(UTC),
     )
     session.add(install)
-    await session.commit()
+    await session.flush()
+    await MCPConnectorRepository(session, org_id=org_id).add(
+        MCPConnector(
+            org_id=org_id,
+            template_id=template_id,
+            name=install.name,
+            server_url=install.server_url,
+            server_url_hash=install.server_url_hash,
+            transport=install.transport,
+            auth_method=install.auth_method,
+            status="active",
+            oauth_client_config=dict(install.oauth_client_config or {}),
+            created_by_user_id=created_by_user_id,
+        )
+    )
     await session.refresh(install)
     return install
+
+
+async def _connector_id_for_install(session: AsyncSession, install: MCPConnectorInstall) -> str:
+    connector = await MCPConnectorRepository(session, org_id=install.org_id).get_active_by_identity(
+        template_id=install.template_id,
+        server_url_hash=install.server_url_hash,
+        slug_name=slugify_for_namespace(install.name),
+    )
+    assert connector is not None
+    return connector.id
 
 
 async def _seed_oauth_install_needing_dcr(
@@ -170,8 +195,8 @@ async def _seed_oauth_install_needing_dcr(
 async def seeded_oauth_install(
     db_session_maker: async_sessionmaker[AsyncSession],
     seed_org_workspace_user: tuple[str, str, str],
-) -> tuple[str, str, str, str, str]:
-    """Yield ``(install_id, grant_scope, workspace_id, user_id, org_id)`` for a
+) -> tuple[str, str, str, str, str, str]:
+    """Yield ``(install_id, connector_id, grant_scope, workspace_id, user_id, org_id)`` for a
     user-policy OAuth install. The trailing org_id is needed by callers that
     pass ``actor_org_id`` into ``start_oauth_flow`` — the cross-tenant guard
     landed in the round-8 plan fix."""
@@ -185,7 +210,8 @@ async def seeded_oauth_install(
             default_credential_policy="user",
             created_by_user_id=user_id,
         )
-        return install.id, "user", ws_id, user_id, org_id
+        connector_id = await _connector_id_for_install(session, install)
+        return install.id, connector_id, "user", ws_id, user_id, org_id
 
 
 # ---------------------------------------------------------------------------
@@ -354,9 +380,10 @@ async def oauth_start_service(
 
 async def test_start_oauth_flow_returns_authorize_url_state_and_expires_at(
     oauth_start_service: OAuthStartService,
-    seeded_oauth_install: tuple[str, str, str, str, str],
+    oauth_state_store: OAuthStateStore,
+    seeded_oauth_install: tuple[str, str, str, str, str, str],
 ) -> None:
-    install_id, scope, ws_id, user_id, org_id = seeded_oauth_install
+    install_id, connector_id, scope, ws_id, user_id, org_id = seeded_oauth_install
     result = await oauth_start_service.start_oauth_flow(
         install_id=install_id,
         actor_user_id=user_id,
@@ -369,19 +396,22 @@ async def test_start_oauth_flow_returns_authorize_url_state_and_expires_at(
     assert result.authorize_url.startswith("https://")
     # state is opaque but must round-trip through OAuthStateStore.consume.
     assert "." in result.state  # payload.signature shape
+    payload = await oauth_state_store.consume(result.state)
+    assert payload.install_id == install_id
+    assert payload.connector_id == connector_id
     assert result.expires_at.tzinfo is not None
 
 
 async def test_start_oauth_flow_rejects_cross_tenant_install_id(
     oauth_start_service: OAuthStartService,
-    seeded_oauth_install: tuple[str, str, str, str, str],
+    seeded_oauth_install: tuple[str, str, str, str, str, str],
 ) -> None:
     """A caller from another org cannot mint a state for this install.
 
     Cross-org and truly-missing collapse to the same error so OAuth
     start can't be used as an org-existence oracle.
     """
-    install_id, scope, ws_id, user_id, _real_org_id = seeded_oauth_install
+    install_id, _connector_id, scope, ws_id, user_id, _real_org_id = seeded_oauth_install
     with pytest.raises(OAuthStartError, match="connector_install_not_found"):
         await oauth_start_service.start_oauth_flow(
             install_id=install_id,
@@ -588,8 +618,8 @@ async def test_start_oauth_flow_uses_resource_metadata_scopes_when_as_omits_scop
 async def seeded_oauth_org_install(
     db_session_maker: async_sessionmaker[AsyncSession],
     seed_org_workspace_user: tuple[str, str, str],
-) -> tuple[str, str, str]:
-    """Yield ``(install_id, org_id, workspace_id)`` for an org-policy OAuth install."""
+) -> tuple[str, str, str, str]:
+    """Yield ``(install_id, connector_id, org_id, workspace_id)`` for an org-policy OAuth install."""
     org_id, ws_id, user_id = seed_org_workspace_user
     async with db_session_maker() as session:
         install = await _seed_oauth_install(
@@ -600,7 +630,8 @@ async def seeded_oauth_org_install(
             default_credential_policy="org",
             created_by_user_id=user_id,
         )
-        return install.id, org_id, ws_id
+        connector_id = await _connector_id_for_install(session, install)
+        return install.id, connector_id, org_id, ws_id
 
 
 @pytest_asyncio.fixture
@@ -669,12 +700,12 @@ async def test_callback_writes_user_grant_and_keeps_install_pending(
     oauth_start_service: OAuthStartService,
     grant_repo: MCPCredentialGrantRepository,
     install_repo: MCPConnectorInstallRepository,
-    seeded_oauth_install: tuple[str, str, str, str, str],
+    seeded_oauth_install: tuple[str, str, str, str, str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User-policy install: grant lands at scope='user', auth_status STAYS
     'pending' (per spec §6 — auth_status is per-install, not per-user)."""
-    install_id, scope, ws_id, user_id, org_id = seeded_oauth_install
+    install_id, connector_id, scope, ws_id, user_id, org_id = seeded_oauth_install
     assert scope == "user"
 
     start = await oauth_start_service.start_oauth_flow(
@@ -692,6 +723,7 @@ async def test_callback_writes_user_grant_and_keeps_install_pending(
         _code: str,
         _verifier: str,
         _cred_service: Any,
+        _frontend_origin: str | None = None,
     ) -> dict[str, Any]:
         return {
             "access_token": "test-access",
@@ -711,8 +743,14 @@ async def test_callback_writes_user_grant_and_keeps_install_pending(
     assert result.install_id == install_id
     assert result.state == start.state
 
-    grant = await grant_repo.get_user_grant(install_id, user_id, workspace_id=ws_id)
+    grant = await grant_repo.get_user_grant_for_connector(
+        connector_id,
+        user_id,
+        workspace_id=ws_id,
+    )
     assert grant is not None
+    assert grant.install_id == install_id
+    assert grant.connector_id == connector_id
     assert grant.grant_status == "valid"
 
     install = await install_repo.get(install_id)
@@ -725,13 +763,13 @@ async def test_callback_writes_org_grant_and_authorizes_install(
     oauth_start_service: OAuthStartService,
     grant_repo: MCPCredentialGrantRepository,
     install_repo: MCPConnectorInstallRepository,
-    seeded_oauth_org_install: tuple[str, str, str],
+    seeded_oauth_org_install: tuple[str, str, str, str],
     seed_org_workspace_user: tuple[str, str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Org-policy install: grant lands at scope='org', auth_status flips
     'pending' → 'authorized' because rule §6 fires."""
-    install_id, org_id, _ws_id = seeded_oauth_org_install
+    install_id, connector_id, org_id, _ws_id = seeded_oauth_org_install
     _seed_org_id, _seed_ws_id, actor_user_id = seed_org_workspace_user
 
     start = await oauth_start_service.start_oauth_flow(
@@ -749,6 +787,7 @@ async def test_callback_writes_org_grant_and_authorizes_install(
         _code: str,
         _verifier: str,
         _cred_service: Any,
+        _frontend_origin: str | None = None,
     ) -> dict[str, Any]:
         return {"access_token": "a", "refresh_token": "r", "expires_in": 3600}
 
@@ -760,8 +799,10 @@ async def test_callback_writes_org_grant_and_authorizes_install(
     )
     assert result.status == "ok"
 
-    grant = await grant_repo.get_org_grant(install_id)
+    grant = await grant_repo.get_org_grant_for_connector(connector_id)
     assert grant is not None
+    assert grant.install_id == install_id
+    assert grant.connector_id == connector_id
     assert grant.grant_status == "valid"
 
     install = await install_repo.get(install_id)
