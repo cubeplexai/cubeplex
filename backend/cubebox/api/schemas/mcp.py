@@ -73,6 +73,7 @@ class MCPConnectorInstallOut(BaseModel):
     """One ``MCPConnectorInstall`` row."""
 
     install_id: str
+    connector_id: str | None = None
     template_id: str | None
     install_scope: Literal["org", "workspace"]
     workspace_id: str | None

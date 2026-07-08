@@ -33,12 +33,14 @@ from loguru import logger
 
 from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash
 from cubebox.models import (
+    MCPConnector,
     MCPConnectorInstall,
     MCPConnectorTemplate,
     MCPCredentialGrant,
 )
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
 )
@@ -112,6 +114,7 @@ class MCPConnectorInstallService:
         org_id: str,
         actor_user_id: str,
         workspace_repo: WorkspaceRepository | None = None,
+        connector_repo: MCPConnectorRepository | None = None,
     ) -> None:
         self._install_repo = install_repo
         self._state_repo = state_repo
@@ -123,6 +126,7 @@ class MCPConnectorInstallService:
         # constructing a real ``WorkspaceRepository`` would force them to bring
         # along a session fixture. DI providers wire this for real.
         self._workspace_repo = workspace_repo
+        self._connector_repo = connector_repo
 
     # ------------------------------------------------------------------ install create
     async def create_from_template_for_workspace(
@@ -235,16 +239,31 @@ class MCPConnectorInstallService:
         """
         if auth_method not in template.supported_auth_methods:
             raise ValueError("auth_method_not_supported_by_template")
-        # R1/R2/R3 cross-scope uniqueness preflight.
-        if await self._has_install_conflict(
+        connector = await self._ensure_connector_from_template(template, auth_method=auth_method)
+        conflict = await self._get_install_conflict(
             server_url_hash=server_url_hash(template.server_url),
             name=template.name,
             template_id=template.id,
             exclude_id=None,
-        ):
+        )
+        if conflict is not None and conflict.workspace_id is None:
             raise ValueError("install_already_exists")
         workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
         defaults = install_defaults_for_auth_method(auth_method, credential_policy)
+        if conflict is not None:
+            conflict.auth_method = auth_method
+            conflict.default_credential_policy = defaults.credential_policy
+            conflict.auth_status = defaults.auth_status
+            conflict.tool_citations = dict(template.tool_citation_defaults)
+            conflict.static_auth_style = template.static_auth_style
+            conflict.static_auth_header_name = template.static_auth_header_name
+            conflict.static_auth_query_param = template.static_auth_query_param
+            promoted = await self.promote_workspace_install_to_org(
+                install_id=conflict.id,
+                distribution=distribution,
+            )
+            promoted.__dict__["_connector_id"] = connector.id
+            return promoted
         # Derive ``auto_enroll_new_workspaces`` from the requested distribution
         # mode rather than relying on the model's ``server_default=true``. The
         # default is right for ``mode='all'`` (admin asked for "every workspace
@@ -272,6 +291,7 @@ class MCPConnectorInstallService:
             created_by_user_id=self._actor_user_id,
         )
         saved = await self._install_repo.add(install)
+        saved.__dict__["_connector_id"] = connector.id
         await self._fan_out_state_rows(
             install=saved,
             workspace_ids=workspace_ids,
@@ -279,6 +299,44 @@ class MCPConnectorInstallService:
             enablement_source=enablement_source,
         )
         return saved
+
+    async def _ensure_connector_from_template(
+        self,
+        template: MCPConnectorTemplate,
+        *,
+        auth_method: str,
+    ) -> MCPConnector:
+        """Create or reuse the org-owned connector identity for a template."""
+        from cubebox.mcp._constants import slugify_for_namespace
+
+        repo = self._connector_repo or MCPConnectorRepository(
+            self._install_repo.session,
+            org_id=self._org_id,
+        )
+        existing = await repo.get_active_by_identity(
+            template_id=template.id,
+            server_url_hash=server_url_hash(template.server_url),
+            slug_name=slugify_for_namespace(template.name),
+        )
+        if existing is not None:
+            return existing
+        return await repo.add(
+            MCPConnector(
+                org_id=self._org_id,
+                template_id=template.id,
+                name=template.name,
+                server_url=template.server_url,
+                server_url_hash=server_url_hash(template.server_url),
+                transport=template.transport,
+                auth_method=auth_method,
+                oauth_client_config={},
+                static_auth_style=template.static_auth_style,
+                static_auth_header_name=template.static_auth_header_name,
+                static_auth_query_param=template.static_auth_query_param,
+                tool_citations=dict(template.tool_citation_defaults),
+                created_by_user_id=self._actor_user_id,
+            )
+        )
 
     async def _resolve_distribution(
         self, distribution: dict[str, Any]
@@ -429,6 +487,24 @@ class MCPConnectorInstallService:
         avoids ``MultipleResultsFound`` when more than one column
         matches.
         """
+        return (
+            await self._get_install_conflict(
+                server_url_hash=server_url_hash,
+                name=name,
+                template_id=template_id,
+                exclude_id=exclude_id,
+            )
+            is not None
+        )
+
+    async def _get_install_conflict(
+        self,
+        *,
+        server_url_hash: str,
+        name: str,
+        template_id: str | None,
+        exclude_id: str | None,
+    ) -> MCPConnectorInstall | None:
         from sqlalchemy import or_
         from sqlalchemy.sql import ColumnElement
         from sqlmodel import select
@@ -436,11 +512,6 @@ class MCPConnectorInstallService:
         from cubebox.mcp._constants import slugify_for_namespace
         from cubebox.models.mcp import MCPConnectorInstall as _Install
 
-        # SQLModel column descriptors return ColumnElement[bool] from
-        # comparisons at runtime, but the static types declare bare
-        # `str` for the column attribute, so mypy infers `bool` for
-        # `_Install.server_url_hash == ...`. Cast each clause to keep
-        # `or_(...)` happy without inviting `# type: ignore` rot.
         or_clauses: list[ColumnElement[bool]] = [
             cast("ColumnElement[bool]", _Install.server_url_hash == server_url_hash),
             cast("ColumnElement[bool]", _Install.slug_name == slugify_for_namespace(name)),
@@ -450,7 +521,7 @@ class MCPConnectorInstallService:
                 cast("ColumnElement[bool]", _Install.template_id == template_id),
             )
         stmt = (
-            select(_Install.id)
+            select(_Install)
             .where(
                 cast("ColumnElement[bool]", _Install.org_id == self._org_id),
                 cast("ColumnElement[bool]", _Install.install_state == "active"),
@@ -460,8 +531,7 @@ class MCPConnectorInstallService:
         )
         if exclude_id is not None:
             stmt = stmt.where(cast("ColumnElement[bool]", _Install.id != exclude_id))
-        row = (await self._install_repo.session.execute(stmt)).first()
-        return row is not None
+        return (await self._install_repo.session.execute(stmt)).scalars().first()
 
     async def promote_workspace_install_to_org(
         self,
