@@ -67,7 +67,7 @@ def test_missing_headers_rejected() -> None:
         )
 
 
-def _encrypt(plaintext: bytes, encrypt_key: str) -> str:
+def _encrypt(plaintext: bytes, encrypt_key: str, *, iv: bytes | None = None) -> str:
     """Reverse of decrypt_feishu_payload, used to fabricate test inputs."""
     import base64
     import hashlib
@@ -76,7 +76,7 @@ def _encrypt(plaintext: bytes, encrypt_key: str) -> str:
     from Crypto.Cipher import AES
 
     key = hashlib.sha256(encrypt_key.encode()).digest()
-    iv = _secrets.token_bytes(16)
+    iv = iv or _secrets.token_bytes(16)
     pad = 16 - (len(plaintext) % 16)
     padded = plaintext + bytes([pad]) * pad
     ct = AES.new(key, AES.MODE_CBC, iv).encrypt(padded)
@@ -92,7 +92,7 @@ def test_decrypt_feishu_payload_roundtrip() -> None:
 
 def test_decrypt_feishu_payload_wrong_key_fails() -> None:
     body = b'{"a":1}'
-    encrypted = _encrypt(body, ENCRYPT_KEY)
+    encrypted = _encrypt(body, ENCRYPT_KEY, iv=b"\0" * 16)
     with pytest.raises(FeishuSignatureError):
         decrypt_feishu_payload(encrypt_key="different-key", encrypted_b64=encrypted)
 
