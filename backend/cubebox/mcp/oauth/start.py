@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubebox.config import config
 from cubebox.credentials.dependencies import build_credential_service
 from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET, slugify_for_namespace
 from cubebox.mcp.exceptions import DCRError, OAuthMetadataFetchError, OAuthMetadataNotFound
 from cubebox.mcp.oauth.dcr import DCRClient, DCRRequest
 from cubebox.mcp.oauth.metadata import (
@@ -46,6 +46,7 @@ from cubebox.mcp.oauth.state import OAuthStateStore
 from cubebox.models.mcp import MCPConnectorInstall, MCPConnectorTemplate
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPConnectorTemplateRepository,
 )
 from cubebox.services.credential import CredentialService
@@ -111,6 +112,11 @@ class OAuthStartService:
         user_id: str | None,
         frontend_origin: str | None = None,
     ) -> OAuthStartResult:
+        _validate_grant_identity(
+            grant_scope=grant_scope,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
         # Org-scoped install lookup. The unauthenticated callback later
         # builds repos and credential service from ``install.org_id``, so
         # an install id alone is enough to direct grant writes into ANY
@@ -137,6 +143,9 @@ class OAuthStartService:
             raise OAuthStartError("connector_install_not_active")
         if install.auth_method != "oauth":
             raise OAuthStartError("oauth_start_only_valid_for_oauth_auth")
+        connector_id = await self._connector_id_for_install(install)
+        if connector_id is None:
+            raise OAuthStartError("connector_identity_not_found")
 
         # Build org-scoped service surface AFTER install reveals org_id.
         cred_service = build_credential_service(
@@ -226,6 +235,7 @@ class OAuthStartService:
         pkce = generate_pkce()
         state = await self._state_store.issue(
             install_id=install_id,
+            connector_id=connector_id,
             actor_user_id=actor_user_id,
             grant_scope=grant_scope,
             workspace_id=workspace_id,
@@ -279,6 +289,15 @@ class OAuthStartService:
             state=state,
             expires_at=expires_at,
         )
+
+    async def _connector_id_for_install(self, install: MCPConnectorInstall) -> str | None:
+        repo = MCPConnectorRepository(self._session, org_id=install.org_id)
+        connector = await repo.get_active_by_identity(
+            template_id=install.template_id,
+            server_url_hash=install.server_url_hash,
+            slug_name=slugify_for_namespace(install.name),
+        )
+        return connector.id if connector is not None else None
 
     async def _ensure_client(
         self,
@@ -398,6 +417,27 @@ def _redirect_uri(frontend_origin: str | None = None) -> str:
         return f"{frontend_origin.rstrip('/')}{_REDIRECT_PATH}"
     base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     return f"{base}{_REDIRECT_PATH}"
+
+
+def _validate_grant_identity(
+    *,
+    grant_scope: str,
+    workspace_id: str | None,
+    user_id: str | None,
+) -> None:
+    if grant_scope == "org":
+        if workspace_id is not None or user_id is not None:
+            raise OAuthStartError("invalid_org_grant_identity")
+        return
+    if grant_scope == "workspace":
+        if workspace_id is None or user_id is not None:
+            raise OAuthStartError("invalid_workspace_grant_identity")
+        return
+    if grant_scope == "user":
+        if workspace_id is None or user_id is None:
+            raise OAuthStartError("invalid_user_grant_identity")
+        return
+    raise OAuthStartError("invalid_grant_scope")
 
 
 def _build_authorize_url(

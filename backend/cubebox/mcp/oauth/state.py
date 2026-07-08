@@ -4,7 +4,7 @@ The wire format is::
 
     state = base64url(payload_json) + "." + base64url(hmac_sha256)
 
-where ``payload_json`` carries ``{install_id, actor_user_id, ts, nonce,
+where ``payload_json`` carries ``{install_id, connector_id, actor_user_id, ts, nonce,
 grant_scope, workspace_id, user_id}`` (the last three honor the four-layer
 grant shape — workspace_id and user_id are nullable per grant_scope) and
 ``hmac_sha256`` is computed over the canonical payload bytes using the
@@ -50,6 +50,7 @@ class OAuthStatePayload:
     """
 
     install_id: str
+    connector_id: str | None
     actor_user_id: str
     issued_at: datetime  # UTC
     grant_scope: str | None = None
@@ -90,6 +91,7 @@ class OAuthStateStore:
         *,
         install_id: str,
         actor_user_id: str,
+        connector_id: str | None = None,
         grant_scope: str | None = None,
         workspace_id: str | None = None,
         user_id: str | None = None,
@@ -104,6 +106,8 @@ class OAuthStateStore:
             "ts": ts_ms,
             "nonce": nonce,
         }
+        if connector_id is not None:
+            payload["connector_id"] = connector_id
         if grant_scope is not None:
             payload["grant_scope"] = grant_scope
         if workspace_id is not None:
@@ -133,6 +137,7 @@ class OAuthStateStore:
         try:
             payload = json.loads(payload_bytes)
             install_id = str(payload["install_id"])
+            raw_connector_id = payload.get("connector_id") if isinstance(payload, dict) else None
             actor_user_id = str(payload["actor_user_id"])
             ts_ms = int(payload["ts"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
@@ -144,6 +149,7 @@ class OAuthStateStore:
         raw_fe_origin = payload.get("frontend_origin") if isinstance(payload, dict) else None
         return OAuthStatePayload(
             install_id=install_id,
+            connector_id=str(raw_connector_id) if raw_connector_id is not None else None,
             actor_user_id=actor_user_id,
             issued_at=issued_at,
             grant_scope=str(raw_grant_scope) if raw_grant_scope is not None else None,

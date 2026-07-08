@@ -44,6 +44,7 @@ from cubebox.models.mcp import MCPConnectorInstall, MCPCredentialGrant
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPCredentialGrantRepository,
 )
 from cubebox.services.credential import CredentialService
@@ -161,8 +162,26 @@ class OAuthCallbackHandler:
                 reason="install_not_found",
                 frontend_origin=payload.frontend_origin,
             )
+        if payload.connector_id is None:
+            return OAuthCallbackResult(
+                status="error",
+                install_id=payload.install_id,
+                state=state,
+                reason="connector_identity_not_found",
+                frontend_origin=payload.frontend_origin,
+            )
 
         # Now build the org-scoped service surface for the rest of the work.
+        connector_repo = MCPConnectorRepository(self._session, org_id=install.org_id)
+        connector = await connector_repo.get(payload.connector_id)
+        if connector is None:
+            return OAuthCallbackResult(
+                status="error",
+                install_id=payload.install_id,
+                state=state,
+                reason="connector_identity_not_found",
+                frontend_origin=payload.frontend_origin,
+            )
         cred_service = build_credential_service(
             self._session,
             self._backend,
@@ -288,6 +307,7 @@ class OAuthCallbackHandler:
         # the same grant identity rotates in place.
         grant_name_suffix = _grant_credential_suffix(payload)
         assert payload.grant_scope is not None
+        assert payload.connector_id is not None
         access_id = await cred_service.upsert_by_kind_name(
             kind=CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
             name=f"mcp:{install.id}:{grant_name_suffix}:access",
@@ -304,8 +324,8 @@ class OAuthCallbackHandler:
         if "expires_in" in token:
             expires_at = datetime.now(tz=UTC) + timedelta(seconds=int(token["expires_in"]))
 
-        existing = await grant_repo.get_for_scope(
-            install_id=install.id,
+        existing = await grant_repo.get_for_connector_scope(
+            connector_id=payload.connector_id,
             grant_scope=payload.grant_scope,
             workspace_id=payload.workspace_id,
             user_id=payload.user_id,
@@ -314,6 +334,7 @@ class OAuthCallbackHandler:
             grant = MCPCredentialGrant(
                 org_id=install.org_id,
                 install_id=install.id,
+                connector_id=payload.connector_id,
                 grant_scope=payload.grant_scope,
                 workspace_id=payload.workspace_id,
                 user_id=payload.user_id,
@@ -324,6 +345,8 @@ class OAuthCallbackHandler:
                 created_by_user_id=payload.actor_user_id,
             )
             return await grant_repo.add(grant)
+        existing.install_id = install.id
+        existing.connector_id = payload.connector_id
         existing.credential_id = access_id
         # Only overwrite refresh_credential_id when the AS sent a new
         # refresh_token. Many providers (GitHub, Slack, Google with

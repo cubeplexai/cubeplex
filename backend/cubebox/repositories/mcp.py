@@ -607,6 +607,27 @@ class MCPCredentialGrantRepository:
         assert workspace_id is not None and user_id is not None, "user grant requires both"
         return await self.get_user_grant(install_id, user_id, workspace_id=workspace_id)
 
+    async def get_for_connector_scope(
+        self,
+        *,
+        connector_id: str,
+        grant_scope: str,
+        workspace_id: str | None,
+        user_id: str | None,
+    ) -> MCPCredentialGrant | None:
+        """Single grant per (connector, scope-shape)."""
+        if grant_scope == "org":
+            return await self.get_org_grant_for_connector(connector_id)
+        if grant_scope == "workspace":
+            assert workspace_id is not None, "workspace grant requires workspace_id"
+            return await self.get_workspace_grant_for_connector(connector_id, workspace_id)
+        assert workspace_id is not None and user_id is not None, "user grant requires both"
+        return await self.get_user_grant_for_connector(
+            connector_id,
+            user_id,
+            workspace_id=workspace_id,
+        )
+
     async def delete_for_install(self, install_id: str) -> int:
         """Bulk-delete every grant for ``install_id``. Returns count.
 
