@@ -37,11 +37,23 @@ class _NoConflictSession:
     """
 
     async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
-        class _Empty:
+        class _EmptyResult:
+            def scalars(self) -> _EmptyResult:
+                return self
+
             def first(self) -> None:
                 return None
 
-        return _Empty()
+        return _EmptyResult()
+
+    def add(self, _obj: Any) -> None:
+        return None
+
+    async def commit(self) -> None:
+        return None
+
+    async def refresh(self, _obj: Any) -> None:
+        return None
 
 
 class _FakeInstallRepo:
