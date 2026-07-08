@@ -46,11 +46,14 @@ describe('MCP four-layer API', () => {
 
   it('adminCreateInstall POSTs to admin install endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ install_id: 'mcins-1' }), { status: 201 }),
+      new Response(JSON.stringify({ install_id: 'mcins-1', connector_id: 'mcpco-1' }), {
+        status: 201,
+      }),
     )
     const client = createApiClient('')
-    await adminCreateInstall(client, { template_id: 'mctpl-1' })
+    const install = await adminCreateInstall(client, { template_id: 'mctpl-1' })
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/installs')
+    expect(install.connector_id).toBe('mcpco-1')
   })
 
   it('wsListEffectiveConnectors GETs the workspace connectors endpoint', async () => {

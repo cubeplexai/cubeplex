@@ -11,12 +11,12 @@ Connector management happens at **Admin > MCP Connectors** (`/admin/mcp`).
 
 ## Key concepts
 
-| Concept | Description |
-|---|---|
-| **Template** | A catalog connector definition that describes a service, its server URL, transport, and which authentication methods it supports. Think of it as the "app" in an app store. Templates are seeded from CubeBox's built-in catalog; they carry no tenant credentials and no tool list. |
-| **Install** | A template activated for a specific org or workspace. Installing creates a concrete connector instance and triggers tool discovery against the server. |
-| **Credential** | The secret attached to an install — an API token, bearer token, or OAuth grant — stored encrypted in the credential vault. |
-| **Grant / workspace access** | Which workspaces (and their members) can use an org-wide install. Managed per-workspace on the install's **Workspaces** tab. |
+| Concept                      | Description                                                                                                                                                                                                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Template**                 | A catalog connector definition that describes a service, its server URL, transport, and which authentication methods it supports. Think of it as the "app" in an app store. Templates are seeded from CubeBox's built-in catalog; they carry no tenant credentials and no tool list. |
+| **Connector identity**       | A template or custom MCP server added to the organization. It owns the server URL, transport, tool namespace, and discovery cache.                                                                                                                                                   |
+| **Credential source**        | The credential selected by a workspace when tools run: organization, workspace, user, or none. Credentials are stored encrypted in the credential vault.                                                                                                                             |
+| **Grant / workspace access** | Which workspaces can use a connector and which credential source they use. Managed per-workspace on the connector's **Workspaces** tab and workspace MCP page.                                                                                                                       |
 
 ## Manage the connector catalog
 
@@ -63,27 +63,29 @@ For connectors that authenticate with a static API token or bearer token (for ex
 
 ## Tool discovery & caching
 
-Installing a connector (or saving its credential) runs **tool discovery**: CubeBox connects to the MCP server, lists its tools, and stores the tool list on the install. Agent runs use this cached list to register the connector's tools — they do not re-contact the server on every message, which keeps chat start fast even with several connectors enabled. Actually *calling* a tool always goes to the live server.
+Installing a connector (or saving its credential) runs **tool discovery**: CubeBox connects to the MCP server, lists its tools, and stores the tool list on the install. Agent runs use this cached list to register the connector's tools — they do not re-contact the server on every message, which keeps chat start fast even with several connectors enabled. Actually _calling_ a tool always goes to the live server.
 
 The cache refreshes automatically in the background when it is older than 24 hours (config key `mcp.tools_cache_ttl_hours`; set `0` to disable background refresh). If a server changed its tools and you don't want to wait, use **Retry discovery** on the install's detail page to refresh immediately.
 
-## Install connectors
+## Add connectors
 
-Connectors can be installed at the **organization level** (available to all workspaces) or at the **workspace level** (available only to that workspace).
+Org admins add connector identities at the **organization level**. Workspaces then enable that connector and choose the credential source they want to use.
 
-### Install at the org level
+### Add at the org level
 
 1. Go to **Admin > MCP Connectors** (`/admin/mcp`).
 2. Select a template from the catalog.
-3. Click **Install**. Choose the **Workspace rollout**:
-   - **Each workspace enables manually** — installs at the org level only; every workspace sees the connector but it stays disabled until each workspace turns it on.
+3. Click **Add to organization**. Choose the **Workspace rollout**:
+   - **Each workspace enables manually** — adds the connector identity at the org level only; every workspace sees the connector but it stays disabled until each workspace turns it on.
    - **Enable for all workspaces** — installs and enables it for every existing workspace, and auto-enables it for new workspaces created later.
 4. Complete the auth flow if required (OAuth consent or token entry).
-5. The connector is now installed org-wide; control per-workspace access on its **Workspaces** tab.
+5. The connector is now available at the organization level; control per-workspace access on its **Workspaces** tab.
 
-### Install at the workspace level
+Adding a connector at the organization level does not overwrite workspace credentials. If a workspace already uses its own credential for the same connector, that workspace keeps using it until a workspace admin changes the credential policy.
 
-Workspace-scoped installs are made by a workspace admin from the workspace **MCP** page (sidebar **MCP** item), not from the org admin area. Select a connector in the **Available** section, click **Connect**, and complete the auth flow. The install is private to that workspace.
+### Enable in a workspace
+
+Workspace admins use the workspace **MCP** page (sidebar **MCP** item). Select a connector in the **Available** section, click **Connect**, and choose whether the workspace uses the organization credential, a workspace credential, or each user's credential.
 
 ## Grant workspace access
 

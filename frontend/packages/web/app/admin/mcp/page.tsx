@@ -88,19 +88,8 @@ export default function AdminMcpPage() {
   }
 
   const availableTemplates = useMemo(() => {
-    // Only ACTIVE installs mask their template from the install dialog —
-    // tombstoned (uninstalled) rows are kept around so a reinstall can
-    // re-attach the same shape (see ``MCPConnectorInstallService.uninstall``),
-    // but they must NOT block the admin from re-launching the install
-    // flow for the same template.
-    const installedTemplateIds = new Set(
-      connectors
-        .filter((c) => c.install.install_state === 'active')
-        .map((c) => c.template?.template_id ?? c.install.template_id)
-        .filter((v): v is string => Boolean(v)),
-    )
-    return templates.filter((tpl) => !installedTemplateIds.has(tpl.template_id))
-  }, [templates, connectors])
+    return templates
+  }, [templates])
 
   return (
     <div className="flex h-full flex-col">
