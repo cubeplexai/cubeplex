@@ -10,12 +10,12 @@ import { WsTryItView } from './WsTryItView'
 
 export interface WsToolsPanelProps {
   tools: MCPToolEntry[]
-  installId: string
+  connectorId: string
   client: ApiClient
   wsId: string
 }
 
-export function WsToolsPanel({ tools, installId, client, wsId }: WsToolsPanelProps) {
+export function WsToolsPanel({ tools, connectorId, client, wsId }: WsToolsPanelProps) {
   const t = useTranslations('mcp.tools')
   const [selectedName, setSelectedName] = useState<string | null>(
     tools.length > 0 ? tools[0].name : null,
@@ -70,7 +70,7 @@ export function WsToolsPanel({ tools, installId, client, wsId }: WsToolsPanelPro
             tryItSlot={
               <WsTryItView
                 key={selected.name}
-                installId={installId}
+                connectorId={connectorId}
                 toolName={selected.name}
                 inputSchema={(selected.input_schema as Record<string, unknown> | null) ?? null}
                 client={client}

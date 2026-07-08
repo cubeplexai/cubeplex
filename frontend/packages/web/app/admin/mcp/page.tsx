@@ -59,7 +59,7 @@ export default function AdminMcpPage() {
   }, [load, client, workspaces.length, fetchWorkspaceList])
 
   const selected = useMemo(
-    () => connectors.find((c) => c.install.install_id === selectedId) ?? null,
+    () => connectors.find((c) => c.install.connector_id === selectedId) ?? null,
     [connectors, selectedId],
   )
 
@@ -73,16 +73,16 @@ export default function AdminMcpPage() {
     await load()
   }
 
-  async function handleDelete(installId: string): Promise<void> {
-    await adminDeleteInstall(client, installId)
+  async function handleDelete(connectorId: string): Promise<void> {
+    await adminDeleteInstall(client, connectorId)
     await load()
     setSelectedId(null)
     setMode(null)
   }
 
-  function handleInstalled(installId: string): void {
+  function handleInstalled(connectorId: string): void {
     setInstallTemplate(null)
-    setSelectedId(installId)
+    setSelectedId(connectorId)
     setMode('detail')
     void load()
   }

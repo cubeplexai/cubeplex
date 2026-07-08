@@ -2540,8 +2540,8 @@ class RunManager:
                 logger.warning("generate_image unavailable for cubepi run: {}", _exc)
 
         # MCP tools — per-workspace enabled HTTP MCP connectors. Reads from
-        # the four-layer ``mcp_connector_installs`` / ``mcp_workspace_connector_states`` /
-        # ``mcp_credential_grants`` tables via :class:`MCPEffectiveConnectorService`.
+        # ``mcp_connectors`` / ``mcp_workspace_connector_states`` /
+        # ``mcp_credential_grants`` via :class:`MCPEffectiveConnectorService`.
         mcp_citation_configs: dict[str, Any] = {}
         _deferred_groups: list[Any] = []
 
@@ -2558,7 +2558,7 @@ class RunManager:
             from cubebox.mcp.oauth.token_manager import OAuthTokenManager
             from cubebox.repositories.credential import CredentialRepository
             from cubebox.repositories.mcp import (
-                MCPConnectorInstallRepository,
+                MCPConnectorRepository,
                 MCPConnectorTemplateRepository,
                 MCPCredentialGrantRepository,
                 MCPWorkspaceConnectorStateRepository,
@@ -2592,9 +2592,7 @@ class RunManager:
                 _grant_repo = MCPCredentialGrantRepository(effective_session, org_id=ctx.org_id)
                 _effective_service = MCPEffectiveConnectorService(
                     template_repo=MCPConnectorTemplateRepository(effective_session),
-                    install_repo=MCPConnectorInstallRepository(
-                        effective_session, org_id=ctx.org_id
-                    ),
+                    install_repo=MCPConnectorRepository(effective_session, org_id=ctx.org_id),
                     state_repo=MCPWorkspaceConnectorStateRepository(
                         effective_session, org_id=ctx.org_id
                     ),

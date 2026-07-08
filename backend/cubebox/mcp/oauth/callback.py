@@ -40,10 +40,9 @@ from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubebox.mcp.oauth.state import OAuthStatePayload, OAuthStateStore
 from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
-from cubebox.models.mcp import MCPConnectorInstall, MCPCredentialGrant
+from cubebox.models.mcp import MCPConnector, MCPCredentialGrant
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
     MCPConnectorRepository,
     MCPCredentialGrantRepository,
 )
@@ -55,7 +54,7 @@ class OAuthCallbackResult:
     """Return shape that the route serializes into the redirect query string."""
 
     status: Literal["ok", "error", "cancelled"]
-    install_id: str  # may be empty string when state could not be decoded
+    connector_id: str  # may be empty string when state could not be decoded
     state: str  # the original state token; required so the parent can match
     reason: str | None = None
     frontend_origin: str | None = None
@@ -65,7 +64,7 @@ class OAuthCallbackHandler:
     """Per-request handler.
 
     Repos and credential service are built INSIDE ``handle_callback()`` after
-    the state token reveals the install_id (and therefore org_id) — the
+    the state token reveals the connector_id (and therefore org_id) — the
     callback route is unauthenticated and has no request_context to seed an
     org-scoped factory.
     """
@@ -107,11 +106,11 @@ class OAuthCallbackHandler:
                 payload = await self._state_store.consume(state)
             except (OAuthStateInvalid, OAuthStateExpired):
                 return OAuthCallbackResult(
-                    status="error", install_id="", state=state, reason="state_invalid"
+                    status="error", connector_id="", state=state, reason="state_invalid"
                 )
             return OAuthCallbackResult(
                 status="cancelled" if error == "access_denied" else "error",
-                install_id=payload.install_id,
+                connector_id=payload.connector_id,
                 state=state,
                 reason=error,
                 frontend_origin=payload.frontend_origin,
@@ -119,25 +118,25 @@ class OAuthCallbackHandler:
 
         if code is None:
             return OAuthCallbackResult(
-                status="error", install_id="", state=state, reason="missing_code"
+                status="error", connector_id="", state=state, reason="missing_code"
             )
 
         try:
             payload = await self._state_store.consume(state)
         except OAuthStateExpired:
             return OAuthCallbackResult(
-                status="error", install_id="", state=state, reason="state_expired"
+                status="error", connector_id="", state=state, reason="state_expired"
             )
         except OAuthStateInvalid:
             return OAuthCallbackResult(
-                status="error", install_id="", state=state, reason="state_invalid"
+                status="error", connector_id="", state=state, reason="state_invalid"
             )
 
         verifier = await self._state_store.consume_pkce(state)
         if verifier is None:
             return OAuthCallbackResult(
                 status="error",
-                install_id=payload.install_id,
+                connector_id=payload.connector_id,
                 state=state,
                 reason="pkce_missing",
                 frontend_origin=payload.frontend_origin,
@@ -149,35 +148,26 @@ class OAuthCallbackHandler:
         # model first.
         install = (
             await self._session.execute(
-                select(MCPConnectorInstall).where(
-                    MCPConnectorInstall.id == payload.install_id,  # type: ignore[arg-type]
+                select(MCPConnector).where(
+                    MCPConnector.id == payload.connector_id,  # type: ignore[arg-type]
                 )
             )
         ).scalar_one_or_none()
         if install is None:
             return OAuthCallbackResult(
                 status="error",
-                install_id=payload.install_id,
+                connector_id=payload.connector_id,
                 state=state,
                 reason="install_not_found",
                 frontend_origin=payload.frontend_origin,
             )
-        if payload.connector_id is None:
-            return OAuthCallbackResult(
-                status="error",
-                install_id=payload.install_id,
-                state=state,
-                reason="connector_identity_not_found",
-                frontend_origin=payload.frontend_origin,
-            )
-
         # Now build the org-scoped service surface for the rest of the work.
         connector_repo = MCPConnectorRepository(self._session, org_id=install.org_id)
         connector = await connector_repo.get(payload.connector_id)
         if connector is None:
             return OAuthCallbackResult(
                 status="error",
-                install_id=payload.install_id,
+                connector_id=payload.connector_id,
                 state=state,
                 reason="connector_identity_not_found",
                 frontend_origin=payload.frontend_origin,
@@ -188,7 +178,7 @@ class OAuthCallbackHandler:
             org_id=install.org_id,
             actor_user_id=payload.actor_user_id,
         )
-        install_repo = MCPConnectorInstallRepository(self._session, org_id=install.org_id)
+        install_repo = MCPConnectorRepository(self._session, org_id=install.org_id)
         grant_repo = MCPCredentialGrantRepository(self._session, org_id=install.org_id)
 
         try:
@@ -198,7 +188,7 @@ class OAuthCallbackHandler:
         except httpx.HTTPError as exc:
             return OAuthCallbackResult(
                 status="error",
-                install_id=install.id,
+                connector_id=install.id,
                 state=state,
                 reason=f"token_exchange_failed:{exc.__class__.__name__}",
                 frontend_origin=payload.frontend_origin,
@@ -236,7 +226,7 @@ class OAuthCallbackHandler:
             metadata=self._metadata,
         )
         await run_post_grant_discovery(
-            install_id=install.id,
+            connector_id=install.id,
             workspace_id=payload.workspace_id,
             actor_user_id=payload.actor_user_id,
             session=self._session,
@@ -247,14 +237,14 @@ class OAuthCallbackHandler:
 
         return OAuthCallbackResult(
             status="ok",
-            install_id=install.id,
+            connector_id=install.id,
             state=state,
             frontend_origin=payload.frontend_origin,
         )
 
     async def _post_token_exchange(
         self,
-        install: MCPConnectorInstall,
+        install: MCPConnector,
         code: str,
         verifier: str,
         cred_service: CredentialService,
@@ -295,7 +285,7 @@ class OAuthCallbackHandler:
     async def _upsert_grant(
         self,
         *,
-        install: MCPConnectorInstall,
+        install: MCPConnector,
         payload: OAuthStatePayload,
         token: dict[str, Any],
         cred_service: CredentialService,
@@ -333,7 +323,6 @@ class OAuthCallbackHandler:
         if existing is None:
             grant = MCPCredentialGrant(
                 org_id=install.org_id,
-                install_id=install.id,
                 connector_id=payload.connector_id,
                 grant_scope=payload.grant_scope,
                 workspace_id=payload.workspace_id,
@@ -345,7 +334,7 @@ class OAuthCallbackHandler:
                 created_by_user_id=payload.actor_user_id,
             )
             return await grant_repo.add(grant)
-        existing.install_id = install.id
+        existing.connector_id = install.id
         existing.connector_id = payload.connector_id
         existing.credential_id = access_id
         # Only overwrite refresh_credential_id when the AS sent a new
@@ -366,9 +355,9 @@ class OAuthCallbackHandler:
     async def _maybe_authorize_install(
         self,
         *,
-        install: MCPConnectorInstall,
+        install: MCPConnector,
         grant: MCPCredentialGrant,
-        install_repo: MCPConnectorInstallRepository,
+        install_repo: MCPConnectorRepository,
     ) -> None:
         """Flip ``auth_status`` only when the scope matches the required policy.
 

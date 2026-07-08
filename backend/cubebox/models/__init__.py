@@ -23,7 +23,6 @@ from cubebox.models.im_connector import (
 )
 from cubebox.models.mcp import (
     MCPConnector,
-    MCPConnectorInstall,
     MCPConnectorTemplate,
     MCPCredentialGrant,
     MCPWorkspaceConnectorState,
@@ -80,7 +79,6 @@ __all__ = [
     "ExternalIdentity",
     "LlmBillingEvent",
     "MCPConnector",
-    "MCPConnectorInstall",
     "MCPConnectorTemplate",
     "MCPCredentialGrant",
     "MCPWorkspaceConnectorState",

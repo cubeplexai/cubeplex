@@ -19,7 +19,7 @@ export default function OAuthReturnPage(): React.ReactElement {
   const params = useSearchParams()
   const status = params.get('status') ?? 'error'
   const state = params.get('state')
-  const installId = params.get('install_id') ?? ''
+  const connectorId = params.get('connector_id') ?? ''
   const reason = params.get('reason') ?? undefined
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export default function OAuthReturnPage(): React.ReactElement {
       kind: 'mcp.oauth.return',
       status,
       state,
-      install_id: installId,
+      connector_id: connectorId,
       reason,
     })
     const close = setTimeout(() => {
@@ -48,7 +48,7 @@ export default function OAuthReturnPage(): React.ReactElement {
       clearTimeout(close)
       channel.close()
     }
-  }, [status, state, installId, reason])
+  }, [status, state, connectorId, reason])
 
   return (
     <div

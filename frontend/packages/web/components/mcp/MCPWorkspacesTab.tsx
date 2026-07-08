@@ -13,7 +13,7 @@ import {
 } from '@cubebox/core'
 
 interface MCPWorkspacesTabProps {
-  installId: string
+  connectorId: string
   // Retained for prop-compatibility from callers that still pass an admin
   // client; the per-workspace four-layer state endpoints are workspace-scoped
   // so this is effectively informational here.
@@ -27,7 +27,7 @@ interface WsRow {
   error: string | null
 }
 
-export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTabProps) {
+export function MCPWorkspacesTab({ connectorId, client: _client }: MCPWorkspacesTabProps) {
   const t = useTranslations('mcpAdmin')
 
   const [rows, setRows] = useState<WsRow[]>([])
@@ -48,7 +48,7 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
             wsClient.setWorkspaceId(ws.id)
             const list = await wsListEffectiveConnectors(wsClient, ws.id)
             const match = list.items.find(
-              (c: MCPEffectiveConnector) => c.install.install_id === installId,
+              (c: MCPEffectiveConnector) => c.install.connector_id === connectorId,
             )
             return {
               ws,
@@ -73,7 +73,7 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
     } finally {
       setLoading(false)
     }
-  }, [installId])
+  }, [connectorId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -89,7 +89,7 @@ export function MCPWorkspacesTab({ installId, client: _client }: MCPWorkspacesTa
     try {
       const wsClient = createApiClient('')
       wsClient.setWorkspaceId(wsId)
-      const updated = await wsPatchConnectorState(wsClient, wsId, installId, { enabled })
+      const updated = await wsPatchConnectorState(wsClient, wsId, connectorId, { enabled })
       patchRow(wsId, { enabled: updated.enabled, saving: false, error: null })
     } catch (err) {
       patchRow(wsId, { saving: false, error: (err as Error).message })

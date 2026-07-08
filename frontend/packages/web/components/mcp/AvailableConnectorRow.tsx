@@ -29,7 +29,7 @@ export interface AvailableConnectorRowProps {
    * panel + auth band open automatically and the operator can finish
    * credential provisioning without hunting for the new install.
    */
-  onConnected: (installId: string) => Promise<void>
+  onConnected: (connectorId: string) => Promise<void>
 }
 
 export function AvailableConnectorRow({
@@ -50,13 +50,13 @@ export function AvailableConnectorRow({
     setBusy(true)
     setError(null)
     try {
-      let installId: string | null = null
+      let connectorId: string | null = null
       if (row.source === 'org_install' && row.install) {
-        await wsPatchConnectorState(client, wsId, row.install.install_id, {
+        await wsPatchConnectorState(client, wsId, row.install.connector_id, {
           enabled: true,
           credential_policy: 'workspace',
         })
-        installId = row.install.install_id
+        connectorId = row.install.connector_id
       } else if (row.source === 'template' && row.template) {
         const tpl = row.template
         const method: MCPAuthMethod =
@@ -70,10 +70,10 @@ export function AvailableConnectorRow({
           auth_method: method,
           default_credential_policy: policy,
         })
-        installId = created.install_id
+        connectorId = created.connector_id
       }
-      if (installId !== null) {
-        await onConnected(installId)
+      if (connectorId !== null) {
+        await onConnected(connectorId)
       }
     } catch (err) {
       setError((err as Error).message)
@@ -85,7 +85,7 @@ export function AvailableConnectorRow({
   return (
     <div
       className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-card/40 p-3"
-      data-testid={`ws-available-row-${row.install?.install_id ?? row.template?.template_id ?? 'unknown'}`}
+      data-testid={`ws-available-row-${row.install?.connector_id ?? row.template?.template_id ?? 'unknown'}`}
     >
       <div className="flex min-w-0 flex-col gap-0.5">
         <div className="flex items-center gap-2">

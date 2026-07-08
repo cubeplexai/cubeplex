@@ -35,7 +35,7 @@ from cubebox.mcp._constants import (
     CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET,
     server_url_hash,
 )
-from cubebox.models import Credential, MCPConnectorInstall
+from cubebox.models import Credential, MCPConnector
 from cubebox.repositories.mcp import MCPConnectorTemplateRepository
 
 
@@ -612,9 +612,9 @@ async def _sync_active_template_installs(
     static_auth_query_param: str | None,
 ) -> int:
     """Keep active installs created from a catalog template aligned with the template row."""
-    stmt = select(MCPConnectorInstall).where(
-        MCPConnectorInstall.template_id == template_id,  # type: ignore[arg-type]
-        MCPConnectorInstall.install_state == "active",  # type: ignore[arg-type]
+    stmt = select(MCPConnector).where(
+        MCPConnector.template_id == template_id,  # type: ignore[arg-type]
+        MCPConnector.status == "active",  # type: ignore[arg-type]
     )
     installs = list((await session.execute(stmt)).scalars().all())
     if not installs:

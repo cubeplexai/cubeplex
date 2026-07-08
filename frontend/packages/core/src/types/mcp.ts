@@ -1,7 +1,7 @@
 // Four-layer MCP types (templates / installs / state / effective + grants).
 //
 // The endpoints live under `/api/v1/ws/{ws}/mcp/templates`, `/installs`,
-// `/connectors`, `/connectors/{installId}/state`, and `/admin/mcp/...`.
+// `/connectors`, `/connectors/{connectorId}/state`, and `/admin/mcp/...`.
 
 export type MCPTransport = 'streamable_http' | 'sse'
 export type MCPAuthMethod = 'static' | 'oauth' | 'none'
@@ -49,8 +49,7 @@ export interface MCPConnectorTemplate {
   install_summary?: Record<string, unknown> | null
 }
 
-export interface MCPConnectorInstall {
-  install_id: string
+export interface MCPConnector {
   connector_id: string
   template_id: string | null
   install_scope: 'org' | 'workspace'
@@ -72,7 +71,6 @@ export interface MCPConnectorInstall {
 
 export interface MCPWorkspaceConnectorState {
   workspace_id: string
-  install_id: string
   connector_id: string
   enabled: boolean
   credential_policy: MCPCredentialScope
@@ -81,7 +79,7 @@ export interface MCPWorkspaceConnectorState {
 
 export interface MCPEffectiveConnector {
   template: MCPConnectorTemplate | null
-  install: MCPConnectorInstall
+  install: MCPConnector
   workspace_state: MCPWorkspaceConnectorState | null
   credential_policy: MCPCredentialScope
   required_grant_scope?: string | null
@@ -94,7 +92,6 @@ export interface MCPEffectiveConnector {
 export type MCPConnectorFilter = 'all' | 'installed' | 'available' | 'custom'
 
 export interface MCPCredentialGrantStatus {
-  install_id: string
   connector_id: string
   grant_scope: 'org' | 'workspace' | 'user'
   workspace_id: string | null

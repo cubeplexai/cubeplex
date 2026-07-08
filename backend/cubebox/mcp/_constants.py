@@ -20,7 +20,7 @@ CREDENTIAL_KIND_MCP_OAUTH_CLIENT_SECRET = "mcp_oauth_client_secret"
 def server_url_hash(url: str) -> str:
     """SHA-256 hex digest of an MCP connector URL.
 
-    Stored on ``MCPConnectorInstall.server_url_hash`` so the partial unique
+    Stored on ``MCPConnector.server_url_hash`` so the partial unique
     indexes on URL × scope can enforce no-duplicate-URL invariants without
     indexing the full URL string.
     """
@@ -42,10 +42,9 @@ def slugify_for_namespace(server_name: str) -> str:
     runs are collapsed to ``_`` and trimmed from both ends. An all-symbol
     name (slug ends up empty) falls back to ``mcp``.
 
-    Same algorithm runs as a Postgres generated column on
-    ``mcp_connector_installs.slug_name`` so the org-wide partial unique
-    index can enforce uniqueness on the canonical slug rather than the
-    raw display string (where ``Web Tools`` and ``Web-Tools`` would
+    Same algorithm populates ``mcp_connectors.slug_name`` so the org-wide
+    partial unique index can enforce uniqueness on the canonical slug rather
+    than the raw display string (where ``Web Tools`` and ``Web-Tools`` would
     otherwise both squat on the slug ``Web_Tools``).
     """
     slug = _NS_SLUG_RE.sub("_", server_name).strip("_")

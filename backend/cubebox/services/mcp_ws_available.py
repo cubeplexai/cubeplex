@@ -18,7 +18,7 @@ class WsAvailableRow:
     """Service-layer row; route serializes into ``WsAvailableOut``."""
 
     source: WsAvailableSource
-    install_id: str | None
+    connector_id: str | None
     template_id: str | None
     reason: WsAvailableReason
 
@@ -39,11 +39,11 @@ def compute_available_rows(
     - ws_states: this workspace's state rows.
     - templates: all active templates in the catalog.
 
-    Output ordering: org rows first (by install_id), then template rows
+    Output ordering: org rows first (by connector_id), then template rows
     (by template_id). Stable so the frontend can compare against the
     previous fetch.
     """
-    state_by_install = {s.install_id: s for s in ws_states}
+    state_by_install = {s.connector_id: s for s in ws_states}
 
     org_rows: list[WsAvailableRow] = []
     for install in org_installs:
@@ -54,7 +54,7 @@ def compute_available_rows(
         org_rows.append(
             WsAvailableRow(
                 source="org_install",
-                install_id=install.id,
+                connector_id=install.id,
                 template_id=install.template_id,
                 reason=reason,
             )
@@ -81,12 +81,12 @@ def compute_available_rows(
         template_rows.append(
             WsAvailableRow(
                 source="template",
-                install_id=None,
+                connector_id=None,
                 template_id=template.id,
                 reason="not_installed_at_org",
             )
         )
 
-    org_rows.sort(key=lambda r: r.install_id or "")
+    org_rows.sort(key=lambda r: r.connector_id or "")
     template_rows.sort(key=lambda r: r.template_id or "")
     return org_rows + template_rows

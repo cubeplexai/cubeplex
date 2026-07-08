@@ -7,8 +7,8 @@ requires its target model to inherit ``OrgScopedMixin`` (NOT NULL
 deliberately allow nullable scope columns:
 
 * ``MCPConnectorTemplate`` has no ``org_id`` at all — templates are global.
-* ``MCPConnectorInstall`` has a nullable ``workspace_id`` (org-scope
-  installs).
+* ``MCPConnector`` is org-scoped but deliberately has no workspace_id;
+  workspace enablement lives in ``MCPWorkspaceConnectorState``.
 * ``MCPCredentialGrant`` has nullable ``workspace_id`` AND ``user_id``
   (a row's shape depends on ``grant_scope``).
 
@@ -29,7 +29,6 @@ from sqlalchemy.sql import ColumnElement
 
 from cubebox.models import (
     MCPConnector,
-    MCPConnectorInstall,
     MCPConnectorTemplate,
     MCPCredentialGrant,
     MCPWorkspaceConnectorState,
@@ -218,18 +217,29 @@ class MCPConnectorRepository:
         )
         return (await self.session.execute(stmt)).scalars().first()
 
-    async def get_connector_id_for_install(
-        self,
-        install: MCPConnectorInstall,
-    ) -> str | None:
-        from cubebox.mcp._constants import slugify_for_namespace
-
-        existing = await self.get_active_by_identity(
-            template_id=install.template_id,
-            server_url_hash=install.server_url_hash,
-            slug_name=slugify_for_namespace(install.name),
+    async def list_active(self) -> list[MCPConnector]:
+        stmt = select(MCPConnector).where(
+            cast("ColumnElement[bool]", MCPConnector.org_id == self.org_id),
+            cast("ColumnElement[bool]", MCPConnector.status == "active"),
         )
-        return existing.id if existing is not None else None
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_auto_enroll_active(self) -> list[MCPConnector]:
+        stmt = select(MCPConnector).where(
+            cast("ColumnElement[bool]", MCPConnector.org_id == self.org_id),
+            cast("ColumnElement[bool]", MCPConnector.status == "active"),
+            cast("ColumnElement[bool]", MCPConnector.auto_enroll_new_workspaces == True),  # noqa: E712
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_org_installs(self) -> list[MCPConnector]:
+        return await self.list_active()
+
+    async def list_workspace_installs(self, _workspace_id: str) -> list[MCPConnector]:
+        return []
+
+    async def get_connector_id_for_install(self, connector: MCPConnector) -> str | None:
+        return connector.id
 
     async def add(self, connector: MCPConnector) -> MCPConnector:
         connector.org_id = self.org_id
@@ -250,69 +260,6 @@ class MCPConnectorRepository:
         return connector
 
 
-class MCPConnectorInstallRepository:
-    """Org-scoped repository for ``mcp_connector_installs``.
-
-    ``workspace_id`` is nullable on the model (org-scope installs use
-    ``workspace_id IS NULL``), so this repo cannot derive from
-    :class:`ScopedRepository[T]`. It still enforces ``org_id`` on every
-    query and on ``add()``.
-    """
-
-    def __init__(self, session: AsyncSession, *, org_id: str) -> None:
-        self.session = session
-        self.org_id = org_id
-
-    async def get(self, install_id: str) -> MCPConnectorInstall | None:
-        stmt = select(MCPConnectorInstall).where(
-            MCPConnectorInstall.id == install_id,  # type: ignore[arg-type]
-            MCPConnectorInstall.org_id == self.org_id,  # type: ignore[arg-type]
-        )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
-
-    async def list_org_installs(self) -> list[MCPConnectorInstall]:
-        """Active org-scope installs (``workspace_id IS NULL``).
-
-        Tombstoned (``install_state='uninstalled'``) rows are excluded —
-        the admin list and the effective-state pipeline both want only
-        live installs. Tombstones survive in the table as an audit trail
-        but never surface to API consumers.
-        """
-        stmt = select(MCPConnectorInstall).where(
-            MCPConnectorInstall.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPConnectorInstall.workspace_id.is_(None),  # type: ignore[union-attr]
-            MCPConnectorInstall.install_state == "active",  # type: ignore[arg-type]
-        )
-        return list((await self.session.execute(stmt)).scalars().all())
-
-    async def list_workspace_installs(self, workspace_id: str) -> list[MCPConnectorInstall]:
-        """Active workspace-scope installs for the given workspace."""
-        stmt = select(MCPConnectorInstall).where(
-            MCPConnectorInstall.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPConnectorInstall.workspace_id == workspace_id,  # type: ignore[arg-type]
-            MCPConnectorInstall.install_state == "active",  # type: ignore[arg-type]
-        )
-        return list((await self.session.execute(stmt)).scalars().all())
-
-    async def add(self, install: MCPConnectorInstall) -> MCPConnectorInstall:
-        install.org_id = self.org_id
-        self.session.add(install)
-        await self.session.commit()
-        await self.session.refresh(install)
-        return install
-
-    async def update(self, install: MCPConnectorInstall) -> MCPConnectorInstall:
-        if install.org_id != self.org_id:
-            raise RuntimeError(
-                "MCPConnectorInstallRepository.update: install belongs to a different org"
-            )
-        install.updated_at = datetime.now(UTC)
-        self.session.add(install)
-        await self.session.commit()
-        await self.session.refresh(install)
-        return install
-
-
 class MCPWorkspaceConnectorStateRepository:
     """Org-scoped repository for ``mcp_workspace_connector_states``.
 
@@ -327,14 +274,6 @@ class MCPWorkspaceConnectorStateRepository:
         self.session = session
         self.org_id = org_id
 
-    async def get(self, workspace_id: str, install_id: str) -> MCPWorkspaceConnectorState | None:
-        stmt = select(MCPWorkspaceConnectorState).where(
-            MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPWorkspaceConnectorState.workspace_id == workspace_id,  # type: ignore[arg-type]
-            MCPWorkspaceConnectorState.install_id == install_id,  # type: ignore[arg-type]
-        )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
-
     async def get_by_connector(
         self,
         workspace_id: str,
@@ -347,6 +286,13 @@ class MCPWorkspaceConnectorStateRepository:
         )
         return (await self.session.execute(stmt)).scalars().first()
 
+    async def get(
+        self,
+        workspace_id: str,
+        connector_id: str,
+    ) -> MCPWorkspaceConnectorState | None:
+        return await self.get_by_connector(workspace_id, connector_id)
+
     async def list_for_workspace(self, workspace_id: str) -> list[MCPWorkspaceConnectorState]:
         stmt = select(MCPWorkspaceConnectorState).where(
             MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
@@ -354,30 +300,22 @@ class MCPWorkspaceConnectorStateRepository:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def list_for_install(self, install_id: str) -> list[MCPWorkspaceConnectorState]:
-        """Every state row pointing at this install across all workspaces.
-
-        Used by the admin connector list to compute the per-install
-        ``workspace_distribution`` aggregate in one query instead of a
-        per-workspace fan-out.
-        """
+    async def list_for_connector(self, connector_id: str) -> list[MCPWorkspaceConnectorState]:
+        """Every state row pointing at this connector across all workspaces."""
         stmt = select(MCPWorkspaceConnectorState).where(
             MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPWorkspaceConnectorState.install_id == install_id,  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.connector_id == connector_id,  # type: ignore[arg-type]
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def delete_for_install(self, install_id: str) -> int:
-        """Bulk-delete every state row for ``install_id``. Returns count.
+    async def list_for_install(self, connector_id: str) -> list[MCPWorkspaceConnectorState]:
+        return await self.list_for_connector(connector_id)
 
-        Called on uninstall: state rows for a tombstoned install would
-        otherwise hang around forever as orphans, since reinstall mints a
-        new install_id (the partial unique indexes exclude tombstones, so
-        the old row never gets rebound to the new install).
-        """
+    async def delete_for_connector(self, connector_id: str) -> int:
+        """Bulk-delete every state row for ``connector_id``. Returns count."""
         stmt = select(MCPWorkspaceConnectorState).where(
             MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPWorkspaceConnectorState.install_id == install_id,  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.connector_id == connector_id,  # type: ignore[arg-type]
         )
         rows = list((await self.session.execute(stmt)).scalars().all())
         for row in rows:
@@ -386,12 +324,14 @@ class MCPWorkspaceConnectorStateRepository:
             await self.session.commit()
         return len(rows)
 
+    async def delete_for_install(self, connector_id: str) -> int:
+        return await self.delete_for_connector(connector_id)
+
     async def upsert_for_connector(
         self,
         *,
         workspace_id: str,
         connector_id: str,
-        install_id: str,
         enabled: bool,
         credential_policy: str,
         enablement_source: str,
@@ -399,7 +339,6 @@ class MCPWorkspaceConnectorStateRepository:
     ) -> MCPWorkspaceConnectorState:
         existing = await self.get_by_connector(workspace_id, connector_id)
         if existing is not None:
-            existing.install_id = install_id
             existing.enabled = enabled
             existing.credential_policy = credential_policy
             existing.enablement_source = enablement_source
@@ -412,7 +351,6 @@ class MCPWorkspaceConnectorStateRepository:
         row = MCPWorkspaceConnectorState(
             org_id=self.org_id,
             workspace_id=workspace_id,
-            install_id=install_id,
             connector_id=connector_id,
             enabled=enabled,
             credential_policy=credential_policy,
@@ -438,12 +376,8 @@ class MCPCredentialGrantRepository:
 
     **User-grant lookup note.** Per the DB check constraint, every user
     grant carries a non-null ``workspace_id`` (user grants are scoped
-    per-workspace). ``get_user_grant`` therefore accepts an optional
-    ``workspace_id``: when provided, the query is the exact unique key
-    ``(install_id, workspace_id, user_id)``; when omitted, it returns
-    the first user grant for ``(install_id, user_id)`` regardless of
-    workspace, which is what most call sites want when probing "does
-    this user have any grant for this install?".
+    per-workspace). ``get_user_grant_for_connector`` therefore requires
+    the exact unique key ``(connector_id, workspace_id, user_id)``.
     """
 
     def __init__(self, session: AsyncSession, *, org_id: str) -> None:
@@ -469,14 +403,6 @@ class MCPCredentialGrantRepository:
         await self.session.refresh(grant)
         return grant
 
-    async def get_org_grant(self, install_id: str) -> MCPCredentialGrant | None:
-        stmt = select(MCPCredentialGrant).where(
-            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.grant_scope == "org",  # type: ignore[arg-type]
-        )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
-
     async def get_org_grant_for_connector(
         self,
         connector_id: str,
@@ -488,29 +414,24 @@ class MCPCredentialGrantRepository:
         )
         return (await self.session.execute(stmt)).scalars().first()
 
-    async def has_any_grant(self, install_id: str) -> bool:
-        """True if any grant (any scope) exists for this install.
+    async def get_org_grant(self, connector_id: str) -> MCPCredentialGrant | None:
+        return await self.get_org_grant_for_connector(connector_id)
+
+    async def has_any_grant_for_connector(self, connector_id: str) -> bool:
+        """True if any grant (any scope) exists for this connector.
 
         Used by auth-method-switch to refuse changes that would orphan
         credentials provisioned for the previous method.
         """
         stmt = select(MCPCredentialGrant).where(
             MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.connector_id == connector_id,  # type: ignore[arg-type]
         )
         result = await self.session.execute(stmt)
         return result.first() is not None
 
-    async def get_workspace_grant(
-        self, install_id: str, workspace_id: str
-    ) -> MCPCredentialGrant | None:
-        stmt = select(MCPCredentialGrant).where(
-            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.workspace_id == workspace_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.grant_scope == "workspace",  # type: ignore[arg-type]
-        )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
+    async def has_any_grant(self, connector_id: str) -> bool:
+        return await self.has_any_grant_for_connector(connector_id)
 
     async def get_workspace_grant_for_connector(
         self,
@@ -524,25 +445,6 @@ class MCPCredentialGrantRepository:
             MCPCredentialGrant.grant_scope == "workspace",  # type: ignore[arg-type]
         )
         return (await self.session.execute(stmt)).scalars().first()
-
-    async def get_user_grant(
-        self,
-        install_id: str,
-        user_id: str,
-        *,
-        workspace_id: str | None = None,
-    ) -> MCPCredentialGrant | None:
-        stmt = select(MCPCredentialGrant).where(
-            MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.user_id == user_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.grant_scope == "user",  # type: ignore[arg-type]
-        )
-        if workspace_id is not None:
-            stmt = stmt.where(
-                MCPCredentialGrant.workspace_id == workspace_id,  # type: ignore[arg-type]
-            )
-        return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get_user_grant_for_connector(
         self,
@@ -559,27 +461,6 @@ class MCPCredentialGrantRepository:
             MCPCredentialGrant.grant_scope == "user",  # type: ignore[arg-type]
         )
         return (await self.session.execute(stmt)).scalars().first()
-
-    async def get_for_scope(
-        self,
-        *,
-        install_id: str,
-        grant_scope: str,
-        workspace_id: str | None,
-        user_id: str | None,
-    ) -> MCPCredentialGrant | None:
-        """Single grant per (install, scope-shape).
-
-        Org grants ignore both ``workspace_id`` and ``user_id``; workspace
-        grants ignore ``user_id``; user grants require both.
-        """
-        if grant_scope == "org":
-            return await self.get_org_grant(install_id)
-        if grant_scope == "workspace":
-            assert workspace_id is not None, "workspace grant requires workspace_id"
-            return await self.get_workspace_grant(install_id, workspace_id)
-        assert workspace_id is not None and user_id is not None, "user grant requires both"
-        return await self.get_user_grant(install_id, user_id, workspace_id=workspace_id)
 
     async def get_for_connector_scope(
         self,
@@ -602,15 +483,11 @@ class MCPCredentialGrantRepository:
             workspace_id=workspace_id,
         )
 
-    async def delete_for_install(self, install_id: str) -> int:
-        """Bulk-delete every grant for ``install_id``. Returns count.
-
-        Called on uninstall so credentials don't outlive the install
-        they were provisioned for. Symmetric with the state-row cleanup.
-        """
+    async def delete_for_connector(self, connector_id: str) -> int:
+        """Bulk-delete every grant for ``connector_id``. Returns count."""
         stmt = select(MCPCredentialGrant).where(
             MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.connector_id == connector_id,  # type: ignore[arg-type]
         )
         rows = list((await self.session.execute(stmt)).scalars().all())
         for row in rows:
@@ -621,7 +498,7 @@ class MCPCredentialGrantRepository:
 
     async def delete_scope(
         self,
-        install_id: str,
+        connector_id: str,
         grant_scope: str,
         workspace_id: str | None = None,
         user_id: str | None = None,
@@ -631,7 +508,7 @@ class MCPCredentialGrantRepository:
         scoped to grants by FK; the service is responsible for cascading)."""
         stmt = select(MCPCredentialGrant).where(
             MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
-            MCPCredentialGrant.install_id == install_id,  # type: ignore[arg-type]
+            MCPCredentialGrant.connector_id == connector_id,  # type: ignore[arg-type]
             MCPCredentialGrant.grant_scope == grant_scope,  # type: ignore[arg-type]
         )
         if workspace_id is not None:

@@ -23,7 +23,7 @@ interface OAuthReturnMessage {
   kind: 'mcp.oauth.return'
   status: 'ok' | 'cancelled' | 'error'
   state: string
-  install_id: string
+  connector_id: string
   reason?: string
 }
 

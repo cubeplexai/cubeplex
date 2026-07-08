@@ -1,7 +1,7 @@
 """Admin MCP routes: four-layer connector surface.
 
 Routes under ``/admin/mcp/{templates,installs,...}`` operate on the
-four-layer model — ``MCPConnectorTemplate`` / ``MCPConnectorInstall`` /
+four-layer model — ``MCPConnectorTemplate`` / ``MCPConnector`` /
 ``MCPCredentialGrant``.
 """
 
@@ -21,7 +21,7 @@ from cubebox.api.schemas.mcp import (
     AdminInstallRefreshIn,
     CreateGrantIn,
     MCPAdminInstallEffectiveOut,
-    MCPConnectorInstallOut,
+    MCPConnectorOut,
     MCPConnectorTemplateListOut,
     MCPConnectorTemplateOut,
     MCPCredentialGrantStatusOut,
@@ -59,10 +59,9 @@ from cubebox.mcp.exceptions import MCPDiscoveryFailed
 from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
 from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
-from cubebox.models import MCPConnectorInstall, User
+from cubebox.models import MCPConnector, User
 from cubebox.models.mcp import MCPCredentialGrant
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
@@ -77,7 +76,7 @@ from cubebox.services.mcp_discovery import (
     discover_tools_for_install,
     run_post_grant_discovery,
 )
-from cubebox.services.mcp_installs import MCPConnectorInstallService
+from cubebox.services.mcp_installs import MCPConnectorService
 from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
 router = APIRouter(prefix="/admin/mcp", tags=["admin-mcp"])
@@ -109,10 +108,10 @@ def _template_to_out(
 
 
 def _install_to_out(
-    install: MCPConnectorInstall,
+    install: MCPConnector,
     *,
     connector_id: str,
-) -> MCPConnectorInstallOut:
+) -> MCPConnectorOut:
     tools_cache = install.tools_cache or []
     tool_entries = [
         MCPToolEntry(
@@ -123,8 +122,7 @@ def _install_to_out(
         for t in tools_cache
         if isinstance(t, dict) and t.get("name")
     ]
-    return MCPConnectorInstallOut(
-        install_id=install.id,
+    return MCPConnectorOut(
         connector_id=connector_id,
         template_id=install.template_id,
         install_scope=install.install_scope,  # type: ignore[arg-type]
@@ -163,7 +161,7 @@ def _policy_field_error(field: str, message: str) -> HTTPException:
 
 def _validate_install_policy_pairing(
     *,
-    install: MCPConnectorInstall,
+    install: MCPConnector,
     requested_policy: str,
     field: str,
 ) -> None:
@@ -206,11 +204,11 @@ async def list_admin_templates(
 @router.post(
     "/installs",
     status_code=status.HTTP_201_CREATED,
-    response_model=MCPConnectorInstallOut,
+    response_model=MCPConnectorOut,
 )
 async def create_admin_install(
     body: AdminCreateInstallIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
@@ -218,7 +216,7 @@ async def create_admin_install(
     token_mgr: Annotated[OAuthTokenManager, Depends(get_admin_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
-) -> MCPConnectorInstallOut:
+) -> MCPConnectorOut:
     """Create an org-scope install, optionally fanning out into workspaces.
 
     Two branches:
@@ -228,9 +226,9 @@ async def create_admin_install(
       transport + name). The schema validator enforces the required
       custom-install fields.
     """
-    from cubebox.services.mcp_installs import InstallWithConnector
+    from cubebox.services.mcp_installs import ConnectorWithIdentity
 
-    result: InstallWithConnector
+    result: ConnectorWithIdentity
     template_id_for_audit: str | None = None
     if body.template_id is None:
         # Custom install. The schema validator already guaranteed
@@ -287,7 +285,7 @@ async def create_admin_install(
     if body.credential_plaintext is not None:
         try:
             await svc.create_static_grant(
-                install_id=install.id,
+                connector_id=install.id,
                 grant_scope="org",
                 plaintext=body.credential_plaintext,
             )
@@ -300,7 +298,7 @@ async def create_admin_install(
             session, backend, org_id=ctx.org_id, actor_user_id=ctx.user.id
         )
         await run_post_grant_discovery(
-            install_id=install.id,
+            connector_id=install.id,
             workspace_id=None,
             actor_user_id=ctx.user.id,
             session=session,
@@ -320,14 +318,14 @@ async def create_admin_install(
 
 
 @router.get(
-    "/installs/{install_id}",
-    response_model=MCPConnectorInstallOut,
+    "/installs/{connector_id}",
+    response_model=MCPConnectorOut,
 )
 async def get_admin_install(
-    install_id: str,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
-) -> MCPConnectorInstallOut:
-    install = await svc._install_repo.get(install_id)
+    connector_id: str,
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
+) -> MCPConnectorOut:
+    install = await svc._install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     connector_id = await svc._connector_id_for_install(install) or ""
@@ -335,18 +333,18 @@ async def get_admin_install(
 
 
 @router.post(
-    "/installs/{install_id}/refresh-discovery",
-    response_model=MCPConnectorInstallOut,
+    "/installs/{connector_id}/refresh-discovery",
+    response_model=MCPConnectorOut,
 )
 async def admin_refresh_discovery(
-    install_id: str,
+    connector_id: str,
     body: AdminInstallRefreshIn,
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
     token_mgr: Annotated[OAuthTokenManager, Depends(get_admin_oauth_token_manager)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
-) -> MCPConnectorInstallOut:
+) -> MCPConnectorOut:
     """Re-discover tools for one install and persist into ``tools_cache``.
 
     Requires ``workspace_id`` when the install's default credential
@@ -357,8 +355,8 @@ async def admin_refresh_discovery(
     cred_service = build_credential_service(
         session, backend, org_id=ctx.org_id, actor_user_id=ctx.user.id
     )
-    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
-    install = await install_repo.get(install_id)
+    install_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     # Determine effective policy for the workspace_id requirement check.
@@ -377,7 +375,7 @@ async def admin_refresh_discovery(
         )
 
         state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
-        ws_state = await state_repo.get(body.workspace_id, install_id)
+        ws_state = await state_repo.get(body.workspace_id, connector_id)
         if ws_state is not None and ws_state.credential_policy:
             effective_policy = ws_state.credential_policy
     needs_ws = effective_policy in {"workspace", "user"}
@@ -395,7 +393,7 @@ async def admin_refresh_discovery(
         )
     try:
         await discover_tools_for_install(
-            install_id=install_id,
+            connector_id=connector_id,
             workspace_id=body.workspace_id,
             actor_user_id=ctx.user.id,
             session=session,
@@ -409,7 +407,7 @@ async def admin_refresh_discovery(
         ) from exc
     except ValueError as exc:
         raise HTTPException(400, detail={"code": str(exc)}) from exc
-    refreshed = await install_repo.get(install_id)
+    refreshed = await install_repo.get(connector_id)
     assert refreshed is not None
     connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
     cid = await connector_repo.get_connector_id_for_install(refreshed) or ""
@@ -417,16 +415,16 @@ async def admin_refresh_discovery(
 
 
 @router.post(
-    "/installs/{install_id}/promote-to-org",
-    response_model=MCPConnectorInstallOut,
+    "/installs/{connector_id}/promote-to-org",
+    response_model=MCPConnectorOut,
 )
 async def admin_promote_install_to_org(
-    install_id: str,
+    connector_id: str,
     body: PromoteInstallIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
-) -> MCPConnectorInstallOut:
+) -> MCPConnectorOut:
     """Promote a workspace-scope install to org scope.
 
     The source workspace's existing state row is preserved — it is
@@ -437,7 +435,7 @@ async def admin_promote_install_to_org(
     """
     try:
         install = await svc.promote_workspace_install_to_org(
-            install_id=install_id,
+            connector_id=connector_id,
             distribution=body.distribution.model_dump(),
         )
     except ValueError as exc:
@@ -453,7 +451,7 @@ async def admin_promote_install_to_org(
         event="mcp.install.promoted",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"distribution_mode": body.distribution.mode},
     )
     connector_id = await svc._connector_id_for_install(install) or ""
@@ -461,20 +459,20 @@ async def admin_promote_install_to_org(
 
 
 @router.put(
-    "/installs/{install_id}/tool-citations",
-    response_model=MCPConnectorInstallOut,
+    "/installs/{connector_id}/tool-citations",
+    response_model=MCPConnectorOut,
 )
 async def admin_upsert_tool_citation(
-    install_id: str,
+    connector_id: str,
     body: ToolCitationUpsertIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
-) -> MCPConnectorInstallOut:
+) -> MCPConnectorOut:
     """Upsert or clear one tool's citation mapping on an install.
 
     ``config=None`` clears the entry; a dict upserts it.
     """
-    install = await svc._install_repo.get(install_id)
+    install = await svc._install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     current = dict(install.tool_citations or {})
@@ -511,13 +509,13 @@ def _admin_invoke_rate_key(_req: Request | None = None) -> str:
     # servers expose tools like `repos/list`). FastAPI's default
     # string parameter stops at the next slash and decodes %2F as
     # one too, so frontend encodeURIComponent doesn't save us.
-    "/installs/{install_id}/tools/{tool_name:path}/invoke",
+    "/installs/{connector_id}/tools/{tool_name:path}/invoke",
     response_model=ToolInvokeOut,
 )
 @limiter.limit("30/minute", key_func=_admin_invoke_rate_key)
 async def admin_invoke_tool(
     request: Request,  # noqa: ARG001
-    install_id: str,
+    connector_id: str,
     tool_name: str,
     body: AdminInstallInvokeIn,
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -539,8 +537,8 @@ async def admin_invoke_tool(
     )
     from cubebox.services.mcp_discovery import _build_runtime_spec_for_discovery
 
-    install_repo = MCPConnectorInstallRepository(session, org_id=ctx.org_id)
-    install = await install_repo.get(install_id)
+    install_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    install = await install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     # Same effective-policy logic as refresh-discovery: workspace_state
@@ -548,7 +546,7 @@ async def admin_invoke_tool(
     effective_policy = install.default_credential_policy
     if body.workspace_id:
         state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
-        ws_state = await state_repo.get(body.workspace_id, install_id)
+        ws_state = await state_repo.get(body.workspace_id, connector_id)
         if ws_state is not None and ws_state.credential_policy:
             effective_policy = ws_state.credential_policy
     needs_ws = effective_policy in {"workspace", "user"}
@@ -579,7 +577,7 @@ async def admin_invoke_tool(
         dtos = await effective_svc.list_for_workspace_user(
             body.workspace_id, ctx.user.id, include_unusable=True
         )
-        dto = next((d for d in dtos if d.install.id == install_id), None)
+        dto = next((d for d in dtos if d.install.id == connector_id), None)
         if dto is None or not dto.usable:
             raise HTTPException(
                 400,
@@ -590,7 +588,7 @@ async def admin_invoke_tool(
             )
         grant = dto.grant
     else:
-        grant = await grant_repo.get_org_grant(install_id)
+        grant = await grant_repo.get_org_grant(connector_id)
     spec = _build_runtime_spec_for_discovery(install=install, grant=grant)
     started = time.perf_counter()
     try:
@@ -613,7 +611,7 @@ async def admin_invoke_tool(
             event="mcp.tool.invoked",
             actor_user_id=ctx.user.id,
             org_id=ctx.org_id,
-            target_id=install_id,
+            target_id=connector_id,
             details={
                 "tool_name": tool_name,
                 "workspace_id": body.workspace_id,
@@ -644,7 +642,7 @@ async def admin_invoke_tool(
             event="mcp.tool.invoked",
             actor_user_id=ctx.user.id,
             org_id=ctx.org_id,
-            target_id=install_id,
+            target_id=connector_id,
             details={
                 "tool_name": tool_name,
                 "workspace_id": body.workspace_id,
@@ -657,7 +655,7 @@ async def admin_invoke_tool(
         event="mcp.tool.invoked",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={
             "tool_name": tool_name,
             "workspace_id": body.workspace_id,
@@ -668,17 +666,17 @@ async def admin_invoke_tool(
 
 
 @router.patch(
-    "/installs/{install_id}",
-    response_model=MCPConnectorInstallOut,
+    "/installs/{connector_id}",
+    response_model=MCPConnectorOut,
 )
 async def patch_admin_install(
-    install_id: str,
+    connector_id: str,
     body: PatchInstallIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
-) -> MCPConnectorInstallOut:
-    install = await svc._install_repo.get(install_id)
+) -> MCPConnectorOut:
+    install = await svc._install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
 
@@ -710,7 +708,7 @@ async def patch_admin_install(
                     "auth_method_not_supported_by_template",
                 )
         grant_repo = MCPCredentialGrantRepository(svc._install_repo.session, org_id=install.org_id)
-        if await grant_repo.has_any_grant(install_id):
+        if await grant_repo.has_any_grant(connector_id):
             raise HTTPException(
                 409,
                 detail={"code": "auth_method_change_blocked_by_existing_grant"},
@@ -777,43 +775,43 @@ async def patch_admin_install(
         event="mcp.install.patched",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
     )
     connector_id = await svc._connector_id_for_install(saved) or ""
     return _install_to_out(saved, connector_id=connector_id)
 
 
 @router.delete(
-    "/installs/{install_id}",
+    "/installs/{connector_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_admin_install(
-    install_id: str,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    connector_id: str,
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> None:
     try:
-        await svc.uninstall(install_id)
+        await svc.uninstall(connector_id)
     except ValueError as exc:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"}) from exc
     await audit.record(
         event="mcp.install.uninstalled",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
     )
 
 
 @router.post(
-    "/installs/{install_id}/grants/org",
+    "/installs/{connector_id}/grants/org",
     response_model=MCPCredentialGrantStatusOut,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_admin_org_grant(
-    install_id: str,
+    connector_id: str,
     body: CreateGrantIn,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     session: Annotated[AsyncSession, Depends(get_session)],
     backend: Annotated[EncryptionBackend, Depends(get_encryption_backend)],
     signer: Annotated[MCPUserTokenSigner, Depends(get_user_token_signer)],
@@ -836,7 +834,7 @@ async def create_admin_org_grant(
         )
     try:
         grant = await svc.create_static_grant(
-            install_id=install_id,
+            connector_id=connector_id,
             grant_scope="org",
             plaintext=body.credential_plaintext,
             name=body.name,
@@ -847,7 +845,7 @@ async def create_admin_org_grant(
         event="mcp.grant.created",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"scope": "org"},
     )
     # Trigger discovery so the operator immediately sees whether the
@@ -857,7 +855,7 @@ async def create_admin_org_grant(
         session, backend, org_id=ctx.org_id, actor_user_id=ctx.user.id
     )
     await run_post_grant_discovery(
-        install_id=install_id,
+        connector_id=connector_id,
         workspace_id=None,
         actor_user_id=ctx.user.id,
         session=session,
@@ -866,7 +864,6 @@ async def create_admin_org_grant(
         token_mgr=token_mgr,
     )
     return MCPCredentialGrantStatusOut(
-        install_id=install_id,
         connector_id=grant.connector_id,
         grant_scope="org",
         workspace_id=None,
@@ -878,31 +875,31 @@ async def create_admin_org_grant(
 
 
 @router.delete(
-    "/installs/{install_id}/grants/org",
+    "/installs/{connector_id}/grants/org",
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_admin_org_grant(
-    install_id: str,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    connector_id: str,
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> None:
-    await svc.disconnect_grant(install_id=install_id, grant_scope="org")
+    await svc.disconnect_grant(connector_id=connector_id, grant_scope="org")
     await audit.record(
         event="mcp.grant.deleted",
         actor_user_id=ctx.user.id,
         org_id=ctx.org_id,
-        target_id=install_id,
+        target_id=connector_id,
         details={"scope": "org"},
     )
 
 
 @router.post(
-    "/installs/{install_id}/grants/org/oauth/start",
+    "/installs/{connector_id}/grants/org/oauth/start",
     response_model=MCPOAuthStartOut,
 )
 async def admin_org_grant_oauth_start(
-    install_id: str,
+    connector_id: str,
     body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
@@ -910,7 +907,7 @@ async def admin_org_grant_oauth_start(
     """Start an OAuth flow that produces an org-scope grant."""
     try:
         result = await svc.start_oauth_flow(
-            install_id=install_id,
+            connector_id=connector_id,
             actor_user_id=ctx.user.id,
             actor_org_id=ctx.org_id,
             grant_scope="org",
@@ -980,7 +977,7 @@ async def admin_test_connection(
 
 @router.get("/connectors", response_model=AdminOrgConnectorListOut)
 async def list_admin_connectors(
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_grant_repo)],
     ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
 ) -> AdminOrgConnectorListOut:
@@ -1032,7 +1029,7 @@ async def list_admin_connectors(
 
 
 def _derive_admin_org_effective(
-    install: MCPConnectorInstall,
+    install: MCPConnector,
     org_grant: MCPCredentialGrant | None,
 ) -> MCPAdminInstallEffectiveOut:
     """Spec §4 admin row: ordered decision table.
@@ -1053,50 +1050,50 @@ def _derive_admin_org_effective(
       6. org grant valid (or expired-with-refresh) → usable.
     """
     if install.auth_method == "none":
-        return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
+        return MCPAdminInstallEffectiveOut(connector_id=install.id, usable=True, reason="usable")
     if org_grant is None:
         if install.auth_method == "oauth" and install.auth_status == "pending":
             return MCPAdminInstallEffectiveOut(
-                install_id=install.id, usable=False, reason="pending_oauth"
+                connector_id=install.id, usable=False, reason="pending_oauth"
             )
         return MCPAdminInstallEffectiveOut(
-            install_id=install.id, usable=False, reason="missing_org_grant"
+            connector_id=install.id, usable=False, reason="missing_org_grant"
         )
     # Org grant exists from here on.
     if org_grant.grant_status == "expired" and org_grant.refresh_credential_id is None:
         return MCPAdminInstallEffectiveOut(
-            install_id=install.id, usable=False, reason="grant_expired"
+            connector_id=install.id, usable=False, reason="grant_expired"
         )
     if install.discovery_status == "error":
         return MCPAdminInstallEffectiveOut(
-            install_id=install.id, usable=False, reason="discovery_failed"
+            connector_id=install.id, usable=False, reason="discovery_failed"
         )
     # Valid OR expired-with-refresh — runtime token manager rotates the
     # access token on next call. Matches workspace-side
     # compute_effective_state rule 8 (only reports grant_expired when
     # there's no refresh credential).
-    return MCPAdminInstallEffectiveOut(install_id=install.id, usable=True, reason="usable")
+    return MCPAdminInstallEffectiveOut(connector_id=install.id, usable=True, reason="usable")
 
 
 @router.get(
-    "/installs/{install_id}/effective",
+    "/installs/{connector_id}/effective",
     response_model=MCPAdminInstallEffectiveOut,
 )
 async def get_admin_install_effective(
-    install_id: str,
-    svc: Annotated[MCPConnectorInstallService, Depends(get_admin_install_service)],
+    connector_id: str,
+    svc: Annotated[MCPConnectorService, Depends(get_admin_install_service)],
     grant_repo: Annotated[MCPCredentialGrantRepository, Depends(get_grant_repo)],
     _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
 ) -> MCPAdminInstallEffectiveOut:
     """Org-row effective state for the admin page (bypasses workspace lens)."""
-    install = await svc._install_repo.get(install_id)
+    install = await svc._install_repo.get(connector_id)
     if install is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     if install.install_scope != "org":
         # Workspace-scope installs get their effective state from the
         # workspace lens — this endpoint is org-row only.
         raise HTTPException(400, detail={"code": "not_an_org_install"})
-    org_grant = await grant_repo.get_org_grant(install_id)
+    org_grant = await grant_repo.get_org_grant(connector_id)
     return _derive_admin_org_effective(install, org_grant)
 
 

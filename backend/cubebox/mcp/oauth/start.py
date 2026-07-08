@@ -43,9 +43,8 @@ from cubebox.mcp.oauth.metadata import (
 )
 from cubebox.mcp.oauth.pkce import generate_pkce
 from cubebox.mcp.oauth.state import OAuthStateStore
-from cubebox.models.mcp import MCPConnectorInstall, MCPConnectorTemplate
+from cubebox.models.mcp import MCPConnector, MCPConnectorTemplate
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
 )
@@ -104,7 +103,7 @@ class OAuthStartService:
     async def start_oauth_flow(
         self,
         *,
-        install_id: str,
+        connector_id: str,
         actor_user_id: str,
         actor_org_id: str,
         grant_scope: str,
@@ -121,15 +120,15 @@ class OAuthStartService:
         # builds repos and credential service from ``install.org_id``, so
         # an install id alone is enough to direct grant writes into ANY
         # org. Without an org-scoped filter here, a caller in org A who
-        # knows org B's install_id could mint a valid state token and
+        # knows org B's connector_id could mint a valid state token and
         # the callback would honor it, persisting credentials in B.
         # Cross-org and truly-missing collapse to the same error so
         # OAuth start cannot be used as an org-existence oracle.
         install = (
             await self._session.execute(
-                select(MCPConnectorInstall).where(
-                    MCPConnectorInstall.id == install_id,  # type: ignore[arg-type]
-                    MCPConnectorInstall.org_id == actor_org_id,  # type: ignore[arg-type]
+                select(MCPConnector).where(
+                    MCPConnector.id == connector_id,  # type: ignore[arg-type]
+                    MCPConnector.org_id == actor_org_id,  # type: ignore[arg-type]
                 )
             )
         ).scalar_one_or_none()
@@ -143,9 +142,7 @@ class OAuthStartService:
             raise OAuthStartError("connector_install_not_active")
         if install.auth_method != "oauth":
             raise OAuthStartError("oauth_start_only_valid_for_oauth_auth")
-        connector_id = await self._connector_id_for_install(install)
-        if connector_id is None:
-            raise OAuthStartError("connector_identity_not_found")
+        connector_id = install.id
 
         # Build org-scoped service surface AFTER install reveals org_id.
         cred_service = build_credential_service(
@@ -154,7 +151,7 @@ class OAuthStartService:
             org_id=install.org_id,
             actor_user_id=actor_user_id,
         )
-        install_repo = MCPConnectorInstallRepository(self._session, org_id=install.org_id)
+        install_repo = MCPConnectorRepository(self._session, org_id=install.org_id)
         template: MCPConnectorTemplate | None = None
         if install.template_id is not None:
             tpl_repo = MCPConnectorTemplateRepository(self._session)
@@ -234,7 +231,6 @@ class OAuthStartService:
 
         pkce = generate_pkce()
         state = await self._state_store.issue(
-            install_id=install_id,
             connector_id=connector_id,
             actor_user_id=actor_user_id,
             grant_scope=grant_scope,
@@ -290,16 +286,16 @@ class OAuthStartService:
             expires_at=expires_at,
         )
 
-    async def _connector_id_for_install(self, install: MCPConnectorInstall) -> str | None:
+    async def _connector_id_for_install(self, install: MCPConnector) -> str | None:
         repo = MCPConnectorRepository(self._session, org_id=install.org_id)
         return await repo.get_connector_id_for_install(install)
 
     async def _ensure_client(
         self,
-        install: MCPConnectorInstall,
+        install: MCPConnector,
         as_meta: AuthorizationServerMetadata,
         cred_service: CredentialService,
-        install_repo: MCPConnectorInstallRepository,
+        install_repo: MCPConnectorRepository,
         frontend_origin: str | None = None,
     ) -> tuple[str, str | None]:
         """Read or create OAuth client.

@@ -41,7 +41,7 @@ export function AdminAuthBand(props: AdminAuthBandProps) {
   const synthesized = toEffectiveForAdmin(connector)
   return (
     <AdminBandInner
-      key={connector.install.install_id}
+      key={connector.install.connector_id}
       connector={synthesized}
       client={client}
       onChanged={onChanged}
@@ -109,10 +109,10 @@ function AdminBandInner({
   const [inFlight, setInFlight] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
 
-  const installId = connector.install.install_id
+  const connectorId = connector.install.connector_id
 
   const onConnect = async (): Promise<void> => {
-    const flowInstallId = installId
+    const flowInstallId = connectorId
     setInFlight(true)
     setErrorMessage(undefined)
     const result = await runOAuthFlow({
@@ -128,7 +128,7 @@ function AdminBandInner({
   }
 
   const onSaveStaticToken = async (token: string): Promise<void> => {
-    const flowInstallId = installId
+    const flowInstallId = connectorId
     try {
       await adminCreateOrgGrant(client, flowInstallId, { credential_plaintext: token })
       await onChanged()
@@ -138,7 +138,7 @@ function AdminBandInner({
   }
 
   const onDelete = async (): Promise<void> => {
-    const flowInstallId = installId
+    const flowInstallId = connectorId
     await adminDeleteOrgGrant(client, flowInstallId)
     await onChanged()
   }

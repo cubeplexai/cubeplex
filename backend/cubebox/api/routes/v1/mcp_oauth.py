@@ -53,7 +53,7 @@ async def oauth_callback(
     params: dict[str, str] = {
         "status": result.status,
         "state": result.state,
-        "install_id": result.install_id,
+        "connector_id": result.connector_id,
     }
     if result.reason:
         params["reason"] = result.reason

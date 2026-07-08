@@ -20,7 +20,7 @@ type DistributionMode = 'all' | 'none'
 interface MCPTemplateInstallPanelProps {
   template: MCPConnectorTemplate
   client: ApiClient
-  onInstalled: (installId: string) => void
+  onInstalled: (connectorId: string) => void
 }
 
 function defaultAuthMethod(supported: MCPAuthMethod[]): MCPAuthMethod {
@@ -77,7 +77,7 @@ export function MCPTemplateInstallPanel({
         default_credential_policy: policy,
         auto_enable: { mode: distribution },
       })
-      onInstalled(install.install_id)
+      onInstalled(install.connector_id)
     } catch (err) {
       setError((err as Error).message)
     } finally {

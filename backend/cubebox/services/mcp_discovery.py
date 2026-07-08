@@ -41,7 +41,6 @@ from cubebox.mcp.exceptions import MCPDiscoveryFailed
 from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
@@ -74,7 +73,7 @@ def _format_discovery_error(exc: BaseException) -> str:
 
 @dataclass(frozen=True)
 class DiscoveryResult:
-    install_id: str
+    connector_id: str
     discovery_status: str  # "ok" | "error"
     tool_count: int
     tools_cache_raw: list[dict[str, Any]]
@@ -171,7 +170,7 @@ def _icon_to_dict(icon: Any) -> dict[str, Any]:
 
 
 def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any]:
-    """Build the JSON shape persisted in ``MCPConnectorInstall.discovery_metadata``.
+    """Build the JSON shape persisted in ``MCPConnector.discovery_metadata``.
 
     Server icons + websiteUrl come from ``InitializeResult.serverInfo``;
     per-tool icons come from each ``Tool.icons``. Tools without icons are
@@ -207,7 +206,7 @@ def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
     from cubebox.mcp.effective import MCPRuntimeConnectorSpec
 
     return MCPRuntimeConnectorSpec(
-        install_id=install.id,
+        connector_id=install.id,
         name=install.name,
         server_url=install.server_url,
         transport=install.transport,
@@ -233,7 +232,7 @@ def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
 
 async def run_post_grant_discovery(
     *,
-    install_id: str,
+    connector_id: str,
     workspace_id: str | None,
     actor_user_id: str,
     session: AsyncSession,
@@ -260,7 +259,7 @@ async def run_post_grant_discovery(
     """
     try:
         await discover_tools_for_install(
-            install_id=install_id,
+            connector_id=connector_id,
             workspace_id=workspace_id,
             actor_user_id=actor_user_id,
             session=session,
@@ -269,14 +268,14 @@ async def run_post_grant_discovery(
             token_mgr=token_mgr,
         )
     except (MCPDiscoveryFailed, ValueError) as exc:
-        logger.warning("Post-grant discovery skipped for {}: {}", install_id, exc)
+        logger.warning("Post-grant discovery skipped for {}: {}", connector_id, exc)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Post-grant discovery raised unexpectedly for {}: {}", install_id, exc)
+        logger.exception("Post-grant discovery raised unexpectedly for {}: {}", connector_id, exc)
 
 
 async def discover_tools_for_install(
     *,
-    install_id: str,
+    connector_id: str,
     workspace_id: str | None,
     actor_user_id: str,
     session: AsyncSession,
@@ -293,8 +292,8 @@ async def discover_tools_for_install(
     """
     cred_org_id = cred_service._org_id
     assert cred_org_id is not None, "discover_tools_for_install requires org-scoped cred_service"
-    install_repo = MCPConnectorInstallRepository(session, org_id=cred_org_id)
-    install = await install_repo.get(install_id)
+    install_repo = MCPConnectorRepository(session, org_id=cred_org_id)
+    install = await install_repo.get(connector_id)
     if install is None:
         raise ValueError("connector_install_not_found")
     if install.install_state != "active":
@@ -334,7 +333,7 @@ async def discover_tools_for_install(
         dtos = await effective_svc.list_for_workspace_user(
             workspace_id, actor_user_id, include_unusable=True
         )
-        dto = next((d for d in dtos if d.install.id == install_id), None)
+        dto = next((d for d in dtos if d.install.id == connector_id), None)
         if dto is None:
             raise ValueError("connector_install_not_found")
         usable = dto.usable
@@ -350,7 +349,7 @@ async def discover_tools_for_install(
         if not usable and reason == "discovery_failed":
             usable = True
     else:
-        grant = await grant_repo.get_org_grant(install_id)
+        grant = await grant_repo.get_org_grant(connector_id)
         # Match the workspace-side effective rule (compute_effective_state
         # rule 8): an org OAuth grant whose status is 'expired' but still
         # has a refresh_credential_id is usable — the token manager rotates
@@ -397,7 +396,7 @@ async def discover_tools_for_install(
             await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
-            install_id=install_id,
+            connector_id=connector_id,
             discovery_status="error",
             tool_count=0,
             tools_cache_raw=list(install.tools_cache or []),
@@ -412,7 +411,7 @@ async def discover_tools_for_install(
             await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
-            install_id=install_id,
+            connector_id=connector_id,
             discovery_status="error",
             tool_count=0,
             tools_cache_raw=list(install.tools_cache or []),
@@ -432,7 +431,7 @@ async def discover_tools_for_install(
         )
     except Exception as exc:  # noqa: BLE001
         formatted = _format_discovery_error(exc)
-        logger.warning("MCP discovery failed for {}: {}", install_id, formatted)
+        logger.warning("MCP discovery failed for {}: {}", connector_id, formatted)
         install.discovery_status = "error"
         install.last_error = formatted[:2048]
         if connector is not None:
@@ -441,7 +440,7 @@ async def discover_tools_for_install(
             await connector_repo.update(connector)
         await install_repo.update(install)
         return DiscoveryResult(
-            install_id=install_id,
+            connector_id=connector_id,
             discovery_status="error",
             tool_count=0,
             tools_cache_raw=list(install.tools_cache or []),
@@ -470,7 +469,7 @@ async def discover_tools_for_install(
         await connector_repo.update(connector)
     await install_repo.update(install)
     return DiscoveryResult(
-        install_id=install_id,
+        connector_id=connector_id,
         discovery_status="ok",
         tool_count=len(tools_cache_raw),
         tools_cache_raw=tools_cache_raw,

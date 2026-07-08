@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
-import type { MCPConnectorInstall, PromoteDistribution } from '@cubebox/core'
+import type { MCPConnector, PromoteDistribution } from '@cubebox/core'
 import { Loader2, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
@@ -12,7 +12,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
 
 export interface MCPPromoteDialogProps {
-  install: MCPConnectorInstall
+  install: MCPConnector
   open: boolean
   onOpenChange: (open: boolean) => void
   onConfirm: (distribution: PromoteDistribution) => Promise<void>
