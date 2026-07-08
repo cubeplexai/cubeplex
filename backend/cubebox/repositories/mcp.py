@@ -363,6 +363,7 @@ class MCPWorkspaceConnectorStateRepository:
         *,
         workspace_id: str,
         install_id: str,
+        connector_id: str | None = None,
         enabled: bool,
         credential_policy: str,
         enablement_source: str,
@@ -373,6 +374,8 @@ class MCPWorkspaceConnectorStateRepository:
             existing.enabled = enabled
             existing.credential_policy = credential_policy
             existing.enablement_source = enablement_source
+            if connector_id is not None:
+                existing.connector_id = connector_id
             existing.updated_by_user_id = updated_by_user_id
             existing.updated_at = datetime.now(UTC)
             self.session.add(existing)
@@ -383,6 +386,7 @@ class MCPWorkspaceConnectorStateRepository:
             org_id=self.org_id,
             workspace_id=workspace_id,
             install_id=install_id,
+            connector_id=connector_id,
             enabled=enabled,
             credential_policy=credential_policy,
             enablement_source=enablement_source,
