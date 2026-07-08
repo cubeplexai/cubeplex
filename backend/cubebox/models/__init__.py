@@ -22,6 +22,7 @@ from cubebox.models.im_connector import (
     IMWebhookReceipt,
 )
 from cubebox.models.mcp import (
+    MCPConnector,
     MCPConnectorInstall,
     MCPConnectorTemplate,
     MCPCredentialGrant,
@@ -78,6 +79,7 @@ __all__ = [
     "EmbeddingJobState",
     "ExternalIdentity",
     "LlmBillingEvent",
+    "MCPConnector",
     "MCPConnectorInstall",
     "MCPConnectorTemplate",
     "MCPCredentialGrant",

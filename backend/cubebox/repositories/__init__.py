@@ -12,6 +12,7 @@ from cubebox.repositories.embedding_job import EmbeddingJobRepository
 from cubebox.repositories.external_identity import ExternalIdentityRepository
 from cubebox.repositories.mcp import (
     MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
@@ -46,6 +47,7 @@ __all__ = [
     "EmbeddingJobRepository",
     "ExternalIdentityRepository",
     "MembershipRepository",
+    "MCPConnectorRepository",
     "MCPConnectorInstallRepository",
     "MCPConnectorTemplateRepository",
     "MCPCredentialGrantRepository",

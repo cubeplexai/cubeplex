@@ -56,6 +56,7 @@ PREFIX_SSO_CONNECTION: str = "sso"
 PREFIX_EXTERNAL_IDENTITY: str = "eid"
 PREFIX_API_KEY: str = "ak"
 PREFIX_ORG_INVITE: str = "oinv"
+PREFIX_MCP_CONNECTOR: str = "mcpco"
 
 
 @dataclass
