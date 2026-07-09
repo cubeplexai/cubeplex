@@ -85,6 +85,28 @@ function workspaceConnector() {
   }
 }
 
+function workspaceConnectorWith(params: { connectorId: string; name: string; provider?: string }) {
+  const base = workspaceConnector()
+  return {
+    ...base,
+    template: {
+      ...base.template,
+      name: params.name,
+      provider: params.provider ?? params.name,
+      description: `${params.name} MCP server`,
+    },
+    install: {
+      ...base.install,
+      connector_id: params.connectorId,
+      name: params.name,
+    },
+    workspace_state: {
+      ...base.workspace_state,
+      connector_id: params.connectorId,
+    },
+  }
+}
+
 function orgCredentialConnector() {
   return {
     ...workspaceConnector(),
@@ -288,6 +310,28 @@ describe('McpPanel workspace installs', () => {
           server_url: 'https://search.example.com/mcp',
         }),
       )
+    })
+  })
+
+  it('clears a connector operation error when another connector is selected', async () => {
+    coreMocks.wsListEffectiveConnectors.mockResolvedValue({
+      items: [
+        workspaceConnectorWith({ connectorId: 'mcpco_cloudflare', name: 'Cloudflare API' }),
+        workspaceConnectorWith({ connectorId: 'mcpco_linear', name: 'Linear' }),
+      ],
+    })
+    coreMocks.wsRefreshDiscovery.mockRejectedValue(new Error('An unexpected error occurred'))
+    renderWithIntl(<McpPanel wsId="ws_1" />)
+
+    fireEvent.click(await screen.findByTestId('ws-connector-row-mcpco_cloudflare'))
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Tools' }))
+
+    expect(await screen.findByText('An unexpected error occurred')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('ws-connector-row-mcpco_linear'))
+
+    await waitFor(() => {
+      expect(screen.queryByText('An unexpected error occurred')).not.toBeInTheDocument()
     })
   })
 })

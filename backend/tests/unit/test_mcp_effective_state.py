@@ -159,6 +159,17 @@ def test_grant_expired_without_refresh_reports_grant_expired() -> None:
     assert result.reason == "grant_expired"
 
 
+def test_grant_expired_with_refresh_reports_grant_expired() -> None:
+    result = compute_effective_state(
+        _input(
+            credential_policy="org",
+            grant=MCPGrantInput(scope="org", status="expired", has_refresh=True),
+        )
+    )
+    assert result.usable is False
+    assert result.reason == "grant_expired"
+
+
 def test_cross_scope_grant_treated_as_missing_for_policy_scope() -> None:
     """An org grant must NOT flip a user-policy install to usable."""
     result = compute_effective_state(

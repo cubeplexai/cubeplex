@@ -64,7 +64,7 @@ def derive_admin_org_effective(
             credential_availability="missing",
         )
 
-    if org_grant.grant_status == "expired" and org_grant.refresh_credential_id is None:
+    if org_grant.grant_status == "expired":
         return AdminOrgEffectiveOut(
             usable=False, reason="grant_expired", credential_availability="missing"
         )

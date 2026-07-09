@@ -1039,15 +1039,14 @@ def _derive_admin_org_effective(
       2. no org grant, ``install.auth_method == 'oauth'``,
          ``install.auth_status == 'pending'`` → pending_oauth.
       3. no org grant otherwise → missing_org_grant.
-      4. org grant exists, ``grant_status == 'expired'``, no refresh
-         available → grant_expired.
+      4. org grant exists, ``grant_status == 'expired'`` → grant_expired.
       5. org grant exists + ``discovery_status='error'`` → discovery_failed.
          Mirrors workspace ``compute_effective_state`` rule 10: only
          reported AFTER auth gates pass, because a discovery failure
          without an attached credential means the credential causing
          the failure is gone — so the right reason is "needs a grant",
          not "the (now-deleted) grant didn't work".
-      6. org grant valid (or expired-with-refresh) → usable.
+      6. org grant valid → usable.
     """
     if install.auth_method == "none":
         return MCPAdminInstallEffectiveOut(connector_id=install.id, usable=True, reason="usable")
@@ -1060,7 +1059,7 @@ def _derive_admin_org_effective(
             connector_id=install.id, usable=False, reason="missing_org_grant"
         )
     # Org grant exists from here on.
-    if org_grant.grant_status == "expired" and org_grant.refresh_credential_id is None:
+    if org_grant.grant_status == "expired":
         return MCPAdminInstallEffectiveOut(
             connector_id=install.id, usable=False, reason="grant_expired"
         )
@@ -1068,10 +1067,9 @@ def _derive_admin_org_effective(
         return MCPAdminInstallEffectiveOut(
             connector_id=install.id, usable=False, reason="discovery_failed"
         )
-    # Valid OR expired-with-refresh — runtime token manager rotates the
-    # access token on next call. Matches workspace-side
-    # compute_effective_state rule 8 (only reports grant_expired when
-    # there's no refresh credential).
+    # Valid grants are usable. Access-token expiry is tracked by
+    # oauth_expires_at/expires_at and refreshed by the runtime token manager;
+    # grant_status='expired' means the refresh grant was terminally rejected.
     return MCPAdminInstallEffectiveOut(connector_id=install.id, usable=True, reason="usable")
 
 

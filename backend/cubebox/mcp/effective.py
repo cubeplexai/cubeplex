@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
+from cubebox.mcp.exceptions import OAuthRefreshFailed
 from cubebox.mcp.oauth.token_manager import OAuthTokenManager
 from cubebox.models import (
     MCPConnector,
@@ -97,7 +98,7 @@ def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
         return MCPEffectiveResult(False, "pending_oauth", "missing")
     if value.grant is None:
         return MCPEffectiveResult(False, _missing_grant_reason(value.credential_policy), "missing")
-    if value.grant.status == "expired" and not value.grant.has_refresh:
+    if value.grant.status == "expired":
         return MCPEffectiveResult(False, "grant_expired", "missing")
     if value.grant.scope != value.credential_policy:
         return MCPEffectiveResult(False, _missing_grant_reason(value.credential_policy), "missing")
@@ -385,12 +386,16 @@ class MCPEffectiveConnectorService:
             and connector.auth_method == "oauth"
             and self._token_manager is not None
         ):
-            await self._token_manager.get_access_token_for_grant(
-                grant=grant,
-                grant_repo=self._grant_repo,
-                server_url=connector.server_url,
-                oauth_client_config=dict(connector.oauth_client_config or {}),
-            )
+            try:
+                await self._token_manager.get_access_token_for_grant(
+                    grant=grant,
+                    grant_repo=self._grant_repo,
+                    server_url=connector.server_url,
+                    oauth_client_config=dict(connector.oauth_client_config or {}),
+                )
+            except OAuthRefreshFailed:
+                grant.grant_status = "expired"
+                await self._grant_repo.update(grant)
         return grant
 
 

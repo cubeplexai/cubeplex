@@ -9,12 +9,14 @@ connectors are tombstones.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
 from cubebox.mcp.effective import MCPEffectiveConnectorService
+from cubebox.mcp.exceptions import OAuthRefreshFailed
 from cubebox.models import MCPConnector, MCPCredentialGrant, MCPWorkspaceConnectorState
 from cubebox.repositories.mcp import (
     MCPConnectorRepository,
@@ -428,3 +430,109 @@ async def test_list_for_workspace_user_reports_saved_grants_for_each_scope(
         "workspace": True,
         "user": True,
     }
+
+
+async def test_oauth_refresh_failure_returns_expired_grant_state() -> None:
+    """A revoked vendor refresh grant should not make effective-state reads 500."""
+    org_id = "org-1"
+    workspace_id = "ws-a"
+    user_id = "u1"
+    connector = MCPConnector(
+        id="mcpco-cloudflare",
+        org_id=org_id,
+        template_id=None,
+        name="Cloudflare API",
+        server_url="https://mcp.cloudflare.com/mcp",
+        server_url_hash="cloudflare",
+        transport="streamable_http",
+        auth_method="oauth",
+        default_credential_policy="workspace",
+        auth_status="authorized",
+        status="active",
+        created_by_user_id=user_id,
+    )
+    state = MCPWorkspaceConnectorState(
+        org_id=org_id,
+        workspace_id=workspace_id,
+        connector_id=connector.id,
+        enabled=True,
+        credential_policy="workspace",
+        enablement_source="workspace_manual",
+        updated_by_user_id=user_id,
+    )
+    grant = MCPCredentialGrant(
+        org_id=org_id,
+        connector_id=connector.id,
+        grant_scope="workspace",
+        workspace_id=workspace_id,
+        credential_id="cred-access",
+        refresh_credential_id="cred-refresh",
+        grant_status="valid",
+        created_by_user_id=user_id,
+    )
+
+    class ConnectorRepo:
+        async def list_active(self) -> list[MCPConnector]:
+            return [connector]
+
+    class StateRepo:
+        async def list_for_workspace(
+            self,
+            requested_workspace_id: str,
+        ) -> list[MCPWorkspaceConnectorState]:
+            assert requested_workspace_id == workspace_id
+            return [state]
+
+    class TemplateRepo:
+        async def get(self, _template_id: str) -> None:
+            return None
+
+    class GrantRepo:
+        async def get_for_connector_scope(
+            self,
+            *,
+            connector_id: str,
+            grant_scope: str,
+            workspace_id: str | None,
+            user_id: str | None,
+        ) -> MCPCredentialGrant | None:
+            assert connector_id == connector.id
+            if grant_scope == "org":
+                assert workspace_id is None
+                assert user_id is None
+                return None
+            if grant_scope == "user":
+                assert workspace_id == "ws-a"
+                assert user_id == "u1"
+                return None
+            assert grant_scope == "workspace"
+            assert workspace_id == "ws-a"
+            assert user_id is None
+            return grant
+
+        async def update(self, updated: MCPCredentialGrant) -> MCPCredentialGrant:
+            return updated
+
+    class TokenManager:
+        async def get_access_token_for_grant(self, **_: Any) -> str:
+            grant.grant_status = "expired"
+            raise OAuthRefreshFailed(
+                400,
+                error="invalid_grant",
+                error_description="Grant not found",
+            )
+
+    service = MCPEffectiveConnectorService(
+        template_repo=TemplateRepo(),  # type: ignore[arg-type]
+        connector_repo=ConnectorRepo(),  # type: ignore[arg-type]
+        state_repo=StateRepo(),  # type: ignore[arg-type]
+        grant_repo=GrantRepo(),  # type: ignore[arg-type]
+        org_id=org_id,
+        token_manager=TokenManager(),  # type: ignore[arg-type]
+    )
+
+    rows = await service.list_for_workspace_user(workspace_id, user_id)
+
+    assert len(rows) == 1
+    assert rows[0].usable is False
+    assert rows[0].reason == "grant_expired"
