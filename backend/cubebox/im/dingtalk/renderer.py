@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from cubebox.im.dingtalk.connector import DingtalkRateLimitError
+from cubebox.im.dingtalk.connector import DingtalkConnector, DingtalkRateLimitError
 from cubebox.im.outbound import note_edit_success, note_flood_strike
 from cubebox.im.types import RenderState
 
@@ -36,7 +36,7 @@ class DingtalkOpDispatcher:
     def __init__(
         self,
         *,
-        connector: Any,
+        connector: DingtalkConnector,
         state: RenderState,
         open_conversation_id: str,
     ) -> None:
