@@ -9,15 +9,17 @@ suites at the same time. All allocations land in
 ## Creating a New Worktree
 
 Always run from the main repo root. The wrapper branches from latest
-`origin/main`:
+`<remote>/main` (`origin/main` by default):
 
 ```bash
 ./scripts/new-worktree feat/<branch-name>
+# or choose a non-origin remote:
+./scripts/new-worktree --remote upstream feat/<branch-name>
 ```
 
 This:
 
-- Fetches `origin/main`.
+- Fetches `<remote>/main` (`origin` by default).
 - Creates the worktree.
 - Allocates a slot.
 - Provisions PostgreSQL databases on the shared `~/infra/postgresql`
@@ -26,6 +28,8 @@ This:
 - Copies `backend/.env` and `config.development.local.yaml` from main
   if missing.
 - Writes `.worktree.env`.
+- Pushes the new branch to `<remote>` with `--no-verify` and sets the
+  branch upstream.
 
 ## Working Inside a Worktree
 
