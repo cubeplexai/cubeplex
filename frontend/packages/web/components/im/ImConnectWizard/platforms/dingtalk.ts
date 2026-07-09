@@ -1,4 +1,4 @@
-import { StepCredentials } from '../steps/StepCredentials'
+import { StepDingtalkCredentials } from '../steps/StepDingtalkCredentials'
 import { StepPrereqs } from '../steps/StepPrereqs'
 import { StepVerify } from '../steps/StepVerify'
 
@@ -24,6 +24,7 @@ export const dingtalkDescriptor: PlatformDescriptor = {
       labelKey: 'im.wizard.dingtalk.prereq.permissions',
       items: [
         'qyapi_chat_manage',
+        'qyapi_microapp_manage',
         'Card.Streaming.Write',
         'Card.Instance.Write',
         'Contact.User.Read',
@@ -59,7 +60,7 @@ export const dingtalkDescriptor: PlatformDescriptor = {
     {
       key: 'credentials',
       labelKey: 'im.wizard.step.credentials',
-      Component: StepCredentials,
+      Component: StepDingtalkCredentials,
       canAdvance: (f) => !!(f.app_key && f.app_secret),
     },
     {
@@ -72,6 +73,8 @@ export const dingtalkDescriptor: PlatformDescriptor = {
     platform: 'dingtalk' as const,
     app_key: f.app_key || '',
     app_secret: f.app_secret || '',
+    bot_name: f.bot_name || '',
+    bot_avatar_url: f.bot_avatar_url || '',
     acting_user_id: 'self',
   }),
   scopeConsoleUrl: () => 'https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app',

@@ -2265,8 +2265,13 @@
         },
         "field": {
           "appKey": "AppKey",
-          "appSecret": "AppSecret"
+          "appSecret": "AppSecret",
+          "botName": "Bot name (as shown in DingTalk)",
+          "selectApp": "Select app"
         },
+        "loadingApps": "Loading app list…",
+        "selectAppPlaceholder": "Pick your DingTalk app…",
+        "autoDetected": "Detected app: {name}",
         "openConsole": "Open DingTalk developer console"
       },
       "credentials": {
@@ -2282,10 +2287,10 @@
     "error": {
       "field": {
         "appIdFormat": "App ID must start with cli_",
-        "appSecretBad": "Bad credentials. Re-copy from the Feishu console."
+        "appSecretBad": "Bad credentials. Re-copy from the developer console."
       },
       "banner": {
-        "duplicateApp": "This Feishu app is already connected.",
+        "duplicateApp": "This app is already connected.",
         "duplicateAppGoTo": "Go to existing",
         "hydrationFailed": "Could not verify the bot identity. Make sure the app version is published and the bot is enabled in the Feishu console.",
         "retry": "Retry",
@@ -2398,7 +2403,7 @@
     },
     "deleteDialog": {
       "title": "Delete this bot connection?",
-      "body": "This removes the credential and stops any active long-connection. The Feishu app itself is untouched.",
+      "body": "This removes the credential and stops any active connection. The {platform} app itself is untouched.",
       "confirmGate": "Type {botName} to confirm"
     },
     "link": {

@@ -543,6 +543,8 @@ class IMConnectorService:
         workspace_id: str,
         app_key: str,
         app_secret: str,
+        bot_name: str = "",
+        bot_avatar_url: str = "",
         acting_user_id: str,
     ) -> IMConnectorAccount:
         """Bind one DingTalk enterprise bot: validate credentials, store, return account."""
@@ -590,8 +592,8 @@ class IMConnectorService:
                 credential_id=credential_id,
                 delivery_mode="stream",
                 config={
-                    "bot_app_name": None,
-                    "bot_avatar_url": None,
+                    "bot_app_name": bot_name or None,
+                    "bot_avatar_url": bot_avatar_url or None,
                 },
             )
             self._session.add(account)
@@ -608,6 +610,51 @@ class IMConnectorService:
                     credential_id,
                 )
             raise
+
+    @staticmethod
+    async def list_dingtalk_apps(
+        app_key: str,
+        app_secret: str,
+    ) -> list[dict[str, Any]]:
+        """Validate DingTalk credentials and return the org's custom app list.
+
+        Each entry has ``agent_id``, ``name``, ``icon_url``, ``desc``.
+        Requires the ``qyapi_microapp_manage`` permission on the app.
+        """
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+                json={"appKey": app_key, "appSecret": app_secret},
+            )
+            if resp.status_code != 200:
+                raise ValueError(f"DingTalk credential validation failed: {resp.text}")
+            token = resp.json().get("accessToken")
+            if not token:
+                raise ValueError("DingTalk returned empty access token")
+
+            resp2 = await client.get(
+                "https://api.dingtalk.com/v1.0/microApp/apps",
+                headers={"x-acs-dingtalk-access-token": token},
+            )
+            if resp2.status_code != 200:
+                raise ValueError(
+                    "Could not list DingTalk apps — grant the qyapi_microapp_manage permission"
+                )
+            raw_apps: list[dict[str, Any]] = resp2.json().get("appList", [])
+
+        result: list[dict[str, Any]] = []
+        for app in raw_apps:
+            result.append(
+                {
+                    "agent_id": int(app.get("agentId", 0)),
+                    "name": str(app.get("name") or ""),
+                    "icon_url": "",
+                    "desc": str(app.get("desc") or ""),
+                }
+            )
+        return result
 
     async def _validate_dingtalk_credentials(
         self,

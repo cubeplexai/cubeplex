@@ -123,6 +123,7 @@ export function ImConnectWizard({
                 <Step
                   descriptor={platform}
                   form={form}
+                  wsId={wsId}
                   onChange={(patch) => {
                     const merged: FormState = { ...form }
                     for (const [k, v] of Object.entries(patch)) {

@@ -200,7 +200,11 @@ export function ImPanel({ wsId }: Props): React.ReactElement {
           <DialogHeader>
             <DialogTitle>{t('deleteDialog.title')}</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">{t('deleteDialog.body')}</p>
+          <p className="text-sm text-muted-foreground">
+            {t('deleteDialog.body', {
+              platform: t(`platform.${deleteCandidate?.platform ?? 'feishu'}.label` as any),
+            })}
+          </p>
           <p className="text-sm">
             {t('deleteDialog.confirmGate', {
               botName: deleteCandidate?.external_account_id ?? '',

@@ -48,7 +48,29 @@ class ConnectDingtalkAccountIn(BaseModel):
     platform: Literal["dingtalk"] = "dingtalk"
     app_key: str = Field(min_length=1, max_length=128)
     app_secret: str = Field(min_length=1)
+    bot_name: str = ""
+    bot_avatar_url: str = ""
     acting_user_id: str = Field(default="self", min_length=1)
+
+
+class DingtalkAppInfo(BaseModel):
+    """One entry from ``GET /v1.0/microApp/apps``."""
+
+    agent_id: int
+    name: str
+    icon_url: str
+    desc: str
+
+
+class DingtalkAppsIn(BaseModel):
+    """Credentials-only payload for the DingTalk app-list probe."""
+
+    app_key: str = Field(min_length=1, max_length=128)
+    app_secret: str = Field(min_length=1)
+
+
+class DingtalkAppsOut(BaseModel):
+    apps: list[DingtalkAppInfo]
 
 
 class ConnectTeamsAccountIn(BaseModel):

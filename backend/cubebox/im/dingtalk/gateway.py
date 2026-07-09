@@ -223,7 +223,11 @@ class DingtalkGateway:
         self._stopping = True
         import logging as _logging
 
-        _logging.getLogger("dingtalk_stream").setLevel(_logging.CRITICAL)
+        for name in ("dingtalk_stream", "dingtalk_stream.client"):
+            lg = _logging.getLogger(name)
+            lg.setLevel(_logging.CRITICAL)
+            lg.handlers.clear()
+            lg.propagate = False
         if self._refresh_task is not None:
             self._refresh_task.cancel()
             try:
@@ -231,10 +235,12 @@ class DingtalkGateway:
             except (asyncio.CancelledError, Exception):
                 pass
         if self._client is not None:
-            try:
-                self._client.stop()
-            except Exception:
-                pass
+            ws = getattr(self._client, "websocket", None)
+            if ws is not None:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
         if self._task is not None:
             self._task.cancel()
             try:

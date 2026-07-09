@@ -30,6 +30,7 @@ export type WizardStepProps = {
   form: FormState
   onChange: (patch: Partial<FormState>) => void
   onNext: () => void
+  wsId?: string
 }
 
 export type WizardStepDef = {

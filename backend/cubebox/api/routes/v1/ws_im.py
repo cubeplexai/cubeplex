@@ -17,6 +17,8 @@ from cubebox.api.schemas.im_connector import (
     ConnectIMAccountIn,
     ConnectSlackAccountIn,
     ConnectTeamsAccountIn,
+    DingtalkAppsIn,
+    DingtalkAppsOut,
     IdentityLinkListOut,
     IdentityLinkOut,
     IMAccountListOut,
@@ -206,10 +208,14 @@ async def _connect_dingtalk(
             workspace_id=ctx.workspace_id,
             app_key=body.app_key,
             app_secret=body.app_secret,
+            bot_name=body.bot_name,
+            bot_avatar_url=body.bot_avatar_url,
             acting_user_id=acting,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        msg = str(exc)
+        code = status.HTTP_409_CONFLICT if "already exists" in msg else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=code, detail=msg) from exc
     starter = getattr(request.app.state, "im_connect_account", None)
     if starter is not None and account.enabled:
         try:
@@ -277,6 +283,29 @@ async def connect_account(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="unsupported platform",
         )
+
+
+@router.post("/dingtalk/apps", response_model=DingtalkAppsOut)
+async def list_dingtalk_apps(
+    workspace_id: str,
+    body: DingtalkAppsIn,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> DingtalkAppsOut:
+    """Validate DingTalk credentials and return the org's app list for the picker."""
+    if workspace_id != ctx.workspace_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="workspace mismatch")
+    try:
+        apps = await IMConnectorService.list_dingtalk_apps(
+            app_key=body.app_key,
+            app_secret=body.app_secret,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    from cubebox.api.schemas.im_connector import DingtalkAppInfo
+
+    return DingtalkAppsOut(
+        apps=[DingtalkAppInfo(**a) for a in apps],
+    )
 
 
 @router.get("/accounts", response_model=IMAccountListOut)

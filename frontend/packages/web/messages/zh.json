@@ -2265,8 +2265,13 @@
         },
         "field": {
           "appKey": "AppKey",
-          "appSecret": "AppSecret"
+          "appSecret": "AppSecret",
+          "botName": "机器人名称（在钉钉中显示的名字）",
+          "selectApp": "选择应用"
         },
+        "loadingApps": "正在获取应用列表…",
+        "selectAppPlaceholder": "选择对应的钉钉应用…",
+        "autoDetected": "已识别应用：{name}",
         "openConsole": "打开钉钉开放平台"
       },
       "credentials": {
@@ -2282,10 +2287,10 @@
     "error": {
       "field": {
         "appIdFormat": "App ID 必须以 cli_ 开头",
-        "appSecretBad": "凭据有误，请从飞书后台重新复制。"
+        "appSecretBad": "凭据有误，请从开发者后台重新复制。"
       },
       "banner": {
-        "duplicateApp": "这个飞书应用已经被绑定过了。",
+        "duplicateApp": "这个应用已经被绑定过了。",
         "duplicateAppGoTo": "查看已有绑定",
         "hydrationFailed": "无法验证 bot 身份。请确认应用版本已发布、bot 已启用。",
         "retry": "重试",
@@ -2398,7 +2403,7 @@
     },
     "deleteDialog": {
       "title": "删除这个 bot 绑定？",
-      "body": "会删除凭据并断开当前 long-connection。飞书侧的应用本身不动。",
+      "body": "会删除凭据并断开当前连接。{platform} 侧的应用本身不动。",
       "confirmGate": "输入 {botName} 以确认"
     },
     "link": {

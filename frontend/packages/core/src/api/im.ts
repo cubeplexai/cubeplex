@@ -59,7 +59,20 @@ export interface ConnectDingtalkAccountIn {
   platform: 'dingtalk'
   app_key: string
   app_secret: string
+  bot_name?: string
+  bot_avatar_url?: string
   acting_user_id?: string
+}
+
+export interface DingtalkAppInfo {
+  agent_id: number
+  name: string
+  icon_url: string
+  desc: string
+}
+
+export interface DingtalkAppsOut {
+  apps: DingtalkAppInfo[]
 }
 
 export interface ConnectTeamsAccountIn {
@@ -93,6 +106,20 @@ export async function wsConnectImAccount(
   const res = await client.post(`/api/v1/ws/${wsId}/im/accounts`, body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as ImAccount
+}
+
+export async function wsListDingtalkApps(
+  client: ApiClient,
+  wsId: string,
+  appKey: string,
+  appSecret: string,
+): Promise<DingtalkAppsOut> {
+  const res = await client.post(`/api/v1/ws/${wsId}/im/dingtalk/apps`, {
+    app_key: appKey,
+    app_secret: appSecret,
+  })
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as DingtalkAppsOut
 }
 
 export async function wsDeleteImAccount(
