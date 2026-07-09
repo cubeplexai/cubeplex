@@ -653,7 +653,6 @@ class SandboxManager:
                 record.image,
                 connection_config=create_conn_config,
                 timeout=timedelta(seconds=self._ttl),
-                ready_timeout=timedelta(seconds=self._ready_timeout),
                 volumes=volumes,
                 resource={
                     "cpu": policy.resource_cpu or self._resource_cpu,
@@ -661,26 +660,46 @@ class SandboxManager:
                 },
                 secure_access=self._secure_access,
                 network_policy=network_policy,
+                skip_health_check=True,
             )
             sandbox_id = raw_sandbox.id
-            logger.info("Sandbox created: {}", sandbox_id)
+            logger.info("Sandbox created: {} (awaiting readiness)", sandbox_id)
 
-            # Promote the row from `provisioning` to `running` with the real
-            # sandbox_id. Any losing race-poller now sees a usable winner.
+            # Persist sandbox_id while still provisioning so the reaper can
+            # track the remote container even if the process dies before
+            # promote.
+            await repo.set_sandbox_id(record.id, sandbox_id)
+
+            await raw_sandbox.check_ready(
+                timedelta(seconds=self._ready_timeout),
+                timedelta(milliseconds=200),
+            )
+
             await repo.promote_to_running(record.id, sandbox_id=sandbox_id)
             promoted = True
         except ProviderSandboxError as exc:
-            # Provider failed at Sandbox.create() — no provider sandbox exists,
-            # so free the slot (delete for fresh reserve, mark failed for revive).
-            await self._release_failed_provisioning(repo, record.id, is_revive)
+            if not promoted:
+                if sandbox_id:
+                    # Remote sandbox exists; leave the row (with sandbox_id)
+                    # for the reaper to kill instead of orphaning it.
+                    logger.warning(
+                        "Provisioning failed after sandbox {} was created; "
+                        "row stays for reaper cleanup",
+                        sandbox_id,
+                    )
+                else:
+                    await self._release_failed_provisioning(repo, record.id, is_revive)
             raise SandboxError(str(exc)) from exc
         except Exception:
-            # Pre-create setup blew up (e.g. SandboxEnvInjector.build on a
-            # malformed vault row, network-policy merge, anything before the
-            # create succeeded). The slot must be released or the partial
-            # unique index pins the scope until TTL.
             if not promoted:
-                await self._release_failed_provisioning(repo, record.id, is_revive)
+                if sandbox_id:
+                    logger.warning(
+                        "Provisioning failed after sandbox {} was created; "
+                        "row stays for reaper cleanup",
+                        sandbox_id,
+                    )
+                else:
+                    await self._release_failed_provisioning(repo, record.id, is_revive)
             raise
 
         try:
@@ -1064,6 +1083,14 @@ class SandboxManager:
                         org_id=record.org_id,
                         workspace_id=record.workspace_id,
                     )
+                    if not record.sandbox_id:
+                        # Crashed provisioning row — no remote sandbox to kill.
+                        await scoped_repo.mark_terminated(record.id)
+                        logger.info(
+                            "Reaped orphan provisioning record {} (no sandbox_id)",
+                            record.id,
+                        )
+                        continue
                     await self._kill_record(session, scoped_repo, record, conn_config)
                 except Exception:
                     logger.opt(exception=True).warning(

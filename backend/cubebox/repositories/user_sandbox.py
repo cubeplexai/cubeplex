@@ -83,6 +83,14 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         record.sandbox_id = f"pending-{record.id}"
         return await self.add(record)
 
+    async def set_sandbox_id(self, record_id: str, sandbox_id: str) -> None:
+        """Persist the provider sandbox_id while still in provisioning status."""
+        record = await self.get(record_id)
+        if record is None:
+            raise ValueError(f"sandbox record {record_id} vanished mid-create")
+        record.sandbox_id = sandbox_id
+        await self.session.commit()
+
     async def promote_to_running(self, record_id: str, *, sandbox_id: str) -> None:
         record = await self.get(record_id)
         if record is None:
