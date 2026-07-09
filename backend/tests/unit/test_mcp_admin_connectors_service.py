@@ -75,12 +75,12 @@ def test_org_policy_grant_expired_no_refresh():
     assert out.reason == "grant_expired"
 
 
-def test_org_policy_grant_expired_with_refresh_is_usable():
+def test_org_policy_grant_expired_with_refresh_requires_reconnect():
     install = _Install("mcins-1", "oauth", "authorized", "ok", "org")
     grant = _Grant("expired", "cred-refresh-1")
     out = derive_admin_org_effective(install, grant)
-    assert out.usable is True
-    assert out.reason == "usable"
+    assert out.usable is False
+    assert out.reason == "grant_expired"
 
 
 def test_org_policy_discovery_error_after_auth_gates_pass():

@@ -660,7 +660,12 @@ export function McpPanel({ wsId }: McpPanelProps) {
         }
         detail={
           selected ? (
-            <ConnectorDetail connector={selected} wsId={wsId} onChanged={load} />
+            <ConnectorDetail
+              key={selected.install.connector_id}
+              connector={selected}
+              wsId={wsId}
+              onChanged={load}
+            />
           ) : showCustomCreate ? (
             <MCPCustomCreatePanel
               client={client}
