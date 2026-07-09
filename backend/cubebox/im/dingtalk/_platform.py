@@ -82,11 +82,9 @@ class DingtalkPlatform:
             stream_interval=1.0,
         )
 
-        card_template_id = (gw.card_template_id if gw else "") or cfg.get("card_template_id", "")
         op_dispatcher = DingtalkOpDispatcher(
             connector=connector,
             state=state,
-            card_template_id=card_template_id,
             open_conversation_id=queue_item.channel_id,
         )
 

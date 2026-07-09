@@ -16,7 +16,7 @@ You need:
 
 ## Step 1 — Create an internal app
 
-In the DingTalk **Open Platform** console (`open-dev.dingtalk.com`), create a new **internal enterprise app**. Once it exists, open its **Credentials & Basic Info** page and note the **AppKey** and **AppSecret** — you'll need both when binding to CubeBox.
+Go to the [DingTalk Open Platform app console](https://open-dev.dingtalk.com/fe/app?hash=%23%2Fcorp%2Fapp#/corp/app) and create a new **internal enterprise app**. Once it exists, open its **Credentials & Basic Info** page and note the **AppKey** and **AppSecret** — you'll need both when binding to CubeBox.
 
 :::info 📸 Screenshot placeholder
 **Capture:** The DingTalk Open Platform "create internal app" dialog, and the app's Credentials & Basic Info page showing where AppKey and AppSecret appear.
@@ -45,14 +45,16 @@ In the bot's message-receiving settings, choose **Stream mode** (the persistent-
 
 ## Step 4 — Grant the permissions the connector needs
 
-In the app's **Permissions** section, grant the scopes the connector uses:
+In the app's **Permissions** section, grant the following scopes:
 
-- **Send and receive bot messages** — required, so the bot can read messages addressed to it and reply with cards. Without this the bot sees nothing.
-- **Read a user's profile (to resolve email)** — optional but recommended. CubeBox can look up a sender's email from their DingTalk staff ID and match it to a CubeBox account, so users don't have to run `link` manually (see Step 6). This needs the user-profile read permission that exposes the user's email.
+| Permission | Required | Purpose |
+|---|---|---|
+| `qyapi_chat_manage` | Yes | Manage group chats the bot is added to. |
+| `Card.Streaming.Write` | Yes | Stream content updates to AI Cards in real time. |
+| `Card.Instance.Write` | Yes | Create and deliver AI Card instances. |
+| `Contact.User.Read` | Recommended | Look up a sender's email to auto-match CubeBox accounts (avoids manual `link`). |
 
-:::note
-The exact permission names in the DingTalk console change between console versions and editions, so the labels above are described by capability rather than quoted verbatim. Grant the permission that lets the app **send/receive bot messages** and, for email auto-resolution, the one that lets it **read a user's profile including email**. If your console wording differs, match by capability.
-:::
+The bot-message send/receive permission (`qyapi_robot_sendmsg`) is granted by default when you add the bot capability — no action needed for that one.
 
 :::info 📸 Screenshot placeholder
 **Capture:** The app Permissions page with the bot-message send/receive permission and the user-profile (email) read permission granted.

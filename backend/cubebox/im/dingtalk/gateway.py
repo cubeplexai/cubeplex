@@ -38,14 +38,10 @@ class DingtalkGateway:
         self._task: asyncio.Task[None] | None = None
         self._refresh_task: asyncio.Task[None] | None = None
         self._access_token: str = ""
-        self.card_template_id: str = ""
+        self._stopping: bool = False
         self._shared_http = httpx.AsyncClient(timeout=10)
 
     async def start(self) -> None:
-        tpl_id = await self._register_card_template()
-        if tpl_id:
-            self.card_template_id = tpl_id
-
         credential = dingtalk_stream.Credential(self._app_key, self._app_secret)
         client = dingtalk_stream.DingTalkStreamClient(credential=credential)
         self._client = client
@@ -75,14 +71,18 @@ class DingtalkGateway:
             _CallbackHandler(on_card_action),
         )
 
+        gw = self
+
         async def _run() -> None:
             backoff = 1.0
             while True:
                 try:
                     await client.start()
                 except asyncio.CancelledError:
-                    raise
+                    return
                 except Exception:
+                    if gw._stopping:
+                        return
                     logger.opt(exception=True).warning(
                         "[DingTalk] Stream disconnected for {}, reconnecting in {:.0f}s",
                         account.id,
@@ -91,6 +91,8 @@ class DingtalkGateway:
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, 60.0)
                 else:
+                    if gw._stopping:
+                        return
                     backoff = 1.0
 
         self._task = asyncio.create_task(_run(), name=f"dingtalk-gateway:{account.id}")
@@ -218,6 +220,10 @@ class DingtalkGateway:
         )
 
     async def stop(self) -> None:
+        self._stopping = True
+        import logging as _logging
+
+        _logging.getLogger("dingtalk_stream").setLevel(_logging.CRITICAL)
         if self._refresh_task is not None:
             self._refresh_task.cancel()
             try:
@@ -258,53 +264,6 @@ class DingtalkGateway:
     @property
     def access_token(self) -> str:
         return self._access_token
-
-    async def _register_card_template(self) -> str:
-        """Register the cubebox streaming card template. Returns template ID."""
-        url = "https://api.dingtalk.com/v1.0/card/templates"
-        headers = {
-            "x-acs-dingtalk-access-token": self._access_token,
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "cardTemplateJson": json.dumps(
-                {
-                    "config": {"autoLayout": True},
-                    "header": {},
-                    "cardContentList": [
-                        {
-                            "id": "content",
-                            "type": "markdown",
-                            "props": {"content": "${content}"},
-                        },
-                        {
-                            "id": "status",
-                            "type": "text",
-                            "props": {"content": "${status}"},
-                        },
-                    ],
-                    "cardActionList": [],
-                }
-            ),
-        }
-        try:
-            async with httpx.AsyncClient(timeout=10) as http:
-                resp = await http.post(url, headers=headers, json=payload)
-                data = resp.json()
-                tpl_id: str = data.get("cardTemplateId", "")
-                if tpl_id:
-                    logger.info("[DingTalk] card template registered: {}", tpl_id)
-                else:
-                    logger.warning(
-                        "[DingTalk] card template registration returned no ID: {}",
-                        data,
-                    )
-                return tpl_id
-        except Exception:
-            logger.opt(exception=True).warning(
-                "[DingTalk] card template registration failed",
-            )
-            return ""
 
 
 class _CallbackHandler(dingtalk_stream.CallbackHandler):  # type: ignore[misc]

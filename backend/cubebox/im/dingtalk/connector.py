@@ -220,35 +220,76 @@ class DingtalkConnector:
     # Interactive card operations
     # ------------------------------------------------------------------
 
-    async def create_and_deliver_card(
+    async def create_ai_card(
         self,
         *,
         card_template_id: str,
-        open_conversation_id: str,
-        card_data: dict[str, Any],
         out_track_id: str,
+        open_conversation_id: str = "",
     ) -> bool:
-        """Create + deliver an interactive card instance."""
-        url = "https://api.dingtalk.com/v1.0/card/instances/createAndDeliver"
+        """Create + deliver an AI Card (two-step: instance + deliver)."""
+        cid = open_conversation_id or self._conversation_id
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
             "Content-Type": "application/json",
         }
-        payload: dict[str, Any] = {
+
+        create_body: dict[str, Any] = {
             "cardTemplateId": card_template_id,
             "outTrackId": out_track_id,
-            "openConversationId": open_conversation_id,
+            "cardData": {
+                "cardParamMap": {
+                    "config": json.dumps({"autoLayout": True}),
+                },
+            },
             "callbackType": "STREAM",
-            "cardData": {"cardParamMap": card_data},
+            "imGroupOpenSpaceModel": {"supportForward": True},
+            "imRobotOpenSpaceModel": {"supportForward": True},
         }
         try:
-            resp = await self._http.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                return True
-            logger.warning("[DingTalk] create_and_deliver_card failed: {}", resp.text)
-            return False
+            resp = await self._http.post(
+                "https://api.dingtalk.com/v1.0/card/instances",
+                headers=headers,
+                json=create_body,
+            )
+            if resp.status_code != 200:
+                logger.warning("[DingTalk] create card instance failed: {}", resp.text)
+                return False
         except Exception:
-            logger.opt(exception=True).warning("[DingTalk] create_and_deliver_card error")
+            logger.opt(exception=True).warning("[DingTalk] create card instance error")
+            return False
+
+        if self._is_dm:
+            deliver_body: dict[str, Any] = {
+                "outTrackId": out_track_id,
+                "userIdType": 1,
+                "openSpaceId": f"dtv1.card//IM_ROBOT.{self._sender_staff_id}",
+                "imRobotOpenDeliverModel": {
+                    "spaceType": "IM_ROBOT",
+                    "robotCode": self._bot_user_id,
+                },
+            }
+        else:
+            deliver_body = {
+                "outTrackId": out_track_id,
+                "userIdType": 1,
+                "openSpaceId": f"dtv1.card//IM_GROUP.{cid}",
+                "imGroupOpenDeliverModel": {
+                    "robotCode": self._bot_user_id,
+                },
+            }
+        try:
+            resp = await self._http.post(
+                "https://api.dingtalk.com/v1.0/card/instances/deliver",
+                headers=headers,
+                json=deliver_body,
+            )
+            if resp.status_code != 200:
+                logger.warning("[DingTalk] deliver card failed: {}", resp.text)
+                return False
+            return True
+        except Exception:
+            logger.opt(exception=True).warning("[DingTalk] deliver card error")
             return False
 
     async def streaming_update_card(
@@ -295,8 +336,9 @@ class DingtalkConnector:
         *,
         out_track_id: str,
         card_data: dict[str, Any],
+        card_update_options: dict[str, Any] | None = None,
     ) -> bool:
-        """Update card data (buttons, status) via PUT."""
+        """Update card data (flowStatus, content, buttons) via PUT."""
         url = "https://api.dingtalk.com/v1.0/card/instances"
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
@@ -306,6 +348,8 @@ class DingtalkConnector:
             "outTrackId": out_track_id,
             "cardData": {"cardParamMap": card_data},
         }
+        if card_update_options:
+            payload["cardUpdateOptions"] = card_update_options
         try:
             resp = await self._http.put(url, headers=headers, json=payload)
             if resp.status_code == 200:
