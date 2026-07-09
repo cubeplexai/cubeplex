@@ -20,6 +20,9 @@ class _FakeRaw:
         _FakeRaw._counter += 1
         self.id = f"prov-{_FakeRaw._counter}"
 
+    async def check_ready(self, timeout, polling_interval) -> None:  # noqa: ANN001
+        return None
+
     async def is_healthy(self) -> bool:
         return True
 

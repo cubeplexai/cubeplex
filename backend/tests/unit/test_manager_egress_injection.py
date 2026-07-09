@@ -46,6 +46,7 @@ def _make_fake_sandbox(sandbox_id: str = "sbx-new") -> Any:
     """Return a minimal fake object matching the attributes read after Sandbox.create."""
     fake = MagicMock()
     fake.id = sandbox_id
+    fake.check_ready = AsyncMock()
     return fake
 
 
@@ -396,6 +397,10 @@ async def test_unhealthy_sandbox_revokes_refs(
         patch(
             "cubebox.repositories.user_sandbox.UserSandboxRepository.claim_for_provisioning",
             return_value=True,
+        ),
+        patch(
+            "cubebox.repositories.user_sandbox.UserSandboxRepository.set_sandbox_id",
+            return_value=None,
         ),
         patch(
             "cubebox.repositories.user_sandbox.UserSandboxRepository.promote_to_running",
