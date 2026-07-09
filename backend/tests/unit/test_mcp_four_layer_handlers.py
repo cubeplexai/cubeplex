@@ -104,12 +104,12 @@ class _NullSession:
 
 
 async def _no_conflict(**_kwargs: Any) -> bool:
-    """``MCPConnectorInstallService._has_install_conflict`` stub for fake-repo tests."""
+    """``MCPConnectorService._has_install_conflict`` stub for fake-repo tests."""
     return False
 
 
 class _FakeInstall:
-    """Minimal stand-in for MCPConnectorInstall used in pairing tests."""
+    """Minimal stand-in for MCPConnector used in pairing tests."""
 
     def __init__(self, auth_method: str) -> None:
         self.auth_method = auth_method
@@ -285,7 +285,7 @@ def test_patch_workspace_state_from_non_admin_returns_403() -> None:
 
 
 class _FullFakeInstall:
-    """Stand-in MCPConnectorInstall with every attribute ``_install_to_out`` reads.
+    """Stand-in MCPConnector with every attribute ``_install_to_out`` reads.
 
     Used by the server_url_hash recompute test: the handler now calls
     ``server_url_hash(body.server_url)`` and writes it back to
@@ -813,6 +813,61 @@ def test_post_workspace_install_unsupported_auth_method_returns_400() -> None:
     assert res.status_code == 400, res.text
     detail = res.json()["detail"]
     assert detail == {"code": "auth_method_not_supported_by_template"}, detail
+
+
+def test_delete_workspace_install_uses_workspace_state_lookup() -> None:
+    """Workspace DELETE should not depend on MCPConnector.workspace_id."""
+    from cubebox.auth.context import RequestContext
+    from cubebox.auth.dependencies import require_admin
+    from cubebox.models import Role, User
+
+    workspace_id = "ws-1"
+    connector_id = "mcpco-ws-1"
+
+    class _Connector:
+        id = connector_id
+        workspace_id = None
+
+    class _ConnectorRepo:
+        async def get(self, cid: str) -> Any:
+            assert cid == connector_id
+            return _Connector()
+
+    class _StateRepo:
+        async def get(self, ws_id: str, cid: str) -> Any:
+            assert ws_id == workspace_id
+            assert cid == connector_id
+            return object()
+
+    async def _fake_admin_ctx() -> RequestContext:
+        user = User(id="usr-1", email="x@example.com", hashed_password="x")
+        return RequestContext(user=user, org_id="org-1", workspace_id=workspace_id, role=Role.ADMIN)
+
+    uninstalled: list[str] = []
+
+    async def _fake_install_svc() -> Any:
+        class _S:
+            _install_repo = _ConnectorRepo()
+            _state_repo = _StateRepo()
+
+            async def uninstall(self, cid: str) -> Any:
+                uninstalled.append(cid)
+                return _Connector()
+
+        return _S()
+
+    app = _make_app_with_overrides(
+        {
+            require_admin: _fake_admin_ctx,
+            get_ws_install_service: _fake_install_svc,
+        }
+    )
+
+    client = TestClient(app)
+    res = client.delete(f"/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}")
+
+    assert res.status_code == 204, res.text
+    assert uninstalled == [connector_id]
 
 
 def test_post_workspace_install_static_with_none_policy_returns_422() -> None:

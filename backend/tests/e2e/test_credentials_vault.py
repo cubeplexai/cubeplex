@@ -13,10 +13,10 @@ from cubebox.credentials.exceptions import (
     CredentialKindMismatch,
     CredentialNotFound,
 )
-from cubebox.models import MCPConnectorInstall, MCPCredentialGrant
+from cubebox.models.mcp import MCPConnector, MCPCredentialGrant
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPCredentialGrantRepository,
 )
 from cubebox.services.credential import CredentialService
@@ -197,12 +197,10 @@ async def test_delete_credential_referenced_by_mcp_grant_raises(
         name=_name("mcp-ref"),
         plaintext="secret",
     )
-    install_repo = MCPConnectorInstallRepository(db_session, org_id="org-vault-mcp-ref")
-    install = await install_repo.add(
-        MCPConnectorInstall(
+    connector_repo = MCPConnectorRepository(db_session, org_id="org-vault-mcp-ref")
+    connector = await connector_repo.add(
+        MCPConnector(
             org_id="org-vault-mcp-ref",
-            workspace_id=None,
-            install_scope="org",
             template_id=None,
             name=_name("ins"),
             server_url="https://mcp-ref",
@@ -217,7 +215,7 @@ async def test_delete_credential_referenced_by_mcp_grant_raises(
     await grant_repo.add(
         MCPCredentialGrant(
             org_id="org-vault-mcp-ref",
-            install_id=install.id,
+            connector_id=connector.id,
             grant_scope="org",
             workspace_id=None,
             user_id=None,

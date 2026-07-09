@@ -366,7 +366,8 @@ async def delete_workspace_install(
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> None:
     install = await svc._install_repo.get(connector_id)
-    if install is None or install.workspace_id != workspace_id:
+    state = await svc._state_repo.get(workspace_id, connector_id)
+    if install is None or state is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
     try:
         await svc.uninstall(connector_id)

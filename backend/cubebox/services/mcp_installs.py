@@ -188,6 +188,12 @@ class MCPConnectorService:
             slug_name=slugify_for_namespace(template.name),
         )
         if existing is not None:
+            if not (
+                existing.template_id == template.id
+                and existing.server_url_hash == server_url_hash(template.server_url)
+                and existing.slug_name == slugify_for_namespace(template.name)
+            ):
+                raise ValueError("install_already_exists")
             existing.auth_method = auth_method
             existing.default_credential_policy = defaults.credential_policy
             existing.auth_status = defaults.auth_status
@@ -320,6 +326,22 @@ class MCPConnectorService:
         else:
             raise ValueError(f"unknown grant_scope: {grant_scope!r}")
 
+    @staticmethod
+    def _static_credential_name(
+        *,
+        connector_id: str,
+        grant_scope: str,
+        workspace_id: str | None,
+        user_id: str | None,
+    ) -> str:
+        if grant_scope == "org":
+            return f"mcp:{connector_id}:org"
+        if grant_scope == "workspace":
+            assert workspace_id is not None, "workspace grant requires workspace_id"
+            return f"mcp:{connector_id}:workspace:{workspace_id}"
+        assert workspace_id is not None and user_id is not None, "user grant requires both"
+        return f"mcp:{connector_id}:user:{workspace_id}:{user_id}"
+
     async def _require_active_connector(self, connector_id: str) -> MCPConnector:
         connector = await self._connector_repo.get(connector_id)
         if connector is None or connector.org_id != self._org_id:
@@ -343,7 +365,12 @@ class MCPConnectorService:
         if connector.auth_method != "static":
             raise ValueError("static_grant_only_valid_for_static_auth")
 
-        credential_name = name or f"mcp:{connector_id}:{grant_scope}"
+        credential_name = name or self._static_credential_name(
+            connector_id=connector_id,
+            grant_scope=grant_scope,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
         credential_id = await self._cred_service.upsert_by_kind_name(
             kind=CREDENTIAL_KIND_MCP,
             name=credential_name,
