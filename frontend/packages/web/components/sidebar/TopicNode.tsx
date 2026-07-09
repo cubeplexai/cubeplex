@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import { MemberPanel } from '@/components/chat/MemberPanel'
 import { AvatarStack } from '@/components/ui/avatar-stack'
+import { PlatformLogo } from '@/components/im/PlatformLogo'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -152,6 +153,8 @@ export function TopicNode({
         )}
         {topic.is_pinned ? (
           <Pin className="size-3 shrink-0 text-primary/70 fill-primary/30" />
+        ) : topic.im_platform ? (
+          <PlatformLogo platform={topic.im_platform} className="size-3 shrink-0" />
         ) : (
           <Layers className="size-3 shrink-0 text-primary/70" />
         )}

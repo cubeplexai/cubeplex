@@ -8,6 +8,7 @@ export interface Topic {
   creator_user_id: string
   is_archived: boolean
   is_pinned: boolean
+  im_platform?: string | null
   created_at: string
   updated_at: string
   last_activity_at: string

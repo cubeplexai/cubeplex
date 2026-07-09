@@ -60,6 +60,8 @@ def _conv_repo(session: AsyncSession, ctx: RequestContext) -> ConversationReposi
 
 
 def _serialize_topic(topic: Any) -> dict[str, Any]:
+    attrs: dict[str, Any] = topic.attributes or {}
+    im_platform: str | None = attrs.get("im", {}).get("platform")
     return {
         "id": topic.id,
         "title": topic.title,
@@ -68,6 +70,7 @@ def _serialize_topic(topic: Any) -> dict[str, Any]:
         "creator_user_id": topic.creator_user_id,
         "is_archived": topic.is_archived,
         "is_pinned": topic.is_pinned,
+        "im_platform": im_platform,
         "created_at": utc_isoformat(topic.created_at),
         "updated_at": utc_isoformat(topic.updated_at),
         "last_activity_at": utc_isoformat(topic.last_activity_at),
