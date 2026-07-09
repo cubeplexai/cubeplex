@@ -30,7 +30,7 @@ from cubebox.mcp.effective import (
 )
 from cubebox.models import Workspace
 from cubebox.repositories.mcp import (
-    MCPConnectorInstallRepository,
+    MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
@@ -55,7 +55,7 @@ async def _build_effective_service(
 ) -> MCPEffectiveConnectorService:
     return MCPEffectiveConnectorService(
         template_repo=MCPConnectorTemplateRepository(session),
-        install_repo=MCPConnectorInstallRepository(session, org_id=org_id),
+        install_repo=MCPConnectorRepository(session, org_id=org_id),
         state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=org_id),
         grant_repo=MCPCredentialGrantRepository(session, org_id=org_id),
         org_id=org_id,
@@ -88,7 +88,7 @@ async def test_noauth_runtime_spec_returns_install_without_grant_lookup(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     async with db_maker() as session:
         ws = await session.get(Workspace, workspace_id)
@@ -106,16 +106,12 @@ async def test_noauth_runtime_spec_returns_install_without_grant_lookup(
         # Spy on the grant repo: a no-auth install must not hit any grant
         # lookup path (the effective service's ``_resolve_grant`` returns None
         # immediately for ``policy='none'``).
-        grant_spy_org = AsyncMock(wraps=svc._grant_repo.get_org_grant)
-        grant_spy_ws = AsyncMock(wraps=svc._grant_repo.get_workspace_grant)
-        grant_spy_user = AsyncMock(wraps=svc._grant_repo.get_user_grant)
-        svc._grant_repo.get_org_grant = grant_spy_org  # type: ignore[method-assign]
-        svc._grant_repo.get_workspace_grant = grant_spy_ws  # type: ignore[method-assign]
-        svc._grant_repo.get_user_grant = grant_spy_user  # type: ignore[method-assign]
+        grant_spy = AsyncMock(wraps=svc._grant_repo.get_for_connector_scope)
+        svc._grant_repo.get_for_connector_scope = grant_spy  # type: ignore[method-assign]
 
         specs = await svc.list_runtime_specs(workspace_id, user_id)
 
-    matching = [s for s in specs if s.install_id == install_id]
+    matching = [s for s in specs if s.connector_id == install_id]
     assert len(matching) == 1, f"expected exactly one runtime spec, got {specs!r}"
     spec = matching[0]
     assert isinstance(spec, MCPRuntimeConnectorSpec)
@@ -124,9 +120,7 @@ async def test_noauth_runtime_spec_returns_install_without_grant_lookup(
     assert spec.credential_id is None
     assert spec.refresh_credential_id is None
 
-    grant_spy_org.assert_not_awaited()
-    grant_spy_ws.assert_not_awaited()
-    grant_spy_user.assert_not_awaited()
+    grant_spy.assert_not_awaited()
 
 
 async def test_noauth_org_install_runtime_only_visible_in_targeted_workspace(
@@ -166,7 +160,7 @@ async def test_noauth_org_install_runtime_only_visible_in_targeted_workspace(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     me_resp = await client.get("/api/v1/auth/me")
     assert me_resp.status_code == 200
@@ -178,9 +172,9 @@ async def test_noauth_org_install_runtime_only_visible_in_targeted_workspace(
         targeted_specs = await svc.list_runtime_specs(workspace_id, user_id)
         sibling_specs = await svc.list_runtime_specs(sibling_id, user_id)
 
-    assert any(s.install_id == install_id for s in targeted_specs), (
+    assert any(s.connector_id == install_id for s in targeted_specs), (
         "targeted workspace should see install in its runtime spec list"
     )
-    assert not any(s.install_id == install_id for s in sibling_specs), (
+    assert not any(s.connector_id == install_id for s in sibling_specs), (
         "sibling workspace must not see org install absent a state row"
     )

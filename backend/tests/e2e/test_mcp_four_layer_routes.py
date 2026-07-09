@@ -62,7 +62,7 @@ async def _find_connector(
     else:
         rows = payload
     for row in rows:
-        if row["install"]["install_id"] == install_id:
+        if row["install"]["connector_id"] == install_id:
             return row
     return None
 
@@ -90,7 +90,7 @@ async def test_workspace_local_noauth_install_renders_usable(
     )
     assert resp.status_code == 201, resp.text
     install = resp.json()
-    install_id = install["install_id"]
+    install_id = install["connector_id"]
     assert install["install_scope"] == "workspace"
     assert install["workspace_id"] == workspace_id
     assert install["auth_method"] == "none"
@@ -150,7 +150,7 @@ async def test_org_admin_noauth_install_distributed_to_workspace_renders_usable(
     )
     assert install_resp.status_code == 201, install_resp.text
     install = install_resp.json()
-    install_id = install["install_id"]
+    install_id = install["connector_id"]
     assert install["install_scope"] == "org"
     assert install["workspace_id"] is None
     assert install["auth_status"] == "not_required"
@@ -159,16 +159,16 @@ async def test_org_admin_noauth_install_distributed_to_workspace_renders_usable(
     # targeted workspace with admin_manual enablement; no row for sibling.
     from sqlalchemy import select
 
-    from cubebox.models import MCPConnectorInstall, MCPWorkspaceConnectorState
+    from cubebox.models import MCPConnector, MCPWorkspaceConnectorState
 
     async with db_maker() as session:
-        install_row = await session.get(MCPConnectorInstall, install_id)
+        install_row = await session.get(MCPConnector, install_id)
         assert install_row is not None
         assert install_row.install_scope == "org"
         assert install_row.workspace_id is None
 
         stmt = select(MCPWorkspaceConnectorState).where(
-            MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.connector_id == install_id  # type: ignore[arg-type]
         )
         states = list((await session.execute(stmt)).scalars().all())
         states_by_ws = {s.workspace_id: s for s in states}
@@ -226,7 +226,7 @@ async def test_user_grant_policy_does_not_fall_back_to_org_grant(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     org_grant_resp = await admin_c.post(
         f"/api/v1/admin/mcp/installs/{install_id}/grants/org",
@@ -317,7 +317,7 @@ async def test_policy_change_drops_previous_scope_grant_from_runtime(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     grant_resp = await client.post(
         f"/api/v1/admin/mcp/installs/{install_id}/grants/org",
@@ -374,7 +374,7 @@ async def test_disconnect_keeps_install_and_state(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     grant_resp = await client.post(
         f"/api/v1/admin/mcp/installs/{install_id}/grants/org",
@@ -393,15 +393,15 @@ async def test_disconnect_keeps_install_and_state(
     # DB invariants: install + state rows survive disconnect.
     from sqlalchemy import select
 
-    from cubebox.models import MCPConnectorInstall, MCPWorkspaceConnectorState
+    from cubebox.models import MCPConnector, MCPWorkspaceConnectorState
 
     async with db_maker() as session:
-        install_row = await session.get(MCPConnectorInstall, install_id)
+        install_row = await session.get(MCPConnector, install_id)
         assert install_row is not None
         assert install_row.install_state == "active"
 
         stmt = select(MCPWorkspaceConnectorState).where(
-            MCPWorkspaceConnectorState.install_id == install_id,  # type: ignore[arg-type]
+            MCPWorkspaceConnectorState.connector_id == install_id,  # type: ignore[arg-type]
             MCPWorkspaceConnectorState.workspace_id == workspace_id,  # type: ignore[arg-type]
         )
         state = (await session.execute(stmt)).scalar_one_or_none()
@@ -456,7 +456,7 @@ async def test_repost_org_grant_is_idempotent(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     first = await client.post(
         f"/api/v1/admin/mcp/installs/{install_id}/grants/org",
@@ -498,16 +498,16 @@ async def test_uninstall_then_reinstall_same_template(
         },
     )
     assert first_resp.status_code == 201, first_resp.text
-    first_install_id = first_resp.json()["install_id"]
+    first_install_id = first_resp.json()["connector_id"]
 
     # Uninstall the first install.
     delete_resp = await client.delete(f"/api/v1/admin/mcp/installs/{first_install_id}")
     assert delete_resp.status_code == 204, delete_resp.text
 
-    from cubebox.models import MCPConnectorInstall
+    from cubebox.models import MCPConnector
 
     async with db_maker() as session:
-        row = await session.get(MCPConnectorInstall, first_install_id)
+        row = await session.get(MCPConnector, first_install_id)
         assert row is not None
         assert row.install_state == "uninstalled"
 
@@ -528,7 +528,7 @@ async def test_uninstall_then_reinstall_same_template(
         },
     )
     assert second_resp.status_code == 201, second_resp.text
-    second_install_id = second_resp.json()["install_id"]
+    second_install_id = second_resp.json()["connector_id"]
     assert second_install_id != first_install_id
 
 
@@ -648,7 +648,7 @@ async def test_patch_state_upserts_for_org_install_with_no_state_row(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     # No state rows exist anywhere for this install yet.
     async with db_maker() as session:
@@ -656,7 +656,7 @@ async def test_patch_state_upserts_for_org_install_with_no_state_row(
             (
                 await session.execute(
                     select(MCPWorkspaceConnectorState).where(
-                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                        MCPWorkspaceConnectorState.connector_id == install_id  # type: ignore[arg-type]
                     )
                 )
             )
@@ -681,7 +681,7 @@ async def test_patch_state_upserts_for_org_install_with_no_state_row(
             (
                 await session.execute(
                     select(MCPWorkspaceConnectorState).where(
-                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                        MCPWorkspaceConnectorState.connector_id == install_id  # type: ignore[arg-type]
                     )
                 )
             )
@@ -712,7 +712,7 @@ async def test_patch_state_upserts_for_org_install_with_no_state_row(
             (
                 await session.execute(
                     select(MCPWorkspaceConnectorState).where(
-                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                        MCPWorkspaceConnectorState.connector_id == install_id  # type: ignore[arg-type]
                     )
                 )
             )
@@ -747,7 +747,7 @@ async def test_selected_distribution_does_not_auto_enroll_new_workspace(
     """
     from sqlalchemy import select
 
-    from cubebox.models import MCPConnectorInstall, MCPWorkspaceConnectorState
+    from cubebox.models import MCPConnector, MCPWorkspaceConnectorState
 
     client, workspace_id = admin_client
 
@@ -766,11 +766,11 @@ async def test_selected_distribution_does_not_auto_enroll_new_workspace(
         },
     )
     assert install_resp.status_code == 201, install_resp.text
-    install_id = install_resp.json()["install_id"]
+    install_id = install_resp.json()["connector_id"]
 
     # Persisted flag is explicitly False, NOT the model server_default of True.
     async with db_maker() as session:
-        install_row = await session.get(MCPConnectorInstall, install_id)
+        install_row = await session.get(MCPConnector, install_id)
         assert install_row is not None
         assert install_row.auto_enroll_new_workspaces is False, (
             "selected distribution must persist auto_enroll_new_workspaces=False"
@@ -792,7 +792,7 @@ async def test_selected_distribution_does_not_auto_enroll_new_workspace(
             (
                 await session.execute(
                     select(MCPWorkspaceConnectorState).where(
-                        MCPWorkspaceConnectorState.install_id == install_id  # type: ignore[arg-type]
+                        MCPWorkspaceConnectorState.connector_id == install_id  # type: ignore[arg-type]
                     )
                 )
             )

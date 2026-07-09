@@ -56,9 +56,9 @@ async def seeded_static_org_install_with_tools_cache(
     org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
     async with db_session_maker() as session:
         from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
+        from cubebox.models.mcp import MCPConnector
 
-        install = MCPConnectorInstall(
+        install = MCPConnector(
             org_id=org_id,
             template_id=None,
             install_scope="org",
@@ -108,7 +108,7 @@ async def test_install_dto_exposes_tools_and_tool_citations(
     admin_client: tuple[httpx.AsyncClient, str],
     seeded_static_org_install_with_tools_cache: str,
 ) -> None:
-    """``MCPConnectorInstallOut`` must expose the tools list (not just
+    """``MCPConnectorOut`` must expose the tools list (not just
     tool_count) and tool_citations dict (for org admin callers)."""
     client, _ws = admin_client
     install_id = seeded_static_org_install_with_tools_cache
@@ -141,9 +141,9 @@ async def test_discover_tools_for_install_writes_tools_cache(
 
     async with db_session_maker() as session:
         from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
+        from cubebox.models.mcp import MCPConnector
 
-        install = MCPConnectorInstall(
+        install = MCPConnector(
             org_id=org_id,
             template_id=None,
             install_scope="org",
@@ -236,9 +236,9 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
 
     async with db_session_maker() as session:
         from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
+        from cubebox.models.mcp import MCPConnector
 
-        install = MCPConnectorInstall(
+        install = MCPConnector(
             org_id=org_id,
             template_id=None,
             install_scope="org",
@@ -307,7 +307,7 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
     from cubebox.credentials.dependencies import build_credential_service
     from cubebox.credentials.encryption import FernetBackend
     from cubebox.mcp.dependencies import build_user_token_signer
-    from cubebox.repositories.mcp import MCPConnectorInstallRepository
+    from cubebox.repositories.mcp import MCPConnectorRepository
     from cubebox.services.mcp_discovery import discover_tools_for_install
 
     backend = FernetBackend([_test_fernet_key().encode()])
@@ -328,7 +328,7 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
         assert result.discovery_status == "ok"
 
     async with db_session_maker() as session:
-        repo = MCPConnectorInstallRepository(session, org_id=org_id)
+        repo = MCPConnectorRepository(session, org_id=org_id)
         refreshed = await repo.get(install_id)
         assert refreshed is not None
         meta = refreshed.discovery_metadata
@@ -375,12 +375,12 @@ async def test_ws_active_tools_returns_namespaced_tools_with_icons(
 
     async with db_session_maker() as session:
         from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
+        from cubebox.models.mcp import MCPConnector
 
         # Use an auth_method='none' org install — automatically usable for
         # any workspace in this org per the effective service rules
         # (no grant required).
-        install = MCPConnectorInstall(
+        install = MCPConnector(
             org_id=org_id,
             template_id=None,
             install_scope="org",
@@ -497,10 +497,10 @@ async def seeded_static_org_install_no_grant(
     org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
     async with db_session_maker() as session:
         from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
+        from cubebox.models.mcp import MCPConnector
 
         url = f"https://no-grant-{ws_id}.example.com/mcp"
-        install = MCPConnectorInstall(
+        install = MCPConnector(
             org_id=org_id,
             template_id=None,
             install_scope="org",
@@ -535,10 +535,10 @@ async def seeded_oauth_user_policy_install(
     org_id, user_id = await _resolve_org_user_for_client(client, ws_id)
     async with db_session_maker() as session:
         from cubebox.mcp._constants import server_url_hash
-        from cubebox.models.mcp import MCPConnectorInstall
+        from cubebox.models.mcp import MCPConnector
 
         url = f"https://oauth-user-{ws_id}.example.com/mcp"
-        install = MCPConnectorInstall(
+        install = MCPConnector(
             org_id=org_id,
             template_id=None,
             install_scope="org",
@@ -731,7 +731,7 @@ async def seeded_workspace_install_with_state(
     )
     assert res.status_code == 201, res.text
     body = res.json()
-    return body["install_id"], workspace_id, body["default_credential_policy"]
+    return body["connector_id"], workspace_id, body["default_credential_policy"]
 
 
 @pytest_asyncio.fixture
@@ -777,14 +777,14 @@ async def test_promote_install_writes_org_scope_and_excludes_source(
     # Source workspace's state row preserved untouched.
     state_res = await client.get(f"/api/v1/ws/{source_ws}/mcp/connectors")
     assert state_res.status_code == 200, state_res.text
-    sources = [c for c in state_res.json()["items"] if c["install"]["install_id"] == install_id]
+    sources = [c for c in state_res.json()["items"] if c["install"]["connector_id"] == install_id]
     assert len(sources) == 1
     assert sources[0]["workspace_state"]["credential_policy"] == source_state_policy
 
     # Other workspace got a state row.
     other_res = await client.get(f"/api/v1/ws/{other_ws}/mcp/connectors")
     assert other_res.status_code == 200, other_res.text
-    others = [c for c in other_res.json()["items"] if c["install"]["install_id"] == install_id]
+    others = [c for c in other_res.json()["items"] if c["install"]["connector_id"] == install_id]
     assert len(others) == 1
 
 
@@ -853,11 +853,11 @@ async def seeded_none_auth_install_with_state(
         },
     )
     assert res.status_code == 201, res.text
-    install_id = res.json()["install_id"]
+    install_id = res.json()["connector_id"]
     async with db_session_maker() as session:
-        from cubebox.models.mcp import MCPConnectorInstall
+        from cubebox.models.mcp import MCPConnector
 
-        install = await session.get(MCPConnectorInstall, install_id)
+        install = await session.get(MCPConnector, install_id)
         assert install is not None
         install.tools_cache = [
             {"name": "ping", "description": "say hi", "input_schema": {"type": "object"}}
