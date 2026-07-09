@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Loader2,
   PauseCircle,
+  Plus,
   Plug,
   Trash2,
   Wrench,
@@ -34,6 +35,7 @@ import { AvailableConnectorRow } from '@/components/mcp/AvailableConnectorRow'
 import { WsAuthBand } from '@/components/mcp/WsAuthBand'
 import { ServerErrorBanner } from '@/components/mcp/detail/ServerErrorBanner'
 import { WsToolsPanel } from '@/components/mcp/detail/tools/WsToolsPanel'
+import { MCPCustomCreatePanel } from '@/components/mcp/MCPCustomCreatePanel'
 import { MCPPromoteDialog } from '@/components/mcp/MCPPromoteDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -98,6 +100,35 @@ function StatusPill({ status }: { status: RowStatus }) {
       {t('statusUninstalled')}
     </span>
   )
+}
+
+type PolicyLabelKey = 'policyOrg' | 'policyWorkspace' | 'policyUser' | 'policyNone'
+type PolicyDescriptionKey =
+  | 'policyOrgDescription'
+  | 'policyWorkspaceDescription'
+  | 'policyUserDescription'
+  | 'policyNoneDescription'
+
+function policyLabelKey(policy: MCPCredentialScope): PolicyLabelKey {
+  if (policy === 'org') return 'policyOrg'
+  if (policy === 'workspace') return 'policyWorkspace'
+  if (policy === 'user') return 'policyUser'
+  return 'policyNone'
+}
+
+function policyDescriptionKey(policy: MCPCredentialScope): PolicyDescriptionKey {
+  if (policy === 'org') return 'policyOrgDescription'
+  if (policy === 'workspace') return 'policyWorkspaceDescription'
+  if (policy === 'user') return 'policyUserDescription'
+  return 'policyNoneDescription'
+}
+
+function hasSavedCredentialForScope(
+  connector: MCPEffectiveConnector,
+  policy: MCPCredentialScope,
+): boolean {
+  if (policy === 'none') return false
+  return Boolean(connector.credential_availability_by_scope[policy])
 }
 
 function ConnectorRow({
@@ -221,6 +252,7 @@ function ConnectorDetail({
 
   const discoveryError = install.discovery_status === 'error'
   const busy = saving || refreshing || deleting
+  const orgCredentialAvailable = hasSavedCredentialForScope(connector, 'org')
 
   async function toggle(): Promise<void> {
     setSaving(true)
@@ -365,19 +397,54 @@ function ConnectorDetail({
           </div>
 
           <div className="rounded-lg border border-border/70 bg-card/40 p-4">
-            <h4 className="mb-3 text-sm font-semibold">{t('credentialPolicy')}</h4>
-            <div className="flex flex-wrap gap-2">
-              {(['org', 'workspace', 'user', 'none'] as MCPCredentialScope[]).map((p) => (
-                <Button
-                  key={p}
-                  size="sm"
-                  variant={connector.credential_policy === p ? 'default' : 'outline'}
-                  disabled={saving}
-                  onClick={() => void changePolicy(p)}
-                >
-                  {p}
-                </Button>
-              ))}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-sm font-semibold">{t('credentialPolicy')}</h4>
+              {orgCredentialAvailable ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-success-solid/10 px-2 py-0.5 text-xs font-medium text-success-fg">
+                  <CheckCircle2 className="size-3" />
+                  {t('orgCredentialAvailable')}
+                </span>
+              ) : null}
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(['org', 'workspace', 'user', 'none'] as MCPCredentialScope[]).map((p) => {
+                const disabledByAuth = p === 'none' && install.auth_method !== 'none'
+                const selected = connector.credential_policy === p
+                const credentialAvailable = hasSavedCredentialForScope(connector, p)
+                return (
+                  <Button
+                    key={p}
+                    type="button"
+                    variant={selected ? 'default' : 'outline'}
+                    disabled={saving || disabledByAuth}
+                    className="h-auto min-h-16 justify-start px-3 py-2 text-left"
+                    onClick={() => void changePolicy(p)}
+                  >
+                    <span className="flex min-w-0 flex-col gap-1">
+                      <span className="flex items-center gap-1.5 text-sm font-medium">
+                        {selected ? <CheckCircle2 className="size-3.5 shrink-0" /> : null}
+                        {t(policyLabelKey(p))}
+                        {credentialAvailable ? (
+                          <CheckCircle2
+                            aria-label={t('policyCredentialAvailableLabel', {
+                              scope: t(policyLabelKey(p)),
+                            })}
+                            className="size-3.5 shrink-0 text-success-fg"
+                          />
+                        ) : null}
+                      </span>
+                      <span
+                        className={cn(
+                          'text-xs leading-snug',
+                          selected ? 'text-primary-foreground/80' : 'text-muted-foreground',
+                        )}
+                      >
+                        {t(policyDescriptionKey(p))}
+                      </span>
+                    </span>
+                  </Button>
+                )
+              })}
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
               {t('credentialAvailability')}: {connector.credential_availability}
@@ -416,6 +483,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [showCustomCreate, setShowCustomCreate] = useState(false)
 
   // Adding new connectors (Available section) is admin-only in workspace
   // settings. Spec §5.1 "New UI rule introduced by this spec".
@@ -505,8 +573,11 @@ export function McpPanel({ wsId }: McpPanelProps) {
       </header>
 
       <ListDetailLayout
-        selected={selected !== null}
-        onBack={() => setSelectedId(null)}
+        selected={selected !== null || showCustomCreate}
+        onBack={() => {
+          setSelectedId(null)
+          setShowCustomCreate(false)
+        }}
         backLabel={t('back')}
         placeholder={t('selectConnector')}
         railClassName="w-[340px] bg-card/20 px-0 py-0"
@@ -531,7 +602,10 @@ export function McpPanel({ wsId }: McpPanelProps) {
                           key={c.install.connector_id}
                           connector={c}
                           active={c.install.connector_id === selectedId}
-                          onClick={() => setSelectedId(c.install.connector_id)}
+                          onClick={() => {
+                            setShowCustomCreate(false)
+                            setSelectedId(c.install.connector_id)
+                          }}
                         />
                       ))}
                     </div>
@@ -540,9 +614,23 @@ export function McpPanel({ wsId }: McpPanelProps) {
 
                 {meWsRole === 'admin' && (
                   <section>
-                    <h3 className="mb-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      {tAvailable('title')}
-                    </h3>
+                    <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {tAvailable('title')}
+                      </h3>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={showCustomCreate ? 'default' : 'outline'}
+                        onClick={() => {
+                          setSelectedId(null)
+                          setShowCustomCreate(true)
+                        }}
+                      >
+                        <Plus className="size-3.5" />
+                        {t('workspaceAddCustomConnector')}
+                      </Button>
+                    </div>
                     {filteredAvailable.length === 0 ? (
                       <p className="px-1 text-xs text-muted-foreground">{tAvailable('empty')}</p>
                     ) : (
@@ -557,6 +645,7 @@ export function McpPanel({ wsId }: McpPanelProps) {
                             wsId={wsId}
                             onConnected={async (connectorId: string) => {
                               await load()
+                              setShowCustomCreate(false)
                               setSelectedId(connectorId)
                             }}
                           />
@@ -570,7 +659,20 @@ export function McpPanel({ wsId }: McpPanelProps) {
           </div>
         }
         detail={
-          selected ? <ConnectorDetail connector={selected} wsId={wsId} onChanged={load} /> : null
+          selected ? (
+            <ConnectorDetail connector={selected} wsId={wsId} onChanged={load} />
+          ) : showCustomCreate ? (
+            <MCPCustomCreatePanel
+              client={client}
+              scope="workspace"
+              wsId={wsId}
+              onCreated={async (install) => {
+                await load()
+                setShowCustomCreate(false)
+                setSelectedId(install.connector_id)
+              }}
+            />
+          ) : null
         }
       />
     </div>

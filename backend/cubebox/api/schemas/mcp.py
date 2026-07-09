@@ -123,6 +123,7 @@ class MCPEffectiveConnectorOut(BaseModel):
     required_grant_scope: str | None
     credential_availability: Literal["available", "missing", "not_required"]
     credential_source: Literal["org", "workspace", "user"] | None
+    credential_availability_by_scope: dict[Literal["org", "workspace", "user"], bool]
     usable: bool
     reason: str
 

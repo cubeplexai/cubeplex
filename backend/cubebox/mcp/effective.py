@@ -116,6 +116,7 @@ class MCPEffectiveConnectorDTO:
     required_grant_scope: str | None
     credential_availability: Literal["available", "missing", "not_required"]
     credential_source: Literal["org", "workspace", "user", "none"]
+    credential_availability_by_scope: dict[Literal["org", "workspace", "user"], bool]
     usable: bool
     reason: MCPEffectiveReason
     template_status: str | None
@@ -283,6 +284,11 @@ class MCPEffectiveConnectorService:
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
+            credential_availability_by_scope = await self._credential_availability_by_scope(
+                connector=connector,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
             grant_input = (
                 MCPGrantInput(
                     scope=grant.grant_scope,
@@ -317,12 +323,46 @@ class MCPEffectiveConnectorService:
                     required_grant_scope=_required_scope_for(policy),
                     credential_availability=effective.credential_availability,
                     credential_source=_cast_source(policy),
+                    credential_availability_by_scope=credential_availability_by_scope,
                     usable=effective.usable,
                     reason=effective.reason,
                     template_status=template_status,
                 )
             )
         return rows
+
+    async def _credential_availability_by_scope(
+        self,
+        *,
+        connector: MCPConnector,
+        workspace_id: str,
+        user_id: str,
+    ) -> dict[Literal["org", "workspace", "user"], bool]:
+        if connector.auth_method == "none":
+            return {"org": False, "workspace": False, "user": False}
+        org_grant = await self._grant_repo.get_for_connector_scope(
+            connector_id=connector.id,
+            grant_scope="org",
+            workspace_id=None,
+            user_id=None,
+        )
+        workspace_grant = await self._grant_repo.get_for_connector_scope(
+            connector_id=connector.id,
+            grant_scope="workspace",
+            workspace_id=workspace_id,
+            user_id=None,
+        )
+        user_grant = await self._grant_repo.get_for_connector_scope(
+            connector_id=connector.id,
+            grant_scope="user",
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        return {
+            "org": org_grant is not None,
+            "workspace": workspace_grant is not None,
+            "user": user_grant is not None,
+        }
 
     async def _resolve_grant(
         self,

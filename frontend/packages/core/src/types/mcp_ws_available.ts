@@ -9,4 +9,5 @@ export interface WsAvailable {
   install: MCPConnector | null
   template: MCPConnectorTemplate | null
   reason: WsAvailableReason
+  credential_availability_by_scope: Record<'org' | 'workspace' | 'user', boolean>
 }

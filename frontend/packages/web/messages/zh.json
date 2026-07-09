@@ -965,6 +965,7 @@
     "available": {
       "title": "可启用",
       "connect": "启用",
+      "orgCredentialAvailable": "组织凭证可用",
       "empty": "暂无可启用的连接器。"
     },
     "scopeBadge": {
@@ -1799,6 +1800,16 @@
     "installs": "连接器安装",
     "workspaceState": "工作区状态",
     "credentialPolicy": "凭证策略",
+    "policyOrg": "组织",
+    "policyOrgDescription": "使用组织管理员维护的组织凭证。",
+    "policyWorkspace": "工作区",
+    "policyWorkspaceDescription": "为当前工作区保存一份凭证。",
+    "policyUser": "用户",
+    "policyUserDescription": "每个用户连接自己的账号。",
+    "policyNone": "无",
+    "policyNoneDescription": "仅适用于无需认证的连接器。",
+    "policyCredentialAvailableLabel": "{scope}凭证可用",
+    "orgCredentialAvailable": "组织凭证可用",
     "orgGrant": "组织授权",
     "workspaceGrant": "工作区授权",
     "myGrant": "我的授权",
@@ -1833,6 +1844,8 @@
     "workspaceStateSummary": "已启用 {enabled} / {total} 个工作区",
     "customCreateTitle": "添加自定义 MCP 服务器",
     "customCreateSubtitle": "为整个组织登记自定义 MCP 服务器，之后可以按工作区开启。",
+    "customCreateWorkspaceTitle": "添加自定义 MCP 服务器",
+    "customCreateWorkspaceSubtitle": "为当前工作区登记自定义 MCP 服务器。",
     "customSectionServer": "服务器",
     "customSectionCredential": "凭证",
     "customFieldName": "名称",
@@ -1854,6 +1867,7 @@
     "customTestOk": "已连接 · {count} 个工具",
     "customTestFailed": "连接失败",
     "addCustomConnector": "+ 添加自定义连接器",
+    "workspaceAddCustomConnector": "添加自定义连接器",
     "promoteToOrg": "提升为组织级"
   },
   "skillSearch": {

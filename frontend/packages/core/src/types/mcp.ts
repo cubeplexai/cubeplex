@@ -85,6 +85,7 @@ export interface MCPEffectiveConnector {
   required_grant_scope?: string | null
   credential_availability: 'available' | 'missing' | 'not_required'
   credential_source: 'org' | 'workspace' | 'user' | null
+  credential_availability_by_scope: Record<'org' | 'workspace' | 'user', boolean>
   usable: boolean
   reason: string
 }

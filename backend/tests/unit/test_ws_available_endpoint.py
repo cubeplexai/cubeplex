@@ -71,8 +71,23 @@ def test_ws_available_lists_org_install_without_state_row() -> None:
                 async def list_for_workspace(self, ws_id: str) -> list[Any]:
                     return []
 
+            class _GrantRepo:
+                async def get_for_connector_scope(
+                    self,
+                    *,
+                    connector_id: str,
+                    grant_scope: str,
+                    workspace_id: str | None,
+                    user_id: str | None,
+                ) -> object | None:
+                    assert connector_id == "mcpco-1"
+                    if grant_scope == "org":
+                        return object()
+                    return None
+
             _install_repo = _InstallRepo()
             _state_repo = _StateRepo()
+            _grant_repo = _GrantRepo()
 
             async def _connector_id_for_install(self, _install: Any) -> str:
                 return "mcpco-1"
@@ -93,3 +108,8 @@ def test_ws_available_lists_org_install_without_state_row() -> None:
     assert body["items"][0]["source"] == "org_install"
     assert body["items"][0]["install"]["connector_id"] == "mcpco-1"
     assert body["items"][0]["reason"] == "no_state_row"
+    assert body["items"][0]["credential_availability_by_scope"] == {
+        "org": True,
+        "workspace": False,
+        "user": False,
+    }

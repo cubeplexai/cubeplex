@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 from cubebox.mcp.effective import MCPEffectiveConnectorService
-from cubebox.models import MCPConnector
+from cubebox.models import MCPConnector, MCPCredentialGrant, MCPWorkspaceConnectorState
 from cubebox.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
@@ -323,3 +323,108 @@ async def test_list_runtime_specs_drops_unusable_rows(session: AsyncSession) -> 
     assert specs[0].name == "ws-connector-ws-a-mcpco-good"
     assert specs[0].auth_method == "none"
     assert specs[0].transport == "streamable_http"
+
+
+async def test_list_for_workspace_user_reports_saved_grants_for_each_scope(
+    session: AsyncSession,
+) -> None:
+    """Policy badges need availability for every selectable credential scope."""
+    org_id = "org-1"
+    workspace_id = "ws-a"
+    user_id = "u1"
+    connector = await _add_workspace_connector(
+        session,
+        connector_id="mcpco-static",
+        org_id=org_id,
+        workspace_id=workspace_id,
+        auth_method="static",
+        credential_policy="workspace",
+        auth_status="connected",
+    )
+    state = MCPWorkspaceConnectorState(
+        org_id=org_id,
+        workspace_id=workspace_id,
+        connector_id=connector.id,
+        enabled=True,
+        credential_policy="workspace",
+        enablement_source="workspace_manual",
+        updated_by_user_id=user_id,
+    )
+    grants = {
+        "org": MCPCredentialGrant(
+            org_id=org_id,
+            connector_id=connector.id,
+            grant_scope="org",
+            credential_id="cred-org",
+            created_by_user_id=user_id,
+        ),
+        "workspace": MCPCredentialGrant(
+            org_id=org_id,
+            connector_id=connector.id,
+            grant_scope="workspace",
+            workspace_id=workspace_id,
+            credential_id="cred-workspace",
+            created_by_user_id=user_id,
+        ),
+        "user": MCPCredentialGrant(
+            org_id=org_id,
+            connector_id=connector.id,
+            grant_scope="user",
+            workspace_id=workspace_id,
+            user_id=user_id,
+            credential_id="cred-user",
+            created_by_user_id=user_id,
+        ),
+    }
+
+    class ConnectorRepo:
+        async def list_active(self) -> list[MCPConnector]:
+            return [connector]
+
+    class StateRepo:
+        async def list_for_workspace(
+            self,
+            requested_workspace_id: str,
+        ) -> list[MCPWorkspaceConnectorState]:
+            assert requested_workspace_id == workspace_id
+            return [state]
+
+    class TemplateRepo:
+        async def get(self, _template_id: str) -> None:
+            return None
+
+    class GrantRepo:
+        async def get_for_connector_scope(
+            self,
+            *,
+            connector_id: str,
+            grant_scope: str,
+            workspace_id: str | None,
+            user_id: str | None,
+        ) -> MCPCredentialGrant | None:
+            assert connector_id == connector.id
+            if grant_scope == "workspace":
+                assert workspace_id == "ws-a"
+            if grant_scope == "user":
+                assert workspace_id == "ws-a"
+                assert user_id == "u1"
+            return grants.get(grant_scope)
+
+    service = MCPEffectiveConnectorService(
+        template_repo=TemplateRepo(),  # type: ignore[arg-type]
+        connector_repo=ConnectorRepo(),  # type: ignore[arg-type]
+        state_repo=StateRepo(),  # type: ignore[arg-type]
+        grant_repo=GrantRepo(),  # type: ignore[arg-type]
+        org_id=org_id,
+    )
+    rows = await service.list_for_workspace_user(workspace_id, user_id)
+
+    assert len(rows) == 1
+    assert rows[0].credential_policy == "workspace"
+    assert rows[0].credential_availability == "available"
+    assert rows[0].credential_source == "workspace"
+    assert rows[0].credential_availability_by_scope == {
+        "org": True,
+        "workspace": True,
+        "user": True,
+    }

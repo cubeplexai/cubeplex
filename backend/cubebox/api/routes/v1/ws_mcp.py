@@ -16,7 +16,7 @@ import asyncio
 import time
 from contextvars import ContextVar
 from datetime import timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,6 +115,7 @@ def _dto_to_effective_out(dto: MCPEffectiveConnectorDTO) -> MCPEffectiveConnecto
         required_grant_scope=dto.required_grant_scope,
         credential_availability=dto.credential_availability,
         credential_source=(dto.credential_source if dto.credential_source != "none" else None),
+        credential_availability_by_scope=dto.credential_availability_by_scope,
         usable=dto.usable,
         reason=dto.reason,
     )
@@ -231,7 +232,7 @@ async def list_workspace_active_tools(
 @router.get("/available", response_model=WsAvailableListOut)
 async def list_workspace_available(
     workspace_id: str,
-    _ctx: Annotated[RequestContext, Depends(require_member)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
     install_svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
     template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
 ) -> WsAvailableListOut:
@@ -266,6 +267,36 @@ async def list_workspace_available(
 
     items: list[WsAvailableOut] = []
     for row in rows:
+        credential_availability_by_scope: dict[Literal["org", "workspace", "user"], bool] = {
+            "org": False,
+            "workspace": False,
+            "user": False,
+        }
+        if row.source == "org_install" and row.connector_id is not None:
+            connector_id = connector_ids.get(row.connector_id, row.connector_id)
+            org_grant = await install_svc._grant_repo.get_for_connector_scope(
+                connector_id=connector_id,
+                grant_scope="org",
+                workspace_id=None,
+                user_id=None,
+            )
+            workspace_grant = await install_svc._grant_repo.get_for_connector_scope(
+                connector_id=connector_id,
+                grant_scope="workspace",
+                workspace_id=workspace_id,
+                user_id=None,
+            )
+            user_grant = await install_svc._grant_repo.get_for_connector_scope(
+                connector_id=connector_id,
+                grant_scope="user",
+                workspace_id=workspace_id,
+                user_id=ctx.user.id,
+            )
+            credential_availability_by_scope = {
+                "org": org_grant is not None,
+                "workspace": workspace_grant is not None,
+                "user": user_grant is not None,
+            }
         install_out = (
             _install_to_out(
                 installs_by_id[row.connector_id],
@@ -285,6 +316,7 @@ async def list_workspace_available(
                 install=install_out,
                 template=template_out,
                 reason=row.reason,
+                credential_availability_by_scope=credential_availability_by_scope,
             )
         )
     return WsAvailableListOut(items=items)
