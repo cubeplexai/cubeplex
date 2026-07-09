@@ -113,6 +113,22 @@ disciplines: **[docs/testing.md](docs/testing.md)**. The non-negotiables:
 - Real services at internal boundaries; mock only the outermost external the
   test isn't about. Real-LLM tests are tagged `@pytest.mark.real_llm`.
 
+### TDD judgment
+
+Use `/test-driven-development` as the default for feature work, business
+logic, reusable core behavior, and bug fixes where the behavior will keep
+evolving. The red → green loop is strongest when a test can express a stable
+contract that future changes must preserve.
+
+Do not force TDD where it produces brittle ceremony instead of useful signal:
+one-off Alembic migrations, generated migration files, config/doc edits,
+mechanical rewrites, and operational repair scripts may be validated with the
+smallest realistic reproduction instead. For migrations, prefer: identify the
+bad data shape, run the migration against a disposable database that contains
+that shape, verify the resulting schema/data, and add a focused regression
+test only when it protects a durable invariant. Verification before completion
+still applies every time.
+
 ---
 
 ## Critical Subsystems — Read Before Touching
@@ -149,7 +165,7 @@ Skills are loaded on demand; trigger them when the situation matches.
 | `/writing-plans` | Multi-step work that needs a written plan before code. |
 | `/executing-plans` | Executing a written plan with checkpoints. |
 | `/systematic-debugging` | Any bug or test failure — **before** proposing fixes. |
-| `/test-driven-development` | Implementing a feature or bug fix — tests first. |
+| `/test-driven-development` | Feature work, business logic, reusable core behavior, and durable bug-fix contracts. Use judgment for one-off migrations/config/docs; always verify. |
 | `/verification-before-completion` | Before claiming "done" / committing / opening a PR. |
 | `/receiving-code-review` | Responding to codex / human review comments. |
 | `/pr-codex-review-loop` | After pushing a PR — the full review loop. |
