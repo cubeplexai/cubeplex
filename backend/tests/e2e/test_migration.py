@@ -10,6 +10,7 @@ disposable test DB via ``CUBEBOX_DATABASE__NAME=cubebox_p1_test``).
 """
 
 import importlib
+import inspect
 
 import pytest
 from sqlalchemy import text
@@ -178,3 +179,25 @@ def test_mcp_connector_state_and_grants_are_rekeyed_by_connector_id() -> None:
     assert "grant_scope = 'org'" in upgrade_text
     assert "grant_scope = 'workspace'" in upgrade_text
     assert "grant_scope = 'user'" in upgrade_text
+
+
+def test_mcp_connector_rekey_migration_drops_stale_tombstone_rows_before_not_null() -> None:
+    """Legacy uninstalled installs can leave state/grant rows with no connector.
+
+    Those rows cannot survive after ``install_id`` is dropped, so the migration
+    must remove them before making ``connector_id`` NOT NULL.
+    """
+    m = _load_migration("bdf4b31f91d2")
+
+    cleanup_sql = m.DROP_STALE_LEGACY_INSTALL_ROWS_SQL  # type: ignore[attr-defined]
+    assert "DELETE FROM mcp_workspace_connector_states" in cleanup_sql
+    assert "DELETE FROM mcp_credential_grants" in cleanup_sql
+    assert "mcp_connector_installs" in cleanup_sql
+    assert "install_state <> 'active'" in cleanup_sql
+
+    upgrade_source = inspect.getsource(m.upgrade)  # type: ignore[attr-defined]
+    cleanup_pos = upgrade_source.index("DROP_STALE_LEGACY_INSTALL_ROWS_SQL")
+    grant_not_null_pos = upgrade_source.index("mcp_credential_grants")
+    state_not_null_pos = upgrade_source.index("mcp_workspace_connector_states")
+    assert cleanup_pos < grant_not_null_pos
+    assert cleanup_pos < state_not_null_pos
