@@ -11,12 +11,26 @@ This guide walks you through enabling MCP connectors in your workspace. Org admi
 
 1. Open the **MCP** page from your workspace sidebar to see connectors available to your workspace. Org admins add new connectors from **Admin > MCP Connectors** (`/admin/mcp`).
 2. You will see the connector catalog. The page splits into an **Enabled** section (connectors active in your workspace) and an **Available** section (org connectors you can enable), each showing names, descriptions, and authentication requirements.
+3. Workspace admins can also click **Add custom connector** from the workspace MCP page to register a custom MCP server only for that workspace.
 
 Each catalog entry shows its current status for your workspace:
 
 - **Available** — the connector exists in the org but has not been enabled in this workspace.
 - **Enabled** — this connector is active in your workspace.
 - **Disabled** — the connector has been turned off for this workspace.
+
+## Choose a credential policy
+
+The **Credential policy** section controls which saved credential the workspace uses for a connector:
+
+- **Organization** — use the org credential managed by org admins.
+- **Workspace** — store one credential for this workspace. Use this when the workspace needs its own API key or service account.
+- **User** — each user connects their own account. Use this for personal OAuth access or per-user API credentials.
+- **None** — no credential is used. This option is only valid for connectors whose authentication method is **No auth**; API key and OAuth connectors cannot use it.
+
+If a saved credential already exists for a policy option, the workspace page marks that option as available.
+
+When a workspace enables an org-owned connector that already has an org credential, CubeBox selects **Organization** by default. You can switch to **Workspace** or **User** later if the workspace needs a narrower credential.
 
 ## Enable with an API key
 

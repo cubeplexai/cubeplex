@@ -3,7 +3,7 @@
 import * as React from 'react'
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { Loader2 } from 'lucide-react'
+import { CheckCircle2, Loader2 } from 'lucide-react'
 import {
   wsCreateInstall,
   wsPatchConnectorState,
@@ -45,6 +45,10 @@ export function AvailableConnectorRow({
   const name = row.install?.name ?? row.template?.name ?? '—'
   const description = row.template?.description ?? ''
   const provider = row.template?.provider ?? ''
+  const hasSavedOrgCredential =
+    row.source === 'org_install' &&
+    row.install?.default_credential_policy === 'org' &&
+    row.credential_availability_by_scope.org
 
   async function handleConnect(): Promise<void> {
     setBusy(true)
@@ -54,7 +58,7 @@ export function AvailableConnectorRow({
       if (row.source === 'org_install' && row.install) {
         await wsPatchConnectorState(client, wsId, row.install.connector_id, {
           enabled: true,
-          credential_policy: 'workspace',
+          credential_policy: hasSavedOrgCredential ? 'org' : 'workspace',
         })
         connectorId = row.install.connector_id
       } else if (row.source === 'template' && row.template) {
@@ -98,6 +102,12 @@ export function AvailableConnectorRow({
         </div>
         {description ? (
           <p className="line-clamp-1 text-xs text-muted-foreground">{description}</p>
+        ) : null}
+        {hasSavedOrgCredential ? (
+          <p className="inline-flex items-center gap-1 text-xs text-success-fg">
+            <CheckCircle2 className="size-3" />
+            {t('orgCredentialAvailable')}
+          </p>
         ) : null}
         {error ? <p className="text-xs text-destructive">{error}</p> : null}
       </div>

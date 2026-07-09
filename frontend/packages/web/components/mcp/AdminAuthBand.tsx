@@ -90,6 +90,11 @@ function toEffectiveForAdmin(connector: AdminOrgConnector): MCPEffectiveConnecto
     required_grant_scope: 'org',
     credential_availability: credentialAvailability,
     credential_source: credentialSource,
+    credential_availability_by_scope: {
+      org: credentialSource === 'org',
+      workspace: false,
+      user: false,
+    },
     usable: eff.usable,
     reason: eff.reason,
   }

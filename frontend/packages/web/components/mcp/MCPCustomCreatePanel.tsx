@@ -6,6 +6,7 @@ import { CheckCircle2, Eye, EyeOff, Loader2, XCircle } from 'lucide-react'
 import {
   adminCreateInstall,
   adminTestConnection,
+  wsCreateInstall,
   type ApiClient,
   type MCPAuthMethod,
   type MCPConnector,
@@ -27,17 +28,27 @@ import {
 
 interface MCPCustomCreatePanelProps {
   client: ApiClient
+  scope?: 'org' | 'workspace'
+  wsId?: string
   onCreated: (install: MCPConnector) => void
 }
 
-export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanelProps) {
+export function MCPCustomCreatePanel({
+  client,
+  scope = 'org',
+  wsId,
+  onCreated,
+}: MCPCustomCreatePanelProps) {
   const t = useTranslations('mcpAdmin')
+  const isWorkspaceScope = scope === 'workspace'
 
   const [name, setName] = useState('')
   const [serverUrl, setServerUrl] = useState('')
   const [transport, setTransport] = useState<MCPTransport>('streamable_http')
   const [authMethod, setAuthMethod] = useState<MCPAuthMethod>('static')
-  const [credentialPolicy, setCredentialPolicy] = useState<MCPCredentialScope>('org')
+  const [credentialPolicy, setCredentialPolicy] = useState<MCPCredentialScope>(
+    isWorkspaceScope ? 'workspace' : 'org',
+  )
   const [credentialPlaintext, setCredentialPlaintext] = useState('')
   const [revealSecret, setRevealSecret] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -50,11 +61,12 @@ export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanel
     if (next === 'none') {
       setCredentialPolicy('none')
     } else if (credentialPolicy === 'none') {
-      setCredentialPolicy('org')
+      setCredentialPolicy(isWorkspaceScope ? 'workspace' : 'org')
     }
   }
 
-  const credentialFieldsNeeded = authMethod === 'static' && credentialPolicy === 'org'
+  const credentialFieldsNeeded =
+    !isWorkspaceScope && authMethod === 'static' && credentialPolicy === 'org'
   const canSubmit =
     !submitting &&
     name.trim().length > 0 &&
@@ -93,7 +105,7 @@ export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanel
     try {
       const body: Record<string, unknown> = {
         template_id: null,
-        install_scope: 'org',
+        install_scope: scope,
         auth_method: authMethod,
         default_credential_policy: credentialPolicy,
         name: name.trim(),
@@ -104,7 +116,10 @@ export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanel
       if (credentialFieldsNeeded) {
         body.credential_plaintext = credentialPlaintext
       }
-      const created = await adminCreateInstall(client, body)
+      const created =
+        isWorkspaceScope && wsId
+          ? await wsCreateInstall(client, wsId, body)
+          : await adminCreateInstall(client, body)
       onCreated(created)
     } catch (err) {
       setError((err as Error).message)
@@ -116,8 +131,12 @@ export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanel
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-custom-form">
       <header className="flex flex-col gap-1">
-        <h3 className="text-xl font-semibold tracking-tight">{t('customCreateTitle')}</h3>
-        <p className="text-sm text-muted-foreground">{t('customCreateSubtitle')}</p>
+        <h3 className="text-xl font-semibold tracking-tight">
+          {isWorkspaceScope ? t('customCreateWorkspaceTitle') : t('customCreateTitle')}
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          {isWorkspaceScope ? t('customCreateWorkspaceSubtitle') : t('customCreateSubtitle')}
+        </p>
       </header>
 
       <form className="flex flex-col gap-4" onSubmit={(e) => void handleSubmit(e)}>
@@ -208,7 +227,9 @@ export function MCPCustomCreatePanel({ client, onCreated }: MCPCustomCreatePanel
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="org">{t('customScopeOrg')}</SelectItem>
+                    {!isWorkspaceScope ? (
+                      <SelectItem value="org">{t('customScopeOrg')}</SelectItem>
+                    ) : null}
                     <SelectItem value="workspace">{t('scopeWorkspace')}</SelectItem>
                     <SelectItem value="user">{t('customScopeUser')}</SelectItem>
                   </SelectContent>

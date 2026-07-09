@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from cubebox.api.schemas.mcp import MCPConnectorOut, MCPConnectorTemplateOut
 
@@ -19,6 +19,11 @@ WsAvailableReason = Literal[
     "state_disabled",
     "not_installed_at_org",
 ]
+CredentialAvailabilityByScope = dict[Literal["org", "workspace", "user"], bool]
+
+
+def _empty_credential_availability_by_scope() -> CredentialAvailabilityByScope:
+    return {"org": False, "workspace": False, "user": False}
 
 
 class WsAvailableOut(BaseModel):
@@ -38,6 +43,9 @@ class WsAvailableOut(BaseModel):
     install: MCPConnectorOut | None
     template: MCPConnectorTemplateOut | None
     reason: WsAvailableReason
+    credential_availability_by_scope: CredentialAvailabilityByScope = Field(
+        default_factory=_empty_credential_availability_by_scope
+    )
 
     @model_validator(mode="after")
     def _validate_shape(self) -> WsAvailableOut:

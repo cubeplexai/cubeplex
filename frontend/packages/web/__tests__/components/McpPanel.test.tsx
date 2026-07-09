@@ -11,6 +11,7 @@ const coreMocks = vi.hoisted(() => ({
   useWorkspaceStore: vi.fn((selector: (state: unknown) => unknown) =>
     selector({ workspaces: [{ id: 'ws_1', org_id: 'org_1', role: 'admin' }] }),
   ),
+  wsCreateInstall: vi.fn(),
   wsDeleteInstall: vi.fn(),
   wsListAvailable: vi.fn(),
   wsListEffectiveConnectors: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@cubebox/core', async (importOriginal) => {
     createApiClient: coreMocks.createApiClient,
     useOrgAdminFlag: coreMocks.useOrgAdminFlag,
     useWorkspaceStore: coreMocks.useWorkspaceStore,
+    wsCreateInstall: coreMocks.wsCreateInstall,
     wsDeleteInstall: coreMocks.wsDeleteInstall,
     wsListAvailable: coreMocks.wsListAvailable,
     wsListEffectiveConnectors: coreMocks.wsListEffectiveConnectors,
@@ -73,8 +75,86 @@ function workspaceConnector() {
     required_grant_scope: 'workspace',
     credential_availability: 'missing',
     credential_source: null,
+    credential_availability_by_scope: {
+      org: false,
+      workspace: false,
+      user: false,
+    },
     usable: false,
     reason: 'missing_workspace_grant',
+  }
+}
+
+function orgCredentialConnector() {
+  return {
+    ...workspaceConnector(),
+    install: {
+      ...workspaceConnector().install,
+      connector_id: 'mcpco_linear',
+      install_scope: 'org',
+      workspace_id: null,
+      name: 'Linear',
+      auth_status: 'pending',
+      default_credential_policy: 'org',
+    },
+    workspace_state: {
+      workspace_id: 'ws_1',
+      connector_id: 'mcpco_linear',
+      enabled: true,
+      credential_policy: 'org',
+    },
+    credential_policy: 'workspace',
+    required_grant_scope: 'workspace',
+    credential_availability: 'available',
+    credential_source: 'workspace',
+    credential_availability_by_scope: {
+      org: true,
+      workspace: true,
+      user: true,
+    },
+    usable: true,
+    reason: 'usable',
+  }
+}
+
+function availableOrgConnector() {
+  const connector = orgCredentialConnector()
+  return {
+    source: 'org_install',
+    install: connector.install,
+    template: connector.template,
+    reason: 'no_state_row',
+    credential_availability_by_scope: {
+      org: true,
+      workspace: false,
+      user: false,
+    },
+  }
+}
+
+function availableTemplate() {
+  return {
+    source: 'template',
+    install: null,
+    template: {
+      template_id: 'mcptpl_custom',
+      slug: 'custom',
+      name: 'Custom template',
+      provider: 'Custom',
+      description: 'Template available to this workspace',
+      server_url: 'https://template.example.com/mcp',
+      transport: 'streamable_http',
+      supported_auth_methods: ['static'],
+      default_credential_policy: 'workspace',
+      static_form_schema: null,
+      status: 'active',
+    },
+    reason: 'not_installed_at_org',
+    credential_availability_by_scope: {
+      org: false,
+      workspace: false,
+      user: false,
+    },
   }
 }
 
@@ -91,6 +171,7 @@ describe('McpPanel workspace installs', () => {
         dispatchEvent: vi.fn(),
       })),
     })
+    coreMocks.wsCreateInstall.mockReset()
     coreMocks.wsDeleteInstall.mockReset()
     coreMocks.wsListAvailable.mockReset()
     coreMocks.wsListEffectiveConnectors.mockReset()
@@ -115,6 +196,98 @@ describe('McpPanel workspace installs', () => {
     )
     await waitFor(() => {
       expect(coreMocks.wsListEffectiveConnectors).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('explains credential policies and highlights an available org credential', async () => {
+    coreMocks.wsListEffectiveConnectors.mockResolvedValue({ items: [orgCredentialConnector()] })
+    renderWithIntl(<McpPanel wsId="ws_1" />)
+
+    fireEvent.click(await screen.findByTestId('ws-connector-row-mcpco_linear'))
+
+    expect(screen.getByText('Org credential available')).toBeInTheDocument()
+    expect(
+      screen.getByText('Use the organization credential managed by admins.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Store one credential for this workspace.')).toBeInTheDocument()
+    expect(screen.getByText('Each user connects their own account.')).toBeInTheDocument()
+
+    const noneButton = screen.getByRole('button', { name: /None/i })
+    expect(noneButton).toBeDisabled()
+    expect(screen.getAllByText('Only available for no-auth connectors.')).toHaveLength(1)
+    expect(screen.getByLabelText('Organization credential available')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workspace credential available')).toBeInTheDocument()
+    expect(screen.getByLabelText('User credential available')).toBeInTheDocument()
+  })
+
+  it('uses the org credential by default when enabling an org connector with saved org creds', async () => {
+    coreMocks.wsListEffectiveConnectors.mockResolvedValue({ items: [] })
+    coreMocks.wsListAvailable.mockResolvedValue({ items: [availableOrgConnector()] })
+    coreMocks.wsPatchConnectorState.mockResolvedValue({
+      workspace_id: 'ws_1',
+      connector_id: 'mcpco_linear',
+      enabled: true,
+      credential_policy: 'org',
+    })
+    renderWithIntl(<McpPanel wsId="ws_1" />)
+
+    fireEvent.click(await screen.findByTestId('ws-available-row-mcpco_linear'))
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }))
+
+    await waitFor(() => {
+      expect(coreMocks.wsPatchConnectorState).toHaveBeenCalledWith(
+        expect.anything(),
+        'ws_1',
+        'mcpco_linear',
+        { enabled: true, credential_policy: 'org' },
+      )
+    })
+  })
+
+  it('creates a workspace-scoped custom connector from workspace settings', async () => {
+    coreMocks.wsListEffectiveConnectors.mockResolvedValue({ items: [] })
+    coreMocks.wsListAvailable.mockResolvedValue({ items: [availableTemplate()] })
+    coreMocks.wsCreateInstall.mockResolvedValue({
+      connector_id: 'mcpco_custom',
+      template_id: null,
+      install_scope: 'workspace',
+      workspace_id: 'ws_1',
+      name: 'Internal Search',
+      server_url: 'https://search.example.com/mcp',
+      transport: 'streamable_http',
+      auth_method: 'static',
+      default_credential_policy: 'workspace',
+      auth_status: 'pending',
+      discovery_status: 'not_run',
+      install_state: 'active',
+      tool_count: 0,
+      tools: [],
+      tool_citations: {},
+      last_error: null,
+      auto_enroll_new_workspaces: false,
+    })
+    renderWithIntl(<McpPanel wsId="ws_1" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add custom connector' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Internal Search' } })
+    fireEvent.change(screen.getByLabelText('Server URL'), {
+      target: { value: 'https://search.example.com/mcp' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Create server' }))
+
+    await waitFor(() => {
+      expect(coreMocks.wsCreateInstall).toHaveBeenCalledWith(
+        expect.anything(),
+        'ws_1',
+        expect.objectContaining({
+          template_id: null,
+          install_scope: 'workspace',
+          auth_method: 'static',
+          default_credential_policy: 'workspace',
+          name: 'Internal Search',
+          server_url: 'https://search.example.com/mcp',
+        }),
+      )
     })
   })
 })

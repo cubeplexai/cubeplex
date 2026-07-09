@@ -965,6 +965,7 @@
     "available": {
       "title": "Available",
       "connect": "Connect",
+      "orgCredentialAvailable": "Org credential available",
       "empty": "No connectors available to add."
     },
     "scopeBadge": {
@@ -1799,6 +1800,16 @@
     "installs": "Connector installs",
     "workspaceState": "Workspace state",
     "credentialPolicy": "Credential policy",
+    "policyOrg": "Organization",
+    "policyOrgDescription": "Use the organization credential managed by admins.",
+    "policyWorkspace": "Workspace",
+    "policyWorkspaceDescription": "Store one credential for this workspace.",
+    "policyUser": "User",
+    "policyUserDescription": "Each user connects their own account.",
+    "policyNone": "None",
+    "policyNoneDescription": "Only available for no-auth connectors.",
+    "policyCredentialAvailableLabel": "{scope} credential available",
+    "orgCredentialAvailable": "Org credential available",
     "orgGrant": "Org grant",
     "workspaceGrant": "Workspace grant",
     "myGrant": "My grant",
@@ -1833,6 +1844,8 @@
     "workspaceStateSummary": "{enabled} of {total} workspaces enabled",
     "customCreateTitle": "Add custom MCP server",
     "customCreateSubtitle": "Register a custom MCP server for the entire organization. You can enable it per workspace afterwards.",
+    "customCreateWorkspaceTitle": "Add custom MCP server",
+    "customCreateWorkspaceSubtitle": "Register a custom MCP server for this workspace.",
     "customSectionServer": "Server",
     "customSectionCredential": "Credential",
     "customFieldName": "Name",
@@ -1854,6 +1867,7 @@
     "customTestOk": "Connected · {count} tool(s)",
     "customTestFailed": "Connection failed",
     "addCustomConnector": "+ Add custom connector",
+    "workspaceAddCustomConnector": "Add custom connector",
     "promoteToOrg": "Promote to org-wide"
   },
   "skillSearch": {
