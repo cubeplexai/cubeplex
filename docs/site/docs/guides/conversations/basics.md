@@ -67,6 +67,15 @@ Right-click (or click the three-dot menu) on any conversation in the sidebar to 
 
 When you send the first message in a conversation, CubeBox uses the LLM to generate a short title summarizing the topic. If you prefer a custom title, rename the conversation from the sidebar menu.
 
+## Using prior work
+
+The agent can search conversations in your current workspace and review artifacts that are
+visible to you. By default, it reads a small window of recent turns from a conversation so it
+can quickly understand the relevant context. When needed, it can retrieve detailed historical
+tool output for a specific result.
+
+This access is read-only: the agent cannot delete artifacts through it.
+
 ## Tips
 
 - **Use pinning for active projects.** Pin conversations you return to frequently so they stay visible regardless of how many new chats you start.
