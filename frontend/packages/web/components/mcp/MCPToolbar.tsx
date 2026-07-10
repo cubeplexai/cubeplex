@@ -71,6 +71,11 @@ export function MCPToolbar({ search, onSearchChange, filter, onFilterChange }: M
           placeholder={t('searchPlaceholder')}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
+          name="mcp-admin-search"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="pl-7"
           aria-label={t('searchAriaLabel')}
         />

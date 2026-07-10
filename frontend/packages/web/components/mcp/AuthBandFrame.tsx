@@ -210,6 +210,11 @@ function StaticTokenForm({
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
+            name="mcp-band-static-token"
+            autoComplete="new-password"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             placeholder={t('staticTokenLabel')}
             className="max-w-xs"
             aria-label={t('staticTokenLabel')}

@@ -522,9 +522,14 @@ export function SSOConfigForm({ connection, orgSlug, onUpdated }: SSOConfigFormP
                 <Input
                   id="oidc-client-secret"
                   type="password"
+                  name="oidc-client-secret"
                   value={state.clientSecret}
                   onChange={(e) => update('clientSecret', e.target.value)}
                   placeholder={isEdit ? t('oidc.clientSecretPlaceholder') : ''}
+                  autoComplete="new-password"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   data-testid="sso-client-secret"
                   aria-invalid={Boolean(errors.clientSecret)}
                 />

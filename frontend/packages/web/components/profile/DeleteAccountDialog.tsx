@@ -98,10 +98,14 @@ export function DeleteAccountDialog({ open, onOpenChange }: DeleteAccountDialogP
           <div className="mt-3">
             <input
               type="password"
+              name="delete-account-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t('passwordPlaceholder')}
-              autoComplete="current-password"
+              autoComplete="new-password"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               disabled={deleting}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
               onKeyDown={(e) => {

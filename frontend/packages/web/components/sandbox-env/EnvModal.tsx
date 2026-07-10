@@ -301,11 +301,15 @@ export function EnvModal({ mode, onSubmit, onClose }: Props) {
             <Input
               id="env-value"
               type="password"
+              name="sandbox-env-secret-value"
               value={value}
               onChange={(e) => setValue(e.target.value)}
               className="font-mono text-sm"
               placeholder="••••••••"
-              autoComplete="off"
+              autoComplete="new-password"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               maxLength={isSecret ? undefined : 4096}
             />
           </div>
