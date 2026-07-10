@@ -81,30 +81,29 @@ def format_tool_result(
         content = _message_text(message)
         tool_name = _optional_string(message.get("tool_name"))
         is_error = bool(message.get("is_error"))
-        if (
-            estimate_tokens(_tool_result_payload(tool_call_id, tool_name, content, is_error, False))
-            <= max_tokens
-        ):
+        estimated_tokens = _estimate_tool_result(
+            tool_call_id, tool_name, content, is_error, truncated=False
+        )
+        if estimated_tokens <= max_tokens:
             return FormattedToolResult(
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
                 content=content,
                 is_error=is_error,
-                estimated_tokens=estimate_tokens(
-                    _tool_result_payload(tool_call_id, tool_name, content, is_error, False)
-                ),
+                estimated_tokens=estimated_tokens,
                 truncated=False,
             )
         truncated_content = _truncate_tool_result_content(
             tool_call_id, tool_name, content, is_error, max_tokens
         )
-        payload = _tool_result_payload(tool_call_id, tool_name, truncated_content, is_error, True)
         return FormattedToolResult(
             tool_call_id=tool_call_id,
             tool_name=tool_name,
             content=truncated_content,
             is_error=is_error,
-            estimated_tokens=estimate_tokens(payload),
+            estimated_tokens=_estimate_tool_result(
+                tool_call_id, tool_name, truncated_content, is_error, truncated=True
+            ),
             truncated=True,
         )
     return None
@@ -217,9 +216,14 @@ def _truncate_turn(turn: dict[str, Any], max_tokens: int) -> dict[str, Any]:
     for container, _, key in fields:
         container[key] = ""
     if estimate_tokens(bounded) > max_tokens:
-        bounded["user"]["text"] = _truncate_text(turn["user"]["text"], max_tokens // 2)
-        bounded["assistant"]["text"] = _truncate_text(turn["assistant"]["text"], max_tokens // 2)
-        return bounded
+        for call in bounded["tool_calls"]:
+            call["arguments"] = _compact_arguments(call["arguments"])
+        if estimate_tokens(bounded) > max_tokens:
+            bounded["user"]["text"] = _truncate_text(turn["user"]["text"], max_tokens // 2)
+            bounded["assistant"]["text"] = _truncate_text(
+                turn["assistant"]["text"], max_tokens // 2
+            )
+            return bounded
     for container, source, key in fields:
         container[key] = _longest_prefix_that_fits(
             container, key, source, max_tokens, lambda: estimate_tokens(bounded)
@@ -236,6 +240,17 @@ def _argument_string_fields(
     ):
         fields.extend(_string_fields(bounded_call["arguments"], source_call["arguments"]))
     return fields
+
+
+def _compact_arguments(value: object) -> dict[str, str]:
+    """Drop oversized argument values while retaining direct redaction markers."""
+    if not isinstance(value, dict):
+        return {}
+    return {
+        key: "[REDACTED]"
+        for key in value
+        if isinstance(key, str) and any(part in key.lower() for part in _SENSITIVE_ARGUMENT_PARTS)
+    }
 
 
 def _string_fields(bounded_value: object, source_value: object) -> list[tuple[Any, str, str | int]]:
@@ -273,15 +288,37 @@ def _longest_prefix_that_fits(
 
 
 def _tool_result_payload(
-    tool_call_id: str, tool_name: str | None, content: str, is_error: bool, truncated: bool
+    tool_call_id: str,
+    tool_name: str | None,
+    content: str,
+    is_error: bool,
+    estimated_tokens: int,
+    truncated: bool,
 ) -> dict[str, object]:
     return {
         "tool_call_id": tool_call_id,
         "tool_name": tool_name,
         "content": content,
         "is_error": is_error,
+        "estimated_tokens": estimated_tokens,
         "truncated": truncated,
     }
+
+
+def _estimate_tool_result(
+    tool_call_id: str, tool_name: str | None, content: str, is_error: bool, *, truncated: bool
+) -> int:
+    estimated_tokens = 0
+    for _ in range(3):
+        next_estimate = estimate_tokens(
+            _tool_result_payload(
+                tool_call_id, tool_name, content, is_error, estimated_tokens, truncated
+            )
+        )
+        if next_estimate == estimated_tokens:
+            return next_estimate
+        estimated_tokens = next_estimate
+    return estimated_tokens
 
 
 def _truncate_tool_result_content(
@@ -293,9 +330,7 @@ def _truncate_tool_result_content(
         middle = (lower + upper + 1) // 2
         candidate = content[:middle]
         if (
-            estimate_tokens(
-                _tool_result_payload(tool_call_id, tool_name, candidate, is_error, True)
-            )
+            _estimate_tool_result(tool_call_id, tool_name, candidate, is_error, truncated=True)
             <= max_tokens
         ):
             lower = middle
