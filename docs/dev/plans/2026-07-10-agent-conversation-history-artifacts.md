@@ -4,7 +4,7 @@
 
 **Goal:** Give agents read-only, workspace-scoped tools to search and read prior conversation turns, retrieve one historical tool result on demand, and list accessible artifacts.
 
-**Architecture:** Add a pure formatter that groups persisted cubepi messages into bounded user-initiated turns. Add a dynamic `conversation_history` capability for run-scoped search dependencies and a static `artifacts` capability backed by scoped repositories. Register both through the deferred capability registry.
+**Architecture:** Add a pure formatter in the existing `conversation_search` package so it shares the package's checkpointer-message sequence semantics while grouping persisted cubepi messages into bounded user-initiated turns. Add a dynamic `conversation_history` capability for run-scoped search dependencies and a static `artifacts` capability backed by scoped repositories. Register both through the deferred capability registry.
 
 **Tech Stack:** Python 3.13, Pydantic v2, cubepi `AgentTool`, SQLAlchemy async, FastAPI test client, pytest, Docusaurus Markdown.
 
@@ -22,20 +22,20 @@
 
 ## File structure
 
-- Create `backend/cubebox/agents/actions/history_format.py`: pure history parsing, tool-call summarization, and estimated-token truncation.
+- Create `backend/cubebox/services/conversation_search/history.py`: pure history parsing, tool-call summarization, and estimated-token truncation.
 - Create `backend/cubebox/agents/actions/capabilities/conversation_history.py`: input models and three read-only history operations.
 - Create `backend/cubebox/agents/actions/capabilities/artifacts.py`: scoped artifact listing.
 - Modify `backend/cubebox/agents/actions/registry.py`: history runtime deps and group registration.
 - Modify `backend/cubebox/streams/run_manager.py`: pass embedding provider and lexical backend to history actions.
-- Create `backend/tests/unit/agents/actions/test_history_format.py`: formatter contract.
+- Create `backend/tests/unit/services/conversation_search/test_history.py`: formatter contract.
 - Create `backend/tests/e2e/test_agent_history_artifacts_actions.py`: DB-backed scope and handler contracts.
 - Modify `docs/site/docs/guides/conversations/basics.md`: user-visible behavior.
 
 ## Task 1: Build the history formatter
 
 **Files:**
-- Create: `backend/cubebox/agents/actions/history_format.py`
-- Test: `backend/tests/unit/agents/actions/test_history_format.py`
+- Create: `backend/cubebox/services/conversation_search/history.py`
+- Test: `backend/tests/unit/services/conversation_search/test_history.py`
 
 **Interfaces:**
 - Produces `format_history_turns(messages: list[dict[str, Any]], *, n: int, max_tokens: int, before_seq: int | None) -> FormattedHistoryPage`.
@@ -64,7 +64,7 @@ def test_targeted_tool_result_obeys_its_token_budget() -> None:
 
 Run: `cd backend && uv run pytest tests/unit/agents/actions/test_history_format.py --no-cov 2>&1 | tee tmp/history-format-red.log | tail -3`
 
-Expected: FAIL because `history_format` does not exist.
+Expected: FAIL because `conversation_search.history` does not exist.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -93,7 +93,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/history_format.py backend/tests/unit/agents/actions/test_history_format.py
+git add backend/cubebox/services/conversation_search/history.py backend/tests/unit/services/conversation_search/test_history.py
 git commit -m "feat: format historical agent turns"
 ```
 
@@ -192,7 +192,7 @@ git commit -m "feat: expose history and artifacts to agents"
 
 **Files:**
 - Modify: `docs/site/docs/guides/conversations/basics.md`
-- Test: `backend/tests/unit/agents/actions/test_history_format.py`
+- Test: `backend/tests/unit/services/conversation_search/test_history.py`
 - Test: `backend/tests/e2e/test_agent_history_artifacts_actions.py`
 
 **Interfaces:**
@@ -204,7 +204,7 @@ Add a “Using prior work” subsection: the agent can search current-workspace 
 
 - [ ] **Step 2: Run focused verification**
 
-Run: `cd backend && uv run pytest tests/unit/agents/actions/test_history_format.py tests/e2e/test_agent_history_artifacts_actions.py --no-cov 2>&1 | tee tmp/history-artifacts-verify.log | tail -3`
+Run: `cd backend && uv run pytest tests/unit/services/conversation_search/test_history.py tests/e2e/test_agent_history_artifacts_actions.py --no-cov 2>&1 | tee tmp/history-artifacts-verify.log | tail -3`
 
 Expected: PASS.
 

@@ -91,9 +91,14 @@ and timestamps. It does not read sandbox files or object-store content.
 ## Architecture and authorization
 
 The capability handlers call services and repositories, never FastAPI route
-functions. `conversation_history` receives the run's embedding provider and
-lexical backend as explicit runtime dependencies so its search behavior matches
-the existing workspace API. Both capabilities open a per-call scoped session
+functions. The conversation-history formatter lives in
+`cubebox.services.conversation_search.history`, alongside the existing
+checkpointer-to-message sequence and searchable-text logic. It reuses that
+package's message/sequence semantics but adds the distinct agent-facing work of
+turn grouping, tool-call/result correlation, and bounded rendering.
+`conversation_history` receives the run's embedding provider and lexical
+backend as explicit runtime dependencies so its search behavior matches the
+existing workspace API. Both capabilities open a per-call scoped session
 through the action context.
 
 Every operation is read-only and is registered for interactive, scheduled, and
