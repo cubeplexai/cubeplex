@@ -177,6 +177,10 @@ class InboundEvent:
     - ``sender_open_id``: app-scoped id (mention gating only).
     - ``attachments``: parsed file refs (empty for text-only / connectors that
       don't parse files), resolved to attachment ids by the worker.
+    - ``channel_name``: human-readable group/channel title when the platform
+      supplies it (DingTalk ``conversationTitle``) or after a lazy API lookup
+      (Feishu ``im.v1.chats.get``). Used as the Topic title for group chats;
+      DMs leave this None.
     """
 
     platform: str
@@ -191,6 +195,7 @@ class InboundEvent:
     sender_open_id: str | None
     text: str
     attachments: list[InboundAttachmentRef] = field(default_factory=list)
+    channel_name: str | None = None
 
 
 @dataclass(slots=True)

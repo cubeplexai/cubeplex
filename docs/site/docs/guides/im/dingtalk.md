@@ -56,6 +56,8 @@ In the app's **Permissions** section, grant the following scopes:
 
 The bot-message send/receive permission (`qyapi_robot_sendmsg`) is granted by default when you add the bot capability — no action needed for that one.
 
+Group Topic titles use the `conversationTitle` field that DingTalk already includes on every robot receive callback — **no extra permission** is required for the group name.
+
 :::info 📸 Screenshot placeholder
 **Capture:** The app Permissions page with the bot-message send/receive permission and the user-profile (email) read permission granted.
 **Asset:** `/img/im/dingtalk-permissions.png`

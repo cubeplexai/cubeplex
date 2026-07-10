@@ -22,6 +22,12 @@ cubebox can bind a Feishu (Lark) bot to a workspace so messages and
    - `im:message.group_at_msg` (group @mentions delivered)
    - `im:message.p2p_msg` (DMs delivered)
    - `im:message.reaction:write` (processing reactions)
+   - `im:chat:readonly` (or `im:chat:read` / `im:chat`) — **REQUIRED**
+     for group Topic titles. CubeBox calls
+     `GET /open-apis/im/v1/chats/:chat_id` on first group message to
+     resolve the human-readable group name. Without this scope the
+     Topic still works but its title falls back to the generic label
+     `群聊` instead of the real group name.
    - `contact:user.base:readonly` (sender display name)
    - `contact:user.email:readonly` — **REQUIRED** for the sender
      identity gate. Without it, Feishu omits `user.email` from

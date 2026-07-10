@@ -162,6 +162,7 @@ async def ingest_inbound_event(
             effective_user_id=effective_user_id,
             title_hint=event.text,
             origin="inbound",
+            channel_name=event.channel_name,
         )
 
         item = IMRunQueueItem(

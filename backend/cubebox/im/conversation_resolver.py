@@ -69,6 +69,7 @@ async def resolve_im_conversation(
     effective_user_id: str,
     title_hint: str,
     origin: Literal["inbound", "schedule", "trigger"],
+    channel_name: str | None = None,
 ) -> ResolvedIMConversation:
     """Resolve the cubebox conversation that should host the next message.
 
@@ -77,6 +78,10 @@ async def resolve_im_conversation(
     observability (per-source counters, structured logs) needs to
     differentiate dispatcher entrypoints without changing this signature
     again.
+
+    ``channel_name`` is the human-readable group title when the platform
+    supplied one (DingTalk ``conversationTitle``, Feishu ``im.v1.chats.get``).
+    Group topics use it as the title; never fall back to the raw channel id.
     """
     del origin  # currently unused; reserved for future observability.
 
@@ -94,9 +99,16 @@ async def resolve_im_conversation(
     # The bot avatar is hydrated into account.config at connect time; the
     # sidebar renders it as the Topic avatar via attributes.im.
     bot_avatar_url = (account.config or {}).get("bot_avatar_url")
-    # channel_name is not yet fetched from the platform — group topics fall
-    # back to the channel id. Lazy fetch is a follow-up (see spec).
-    channel_name = None if scope_kind == "dm" else channel_id
+    # Display name for group topics. Prefer the platform-supplied name;
+    # never substitute the opaque channel_id (that produced unreadable
+    # ``oc_…`` / ``cid…`` titles). Missing name → ``im_topic_title`` falls
+    # back to the generic "群聊" label.
+    resolved_channel_name: str | None
+    if scope_kind == "dm":
+        resolved_channel_name = None
+    else:
+        stripped = (channel_name or "").strip()
+        resolved_channel_name = stripped or None
     im_attrs = build_im_attributes(
         platform=account.platform,
         account_id=account.id,
@@ -104,7 +116,7 @@ async def resolve_im_conversation(
         bot_name=bot_name,
         bot_avatar_url=bot_avatar_url,
         channel_id=channel_id,
-        channel_name=channel_name,
+        channel_name=resolved_channel_name,
     )
 
     # The Topic anchor lives on the IMThreadLink and survives /new (which
@@ -127,6 +139,12 @@ async def resolve_im_conversation(
         anchored = await session.get(Topic, existing_link.topic_id)
         if anchored is not None and not anchored.is_archived:
             topic_id = anchored.id
+            # Refresh titles that still show the raw channel id (legacy
+            # before we resolved real names) or a stale cached name.
+            if resolved_channel_name is not None:
+                _maybe_refresh_topic_channel_name(
+                    anchored, channel_id=channel_id, channel_name=resolved_channel_name
+                )
         else:
             # The linked Topic was archived/deleted in the UI. Don't keep
             # appending under a Topic the user removed (topic + conversation
@@ -150,7 +168,9 @@ async def resolve_im_conversation(
             workspace_id=account.workspace_id,
             creator_user_id=account.acting_user_id if is_shared else effective_user_id,
             title=im_topic_title(
-                scope_kind=scope_kind, bot_name=bot_name, channel_name=channel_name
+                scope_kind=scope_kind,
+                bot_name=bot_name,
+                channel_name=resolved_channel_name,
             ),
             sandbox_mode=sandbox_mode or "dedicated",
             attributes=dict(im_attrs),
@@ -270,6 +290,38 @@ async def resolve_im_conversation(
         is_group_chat=is_shared,
         sandbox_mode=sandbox_mode,
     )
+
+
+def _maybe_refresh_topic_channel_name(topic: Topic, *, channel_id: str, channel_name: str) -> None:
+    """Update a live Topic when we learn (or re-learn) the group display name.
+
+    Title is rewritten only when it still looks platform-derived:
+    - the opaque channel id (legacy before real names),
+    - the generic ``群聊`` fallback, or
+    - equal to the previously stored ``attributes.im.channel_name``
+      (so a platform rename follows through without clobbering a title
+      the user edited in the UI).
+
+    ``attributes.im.channel_name`` is always kept in sync with the latest
+    resolved name. Mutates ``topic`` in place (already session-tracked).
+    """
+    desired = channel_name[:255]
+    im_blob = (topic.attributes or {}).get("im")
+    stored_name = im_blob.get("channel_name") if isinstance(im_blob, dict) else None
+    title_is_placeholder = topic.title in (channel_id, "群聊", "") or not topic.title
+    title_tracks_platform = stored_name is not None and topic.title == stored_name
+    name_changed = stored_name != desired
+    if not title_is_placeholder and not name_changed:
+        return
+    if title_is_placeholder or title_tracks_platform:
+        topic.title = desired
+    if name_changed or not isinstance(im_blob, dict) or stored_name is None:
+        attrs = dict(topic.attributes or {})
+        im = dict(attrs.get("im") or {})
+        im["channel_name"] = desired
+        im["channel_id"] = channel_id
+        attrs["im"] = im
+        topic.attributes = attrs
 
 
 async def _ensure_topic_participant(session: AsyncSession, topic_id: str, user_id: str) -> None:

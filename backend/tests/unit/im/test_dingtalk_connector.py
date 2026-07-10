@@ -37,6 +37,7 @@ class TestParseInbound:
             "msgId": "msg_002",
             "conversationId": "cid_group_456",
             "conversationType": "2",
+            "conversationTitle": "项目协作群",
             "senderId": "staff_def",
             "senderStaffId": "staff_def",
             "chatbotUserId": "bot_999",
@@ -51,6 +52,25 @@ class TestParseInbound:
         assert event.scope_key == "u:staff_def"
         assert event.scope_kind == "group"
         assert event.text == "what time is it"
+        assert event.channel_name == "项目协作群"
+
+    def test_dm_has_no_channel_name(self) -> None:
+        raw = {
+            "msgtype": "text",
+            "text": {"content": "hello"},
+            "msgId": "msg_dm_name",
+            "conversationId": "cid_dm_123",
+            "conversationType": "1",
+            "conversationTitle": "should-be-ignored",
+            "senderId": "staff_abc",
+            "senderStaffId": "staff_abc",
+            "chatbotUserId": "bot_999",
+        }
+        connector = DingtalkConnector(bot_user_id="bot_999")
+        event = connector.parse_inbound(raw)
+        assert event is not None
+        assert event.scope_kind == "dm"
+        assert event.channel_name is None
 
     def test_non_text_ignored(self) -> None:
         raw = {
