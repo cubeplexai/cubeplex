@@ -13,7 +13,7 @@
 - Every operation is read-only and available in interactive, scheduled, and IM runs.
 - Every query enforces org, workspace, and current-user conversation visibility.
 - `conversation_history_read` defaults to five user-initiated turns and returns selected turns chronologically.
-- Normal history reads contain tool-call summaries only; detailed tool output is available only from the targeted result operation.
+- Normal history reads contain tool-call summaries only; detailed tool output is available only from the targeted result operation. Oversized turns may expose only a prefix of calls plus `tool_calls_omitted`; re-read with a larger budget before using targeted lookup for omitted calls.
 - Artifact deletion and artifact file reads are out of scope.
 - Preserve deterministic deferred/eager tool registration order for prompt caching.
 - Database/app-client tests go in `backend/tests/e2e/`; update user-facing site docs in the same change.
@@ -83,7 +83,7 @@ def estimate_tokens(value: object) -> int:
     return max(1, len(json.dumps(value, ensure_ascii=False)) // 4)
 ```
 
-Partition sorted persisted messages at each `role == "user"`; attach following assistant text and tool-call summaries until the next user message. Correlate `tool_result.tool_call_id` only to derive call status, never to include its body. Select newest complete turns until `n` or `max_tokens`, then reverse them for chronological output. If one turn alone exceeds budget, truncate text fields, keep call identity/status, and set `truncated=True`. Redact compact argument values for keys containing `secret`, `token`, `password`, `authorization`, or `api_key`.
+Partition sorted persisted messages at each `role == "user"`; attach following assistant text and tool-call summaries until the next user message. Correlate `tool_result.tool_call_id` only to derive call status, never to include its body. Select newest complete turns until `n` or `max_tokens`, then reverse them for chronological output. If one turn alone exceeds budget, truncate text fields and, if necessary, the tool-call list. Keep every returned call identity/status usable for targeted lookup, record the number removed as `tool_calls_omitted`, and set `truncated=True`. Budget the complete page envelope, including `estimated_tokens`, not only its turns. Redact compact argument values for keys containing `secret`, `token`, `password`, `authorization`, or `api_key`.
 
 - [ ] **Step 4: Run test to verify it passes**
 

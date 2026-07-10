@@ -44,6 +44,21 @@ cd backend && git diff --check
 Results: Ruff reported `All checks passed!`; mypy reported `Success: no issues
 found in 1 source file`; `git diff --check` produced no output.
 
+## Final P1 follow-up: many normal-sized tool calls
+
+Normal history pages now budget the complete serialized page envelope, including
+`estimated_tokens`, using the same stable-estimate approach as targeted results.
+When one selected turn has too many otherwise normal tool calls for the budget,
+the formatter keeps a prefix of complete call summaries and records the rest in
+the turn-level `tool_calls_omitted` count. Kept call IDs remain valid targeted
+result references. The design and plan document that omitted calls require a
+re-read with a larger `max_tokens` budget before targeted lookup.
+
+The regression creates 400 normal-sized calls at `max_tokens=256`, reconstructs
+the full returned page payload, asserts it and `estimated_tokens` are bounded,
+checks the omitted count reconciles with the original call count, and confirms
+every retained reference resolves through `format_tool_result`.
+
 ## Final review follow-up: full payload accounting and structured arguments
 
 Addressed the final two P1 findings.

@@ -151,6 +151,55 @@ def test_history_page_bounds_non_string_tool_call_arguments() -> None:
     assert "never include this result body" not in str(page.turns)
 
 
+def test_history_page_bounds_its_full_envelope_with_hundreds_of_tool_calls() -> None:
+    tool_calls = [
+        {
+            "type": "tool_call",
+            "id": f"call-{index}",
+            "name": "search",
+            "arguments": {"query": f"record {index}"},
+        }
+        for index in range(400)
+    ]
+    messages = [
+        {
+            "seq": 1,
+            "role": "user",
+            "content": [{"type": "text", "text": "Find records"}],
+        },
+        {"seq": 2, "role": "assistant", "content": tool_calls},
+        *[
+            {
+                "seq": index + 3,
+                "role": "tool_result",
+                "tool_call_id": f"call-{index}",
+                "tool_name": "search",
+                "content": [{"type": "text", "text": f"result {index}"}],
+            }
+            for index in range(400)
+        ],
+    ]
+
+    page = format_history_turns(messages, n=1, max_tokens=256, before_seq=None)
+
+    payload = {
+        "turns": page.turns,
+        "has_more": page.has_more,
+        "next_before_seq": page.next_before_seq,
+        "estimated_tokens": page.estimated_tokens,
+        "truncated": page.truncated,
+    }
+    turn = page.turns[0]
+    assert estimate_tokens(payload) <= 256
+    assert page.estimated_tokens == estimate_tokens(payload)
+    assert turn["tool_calls_omitted"] > 0
+    assert len(turn["tool_calls"]) + turn["tool_calls_omitted"] == 400
+    assert all(
+        format_tool_result(messages, tool_call_id=call["tool_call_id"], max_tokens=256) is not None
+        for call in turn["tool_calls"]
+    )
+
+
 def test_formatters_reject_budgets_below_the_capability_minimum() -> None:
     with pytest.raises(ValueError, match="at least 256"):
         format_history_turns(MESSAGES, n=1, max_tokens=255, before_seq=None)
