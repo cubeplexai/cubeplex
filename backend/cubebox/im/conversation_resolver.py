@@ -139,12 +139,14 @@ async def resolve_im_conversation(
         anchored = await session.get(Topic, existing_link.topic_id)
         if anchored is not None and not anchored.is_archived:
             topic_id = anchored.id
-            # Refresh titles that still show the raw channel id (legacy
-            # before we resolved real names) or a stale cached name.
-            if resolved_channel_name is not None:
-                _maybe_refresh_topic_channel_name(
-                    anchored, channel_id=channel_id, channel_name=resolved_channel_name
-                )
+            # Refresh / clear platform-derived titles on every inbound.
+            # With a real name: promote placeholder or platform-tracked titles.
+            # Without a name: still clear legacy channel-id / "群聊" placeholders
+            # so the UI can localize — otherwise failed lookups leave oc_…
+            # titles stuck forever.
+            _maybe_refresh_topic_channel_name(
+                anchored, channel_id=channel_id, channel_name=resolved_channel_name
+            )
         else:
             # The linked Topic was archived/deleted in the UI. Don't keep
             # appending under a Topic the user removed (topic + conversation
@@ -292,35 +294,54 @@ async def resolve_im_conversation(
     )
 
 
-def _maybe_refresh_topic_channel_name(topic: Topic, *, channel_id: str, channel_name: str) -> None:
-    """Update a live Topic when we learn (or re-learn) the group display name.
+def _maybe_refresh_topic_channel_name(
+    topic: Topic, *, channel_id: str, channel_name: str | None
+) -> None:
+    """Update a live Topic's title / ``attributes.im`` from platform group name.
 
-    Title is rewritten only when it still looks platform-derived:
-    - empty (i18n-friendly "no name yet" sentinel — UI shows localized label),
-    - the opaque channel id (legacy before real names),
-    - the short-lived Chinese ``群聊`` fallback from an earlier build, or
-    - equal to the previously stored ``attributes.im.channel_name``
-      (so a platform rename follows through without clobbering a title
-      the user edited in the UI).
+    When ``channel_name`` is set:
+    - rewrite title if it still looks platform-derived (empty, channel id,
+      legacy ``群聊``, or equal to the previously stored channel_name);
+    - keep ``attributes.im.channel_name`` in sync.
 
-    ``attributes.im.channel_name`` is always kept in sync with the latest
-    resolved name. Mutates ``topic`` in place (already session-tracked).
+    When ``channel_name`` is missing (lookup failed / no scope granted):
+    - only clear *legacy placeholder* titles (channel id / ``群聊``) to ``""``
+      so the UI can localize; never touch user-edited titles;
+    - clear ``attributes.im.channel_name`` if it still holds the opaque id.
+
+    Mutates ``topic`` in place (already session-tracked).
     """
-    desired = channel_name[:255]
     im_blob = (topic.attributes or {}).get("im")
     stored_name = im_blob.get("channel_name") if isinstance(im_blob, dict) else None
-    # "群聊" kept as a placeholder for rows written before the empty-title fix.
-    title_is_placeholder = topic.title in (channel_id, "群聊", "") or not topic.title
-    title_tracks_platform = stored_name is not None and topic.title == stored_name
-    name_changed = stored_name != desired
-    if not title_is_placeholder and not name_changed:
+    title_is_legacy_id = topic.title == channel_id
+    title_is_legacy_label = topic.title == "群聊"
+    title_is_empty = not topic.title
+
+    if channel_name:
+        desired = channel_name[:255]
+        title_is_placeholder = title_is_legacy_id or title_is_legacy_label or title_is_empty
+        title_tracks_platform = stored_name is not None and topic.title == stored_name
+        name_changed = stored_name != desired
+        if not title_is_placeholder and not name_changed:
+            return
+        if title_is_placeholder or title_tracks_platform:
+            topic.title = desired
+        if name_changed or not isinstance(im_blob, dict) or stored_name is None:
+            attrs = dict(topic.attributes or {})
+            im = dict(attrs.get("im") or {})
+            im["channel_name"] = desired
+            im["channel_id"] = channel_id
+            attrs["im"] = im
+            topic.attributes = attrs
         return
-    if title_is_placeholder or title_tracks_platform:
-        topic.title = desired
-    if name_changed or not isinstance(im_blob, dict) or stored_name is None:
+
+    # No resolved name: clear only opaque / legacy-label placeholders.
+    if title_is_legacy_id or title_is_legacy_label:
+        topic.title = ""
+    if stored_name in (channel_id, "群聊"):
         attrs = dict(topic.attributes or {})
         im = dict(attrs.get("im") or {})
-        im["channel_name"] = desired
+        im["channel_name"] = None
         im["channel_id"] = channel_id
         attrs["im"] = im
         topic.attributes = attrs
