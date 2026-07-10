@@ -307,6 +307,63 @@ async def test_shared_topic_refreshes_legacy_channel_id_title(
         assert topic.attributes["im"]["channel_name"] == "研发大群"
 
 
+async def test_shared_topic_clears_legacy_channel_id_without_name(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """When name lookup fails, still clear legacy channel-id titles to empty."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="first",
+            origin="inbound",
+        )
+        await session.commit()
+        topic_id = r1.topic_id
+        assert topic_id is not None
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        topic.title = _CHANNEL
+        attrs = dict(topic.attributes or {})
+        im = dict(attrs.get("im") or {})
+        im["channel_name"] = _CHANNEL
+        attrs["im"] = im
+        topic.attributes = attrs
+        session.add(topic)
+        await session.commit()
+
+    async with maker() as session:
+        account = (
+            await session.execute(
+                select(IMConnectorAccount).where(IMConnectorAccount.id == _ACCOUNT)
+            )
+        ).scalar_one()
+        _with_settings(account, IMBotSettings(routing_mode="shared"))
+        await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="second",
+            origin="inbound",
+            # no channel_name — lookup failed / scope missing
+        )
+        await session.commit()
+
+    async with maker() as session:
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        assert topic.title == ""
+        assert topic.attributes["im"]["channel_name"] is None
+
+
 async def test_isolated_topic_mode_creates_per_sender_topic(
     _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
 ) -> None:
