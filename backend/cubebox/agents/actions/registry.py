@@ -20,12 +20,18 @@ from cubepi.agent.types import AgentTool
 from cubepi.deferred import DeferredToolGroup
 
 from cubebox.agents.actions.builder import ContextFactory, build_capability_tools
+from cubebox.agents.actions.capabilities.artifacts import ARTIFACTS_CAPABILITY
+from cubebox.agents.actions.capabilities.conversation_history import (
+    ConversationHistoryDeps,
+    build_conversation_history_capability,
+)
 from cubebox.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY
 from cubebox.agents.actions.capabilities.skills import SkillDeps, build_skills_capability
 from cubebox.agents.actions.types import AgentCapability
 
 AGENT_CAPABILITIES: list[AgentCapability] = [
     SCHEDULED_TASKS_CAPABILITY,
+    ARTIFACTS_CAPABILITY,
 ]
 
 
@@ -70,6 +76,7 @@ def tools_for_run(
     *,
     allow_mutations: bool,
     skill_deps: SkillDeps | None = None,
+    history_deps: ConversationHistoryDeps | None = None,
 ) -> CapabilityToolSet:
     """Build deferred groups + flat per-op tools for all registered capabilities.
 
@@ -97,5 +104,8 @@ def tools_for_run(
 
     if skill_deps is not None:
         _add(build_skills_capability(skill_deps))
+
+    if history_deps is not None:
+        _add(build_conversation_history_capability(history_deps))
 
     return CapabilityToolSet(groups=groups, flat_tools=flat_tools)

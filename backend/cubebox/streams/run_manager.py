@@ -2679,6 +2679,9 @@ class RunManager:
         # to build (just without action tools).
         _action_flat_tools: list[Any] = []
         try:
+            from cubebox.agents.actions.capabilities.conversation_history import (
+                ConversationHistoryDeps,
+            )
             from cubebox.agents.actions.capabilities.skills import SkillDeps
             from cubebox.agents.actions.registry import (
                 tools_for_run as _action_tools_for_run,
@@ -2751,10 +2754,20 @@ class RunManager:
                             _skill_exc,
                         )
 
+                _history_lexical_backend = getattr(self._app.state, "lexical_backend", None)
+                _history_deps = (
+                    ConversationHistoryDeps(
+                        provider=getattr(self._app.state, "embedding_provider", None),
+                        lexical_backend=_history_lexical_backend,
+                    )
+                    if _history_lexical_backend is not None
+                    else None
+                )
                 _action_toolset = _action_tools_for_run(
                     _action_ctx_factory,
                     allow_mutations=(trigger == "interactive"),
                     skill_deps=_skill_deps,
+                    history_deps=_history_deps,
                 )
                 _deferred_groups.extend(_action_toolset.groups)
                 # Subagents (built below) need the per-op tools eagerly —
