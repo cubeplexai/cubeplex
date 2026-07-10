@@ -40,7 +40,7 @@ Input:
 
 - `conversation_id`.
 - `n`: number of user-initiated turns, default `5`.
-- `max_tokens`: estimated output-token budget, default `4000`.
+- `max_tokens`: estimated output-token budget, default `4000`, range `256..12000`.
 - `before_seq`: optional exclusive cursor for reading earlier turns.
 
 A turn begins with a user message and includes all following non-user messages
@@ -65,7 +65,7 @@ Input:
 
 - `conversation_id`.
 - `tool_call_id`.
-- `max_tokens`: estimated output-token budget, default `2000`.
+- `max_tokens`: estimated output-token budget, default `2000`, range `256..12000`.
 
 This operation obtains the result associated with exactly one historical tool
 call. It applies the same conversation access check and returns a bounded,

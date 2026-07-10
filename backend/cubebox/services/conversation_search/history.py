@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 _SENSITIVE_ARGUMENT_PARTS = ("secret", "token", "password", "authorization", "api_key")
+MIN_HISTORY_MAX_TOKENS = 256
 
 
 @dataclass(frozen=True)
@@ -37,9 +38,10 @@ def estimate_tokens(value: object) -> int:
 def format_history_turns(
     messages: list[dict[str, Any]], *, n: int, max_tokens: int, before_seq: int | None
 ) -> FormattedHistoryPage:
-    """Format the newest bounded user-initiated turns in chronological order."""
+    """Format turns within a token budget of at least ``MIN_HISTORY_MAX_TOKENS``."""
+    _validate_max_tokens(max_tokens)
     turns = _build_turns(messages, before_seq=before_seq)
-    if n <= 0 or max_tokens <= 0:
+    if n <= 0:
         return FormattedHistoryPage([], bool(turns), _first_seq(turns), 0, False)
 
     selected: list[dict[str, Any]] = []
@@ -74,7 +76,8 @@ def format_history_turns(
 def format_tool_result(
     messages: list[dict[str, Any]], *, tool_call_id: str, max_tokens: int
 ) -> FormattedToolResult | None:
-    """Return one bounded historical tool result, or ``None`` when absent."""
+    """Return a result within a token budget of at least ``MIN_HISTORY_MAX_TOKENS``."""
+    _validate_max_tokens(max_tokens)
     for message in sorted(messages, key=_seq):
         if message.get("role") != "tool_result" or message.get("tool_call_id") != tool_call_id:
             continue
@@ -107,6 +110,11 @@ def format_tool_result(
             truncated=True,
         )
     return None
+
+
+def _validate_max_tokens(max_tokens: int) -> None:
+    if max_tokens < MIN_HISTORY_MAX_TOKENS:
+        raise ValueError(f"max_tokens must be at least {MIN_HISTORY_MAX_TOKENS}")
 
 
 def _build_turns(messages: list[dict[str, Any]], *, before_seq: int | None) -> list[dict[str, Any]]:

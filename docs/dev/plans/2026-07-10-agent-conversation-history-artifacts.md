@@ -40,6 +40,7 @@
 **Interfaces:**
 - Produces `format_history_turns(messages: list[dict[str, Any]], *, n: int, max_tokens: int, before_seq: int | None) -> FormattedHistoryPage`.
 - Produces `format_tool_result(messages: list[dict[str, Any]], *, tool_call_id: str, max_tokens: int) -> FormattedToolResult | None`.
+- Both formatter functions reject `max_tokens < 256`, matching the capability input contract.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -53,7 +54,7 @@ def test_history_page_returns_complete_recent_turns_without_result_bodies() -> N
 
 
 def test_targeted_tool_result_obeys_its_token_budget() -> None:
-    result = format_tool_result(MESSAGES, tool_call_id="call-1", max_tokens=2)
+    result = format_tool_result(MESSAGES, tool_call_id="call-1", max_tokens=256)
 
     assert result is not None
     assert result.tool_call_id == "call-1"
