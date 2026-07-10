@@ -67,6 +67,13 @@ class TeamsConnector:
         conversation: dict[str, Any] = activity.get("conversation", {})
         conv_type: str = str(conversation.get("conversationType") or "personal")
         conv_id: str = str(conversation.get("id") or "")
+        # Group chats often include a display name; channel activities may not.
+        raw_conv_name = conversation.get("name")
+        channel_name = (
+            str(raw_conv_name).strip()
+            if isinstance(raw_conv_name, str) and raw_conv_name.strip()
+            else None
+        )
         message_id: str = str(activity.get("id") or "")
         reply_to_id: str | None = activity.get("replyToId")
 
@@ -113,6 +120,7 @@ class TeamsConnector:
                 sender_ref=sender_ref,
                 sender_open_id=aad_object_id or None,
                 text=text.strip(),
+                channel_name=channel_name,
             )
 
         scope_kind = "group" if conv_type == "groupChat" else "channel"
@@ -128,6 +136,7 @@ class TeamsConnector:
             sender_ref=sender_ref,
             sender_open_id=aad_object_id or None,
             text=text.strip(),
+            channel_name=channel_name,
         )
 
     def _is_bot_mentioned(self, activity: dict[str, Any]) -> bool:
