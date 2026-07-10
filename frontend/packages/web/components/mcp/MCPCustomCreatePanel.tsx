@@ -139,7 +139,11 @@ export function MCPCustomCreatePanel({
         </p>
       </header>
 
-      <form className="flex flex-col gap-4" autoComplete="off" onSubmit={(e) => void handleSubmit(e)}>
+      <form
+        className="flex flex-col gap-4"
+        autoComplete="off"
+        onSubmit={(e) => void handleSubmit(e)}
+      >
         <Card>
           <CardHeader>
             <CardTitle>{t('customSectionServer')}</CardTitle>
