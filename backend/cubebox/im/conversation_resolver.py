@@ -101,8 +101,8 @@ async def resolve_im_conversation(
     bot_avatar_url = (account.config or {}).get("bot_avatar_url")
     # Display name for group topics. Prefer the platform-supplied name;
     # never substitute the opaque channel_id (that produced unreadable
-    # ``oc_…`` / ``cid…`` titles). Missing name → ``im_topic_title`` falls
-    # back to the generic "群聊" label.
+    # ``oc_…`` / ``cid…`` titles). Missing name → empty title; the UI
+    # localizes via ``t('newGroupChat')``.
     resolved_channel_name: str | None
     if scope_kind == "dm":
         resolved_channel_name = None
@@ -296,8 +296,9 @@ def _maybe_refresh_topic_channel_name(topic: Topic, *, channel_id: str, channel_
     """Update a live Topic when we learn (or re-learn) the group display name.
 
     Title is rewritten only when it still looks platform-derived:
+    - empty (i18n-friendly "no name yet" sentinel — UI shows localized label),
     - the opaque channel id (legacy before real names),
-    - the generic ``群聊`` fallback, or
+    - the short-lived Chinese ``群聊`` fallback from an earlier build, or
     - equal to the previously stored ``attributes.im.channel_name``
       (so a platform rename follows through without clobbering a title
       the user edited in the UI).
@@ -308,6 +309,7 @@ def _maybe_refresh_topic_channel_name(topic: Topic, *, channel_id: str, channel_
     desired = channel_name[:255]
     im_blob = (topic.attributes or {}).get("im")
     stored_name = im_blob.get("channel_name") if isinstance(im_blob, dict) else None
+    # "群聊" kept as a placeholder for rows written before the empty-title fix.
     title_is_placeholder = topic.title in (channel_id, "群聊", "") or not topic.title
     title_tracks_platform = stored_name is not None and topic.title == stored_name
     name_changed = stored_name != desired

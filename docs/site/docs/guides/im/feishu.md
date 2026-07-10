@@ -41,7 +41,7 @@ Under **Permissions & Scopes**, grant the scopes the bot needs to read mentions,
 | Scope | Required | Purpose |
 |---|---|---|
 | Message read / send (`im:message`, `im:message:send_as_bot`, …) | Yes | Receive @-mentions / DMs and reply as the bot. |
-| `im:chat:readonly` (or `im:chat:read` / `im:chat`) | Yes | Look up the group display name via `GET /open-apis/im/v1/chats/:chat_id` so CubeBox Topic titles show the real group name instead of a generic label. |
+| `im:chat:readonly` (or `im:chat:read` / `im:chat`) | Yes | Look up the group display name via `GET /open-apis/im/v1/chats/:chat_id` so CubeBox Topic titles show the real group name. Without it the title stays empty and the UI shows a localized "New Group Chat" placeholder. |
 | Contact email read (`contact:user.email:readonly` + related) | Recommended | Auto-match the sender's Feishu email to a CubeBox account (avoids manual `link`). |
 
 After adding scopes, **publish a new app version** so the tenant grants take effect — Feishu does not apply new scopes until the version is published.
