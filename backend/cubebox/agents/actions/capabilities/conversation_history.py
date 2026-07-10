@@ -27,7 +27,7 @@ class ConversationHistoryDeps:
 
 class SearchInput(BaseModel):
     q: str = Field(min_length=1, max_length=255)
-    n: int = Field(default=10, ge=1, le=20)
+    n: int = Field(default=8, ge=1, le=20)
 
 
 class ReadInput(BaseModel):
@@ -40,7 +40,7 @@ class ReadInput(BaseModel):
 class ToolResultInput(BaseModel):
     conversation_id: str
     tool_call_id: str
-    max_tokens: int = Field(default=4_000, ge=256, le=12_000)
+    max_tokens: int = Field(default=2_000, ge=256, le=12_000)
 
 
 async def _visible_conversation(
@@ -55,8 +55,41 @@ async def _visible_conversation(
     return conversation
 
 
-async def _checkpoint_messages(session: AsyncSession, conversation_id: str) -> list[dict[str, Any]]:
-    return (await load_history_window(session, conversation_id, limit=200)).messages
+async def _checkpoint_messages_for_read(
+    session: AsyncSession, conversation_id: str, *, n: int, before_seq: int | None
+) -> tuple[list[dict[str, Any]], bool]:
+    """Load enough backwards-paged messages to form ``n`` complete recent turns."""
+    cursor = before_seq
+    messages: list[dict[str, Any]] = []
+    while True:
+        window = await load_history_window(session, conversation_id, before_seq=cursor, limit=200)
+        if not window.messages:
+            return messages, False
+        messages = [*window.messages, *messages]
+        if sum(message.get("role") == "user" for message in messages) > n:
+            return messages, window.has_more
+        if not window.has_more or window.oldest_seq is None:
+            return messages, False
+        cursor = window.oldest_seq
+
+
+async def _find_tool_result(
+    session: AsyncSession, conversation_id: str, *, tool_call_id: str, max_tokens: int
+) -> Any:
+    """Search every authorized history page, stopping as soon as the result is found."""
+    before_seq: int | None = None
+    while True:
+        window = await load_history_window(
+            session, conversation_id, before_seq=before_seq, limit=200
+        )
+        result = format_tool_result(
+            window.messages, tool_call_id=tool_call_id, max_tokens=max_tokens
+        )
+        if result is not None:
+            return result
+        if not window.has_more or window.oldest_seq is None:
+            return None
+        before_seq = window.oldest_seq
 
 
 def build_conversation_history_capability(deps: ConversationHistoryDeps) -> AgentCapability:
@@ -69,19 +102,12 @@ def build_conversation_history_capability(deps: ConversationHistoryDeps) -> Agen
         response = await service.search(
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
-            creator_user_id=ctx.user_id,
+            user_id=ctx.user_id,
             q=inp.q,
             limit=inp.n,
         )
         results: list[dict[str, Any]] = []
         for result in response.results:
-            # The search service's index is creator-scoped. Re-check through
-            # ConversationRepository so every emitted id follows the action
-            # layer's canonical participant/archival visibility rules.
-            try:
-                await _visible_conversation(ctx, session, result.conversation_id)
-            except ActionNotFound:
-                continue
             results.append(
                 {
                     "conversation_id": result.conversation_id,
@@ -90,17 +116,22 @@ def build_conversation_history_capability(deps: ConversationHistoryDeps) -> Agen
                     "match_offsets": result.match_offsets,
                     "matched_message_seq": result.matched_message_seq,
                     "matched_at": result.matched_at,
+                    "score": result.score,
                 }
             )
         return {"results": results}
 
     async def read(ctx: ScopeContext, session: AsyncSession, inp: ReadInput) -> dict[str, Any]:
         await _visible_conversation(ctx, session, inp.conversation_id)
+        messages, has_older_messages = await _checkpoint_messages_for_read(
+            session, inp.conversation_id, n=inp.n, before_seq=inp.before_seq
+        )
         page = format_history_turns(
-            await _checkpoint_messages(session, inp.conversation_id),
+            messages,
             n=inp.n,
             max_tokens=inp.max_tokens,
             before_seq=inp.before_seq,
+            has_older_messages=has_older_messages,
         )
         return {
             "turns": page.turns,
@@ -114,8 +145,9 @@ def build_conversation_history_capability(deps: ConversationHistoryDeps) -> Agen
         ctx: ScopeContext, session: AsyncSession, inp: ToolResultInput
     ) -> dict[str, Any]:
         await _visible_conversation(ctx, session, inp.conversation_id)
-        result = format_tool_result(
-            await _checkpoint_messages(session, inp.conversation_id),
+        result = await _find_tool_result(
+            session,
+            inp.conversation_id,
             tool_call_id=inp.tool_call_id,
             max_tokens=inp.max_tokens,
         )

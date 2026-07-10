@@ -10,14 +10,14 @@ class PgBigmBackend:
         # Escape SQL LIKE wildcards. Leading/trailing % are added by SQL.
         return q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").strip()
 
-    def search_sql(self, limit: int) -> LexicalSqlBundle:
+    def search_sql(self, limit: int, *, visibility_sql: str) -> LexicalSqlBundle:
         sql = f"""
             SELECT cc.id, bigm_similarity(cc.text, :q) AS score
             FROM conversation_chunks cc
             JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
             WHERE cc.org_id = :org_id
               AND cc.workspace_id = :ws_id
-              AND cc.creator_user_id = :user_id
+              AND ({visibility_sql})
               AND cc.text LIKE '%' || :q || '%' ESCAPE '\\'
             ORDER BY score DESC
             LIMIT {int(limit)}

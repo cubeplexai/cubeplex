@@ -82,7 +82,7 @@ async def test_search_returns_seeded_conversation(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -123,7 +123,7 @@ async def test_search_excludes_soft_deleted_conversation(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -154,7 +154,7 @@ async def test_search_legs_run_concurrently_without_session_race(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -201,7 +201,7 @@ async def test_vector_leg_filters_by_embed_model(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -232,7 +232,7 @@ async def test_search_runs_lexical_only_when_provider_is_none(
         resp = await svc.search(
             org_id=org_id,
             workspace_id=ws_id,
-            creator_user_id=user_id,
+            user_id=user_id,
             q="docling",
             limit=8,
         )
@@ -256,7 +256,7 @@ async def test_search_rejects_control_characters(
             await svc.search(
                 org_id=org_id,
                 workspace_id=ws_id,
-                creator_user_id=user_id,
+                user_id=user_id,
                 q="doc\x00ling",
                 limit=8,
             )

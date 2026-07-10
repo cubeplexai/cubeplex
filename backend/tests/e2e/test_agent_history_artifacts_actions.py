@@ -34,6 +34,7 @@ class Seed:
     private_conversation_id: str
     visible_artifact_id: str
     hidden_artifact_id: str
+    participant_conversation_id: str
     tool_call_id: str
 
 
@@ -46,6 +47,7 @@ async def seed(client: Any) -> AsyncIterator[Seed]:
     private_conversation_id = f"conv-hp-{suffix}"
     visible_artifact_id = f"art-ha-{suffix}"
     hidden_artifact_id = f"art-hp-{suffix}"
+    participant_conversation_id = f"conv-hg-{suffix}"
     tool_call_id = f"tool-ha-{suffix}"
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -59,16 +61,17 @@ async def seed(client: Any) -> AsyncIterator[Seed]:
                 ),
                 {"id": stranger_id, "email": f"{stranger_id}@example.com"},
             )
-            for conversation_id, user_id in (
-                (visible_conversation_id, member_id),
-                (private_conversation_id, stranger_id),
+            for conversation_id, user_id, is_group_chat in (
+                (visible_conversation_id, member_id, False),
+                (private_conversation_id, stranger_id, False),
+                (participant_conversation_id, stranger_id, True),
             ):
                 await session.execute(
                     text(
                         "INSERT INTO conversations (id, org_id, workspace_id, creator_user_id, "
                         "title, has_messages, is_group_chat, reasoning, attributes, created_at, "
                         "updated_at) VALUES (:id, :org_id, :workspace_id, :user_id, :title, true, "
-                        "false, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())"
+                        ":is_group_chat, '{}'::jsonb, '{}'::jsonb, NOW(), NOW())"
                     ),
                     {
                         "id": conversation_id,
@@ -76,8 +79,24 @@ async def seed(client: Any) -> AsyncIterator[Seed]:
                         "workspace_id": DEFAULT_WS_ID,
                         "user_id": user_id,
                         "title": "history action seed",
+                        "is_group_chat": is_group_chat,
                     },
                 )
+            await session.execute(
+                text(
+                    "INSERT INTO conversation_participants "
+                    "(id, org_id, workspace_id, conversation_id, user_id, joined_at, "
+                    "created_at, updated_at) VALUES "
+                    "(:id, :org_id, :workspace_id, :conversation_id, :user_id, NOW(), NOW(), NOW())"
+                ),
+                {
+                    "id": f"cpm-ha-{suffix}",
+                    "org_id": DEFAULT_ORG_ID,
+                    "workspace_id": DEFAULT_WS_ID,
+                    "conversation_id": participant_conversation_id,
+                    "user_id": member_id,
+                },
+            )
             for artifact_id, conversation_id in (
                 (visible_artifact_id, visible_conversation_id),
                 (hidden_artifact_id, private_conversation_id),
@@ -120,6 +139,10 @@ async def seed(client: Any) -> AsyncIterator[Seed]:
                     ),
                 ],
             )
+            await checkpointer.append(
+                participant_conversation_id,
+                [UserMessage(content=[TextContent(text="participant-visible search")])],
+            )
         yield Seed(
             member_context=ScopeContext(
                 org_id=DEFAULT_ORG_ID,
@@ -137,11 +160,16 @@ async def seed(client: Any) -> AsyncIterator[Seed]:
             private_conversation_id=private_conversation_id,
             visible_artifact_id=visible_artifact_id,
             hidden_artifact_id=hidden_artifact_id,
+            participant_conversation_id=participant_conversation_id,
             tool_call_id=tool_call_id,
         )
     finally:
         async with maker() as session:
-            for conversation_id in (visible_conversation_id, private_conversation_id):
+            for conversation_id in (
+                visible_conversation_id,
+                private_conversation_id,
+                participant_conversation_id,
+            ):
                 await session.execute(
                     text("DELETE FROM conversation_chunks WHERE conversation_id = :id"),
                     {"id": conversation_id},
@@ -166,8 +194,16 @@ async def seed(client: Any) -> AsyncIterator[Seed]:
                 {"visible": visible_artifact_id, "hidden": hidden_artifact_id},
             )
             await session.execute(
-                text("DELETE FROM conversations WHERE id IN (:visible, :private)"),
-                {"visible": visible_conversation_id, "private": private_conversation_id},
+                text("DELETE FROM conversation_participants WHERE conversation_id = :id"),
+                {"id": participant_conversation_id},
+            )
+            await session.execute(
+                text("DELETE FROM conversations WHERE id IN (:visible, :private, :participant)"),
+                {
+                    "visible": visible_conversation_id,
+                    "private": private_conversation_id,
+                    "participant": participant_conversation_id,
+                },
             )
             await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": stranger_id})
             await session.commit()
@@ -244,6 +280,46 @@ async def test_history_tools_return_formatted_visible_checkpoint_data(seed: Seed
 
 
 @pytest.mark.asyncio
+async def test_history_tools_page_older_turns_and_find_old_tool_results(seed: Seed) -> None:
+    from cubebox.agents.actions.capabilities.conversation_history import (
+        ConversationHistoryDeps,
+        build_conversation_history_capability,
+    )
+
+    async with init_checkpointer() as checkpointer:
+        await checkpointer.append(
+            seed.visible_conversation_id,
+            [UserMessage(content=[TextContent(text=f"later-{index}")]) for index in range(205)],
+        )
+
+    capability = build_conversation_history_capability(ConversationHistoryDeps(None, None))
+    older = await _invoke(
+        capability,
+        seed.member_context,
+        "read",
+        conversation_id=seed.visible_conversation_id,
+        n=2,
+        before_seq=16,
+    )
+
+    assert older.is_error is None
+    older_payload = json.loads(older.content[0].text)
+    assert [turn["user"]["text"] for turn in older_payload["turns"]] == ["later-2", "later-3"]
+    assert older_payload["has_more"] is True
+    assert older_payload["next_before_seq"] is not None
+
+    tool_result = await _invoke(
+        capability,
+        seed.member_context,
+        "tool_result",
+        conversation_id=seed.visible_conversation_id,
+        tool_call_id=seed.tool_call_id,
+    )
+    assert tool_result.is_error is None
+    assert json.loads(tool_result.content[0].text)["content"] == "targeted result"
+
+
+@pytest.mark.asyncio
 async def test_history_search_returns_only_visible_conversation_context_ids(seed: Seed) -> None:
     from cubebox.agents.actions.capabilities.conversation_history import (
         ConversationHistoryDeps,
@@ -260,25 +336,37 @@ async def test_history_search_returns_only_visible_conversation_context_ids(seed
             workspace_id=seed.member_context.workspace_id,
             user_id=seed.member_context.user_id,
         ).enqueue(conversation_id=seed.visible_conversation_id)
-    await EmbeddingWorker(None)._claim_one()
+        await EmbeddingJobRepository(
+            session,
+            org_id=seed.member_context.org_id,
+            workspace_id=seed.member_context.workspace_id,
+            user_id=seed.stranger_context.user_id,
+        ).enqueue(conversation_id=seed.participant_conversation_id)
+    worker = EmbeddingWorker(None)
+    while await worker._claim_one() is not None:
+        pass
 
     result = await _invoke(
         build_conversation_history_capability(ConversationHistoryDeps(None, None)),
         seed.member_context,
         "search",
-        q="one",
+        q="participant-visible",
     )
 
     assert result.is_error is None
-    assert {item["conversation_id"] for item in json.loads(result.content[0].text)["results"]} == {
-        seed.visible_conversation_id
-    }
+    results = json.loads(result.content[0].text)["results"]
+    assert seed.participant_conversation_id in {item["conversation_id"] for item in results}
+    assert all("score" in item for item in results)
 
 
 @pytest.mark.asyncio
 async def test_artifact_list_excludes_inaccessible_conversation_artifacts(seed: Seed) -> None:
     from cubebox.agents.actions.capabilities.artifacts import ARTIFACTS_CAPABILITY, ListInput
-    from cubebox.agents.actions.capabilities.conversation_history import ReadInput
+    from cubebox.agents.actions.capabilities.conversation_history import (
+        ReadInput,
+        SearchInput,
+        ToolResultInput,
+    )
 
     result = await _invoke(ARTIFACTS_CAPABILITY, seed.member_context, "list", n=10)
     payload = result.content[0].text
@@ -290,3 +378,10 @@ async def test_artifact_list_excludes_inaccessible_conversation_artifacts(seed: 
         ListInput(n=51)
     with pytest.raises(ValidationError):
         ReadInput(conversation_id=seed.visible_conversation_id, max_tokens=255)
+    assert SearchInput(q="history").n == 8
+    assert (
+        ToolResultInput(
+            conversation_id=seed.visible_conversation_id, tool_call_id=seed.tool_call_id
+        ).max_tokens
+        == 2_000
+    )
