@@ -264,6 +264,8 @@ def build_event_handler(
                 if gate_connector is not None:
                     kwargs["identity_resolver"] = gate_connector
                     kwargs["rejection_notifier"] = gate_connector
+                    # Resolve group display name for Topic titles (im.v1.chats.get).
+                    await gate_connector.enrich_inbound_channel_name(event)
                 res = await ingest(
                     event,
                     account=account,

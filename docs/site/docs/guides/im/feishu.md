@@ -36,10 +36,18 @@ Under the app's **Features**, add the **Bot** capability and publish the bot ide
 
 ## Step 3 — Grant message permissions
 
-Under **Permissions & Scopes**, grant the scopes the bot needs to read mentions and send messages. To let CubeBox auto-resolve a sender's email (so users don't have to run `/link` manually), also grant the contact/read-email scope.
+Under **Permissions & Scopes**, grant the scopes the bot needs to read mentions, send messages, and resolve group names. To let CubeBox auto-resolve a sender's email (so users don't have to run `/link` manually), also grant the contact/read-email scope.
+
+| Scope | Required | Purpose |
+|---|---|---|
+| Message read / send (`im:message`, `im:message:send_as_bot`, …) | Yes | Receive @-mentions / DMs and reply as the bot. |
+| `im:chat:readonly` (or `im:chat:read` / `im:chat`) | Yes | Look up the group display name via `GET /open-apis/im/v1/chats/:chat_id` so CubeBox Topic titles show the real group name instead of a generic label. |
+| Contact email read (`contact:user.email:readonly` + related) | Recommended | Auto-match the sender's Feishu email to a CubeBox account (avoids manual `link`). |
+
+After adding scopes, **publish a new app version** so the tenant grants take effect — Feishu does not apply new scopes until the version is published.
 
 :::info 📸 Screenshot placeholder
-**Capture:** The app Permissions & Scopes page with the message read/send and contact email scopes selected.
+**Capture:** The app Permissions & Scopes page with the message read/send, group-info read (`im:chat:readonly`), and contact email scopes selected.
 **Asset:** `/img/im/feishu/console-permissions.png`
 :::
 

@@ -82,6 +82,11 @@ class DingtalkConnector:
         if not msg_id or not conversation_id or not sender_staff_id:
             return None
 
+        # DingTalk includes the group title on every robot receive callback
+        # (field ``conversationTitle`` — group only). No extra API / scope.
+        # https://open.dingtalk.com/document/orgapp/receive-message
+        channel_name: str | None = None
+
         if conversation_type == "1":
             scope_key = DM_SCOPE_KEY
             scope_kind = "dm"
@@ -96,6 +101,9 @@ class DingtalkConnector:
                 scope_key = make_participant_scope(sender_staff_id)
                 scope_kind = "group"
             text = re.sub(r"^\s+", "", text)
+            title = raw.get("conversationTitle")
+            if isinstance(title, str) and title.strip():
+                channel_name = title.strip()
 
         return InboundEvent(
             platform="dingtalk",
@@ -109,6 +117,7 @@ class DingtalkConnector:
             sender_ref=sender_staff_id,
             sender_open_id=sender_staff_id,
             text=text,
+            channel_name=channel_name,
         )
 
     # ------------------------------------------------------------------

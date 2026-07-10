@@ -459,6 +459,54 @@ class FeishuConnector:
         email = getattr(user_obj, "enterprise_email", None) or getattr(user_obj, "email", None)
         return str(email) if email else None
 
+    async def get_chat_name(self, chat_id: str) -> str | None:
+        """Fetch a group display name via ``GET /open-apis/im/v1/chats/:chat_id``.
+
+        Requires one of: ``im:chat:readonly`` / ``im:chat:read`` / ``im:chat``.
+        Without the scope Feishu returns a non-zero code — we log and return
+        None so topic creation falls back to the generic ``群聊`` label rather
+        than failing the whole inbound.
+
+        Docs: https://open.feishu.cn/document/server-docs/group/chat/get-2
+        """
+        if self._client is None or not chat_id:
+            return None
+        from lark_oapi.api.im.v1 import GetChatRequest
+
+        req = GetChatRequest.builder().chat_id(chat_id).build()
+        try:
+            response = await asyncio.to_thread(self._client.im.v1.chat.get, req)
+        except Exception:
+            logger.opt(exception=True).warning(
+                "[Feishu] get_chat_name raised for chat_id={}", chat_id
+            )
+            return None
+        if not getattr(response, "success", lambda: False)():
+            logger.warning(
+                "[Feishu] get_chat_name failed: code={} msg={} chat_id={}",
+                getattr(response, "code", None),
+                getattr(response, "msg", None),
+                chat_id,
+            )
+            return None
+        data = getattr(response, "data", None)
+        name = getattr(data, "name", None) if data is not None else None
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+        return None
+
+    async def enrich_inbound_channel_name(self, event: InboundEvent) -> None:
+        """Fill ``event.channel_name`` for group chats via ``get_chat_name``.
+
+        No-op for DMs, when a name is already present, or when no outbound
+        client is bound. Failures leave ``channel_name`` as None.
+        """
+        if event.scope_kind == "dm" or event.channel_name or not event.channel_id:
+            return
+        name = await self.get_chat_name(event.channel_id)
+        if name:
+            event.channel_name = name
+
     async def send_to_chat(self, chat_id: str, reply_to_id: str | None, text: str) -> str | None:
         """Send a one-off plain text bubble to a chat, optionally as a thread reply.
 

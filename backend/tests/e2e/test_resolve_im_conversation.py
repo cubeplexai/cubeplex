@@ -178,8 +178,10 @@ async def test_shared_creates_topic_and_link(
         topic = (
             await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
         ).scalar_one()
-        # Group title falls back to the channel id (no per-channel name yet).
-        assert topic.title == _CHANNEL
+        # Without a platform-supplied channel_name, group title falls back to
+        # the generic "群聊" label (never the opaque channel id).
+        assert topic.title == "群聊"
+        assert topic.attributes.get("im", {}).get("channel_name") is None
         assert topic.creator_user_id == _USER  # acting user owns shared topics
         assert topic.attributes.get("im", {}).get("account_id") == _ACCOUNT
         assert topic.attributes["im"]["scope_kind"] == "channel"
@@ -213,6 +215,96 @@ async def test_shared_creates_topic_and_link(
             )
         ).scalar_one_or_none()
         assert cp is not None
+
+
+async def test_shared_topic_uses_channel_name_as_title(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """When the platform supplies a group display name, use it as Topic title."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
+
+    async with maker() as session:
+        resolved = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="hello",
+            origin="inbound",
+            channel_name="项目 Alpha",
+        )
+        await session.commit()
+
+    assert resolved.topic_id is not None
+    async with maker() as session:
+        topic = (
+            await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
+        ).scalar_one()
+        assert topic.title == "项目 Alpha"
+        assert topic.attributes["im"]["channel_name"] == "项目 Alpha"
+        assert topic.attributes["im"]["channel_id"] == _CHANNEL
+
+
+async def test_shared_topic_refreshes_legacy_channel_id_title(
+    _seeded: tuple[async_sessionmaker[AsyncSession], IMConnectorAccount],
+) -> None:
+    """A subsequent resolve with a real name rewrites a legacy channel-id title."""
+    maker, account = _seeded
+    _with_settings(account, IMBotSettings(routing_mode="shared"))
+
+    async with maker() as session:
+        r1 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="first",
+            origin="inbound",
+            # no channel_name → title "群聊"
+        )
+        await session.commit()
+        topic_id = r1.topic_id
+        assert topic_id is not None
+        # Simulate pre-fix rows that used channel_id as the title.
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        topic.title = _CHANNEL
+        attrs = dict(topic.attributes or {})
+        im = dict(attrs.get("im") or {})
+        im["channel_name"] = _CHANNEL
+        attrs["im"] = im
+        topic.attributes = attrs
+        session.add(topic)
+        await session.commit()
+
+    async with maker() as session:
+        account = (
+            await session.execute(
+                select(IMConnectorAccount).where(IMConnectorAccount.id == _ACCOUNT)
+            )
+        ).scalar_one()
+        _with_settings(account, IMBotSettings(routing_mode="shared"))
+        await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="ch",
+            scope_kind="channel",
+            effective_user_id=_USER,
+            title_hint="second",
+            origin="inbound",
+            channel_name="研发大群",
+        )
+        await session.commit()
+
+    async with maker() as session:
+        topic = (await session.execute(select(Topic).where(Topic.id == topic_id))).scalar_one()
+        assert topic.title == "研发大群"
+        assert topic.attributes["im"]["channel_name"] == "研发大群"
 
 
 async def test_isolated_topic_mode_creates_per_sender_topic(
