@@ -16,6 +16,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { topicDisplayTitle } from '@/lib/topicTitle'
 import { StatusBadge } from './StatusBadge'
 
 interface SandboxCardProps {
@@ -32,6 +33,8 @@ interface SandboxCardProps {
  */
 export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
   const t = useTranslations('wsSandboxes')
+  const tTopics = useTranslations('topics')
+  const tSidebar = useTranslations('sidebar')
   const tTime = useTranslations('time')
   // `mutate` is bound to the same SWR key the panel reads, so a restart/
   // delete revalidates the whole list (status flips to "Off", row disappears).
@@ -42,7 +45,9 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
   const [busy, setBusy] = useState<'restart' | 'delete' | null>(null)
 
   // scope → human label (spec §7.4). conversation/topic fall back to
-  // "(deleted)" when the backing row is gone (scope_title null).
+  // "(deleted)" when the backing row is gone (scope_title null). Empty
+  // titles (IM topics without a resolved channel name) keep the row and
+  // use the localized empty-name label — do not treat "" as deleted.
   const deleted = t('scope.deleted')
   let label: string
   switch (sandbox.scope_type) {
@@ -50,10 +55,20 @@ export function SandboxCard({ sandbox, wsId, onMutated }: SandboxCardProps) {
       label = t('scope.user')
       break
     case 'conversation':
-      label = t('scope.conversation', { title: sandbox.scope_title ?? deleted })
+      label = t('scope.conversation', {
+        title:
+          sandbox.scope_title === null
+            ? deleted
+            : topicDisplayTitle(sandbox.scope_title, tSidebar('untitledChat')),
+      })
       break
     case 'topic':
-      label = t('scope.topic', { title: sandbox.scope_title ?? deleted })
+      label = t('scope.topic', {
+        title:
+          sandbox.scope_title === null
+            ? deleted
+            : topicDisplayTitle(sandbox.scope_title, tTopics('newGroupChat')),
+      })
       break
     default:
       label = t('scope.unknown', { type: sandbox.scope_type })
