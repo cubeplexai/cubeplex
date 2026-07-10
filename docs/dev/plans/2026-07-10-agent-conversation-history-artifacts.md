@@ -62,7 +62,7 @@ def test_targeted_tool_result_obeys_its_token_budget() -> None:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd backend && uv run pytest tests/unit/agents/actions/test_history_format.py --no-cov 2>&1 | tee tmp/history-format-red.log | tail -3`
+Run: `cd backend && uv run pytest tests/unit/services/conversation_search/test_history.py --no-cov 2>&1 | tee tmp/history-format-red.log | tail -3`
 
 Expected: FAIL because `conversation_search.history` does not exist.
 
@@ -86,7 +86,7 @@ Partition sorted persisted messages at each `role == "user"`; attach following a
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd backend && uv run pytest tests/unit/agents/actions/test_history_format.py --no-cov 2>&1 | tee tmp/history-format-green.log | tail -3`
+Run: `cd backend && uv run pytest tests/unit/services/conversation_search/test_history.py --no-cov 2>&1 | tee tmp/history-format-green.log | tail -3`
 
 Expected: PASS.
 
