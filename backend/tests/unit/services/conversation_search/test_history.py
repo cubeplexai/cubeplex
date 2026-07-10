@@ -187,5 +187,50 @@ def test_targeted_tool_result_obeys_the_minimum_token_budget_including_metadata(
     )
 
 
+def test_long_tool_metadata_uses_a_bounded_reference_that_fetches_the_result() -> None:
+    long_call_id = "call-" + "i" * 10_000
+    long_tool_name = "tool-" + "n" * 10_000
+    messages = [
+        {
+            "seq": 1,
+            "role": "user",
+            "content": [{"type": "text", "text": "Find the record"}],
+        },
+        {
+            "seq": 2,
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": long_call_id,
+                    "name": long_tool_name,
+                    "arguments": {},
+                }
+            ],
+        },
+        {
+            "seq": 3,
+            "role": "tool_result",
+            "tool_call_id": long_call_id,
+            "tool_name": long_tool_name,
+            "content": [{"type": "text", "text": "exact persisted result"}],
+        },
+    ]
+
+    page = format_history_turns(messages, n=1, max_tokens=256, before_seq=None)
+
+    call = page.turns[0]["tool_calls"][0]
+    assert page.estimated_tokens <= 256
+    assert call["tool_call_id"] != long_call_id
+    assert len(call["tool_call_id"]) < 100
+    assert call["name"] != long_tool_name
+    result = format_tool_result(messages, tool_call_id=call["tool_call_id"], max_tokens=256)
+    assert result is not None
+    assert result.content == "exact persisted result"
+    assert result.tool_call_id == call["tool_call_id"]
+    assert result.tool_name != long_tool_name
+    assert result.estimated_tokens <= 256
+
+
 def test_targeted_tool_result_returns_none_for_an_unknown_call() -> None:
     assert format_tool_result(MESSAGES, tool_call_id="missing", max_tokens=256) is None

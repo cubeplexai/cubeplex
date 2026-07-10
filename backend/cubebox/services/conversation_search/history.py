@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any
 
 _SENSITIVE_ARGUMENT_PARTS = ("secret", "token", "password", "authorization", "api_key")
 MIN_HISTORY_MAX_TOKENS = 256
+_MAX_METADATA_DISPLAY_CHARS = 64
+_TOOL_CALL_REFERENCE_PREFIX = "tool_ref_"
 
 
 @dataclass(frozen=True)
@@ -76,20 +79,24 @@ def format_history_turns(
 def format_tool_result(
     messages: list[dict[str, Any]], *, tool_call_id: str, max_tokens: int
 ) -> FormattedToolResult | None:
-    """Return a result within a token budget of at least ``MIN_HISTORY_MAX_TOKENS``."""
+    """Return a result for a raw ID or bounded history reference within its token budget."""
     _validate_max_tokens(max_tokens)
     for message in sorted(messages, key=_seq):
-        if message.get("role") != "tool_result" or message.get("tool_call_id") != tool_call_id:
+        raw_tool_call_id = _optional_string(message.get("tool_call_id"))
+        if message.get("role") != "tool_result" or raw_tool_call_id is None:
+            continue
+        if not _matches_tool_call_id(raw_tool_call_id, tool_call_id):
             continue
         content = _message_text(message)
-        tool_name = _optional_string(message.get("tool_name"))
+        bounded_tool_call_id = _bounded_tool_call_id(raw_tool_call_id)
+        tool_name = _bounded_metadata(_optional_string(message.get("tool_name")))
         is_error = bool(message.get("is_error"))
         estimated_tokens = _estimate_tool_result(
-            tool_call_id, tool_name, content, is_error, truncated=False
+            bounded_tool_call_id, tool_name, content, is_error, truncated=False
         )
         if estimated_tokens <= max_tokens:
             return FormattedToolResult(
-                tool_call_id=tool_call_id,
+                tool_call_id=bounded_tool_call_id,
                 tool_name=tool_name,
                 content=content,
                 is_error=is_error,
@@ -97,15 +104,15 @@ def format_tool_result(
                 truncated=False,
             )
         truncated_content = _truncate_tool_result_content(
-            tool_call_id, tool_name, content, is_error, max_tokens
+            bounded_tool_call_id, tool_name, content, is_error, max_tokens
         )
         return FormattedToolResult(
-            tool_call_id=tool_call_id,
+            tool_call_id=bounded_tool_call_id,
             tool_name=tool_name,
             content=truncated_content,
             is_error=is_error,
             estimated_tokens=_estimate_tool_result(
-                tool_call_id, tool_name, truncated_content, is_error, truncated=True
+                bounded_tool_call_id, tool_name, truncated_content, is_error, truncated=True
             ),
             truncated=True,
         )
@@ -128,7 +135,7 @@ def _build_turns(messages: list[dict[str, Any]], *, before_seq: int | None) -> l
         if role == "tool_result":
             call_id = message.get("tool_call_id")
             if isinstance(call_id, str):
-                results[call_id] = bool(message.get("is_error"))
+                results[_bounded_tool_call_id(call_id)] = bool(message.get("is_error"))
             continue
         if role == "user":
             current = {
@@ -150,8 +157,8 @@ def _build_turns(messages: list[dict[str, Any]], *, before_seq: int | None) -> l
                 continue
             current["tool_calls"].append(
                 {
-                    "tool_call_id": call_id,
-                    "name": _optional_string(block.get("name")),
+                    "tool_call_id": _bounded_tool_call_id(call_id),
+                    "name": _bounded_metadata(_optional_string(block.get("name"))),
                     "arguments": _redact_arguments(block.get("arguments")),
                     "status": "pending",
                 }
@@ -198,6 +205,25 @@ def _tool_call_blocks(message: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _bounded_tool_call_id(tool_call_id: str) -> str:
+    if len(tool_call_id) <= _MAX_METADATA_DISPLAY_CHARS:
+        return tool_call_id
+    return _TOOL_CALL_REFERENCE_PREFIX + hashlib.sha256(tool_call_id.encode()).hexdigest()
+
+
+def _matches_tool_call_id(raw_tool_call_id: str, requested_tool_call_id: str) -> bool:
+    return requested_tool_call_id in {
+        raw_tool_call_id,
+        _bounded_tool_call_id(raw_tool_call_id),
+    }
+
+
+def _bounded_metadata(value: str | None) -> str | None:
+    if value is None or len(value) <= _MAX_METADATA_DISPLAY_CHARS:
+        return value
+    return f"{value[: _MAX_METADATA_DISPLAY_CHARS - 3]}..."
 
 
 def _redact_arguments(value: object) -> object:
