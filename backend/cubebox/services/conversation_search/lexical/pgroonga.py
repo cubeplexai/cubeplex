@@ -12,14 +12,14 @@ class PgroongaBackend:
         bad = set('"()\\')
         return "".join(c for c in q if c not in bad).strip()
 
-    def search_sql(self, limit: int) -> LexicalSqlBundle:
+    def search_sql(self, limit: int, *, visibility_sql: str) -> LexicalSqlBundle:
         sql = f"""
             SELECT cc.id, pgroonga_score(cc.tableoid, cc.ctid) AS score
             FROM conversation_chunks cc
             JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
             WHERE cc.org_id = :org_id
               AND cc.workspace_id = :ws_id
-              AND cc.creator_user_id = :user_id
+              AND ({visibility_sql})
               AND cc.text &@~ :q
             ORDER BY score DESC
             LIMIT {int(limit)}

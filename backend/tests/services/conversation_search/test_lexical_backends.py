@@ -9,7 +9,7 @@ def test_pgroonga_strips_disallowed_chars() -> None:
 
 def test_pgroonga_sql_has_expected_binds() -> None:
     b = PgroongaBackend()
-    bundle = b.search_sql(limit=20)
+    bundle = b.search_sql(limit=20, visibility_sql="true")
     assert "pgroonga_score" in bundle.sql
     assert "&@~" in bundle.sql
     assert set(bundle.bind_keys) == {"org_id", "ws_id", "user_id", "q"}
@@ -22,6 +22,6 @@ def test_pgbigm_escapes_like_wildcards() -> None:
 
 def test_pgbigm_sql_has_like_clause() -> None:
     b = PgBigmBackend()
-    bundle = b.search_sql(limit=20)
+    bundle = b.search_sql(limit=20, visibility_sql="true")
     assert "LIKE" in bundle.sql
     assert "bigm_similarity" in bundle.sql

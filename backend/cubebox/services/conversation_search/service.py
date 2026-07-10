@@ -67,7 +67,7 @@ class ConversationSearchService:
         *,
         org_id: str,
         workspace_id: str,
-        creator_user_id: str,
+        user_id: str,
         q: str,
         limit: int,
     ) -> SearchResponse:
@@ -88,8 +88,8 @@ class ConversationSearchService:
         # errors. Sequential _hydrate_chunks / _titles below keep using
         # ``self._session`` because they run after the gather.
         lex_list, vec_list = await asyncio.gather(
-            self._lexical_leg(org_id, workspace_id, creator_user_id, q),
-            self._vector_leg(org_id, workspace_id, creator_user_id, q),
+            self._lexical_leg(org_id, workspace_id, user_id, q),
+            self._vector_leg(org_id, workspace_id, user_id, q),
         )
         fused = rrf_fuse(
             lexical=[r[0] for r in lex_list],
@@ -142,16 +142,48 @@ class ConversationSearchService:
             fused_count=len(fused),
         )
 
-    # _lexical_leg / _vector_leg / _hydrate_chunks embed (org_id, ws_id,
-    # user_id) directly in textual SQL templates rather than going through
-    # ConversationChunkRepository._scoped_select. They have to: the templates
-    # are typed text() with named binds (single-tenant, single-DB), and the
-    # operator they need (vector <=>, pgroonga &@~, bigm_similarity) requires
-    # raw SQL anyway. Scope still comes from the route's RequestContext.
+    @staticmethod
+    def _visibility_sql() -> str:
+        """SQL visibility predicate matching ``ConversationRepository`` exactly."""
+        return """
+            (
+                (c.topic_id IS NULL AND c.creator_user_id = :user_id)
+                OR (
+                    c.topic_id IS NULL
+                    AND EXISTS (
+                        SELECT 1 FROM conversation_participants cp
+                        WHERE cp.conversation_id = c.id AND cp.user_id = :user_id
+                    )
+                )
+                OR (
+                    c.topic_id IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM topic_participants tp
+                        JOIN topics t ON t.id = tp.topic_id
+                        WHERE tp.topic_id = c.topic_id
+                          AND tp.user_id = :user_id
+                          AND t.is_archived = false
+                    )
+                )
+                OR (
+                    c.topic_id IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM conversation_participants cp
+                        JOIN topics t ON t.id = c.topic_id
+                        WHERE cp.conversation_id = c.id
+                          AND cp.user_id = :user_id
+                          AND t.is_archived = false
+                    )
+                )
+            )
+        """
+
     async def _lexical_leg(
         self, org_id: str, ws_id: str, user_id: str, q: str
     ) -> list[tuple[str, float]]:
-        bundle = self._lexical.search_sql(limit=self._prefetch)
+        bundle = self._lexical.search_sql(
+            limit=self._prefetch, visibility_sql=self._visibility_sql()
+        )
         binds = {
             "org_id": org_id,
             "ws_id": ws_id,
@@ -187,13 +219,13 @@ class ConversationSearchService:
             # written when no provider is configured carry NULL embeddings
             # and would otherwise break the cosine operator.
             sql = text(
-                """
+                f"""
                 SELECT cc.id, 1.0 - (cc.embedding <=> :v) AS score
                 FROM conversation_chunks cc
                 JOIN conversations c ON c.id = cc.conversation_id AND c.deleted_at IS NULL
                 WHERE cc.org_id = :org_id
                   AND cc.workspace_id = :ws_id
-                  AND cc.creator_user_id = :user_id
+                  AND ({self._visibility_sql()})
                   AND cc.embed_model = :embed_model
                   AND cc.embedding IS NOT NULL
                 ORDER BY cc.embedding <=> :v

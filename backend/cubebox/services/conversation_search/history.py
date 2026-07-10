@@ -40,7 +40,12 @@ def estimate_tokens(value: object) -> int:
 
 
 def format_history_turns(
-    messages: list[dict[str, Any]], *, n: int, max_tokens: int, before_seq: int | None
+    messages: list[dict[str, Any]],
+    *,
+    n: int,
+    max_tokens: int,
+    before_seq: int | None,
+    has_older_messages: bool = False,
 ) -> FormattedHistoryPage:
     """Format turns within a token budget of at least ``MIN_HISTORY_MAX_TOKENS``."""
     _validate_max_tokens(max_tokens)
@@ -94,7 +99,7 @@ def format_history_turns(
             truncated = True
         break
 
-    has_more = len(selected) < len(turns)
+    has_more = len(selected) < len(turns) or has_older_messages
     next_before_seq = _first_seq(selected) if has_more else None
     return FormattedHistoryPage(
         turns=selected,

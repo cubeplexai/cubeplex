@@ -39,7 +39,7 @@ async def search_conversations(
     resp = await svc.search(
         org_id=ctx.org_id,
         workspace_id=ctx.workspace_id,
-        creator_user_id=ctx.user.id,
+        user_id=ctx.user.id,
         q=cleaned,
         limit=limit,
     )
