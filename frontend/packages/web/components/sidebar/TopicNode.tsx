@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { cn } from '@/lib/utils'
+import { topicDisplayTitle } from '@/lib/topicTitle'
 import {
   type Conversation,
   type Topic,
@@ -159,7 +160,7 @@ export function TopicNode({
           <Layers className="size-3 shrink-0 text-primary/70" />
         )}
         <div className="flex-1 min-w-0 truncate text-[12.5px] font-medium leading-tight">
-          {topic.title || tTopics('newGroupChat')}
+          {topicDisplayTitle(topic.title, tTopics('newGroupChat'))}
         </div>
         {participants.length > 0 ? (
           <AvatarStack

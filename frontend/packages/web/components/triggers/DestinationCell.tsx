@@ -6,6 +6,7 @@ import { Hash, MessageCircle, MessageSquare } from 'lucide-react'
 import { createApiClient, getTopic } from '@cubebox/core'
 import type { Trigger } from '@cubebox/core'
 import { cn } from '@/lib/utils'
+import { topicDisplayTitle } from '@/lib/topicTitle'
 
 interface DestinationCellProps {
   /** Workspace for resolving /api/v1/topics → workspace-scoped path. */
@@ -26,6 +27,7 @@ interface DestinationCellProps {
  */
 export function DestinationCell({ wsId, trigger, className }: DestinationCellProps) {
   const t = useTranslations('triggers')
+  const tTopics = useTranslations('topics')
   const client = useMemo(() => {
     const c = createApiClient('')
     c.setWorkspaceId(wsId)
@@ -62,7 +64,11 @@ export function DestinationCell({ wsId, trigger, className }: DestinationCellPro
           data-testid="trigger-destination-topic"
         >
           <MessageSquare className="size-3 shrink-0" />
-          <span className="max-w-[14ch] truncate">{topicTitle ?? t('destTopicFallback')}</span>
+          <span className="max-w-[14ch] truncate">
+            {topicTitle === null
+              ? t('destTopicFallback')
+              : topicDisplayTitle(topicTitle, tTopics('newGroupChat'))}
+          </span>
         </span>
       )
     }
