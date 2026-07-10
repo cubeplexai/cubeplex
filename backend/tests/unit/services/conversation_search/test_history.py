@@ -1,6 +1,10 @@
 """Tests for the agent-facing historical conversation formatter."""
 
-from cubebox.services.conversation_search.history import format_history_turns, format_tool_result
+from cubebox.services.conversation_search.history import (
+    estimate_tokens,
+    format_history_turns,
+    format_tool_result,
+)
 
 MESSAGES = [
     {
@@ -60,13 +64,54 @@ def test_history_page_uses_complete_turns_before_truncating_one_oversized_turn()
     assert page.has_more is True
 
 
+def test_history_page_bounds_large_non_sensitive_tool_call_arguments() -> None:
+    messages = [
+        {
+            "seq": 1,
+            "role": "user",
+            "content": [{"type": "text", "text": "Find a record"}],
+        },
+        {
+            "seq": 2,
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": "call-large-arguments",
+                    "name": "search",
+                    "arguments": {"query": "x" * 1_000, "api_key": "private"},
+                }
+            ],
+        },
+    ]
+
+    page = format_history_turns(messages, n=1, max_tokens=100, before_seq=None)
+
+    arguments = page.turns[0]["tool_calls"][0]["arguments"]
+    assert page.truncated is True
+    assert page.estimated_tokens <= 100
+    assert arguments["api_key"] == "[REDACTED]"
+    assert arguments["query"] != "x" * 1_000
+
+
 def test_targeted_tool_result_obeys_its_token_budget() -> None:
-    result = format_tool_result(MESSAGES, tool_call_id="call-1", max_tokens=2)
+    result = format_tool_result(MESSAGES, tool_call_id="call-1", max_tokens=35)
 
     assert result is not None
     assert result.tool_call_id == "call-1"
     assert result.truncated is True
-    assert result.content != "tool result body that is deliberately long"
+    assert (
+        estimate_tokens(
+            {
+                "tool_call_id": result.tool_call_id,
+                "tool_name": result.tool_name,
+                "content": result.content,
+                "is_error": result.is_error,
+                "truncated": result.truncated,
+            }
+        )
+        <= 35
+    )
 
 
 def test_targeted_tool_result_returns_none_for_an_unknown_call() -> None:
