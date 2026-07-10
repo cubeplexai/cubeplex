@@ -159,6 +159,10 @@ class DiscordConnector:
         if not self._mentions_bot(message):
             return None
 
+        # Guild channel / thread names are on the object; free for Topic titles.
+        raw_name = getattr(channel, "name", None)
+        channel_name = str(raw_name).strip() if raw_name else None
+
         if is_thread:
             thread_id = str(channel.id)
             if binding_mode == "shared":
@@ -178,6 +182,7 @@ class DiscordConnector:
                 sender_open_id=sender_ref,
                 text=text,
                 attachments=attachments,
+                channel_name=channel_name,
             )
 
         if binding_mode == "shared":
@@ -197,6 +202,7 @@ class DiscordConnector:
             sender_open_id=sender_ref,
             text=text,
             attachments=attachments,
+            channel_name=channel_name,
         )
 
     def _mentions_bot(self, message: Any) -> bool:
