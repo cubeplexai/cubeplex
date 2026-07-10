@@ -44,6 +44,46 @@ cd backend && git diff --check
 Results: Ruff reported `All checks passed!`; mypy reported `Success: no issues
 found in 1 source file`; `git diff --check` produced no output.
 
+## Final review follow-up: full payload accounting and structured arguments
+
+Addressed the final two P1 findings.
+
+- Targeted tool-result estimates now include every returned field, including
+  `estimated_tokens`. The formatter iterates the cheap JSON estimate until it
+  reaches a stable value, and uses that full payload during truncation.
+- When a normal page is still oversized after string compaction, tool-call
+  arguments now compact regardless of value type. Large numeric lists and
+  nested boolean objects are dropped while direct sensitive keys remain
+  `[REDACTED]`; call ID, name, and resolved status remain intact.
+- Regression tests reconstruct the complete targeted result payload and cover
+  a normal turn with both a 1,000-item numeric list and 500 nested booleans.
+  They also assert ordinary reads do not expose tool-result bodies.
+
+### Final follow-up TDD and verification evidence
+
+The new regressions were run before the implementation:
+
+```bash
+cd backend && uv run pytest tests/unit/services/conversation_search/test_history.py --no-cov 2>&1 | tee tmp/history-format-final-budget-red.log | tail -30
+```
+
+Result: `2 failed, 4 passed`. The failures were the expected full targeted
+payload estimate (`41 <= 35` was false) and an oversized normal-page result
+from the numeric/nested-boolean arguments.
+
+After the minimal formatter changes:
+
+```bash
+cd backend && uv run pytest tests/unit/services/conversation_search/test_history.py --no-cov 2>&1 | tee tmp/history-format-final-budget-green.log | tail -12
+cd backend && uv run ruff check cubebox/services/conversation_search/history.py tests/unit/services/conversation_search/test_history.py
+cd backend && uv run mypy cubebox/services/conversation_search/history.py
+git diff --check
+```
+
+Results: `6 passed in 0.06s`; Ruff reported `All checks passed!`; mypy
+reported `Success: no issues found in 1 source file`; `git diff --check`
+produced no output.
+
 ## Changed files
 
 - `backend/cubebox/services/conversation_search/history.py`

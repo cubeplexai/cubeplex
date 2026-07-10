@@ -94,6 +94,49 @@ def test_history_page_bounds_large_non_sensitive_tool_call_arguments() -> None:
     assert arguments["query"] != "x" * 1_000
 
 
+def test_history_page_bounds_non_string_tool_call_arguments() -> None:
+    messages = [
+        {
+            "seq": 1,
+            "role": "user",
+            "content": [{"type": "text", "text": "Find records"}],
+        },
+        {
+            "seq": 2,
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "tool_call",
+                    "id": "call-non-string-arguments",
+                    "name": "search",
+                    "arguments": {
+                        "record_ids": list(range(1_000)),
+                        "filters": {f"enabled_{index}": index % 2 == 0 for index in range(500)},
+                        "api_key": "private",
+                    },
+                }
+            ],
+        },
+        {
+            "seq": 3,
+            "role": "tool_result",
+            "tool_call_id": "call-non-string-arguments",
+            "content": [{"type": "text", "text": "never include this result body"}],
+        },
+    ]
+
+    page = format_history_turns(messages, n=1, max_tokens=100, before_seq=None)
+
+    call = page.turns[0]["tool_calls"][0]
+    assert page.truncated is True
+    assert page.estimated_tokens <= 100
+    assert call["tool_call_id"] == "call-non-string-arguments"
+    assert call["name"] == "search"
+    assert call["status"] == "completed"
+    assert call["arguments"]["api_key"] == "[REDACTED]"
+    assert "never include this result body" not in str(page.turns)
+
+
 def test_targeted_tool_result_obeys_its_token_budget() -> None:
     result = format_tool_result(MESSAGES, tool_call_id="call-1", max_tokens=35)
 
@@ -107,6 +150,7 @@ def test_targeted_tool_result_obeys_its_token_budget() -> None:
                 "tool_name": result.tool_name,
                 "content": result.content,
                 "is_error": result.is_error,
+                "estimated_tokens": result.estimated_tokens,
                 "truncated": result.truncated,
             }
         )
