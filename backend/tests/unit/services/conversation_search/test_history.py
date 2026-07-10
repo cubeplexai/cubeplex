@@ -1,5 +1,7 @@
 """Tests for the agent-facing historical conversation formatter."""
 
+import pytest
+
 from cubebox.services.conversation_search.history import (
     estimate_tokens,
     format_history_turns,
@@ -56,9 +58,21 @@ def test_history_page_returns_complete_recent_turns_without_result_bodies() -> N
 
 
 def test_history_page_uses_complete_turns_before_truncating_one_oversized_turn() -> None:
-    page = format_history_turns(MESSAGES, n=5, max_tokens=12, before_seq=None)
+    messages = [
+        {
+            **message,
+            "content": [
+                {**block, "text": block["text"] * 100} if block.get("type") == "text" else block
+                for block in message.get("content", [])
+            ],
+        }
+        for message in MESSAGES
+    ]
 
-    assert [turn["user"]["text"] for turn in page.turns] == ["newer"]
+    page = format_history_turns(messages, n=5, max_tokens=256, before_seq=None)
+
+    assert len(page.turns) == 1
+    assert page.turns[0]["user"]["text"].startswith("newer")
     assert page.truncated is True
     assert page.next_before_seq == 3
     assert page.has_more is True
@@ -85,11 +99,11 @@ def test_history_page_bounds_large_non_sensitive_tool_call_arguments() -> None:
         },
     ]
 
-    page = format_history_turns(messages, n=1, max_tokens=100, before_seq=None)
+    page = format_history_turns(messages, n=1, max_tokens=256, before_seq=None)
 
     arguments = page.turns[0]["tool_calls"][0]["arguments"]
     assert page.truncated is True
-    assert page.estimated_tokens <= 100
+    assert page.estimated_tokens <= 256
     assert arguments["api_key"] == "[REDACTED]"
     assert arguments["query"] != "x" * 1_000
 
@@ -125,11 +139,11 @@ def test_history_page_bounds_non_string_tool_call_arguments() -> None:
         },
     ]
 
-    page = format_history_turns(messages, n=1, max_tokens=100, before_seq=None)
+    page = format_history_turns(messages, n=1, max_tokens=256, before_seq=None)
 
     call = page.turns[0]["tool_calls"][0]
     assert page.truncated is True
-    assert page.estimated_tokens <= 100
+    assert page.estimated_tokens <= 256
     assert call["tool_call_id"] == "call-non-string-arguments"
     assert call["name"] == "search"
     assert call["status"] == "completed"
@@ -137,8 +151,23 @@ def test_history_page_bounds_non_string_tool_call_arguments() -> None:
     assert "never include this result body" not in str(page.turns)
 
 
-def test_targeted_tool_result_obeys_its_token_budget() -> None:
-    result = format_tool_result(MESSAGES, tool_call_id="call-1", max_tokens=35)
+def test_formatters_reject_budgets_below_the_capability_minimum() -> None:
+    with pytest.raises(ValueError, match="at least 256"):
+        format_history_turns(MESSAGES, n=1, max_tokens=255, before_seq=None)
+
+    with pytest.raises(ValueError, match="at least 256"):
+        format_tool_result(MESSAGES, tool_call_id="call-1", max_tokens=255)
+
+
+def test_targeted_tool_result_obeys_the_minimum_token_budget_including_metadata() -> None:
+    messages = [
+        {
+            **MESSAGES[-1],
+            "content": [{"type": "text", "text": "tool result body " * 1_000}],
+        }
+    ]
+
+    result = format_tool_result(messages, tool_call_id="call-1", max_tokens=256)
 
     assert result is not None
     assert result.tool_call_id == "call-1"
@@ -154,9 +183,9 @@ def test_targeted_tool_result_obeys_its_token_budget() -> None:
                 "truncated": result.truncated,
             }
         )
-        <= 35
+        <= 256
     )
 
 
 def test_targeted_tool_result_returns_none_for_an_unknown_call() -> None:
-    assert format_tool_result(MESSAGES, tool_call_id="missing", max_tokens=100) is None
+    assert format_tool_result(MESSAGES, tool_call_id="missing", max_tokens=256) is None

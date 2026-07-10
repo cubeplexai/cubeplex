@@ -89,6 +89,29 @@ produced no output.
 - `backend/cubebox/services/conversation_search/history.py`
 - `backend/tests/unit/services/conversation_search/test_history.py`
 
+## Review follow-up: minimum formatter budget
+
+The capability input models require `max_tokens >= 256`; the pure formatter now
+enforces the same lower bound with a clear `ValueError`. Both formatter
+docstrings reference the shared `MIN_HISTORY_MAX_TOKENS` constant. Regression
+coverage proves that `255` is rejected by both functions and that a targeted
+tool-result response at `256` remains bounded when its full serialized
+metadata is included in the estimate.
+
+### Minimum-budget verification evidence
+
+```bash
+cd backend && uv run pytest tests/unit/services/conversation_search/test_history.py --no-cov
+cd backend && uv run ruff check cubebox/services/conversation_search/history.py tests/unit/services/conversation_search/test_history.py
+cd backend && uv run ruff format --check cubebox/services/conversation_search/history.py tests/unit/services/conversation_search/test_history.py
+cd backend && uv run mypy cubebox/services/conversation_search/history.py
+git diff --check
+```
+
+Results: `7 passed`; Ruff checks and format check passed; mypy reported
+`Success: no issues found in 1 source file`; `git diff --check` produced no
+output.
+
 ## Review notes and concerns
 
 No unresolved concerns. The token calculation deliberately uses the approved
