@@ -57,8 +57,10 @@ class TestTitleAndAttributes:
     def test_group_title_is_channel_name(self) -> None:
         assert im_topic_title(scope_kind="channel", bot_name="MyBot", channel_name="Team") == "Team"
 
-    def test_group_title_falls_back_when_no_channel_name(self) -> None:
-        assert im_topic_title(scope_kind="channel", bot_name="MyBot", channel_name=None) == "群聊"
+    def test_group_title_empty_when_no_channel_name(self) -> None:
+        # Empty string — UI localizes via t('newGroupChat'); do not bake a
+        # locale-specific phrase into the stored title.
+        assert im_topic_title(scope_kind="channel", bot_name="MyBot", channel_name=None) == ""
 
     def test_bot_display_name_default(self) -> None:
         assert bot_display_name(None) == "cubebox"

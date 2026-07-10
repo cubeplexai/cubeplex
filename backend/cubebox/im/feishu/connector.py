@@ -464,7 +464,7 @@ class FeishuConnector:
 
         Requires one of: ``im:chat:readonly`` / ``im:chat:read`` / ``im:chat``.
         Without the scope Feishu returns a non-zero code — we log and return
-        None so topic creation falls back to the generic ``群聊`` label rather
+        None so topic creation keeps an empty title (UI localizes) rather
         than failing the whole inbound.
 
         Docs: https://open.feishu.cn/document/server-docs/group/chat/get-2

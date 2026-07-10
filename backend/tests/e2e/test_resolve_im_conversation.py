@@ -178,9 +178,9 @@ async def test_shared_creates_topic_and_link(
         topic = (
             await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
         ).scalar_one()
-        # Without a platform-supplied channel_name, group title falls back to
-        # the generic "群聊" label (never the opaque channel id).
-        assert topic.title == "群聊"
+        # Without a platform-supplied channel_name, title stays empty so the
+        # UI can localize (never the opaque channel id, never a frozen phrase).
+        assert topic.title == ""
         assert topic.attributes.get("im", {}).get("channel_name") is None
         assert topic.creator_user_id == _USER  # acting user owns shared topics
         assert topic.attributes.get("im", {}).get("account_id") == _ACCOUNT
@@ -265,7 +265,7 @@ async def test_shared_topic_refreshes_legacy_channel_id_title(
             effective_user_id=_USER,
             title_hint="first",
             origin="inbound",
-            # no channel_name → title "群聊"
+            # no channel_name → empty title (UI localizes)
         )
         await session.commit()
         topic_id = r1.topic_id

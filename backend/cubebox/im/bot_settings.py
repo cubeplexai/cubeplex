@@ -76,8 +76,13 @@ def bot_display_name(config: dict[str, Any] | None) -> str:
 
 
 def im_topic_title(*, scope_kind: str, bot_name: str, channel_name: str | None) -> str:
-    """Topic title: bot name for a DM, channel name for a group."""
-    title = bot_name if scope_kind == "dm" else (channel_name or "群聊")
+    """Topic title: bot name for a DM, channel name for a group.
+
+    When the platform did not supply a group name, return ``""`` rather than a
+    localized phrase. The sidebar already does ``title || t('newGroupChat')``,
+    so an empty title stays i18n-clean and is not frozen in the writer's locale.
+    """
+    title = bot_name if scope_kind == "dm" else (channel_name or "")
     return title[:255]
 
 
