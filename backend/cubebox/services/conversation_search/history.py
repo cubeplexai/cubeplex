@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,33 +46,63 @@ def format_history_turns(
     _validate_max_tokens(max_tokens)
     turns = _build_turns(messages, before_seq=before_seq)
     if n <= 0:
-        return FormattedHistoryPage([], bool(turns), _first_seq(turns), 0, False)
+        has_more = bool(turns)
+        next_before_seq = _first_seq(turns)
+        return FormattedHistoryPage(
+            [],
+            has_more,
+            next_before_seq,
+            _estimate_history_page([], has_more, next_before_seq, truncated=False),
+            False,
+        )
 
     selected: list[dict[str, Any]] = []
-    used_tokens = 0
     truncated = False
-    for turn in reversed(turns):
+    for index in range(len(turns) - 1, -1, -1):
         if len(selected) == n:
             break
-        turn_tokens = estimate_tokens(turn)
-        if used_tokens + turn_tokens <= max_tokens:
-            selected.append(turn)
-            used_tokens += turn_tokens
+        turn = turns[index]
+        candidate = [turn, *selected]
+        candidate_has_more = index > 0
+        candidate_next_before_seq = _first_seq(candidate) if candidate_has_more else None
+        if (
+            _estimate_history_page(
+                candidate, candidate_has_more, candidate_next_before_seq, truncated=False
+            )
+            <= max_tokens
+        ):
+            selected = candidate
             continue
         if not selected:
-            bounded_turn = _truncate_turn(turn, max_tokens)
-            selected.append(bounded_turn)
-            used_tokens = estimate_tokens(bounded_turn)
+            has_more = index > 0
+            next_before_seq = _seq(turn) if has_more else None
+
+            def turn_fits(
+                bounded_turn: dict[str, Any],
+                page_has_more: bool = has_more,
+                page_next_before_seq: int | None = next_before_seq,
+            ) -> bool:
+                return (
+                    _estimate_history_page(
+                        [bounded_turn], page_has_more, page_next_before_seq, truncated=True
+                    )
+                    <= max_tokens
+                )
+
+            bounded_turn = _truncate_turn(turn, turn_fits)
+            selected = [bounded_turn]
             truncated = True
         break
 
-    selected.reverse()
     has_more = len(selected) < len(turns)
+    next_before_seq = _first_seq(selected) if has_more else None
     return FormattedHistoryPage(
         turns=selected,
         has_more=has_more,
-        next_before_seq=_first_seq(selected) if has_more else None,
-        estimated_tokens=used_tokens,
+        next_before_seq=next_before_seq,
+        estimated_tokens=_estimate_history_page(
+            selected, has_more, next_before_seq, truncated=truncated
+        ),
         truncated=truncated,
     )
 
@@ -143,6 +174,7 @@ def _build_turns(messages: list[dict[str, Any]], *, before_seq: int | None) -> l
                 "user": {"text": _message_text(message)},
                 "assistant": {"text": ""},
                 "tool_calls": [],
+                "tool_calls_omitted": 0,
             }
             turns.append(current)
             continue
@@ -179,6 +211,40 @@ def _seq(message: dict[str, Any]) -> int:
 
 def _first_seq(turns: list[dict[str, Any]]) -> int | None:
     return turns[0]["seq"] if turns else None
+
+
+def _history_page_payload(
+    turns: list[dict[str, Any]],
+    has_more: bool,
+    next_before_seq: int | None,
+    estimated_tokens: int,
+    truncated: bool,
+) -> dict[str, object]:
+    return {
+        "turns": turns,
+        "has_more": has_more,
+        "next_before_seq": next_before_seq,
+        "estimated_tokens": estimated_tokens,
+        "truncated": truncated,
+    }
+
+
+def _estimate_history_page(
+    turns: list[dict[str, Any]],
+    has_more: bool,
+    next_before_seq: int | None,
+    *,
+    truncated: bool,
+) -> int:
+    estimated_tokens = 0
+    for _ in range(3):
+        next_estimate = estimate_tokens(
+            _history_page_payload(turns, has_more, next_before_seq, estimated_tokens, truncated)
+        )
+        if next_estimate == estimated_tokens:
+            return next_estimate
+        estimated_tokens = next_estimate
+    return estimated_tokens
 
 
 def _message_text(message: dict[str, Any]) -> str:
@@ -240,7 +306,7 @@ def _redact_arguments(value: object) -> object:
     return value
 
 
-def _truncate_turn(turn: dict[str, Any], max_tokens: int) -> dict[str, Any]:
+def _truncate_turn(turn: dict[str, Any], fits: Callable[[dict[str, Any]], bool]) -> dict[str, Any]:
     bounded = copy.deepcopy(turn)
     fields = [
         (bounded["user"], turn["user"]["text"], "text"),
@@ -249,19 +315,14 @@ def _truncate_turn(turn: dict[str, Any], max_tokens: int) -> dict[str, Any]:
     ]
     for container, _, key in fields:
         container[key] = ""
-    if estimate_tokens(bounded) > max_tokens:
+    if not fits(bounded):
         for call in bounded["tool_calls"]:
             call["arguments"] = _compact_arguments(call["arguments"])
-        if estimate_tokens(bounded) > max_tokens:
-            bounded["user"]["text"] = _truncate_text(turn["user"]["text"], max_tokens // 2)
-            bounded["assistant"]["text"] = _truncate_text(
-                turn["assistant"]["text"], max_tokens // 2
-            )
-            return bounded
+    while bounded["tool_calls"] and not fits(bounded):
+        bounded["tool_calls"].pop()
+        bounded["tool_calls_omitted"] += 1
     for container, source, key in fields:
-        container[key] = _longest_prefix_that_fits(
-            container, key, source, max_tokens, lambda: estimate_tokens(bounded)
-        )
+        container[key] = _longest_prefix_that_fits(container, key, source, lambda: fits(bounded))
     return bounded
 
 
@@ -306,7 +367,7 @@ def _string_fields(bounded_value: object, source_value: object) -> list[tuple[An
 
 
 def _longest_prefix_that_fits(
-    container: Any, key: str | int, text: str, max_tokens: int, estimate: Any
+    container: Any, key: str | int, text: str, fits: Callable[[], bool]
 ) -> str:
     lower = 0
     upper = len(text)
@@ -314,7 +375,7 @@ def _longest_prefix_that_fits(
         middle = (lower + upper + 1) // 2
         candidate = text[:middle]
         container[key] = candidate
-        if estimate() <= max_tokens:
+        if fits():
             lower = middle
         else:
             upper = middle - 1

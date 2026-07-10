@@ -53,11 +53,18 @@ tool calls (`tool_call_id`, name, and redacted/compact arguments). It does not
 embed tool-result bodies. It identifies whether each tool call completed or
 errored when that can be resolved from the stored messages.
 
+When one oversized turn contains more tool calls than fit, the turn retains a
+usable prefix of calls and includes `tool_calls_omitted` with the number not
+returned. Only IDs returned in that prefix can be passed to the targeted
+tool-result operation. Re-read the same turn with a larger `max_tokens` budget
+to expose more calls; normal history reads never include tool-result bodies.
+
 The formatter estimates output tokens and includes complete turns while within
 `max_tokens`. If one individual turn exceeds the budget, its textual content is
-truncated and marked as such. The response includes `has_more`,
-`next_before_seq`, `estimated_tokens`, and `truncated` so the agent can decide
-whether to page or fetch a more targeted result.
+truncated and marked as such. Its budget includes the full response envelope,
+not only the turn list. The response includes `has_more`, `next_before_seq`,
+`estimated_tokens`, and `truncated` so the agent can decide whether to page or
+fetch a more targeted result.
 
 ### `conversation_history_tool_result`
 
