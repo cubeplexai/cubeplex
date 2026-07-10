@@ -139,7 +139,7 @@ export function MCPCustomCreatePanel({
         </p>
       </header>
 
-      <form className="flex flex-col gap-4" onSubmit={(e) => void handleSubmit(e)}>
+      <form className="flex flex-col gap-4" autoComplete="off" onSubmit={(e) => void handleSubmit(e)}>
         <Card>
           <CardHeader>
             <CardTitle>{t('customSectionServer')}</CardTitle>
@@ -149,9 +149,14 @@ export function MCPCustomCreatePanel({
               <Label htmlFor="custom-name">{t('customFieldName')}</Label>
               <Input
                 id="custom-name"
+                name="mcp-connector-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={t('customFieldNamePlaceholder')}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 required
               />
             </div>
@@ -161,9 +166,14 @@ export function MCPCustomCreatePanel({
               <Input
                 id="custom-url"
                 type="url"
+                name="mcp-connector-server-url"
                 value={serverUrl}
                 onChange={(e) => setServerUrl(e.target.value)}
                 placeholder="https://example.com/mcp"
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 required
               />
             </div>
@@ -245,6 +255,11 @@ export function MCPCustomCreatePanel({
                       type={revealSecret ? 'text' : 'password'}
                       value={credentialPlaintext}
                       onChange={(e) => setCredentialPlaintext(e.target.value)}
+                      name="mcp-credential-plaintext"
+                      autoComplete="new-password"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
                       required
                     />
                     <button

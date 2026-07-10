@@ -105,9 +105,14 @@ export function StepDingtalkCredentials({
         <Input
           id="cred-app_secret"
           type="password"
+          name="dingtalk-app-secret"
           required
           value={appSecret}
           onChange={(e) => onChange({ app_secret: e.target.value })}
+          autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
         />
       </div>
 

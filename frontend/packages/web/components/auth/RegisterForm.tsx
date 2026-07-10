@@ -93,9 +93,13 @@ export function RegisterForm({ nextPath = '/' }: { nextPath?: string }) {
         <span className="text-sm text-foreground/80">{t('password')}</span>
         <input
           type="password"
+          name="register-password"
           required
           minLength={8}
           autoComplete="new-password"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

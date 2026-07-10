@@ -173,9 +173,14 @@ export function TriggerForm({ wsId, open, onOpenChange, onCreated, onSubmit }: T
               <Input
                 id="trigger-secret"
                 type="password"
+                name="trigger-webhook-secret"
                 value={webhookSecret}
                 onChange={(e) => setWebhookSecret(e.target.value)}
                 placeholder={t('fieldWebhookSecretPlaceholder')}
+                autoComplete="new-password"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
                 data-testid="trigger-secret-input"
               />
               <p className="text-xs text-muted-foreground">{t('fieldWebhookSecretHint')}</p>

@@ -316,9 +316,14 @@ export function ProviderConfigForm({
           <Input
             id="pcf-api-key"
             type="password"
+            name="provider-api-key"
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder={isCreate ? 'sk-…' : t('apiKeyEditHint')}
+            autoComplete="new-password"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
           <span className="text-[11px] text-muted-foreground">
             {isCreate ? tc('apiKeyRequired') : t('apiKeyEditHint')}

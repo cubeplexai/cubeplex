@@ -568,6 +568,11 @@ export function McpPanel({ wsId }: McpPanelProps) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={t('searchPlaceholder')}
+          name="mcp-connector-search"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="max-w-xs"
         />
       </header>

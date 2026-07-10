@@ -69,6 +69,11 @@ export function MasterDetailList<T extends { name?: string; description?: string
           onChange={(e) => setQuery(e.target.value)}
           placeholder={searchPlaceholder}
           aria-label={searchPlaceholder}
+          name="mcp-detail-search"
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
           className="h-9 pl-7 text-sm"
         />
       </div>
