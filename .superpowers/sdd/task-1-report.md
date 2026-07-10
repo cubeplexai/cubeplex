@@ -133,10 +133,24 @@ Addressed both Important review findings in the history formatter.
   (`tool_call_id`, `tool_name`, `content`, `is_error`, and `truncated`) rather
   than the result content alone. The content is shortened by a bounded search
   until that full payload fits the requested budget whenever the metadata
-  itself fits.
+itself fits.
 - Added regression coverage for a 1,000-character non-sensitive call argument
   (while preserving API-key redaction) and for a tool result whose content fits
   alone but whose complete response needs truncation.
+
+## Final P1 follow-up: oversized persisted tool metadata
+
+Long persisted tool-call IDs and tool names can no longer consume the entire
+formatter budget. IDs longer than 64 characters are represented as a stable
+`tool_ref_` plus SHA-256 digest; `format_tool_result` accepts either that
+returned reference or the original persisted ID. Long names are bounded to a
+64-character display value. This retains an agent-usable path to the exact
+persisted result while keeping both normal history and targeted-result payloads
+within the 256-token minimum.
+
+The regression uses 10,000-character IDs and names at `max_tokens=256`, checks
+both bounded payload estimates, and fetches the exact result with the returned
+reference.
 
 ### Follow-up test evidence
 
