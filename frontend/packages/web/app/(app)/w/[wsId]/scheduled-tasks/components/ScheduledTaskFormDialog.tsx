@@ -123,18 +123,9 @@ export function ScheduledTaskFormDialog({
     try {
       let result: ScheduledTaskOut
       if (isEdit && task) {
-        const patch: ScheduledTaskPatch = {
-          name: name.trim(),
-          prompt: prompt.trim(),
-          ...scheduleFields,
-        }
-        // topic_id still patchable when staying on new_each_run (legacy path);
-        // full mode switches go through retarget below.
-        if (task.target_mode === 'new_each_run' && targetMode === 'new_each_run') {
-          patch.topic_id = topicId
-        }
-        result = await patchScheduledTask(client, task.id, patch)
-
+        // Destination first: im_channel retarget is the failure-prone call (422
+        // when no IMThreadLink). Doing it before PATCH avoids persisting
+        // prompt/schedule changes while reporting a failed save.
         if (destinationChanged(task, targetMode, targetConversationId, topicId)) {
           const body: ScheduledTaskRetarget = { target_mode: targetMode }
           if (targetMode === 'fixed') {
@@ -156,7 +147,21 @@ export function ScheduledTaskFormDialog({
             }
           }
           result = await retargetScheduledTaskDestination(client, task.id, body)
+        } else {
+          result = task
         }
+
+        const patch: ScheduledTaskPatch = {
+          name: name.trim(),
+          prompt: prompt.trim(),
+          ...scheduleFields,
+        }
+        // topic_id still patchable when staying on new_each_run (legacy path);
+        // full mode switches already applied via retarget above.
+        if (task.target_mode === 'new_each_run' && targetMode === 'new_each_run') {
+          patch.topic_id = topicId
+        }
+        result = await patchScheduledTask(client, task.id, patch)
       } else {
         if (targetMode === 'im_channel') {
           setError(t('targetImChannelCreateOnlyFromIm'))
