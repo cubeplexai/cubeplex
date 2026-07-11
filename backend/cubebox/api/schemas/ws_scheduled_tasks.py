@@ -131,6 +131,46 @@ class ScheduledTaskPatch(BaseModel):
         return self
 
 
+class ScheduledTaskRetarget(BaseModel):
+    """Whole-package destination replacement (not a partial PATCH).
+
+    ``im_channel`` does not accept free-form im_* fields — the server
+    resolves them from ``anchor_conversation_id`` and/or the task's current
+    conversation/topic ``IMThreadLink``. If no binding is found, the request
+    fails with 422.
+    """
+
+    target_mode: TargetMode
+    target_conversation_id: str | None = None
+    topic_id: str | None = None
+    # Optional explicit anchor when retargeting to im_channel (e.g. the
+    # conversation the user is editing from). Falls back to the task's
+    # existing fixed conversation or topic link.
+    anchor_conversation_id: str | None = None
+
+    @model_validator(mode="after")
+    def _check(self) -> ScheduledTaskRetarget:
+        if self.target_mode == "fixed" and not self.target_conversation_id:
+            raise ValueError("target_conversation_id is required when target_mode='fixed'")
+        if self.target_mode == "im_channel":
+            # im_* are resolved server-side; client must not send them.
+            return self
+        # Shape-check fixed / new_each_run the same way as create (im empty).
+        try:
+            ScheduleTargetSpec(
+                target_mode=self.target_mode,
+                target_conversation_id=self.target_conversation_id,
+                topic_id=self.topic_id if self.target_mode == "new_each_run" else None,
+                im_account_id=None,
+                im_channel_id=None,
+                im_scope_key=None,
+                im_scope_kind=None,
+            ).validate()
+        except ScheduleTargetError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
+
 class ScheduledTaskOut(BaseModel):
     id: str
     name: str

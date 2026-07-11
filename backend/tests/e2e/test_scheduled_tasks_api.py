@@ -389,19 +389,18 @@ def _create_topic(client: TestClient, title: str = "tpc") -> str:
 
 
 class TestScheduledTaskDestinations:
-    """target_mode is immutable after create — destination fields lock with it.
+    """Partial destination PATCH is rejected; whole-package retarget is allowed.
 
     The PATCH route gates target_mode / target_conversation_id / im_* via
-    `body.model_fields_set` so an explicit `null` value is rejected just as
-    a non-null one would be. Sending any of these requires deleting and
-    recreating the schedule.
+    `body.model_fields_set`. Destination changes go through
+    PUT .../destination instead.
     """
 
     def test_patch_rejects_target_mode_change(self, client: TestClient) -> None:
         tid = _make(client).json()["id"]  # new_each_run by default
         r = client.patch(f"{BASE}/{tid}", json={"target_mode": "im_channel"})
         assert r.status_code == 422
-        assert "target_mode" in r.text.lower()
+        assert "target_mode" in r.text.lower() or "destination" in r.text.lower()
 
     def test_patch_rejects_target_conversation_id_change(self, client: TestClient) -> None:
         tid = _make(client).json()["id"]
@@ -437,6 +436,53 @@ class TestScheduledTaskDestinations:
         tid_fixed = _make(client, target_mode="fixed", target_conversation_id=conv).json()["id"]
         r = client.patch(f"{BASE}/{tid_fixed}", json={"topic_id": topic})
         assert r.status_code == 422
+
+    def test_retarget_fixed_to_new_each_run(self, client: TestClient) -> None:
+        conv = client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",
+            params={"title": "retarget-src"},
+        ).json()["id"]
+        tid = _make(client, target_mode="fixed", target_conversation_id=conv).json()["id"]
+        topic = _create_topic(client, "retarget-topic")
+        r = client.put(
+            f"{BASE}/{tid}/destination",
+            json={"target_mode": "new_each_run", "topic_id": topic},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["target_mode"] == "new_each_run"
+        assert body["topic_id"] == topic
+        assert body["target_conversation_id"] is None
+        assert body["im_account_id"] is None
+
+    def test_retarget_to_im_channel_without_binding_fails(self, client: TestClient) -> None:
+        conv = client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",
+            params={"title": "no-im"},
+        ).json()["id"]
+        tid = _make(client, target_mode="fixed", target_conversation_id=conv).json()["id"]
+        r = client.put(
+            f"{BASE}/{tid}/destination",
+            json={"target_mode": "im_channel", "anchor_conversation_id": conv},
+        )
+        assert r.status_code == 422, r.text
+        assert "im" in r.text.lower() or "binding" in r.text.lower()
+
+    def test_retarget_new_each_run_to_fixed(self, client: TestClient) -> None:
+        tid = _make(client).json()["id"]
+        conv = client.post(
+            f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",
+            params={"title": "retarget-fixed"},
+        ).json()["id"]
+        r = client.put(
+            f"{BASE}/{tid}/destination",
+            json={"target_mode": "fixed", "target_conversation_id": conv},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["target_mode"] == "fixed"
+        assert body["target_conversation_id"] == conv
+        assert body["topic_id"] is None
 
     def test_create_with_topic_id_round_trips(self, client: TestClient) -> None:
         topic = _create_topic(client, "rt-create")
