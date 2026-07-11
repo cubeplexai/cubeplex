@@ -27,5 +27,3 @@ identification only. See [theSVG legal](https://thesvg.org/legal).
 
 When adding a catalog connector, look up the brand on https://thesvg.org, drop
 `{icon}.svg` here matching `template_metadata.icon`, and update this table.
-
-> **Google Workspace path note:** `icons/google-workspace/default.svg` is not published. Use `google-workspace-editors` (square mark) or `google-workspace-2026` (wide wordmark). CDN: `https://cdn.jsdelivr.net/gh/glincker/thesvg@main/public/icons/{slug}/{variant}.svg`.
