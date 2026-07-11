@@ -130,6 +130,7 @@ class DingtalkGateway:
             await self._handle_link_command(raw)
             return
 
+        from cubebox.im.reset_command import parse_reset_command
         from cubebox.im.types import lookup_binding_mode
 
         channel_id = raw.get("conversationId", "")
@@ -138,6 +139,10 @@ class DingtalkGateway:
         if parsed is None:
             return
         parsed.account_external_id = account.external_account_id
+
+        if parse_reset_command(parsed.text):
+            await self._handle_reset_command(parsed, account, session_maker)
+            return
 
         is_dm = parsed.scope_kind == "dm"
         gate_connector = DingtalkConnector(
@@ -167,6 +172,55 @@ class DingtalkGateway:
                 parsed.platform_event_id,
             )
 
+    def _reply_connector(
+        self, *, conversation_id: str, sender_staff_id: str, is_dm: bool
+    ) -> DingtalkConnector:
+        return DingtalkConnector(
+            bot_user_id=self._app_key,
+            access_token=self._access_token,
+            conversation_id=conversation_id,
+            sender_staff_id=sender_staff_id,
+            is_dm=is_dm,
+            http_client=self._shared_http,
+        )
+
+    async def _handle_reset_command(
+        self,
+        event: Any,
+        account: Any,
+        session_maker: Any,
+    ) -> None:
+        """Handle /new or /reset by rotating the IM conversation binding."""
+        from cubebox.im.reset_command import apply_reset_command, format_reset_reply
+
+        channel_id = event.channel_id or ""
+        scope_key = event.scope_key or ""
+        sender_staff_id = event.sender_ref or ""
+        if not channel_id or not scope_key or not sender_staff_id:
+            return
+
+        try:
+            outcome = await apply_reset_command(
+                session_maker=session_maker,
+                account_id=account.id,
+                channel_id=channel_id,
+                scope_key=scope_key,
+            )
+        except Exception:
+            logger.exception("[DingTalk] /new handler failed for {}", event.platform_event_id)
+            return
+
+        is_dm = event.scope_kind == "dm"
+        await self._reply_connector(
+            conversation_id=channel_id,
+            sender_staff_id=sender_staff_id,
+            is_dm=is_dm,
+        ).reply_markdown(
+            title="New conversation",
+            text=format_reset_reply(outcome),
+            open_conversation_id=channel_id,
+        )
+
     async def _handle_link_command(self, raw: dict[str, Any]) -> None:
         """Handle 'link alice@example.com' by sending an identity-link URL."""
         sender_staff_id = raw.get("senderStaffId", "")
@@ -175,20 +229,16 @@ class DingtalkGateway:
         if not sender_staff_id or not conversation_id:
             return
 
-        def _make_reply_connector() -> DingtalkConnector:
-            return DingtalkConnector(
-                bot_user_id=self._app_key,
-                access_token=self._access_token,
-                conversation_id=conversation_id,
-                sender_staff_id=sender_staff_id,
-                is_dm=is_dm,
-                http_client=self._shared_http,
-            )
+        reply = self._reply_connector(
+            conversation_id=conversation_id,
+            sender_staff_id=sender_staff_id,
+            is_dm=is_dm,
+        )
 
         connector = DingtalkConnector(bot_user_id=self._app_key)
         email = connector.parse_link_email(raw)
         if not email:
-            await _make_reply_connector().reply_markdown(
+            await reply.reply_markdown(
                 title="Link",
                 text="Usage: `link alice@example.com`",
                 open_conversation_id=conversation_id,
@@ -213,7 +263,7 @@ class DingtalkGateway:
         base = get_frontend_base_url()
         url = f"{base}/im-link?token={token}"
 
-        await _make_reply_connector().reply_markdown(
+        await reply.reply_markdown(
             title="Link your account",
             text=f"Click to bind your cubebox account:\n\n[Link your account]({url})",
             open_conversation_id=conversation_id,

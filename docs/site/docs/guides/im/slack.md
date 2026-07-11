@@ -124,15 +124,15 @@ Once linked (or auto-resolved), the bot replies in-channel and edits its message
 
 ## Conversation commands
 
-Slack registers **one** native slash command:
+Slack registers these native slash commands (create matching slash commands in the Slack app if you use the slash form; typed messages also work):
 
 | Command | Effect |
 |---|---|
 | `/link <email>` | Link your Slack identity to your CubeBox account (see [Step 8](#step-8--link-your-identity)). Replies privately. |
+| `/new` | Start a fresh conversation; your next message begins a new one. Replies privately for the slash form. |
+| `/reset` | Same as `/new`. |
 
-:::note `/new` and `/reset` are not wired on Slack
-The shared conversation model documents `/new` and `/reset` for starting a fresh conversation, and Feishu and Discord support them. The Slack connector does **not** register or parse `/new` / `/reset` today — only `/link` is wired. To start a clean conversation on Slack, use a new DM or thread, or manage channel bindings from the workspace IM settings.
-:::
+You can also type `/new`, `/reset`, or `新对话` as a normal message (in a channel, @ the bot). That path does not require a Slack slash-command registration.
 
 ## Rotating credentials
 

@@ -93,15 +93,14 @@ Once linked, the bot replies with a live-updating interactive card as the agent 
 
 ## Conversation commands
 
-The DingTalk bot recognizes the link command in any chat it's in:
+The DingTalk bot recognizes these as text messages (in a group, @ the bot first):
 
 | Command | Aliases | Effect |
 |---|---|---|
 | `link <email>` | `/link <email>` | Link your DingTalk identity to your CubeBox account (see [Identity linking](./overview.md#identity-linking)). |
+| `/new` | `/reset`, `新对话` | Start a fresh conversation; your next message begins a new one. |
 
-:::note
-The `/new` and `/reset` "start a fresh conversation" commands are **not** wired up on the DingTalk connector today — they work on Feishu/Lark and Discord but are silently ignored on DingTalk. To start over, message the bot fresh; per-channel conversation behavior follows the [channel binding mode](./overview.md#channel-binding-modes).
-:::
+`/new` and `/reset` are equivalent. Per-channel conversation behavior follows the [channel binding mode](./overview.md#channel-binding-modes).
 
 ## Rotating credentials
 

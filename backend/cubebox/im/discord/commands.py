@@ -32,8 +32,9 @@ async def register_commands(bot: commands.Bot) -> None:
 
 
 async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bot) -> None:
-    """Delete the IMThreadLink for the current channel/scope so the next
-    message starts a fresh conversation."""
+    """Delete/rotate the IMThreadLink for the current channel/scope so the
+    next message starts a fresh conversation."""
+    from cubebox.im.reset_command import apply_reset_command, format_reset_reply
     from cubebox.im.types import (
         DM_SCOPE_KEY,
         make_participant_scope,
@@ -59,8 +60,6 @@ async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bo
     else:
         scope_key = make_participant_scope(sender_ref)
 
-    from cubebox.im.conversation_resolver import reset_im_conversation
-
     session_maker = getattr(bot, "_cubebox_session_maker", None)
     account_id = getattr(bot, "_cubebox_account_id", None)
     if session_maker is None or account_id is None:
@@ -70,18 +69,13 @@ async def _reset_conversation(interaction: discord.Interaction, bot: commands.Bo
     # Route through the mode-aware reset so topic-mode accounts rotate the
     # conversation under the same durable Topic instead of dropping the anchor
     # (which would spawn a second Topic on the next message).
-    async with session_maker() as session:
-        outcome = await reset_im_conversation(
-            session, account_id=account_id, channel_id=channel_id, scope_key=scope_key
-        )
-        await session.commit()
-
-    msg = (
-        "ℹ️ 当前还没有进行中的会话，直接发送消息即可开始新对话。"
-        if outcome == "none"
-        else "✅ 新对话已开始。"
+    outcome = await apply_reset_command(
+        session_maker=session_maker,
+        account_id=account_id,
+        channel_id=channel_id,
+        scope_key=scope_key,
     )
-    await interaction.response.send_message(msg, ephemeral=True)
+    await interaction.response.send_message(format_reset_reply(outcome), ephemeral=True)
 
 
 async def _initiate_link(
