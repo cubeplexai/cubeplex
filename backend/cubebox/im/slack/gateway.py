@@ -127,6 +127,33 @@ class SlackGateway:
             return
         parsed.account_external_id = account.external_account_id
 
+        from cubebox.im.reset_command import (
+            apply_reset_command,
+            format_reset_reply,
+            parse_reset_command,
+        )
+
+        if parse_reset_command(parsed.text):
+            try:
+                outcome = await apply_reset_command(
+                    session_maker=session_maker,
+                    account_id=account.id,
+                    channel_id=parsed.channel_id,
+                    scope_key=parsed.scope_key,
+                )
+                gate = SlackConnector(
+                    bot_user_id=bot_user_id,
+                    client=self._client,
+                    channel_id=parsed.channel_id,
+                    thread_ts=parsed.reply_to_id,
+                )
+                await gate.send_to_chat(
+                    parsed.channel_id, parsed.reply_to_id, format_reset_reply(outcome)
+                )
+            except Exception:
+                logger.exception("[Slack] /new handler failed for {}", parsed.platform_event_id)
+            return
+
         gate_connector = SlackConnector(
             bot_user_id=bot_user_id,
             client=self._client,

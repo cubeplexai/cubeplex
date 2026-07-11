@@ -128,8 +128,10 @@ Once linked, your messages run as that user, with the same skills, memory, and t
 |---|---|
 | `/link <email>` | Link your Teams identity to your CubeBox account. |
 | `/new` | Start a fresh conversation; your next message begins a new one. |
+| `/reset` | Same as `/new`. |
+| `新对话` | Same as `/new` (text form). |
 
-`/reset` is an alias for `/new`. (The Chinese `绑定` / `新对话` aliases documented for Feishu are not part of the Teams reply flow.)
+`/new`, `/reset`, and `新对话` are equivalent. (The Chinese `绑定` alias for `/link` is Feishu-only.)
 
 ## How inbound messages are authenticated
 

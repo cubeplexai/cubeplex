@@ -529,6 +529,29 @@ async def teams_messages(
         )
         return Response(status_code=status.HTTP_200_OK)
 
+    from cubebox.im.reset_command import (
+        apply_reset_command,
+        format_reset_reply,
+        parse_reset_command,
+    )
+
+    if parse_reset_command(event.text):
+        channel_id = event.channel_id or ""
+        scope_key = event.scope_key or ""
+        if not channel_id or not scope_key:
+            if gate_connector is not None:
+                await gate_connector.send_to_chat(channel_id, None, "无法确定会话范围。")
+        else:
+            outcome = await apply_reset_command(
+                session_maker=async_session_maker,
+                account_id=account.id,
+                channel_id=channel_id,
+                scope_key=scope_key,
+            )
+            if gate_connector is not None:
+                await gate_connector.send_to_chat(channel_id, None, format_reset_reply(outcome))
+        return Response(status_code=status.HTTP_200_OK)
+
     maker: async_sessionmaker[AsyncSession] = async_session_maker
     result = await ingest_inbound_event(
         event,

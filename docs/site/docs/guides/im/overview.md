@@ -25,8 +25,8 @@ CubeBox ships connector code for five platforms. They are **not** equally mature
 | Platform | Maturity | Delivery mode | Setup guide |
 |---|---|---|---|
 | **Feishu / Lark** | Most developed — interactive streaming cards, message encryption, signature verification, in-place card edits, human-in-the-loop button actions. | Long-connection (default) or webhook | [Feishu / Lark](./feishu.md) |
-| **Slack** | Working connector — in-place message edits, automatic email-based identity resolution, native `/link` slash command. | Gateway (Socket Mode) | [Slack](./slack.md) |
-| **DingTalk** | Working connector — automatic email-based identity resolution. | Stream | [DingTalk](./dingtalk.md) |
+| **Slack** | Working connector — in-place message edits, automatic email-based identity resolution, native `/link` / `/new` / `/reset` slash commands. | Gateway (Socket Mode) | [Slack](./slack.md) |
+| **DingTalk** | Working connector — automatic email-based identity resolution; text `/new` / `/reset` / `link`. | Stream | [DingTalk](./dingtalk.md) |
 | **Microsoft Teams** | Working connector — validates the Azure Bot Framework JWT on each inbound activity; requires a publicly reachable host. | Webhook | [Microsoft Teams](./teams.md) |
 | **Discord** | Working connector — native `/new`, `/reset`, `/link` slash commands. | Gateway | [Discord](./discord.md) |
 
@@ -76,7 +76,7 @@ Command support differs by platform — not every command exists everywhere.
 | Command | Effect | Available on |
 |---|---|---|
 | `/link <email>` | Links your chat identity to your CubeBox account (see [Identity linking](#identity-linking)). | All platforms. Native slash command on Slack and Discord; a text message on Feishu, DingTalk, and Teams. The Chinese alias `绑定 <email>` works on Feishu only. |
-| `/new` (alias `/reset`, `新对话`) | Starts a fresh conversation — drops the current conversation binding for the chat scope you're in, so the bot starts clean on your next message. | **Feishu** (text command) and **Discord** (native slash command) only. Not yet wired up on Slack, DingTalk, or Teams. |
+| `/new` (alias `/reset`, `新对话`) | Starts a fresh conversation — drops the current conversation binding for the chat scope you're in, so the bot starts clean on your next message. | All platforms. Native slash command on Discord and Slack; a text message on Feishu, DingTalk, and Teams (and as a plain `@bot /new` message on Slack). The Chinese alias `新对话` works everywhere the text form is accepted. |
 
 See each platform's setup guide for the exact command form.
 
