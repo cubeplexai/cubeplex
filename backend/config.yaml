@@ -220,6 +220,14 @@ default:
       enabled: "auto"        # "auto" | "on" | "off"
       threshold_pct: 10.0    # collapse when deferrable schemas >= this % of context
       min_servers: 2         # never collapse below this server count
+    # Connector icon materialisation (discovery-time fetch of remote server icons).
+    # Air-gapped deploys can set both to false; catalog brand icons still work via
+    # frontend /mcp-icons/{key}.svg static assets.
+    icons:
+      allow_remote: true       # UI may render https icon.src (frontend also has env)
+      fetch_remote: true       # discovery may outbound-fetch https icons → data: cache
+      fetch_timeout_ms: 2500
+      max_bytes: 262144        # 256 KiB cap per icon
 
   # Object Storage Configuration (S3-compatible)
   objectstore:

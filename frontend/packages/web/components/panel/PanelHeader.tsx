@@ -47,8 +47,16 @@ export function PanelHeader({ source, actions, fullscreen, onClose }: PanelHeade
 
   if (source.kind === 'tool') {
     const displayName = mcpEntry?.bare_name ?? source.toolName
+    const pickSrc = (icons: { src: string; cached_src?: string | null }[]) => {
+      for (const i of icons) {
+        if (i.cached_src) return i.cached_src
+        if (i.src.startsWith('data:image/') || i.src.startsWith('/')) return i.src
+        if (i.src.startsWith('https://') || i.src.startsWith('http://')) return i.src
+      }
+      return null
+    }
     const mcpIconSrc = mcpEntry
-      ? (mcpEntry.tool_icons[0]?.src ?? mcpEntry.server_icons[0]?.src ?? null)
+      ? (pickSrc(mcpEntry.tool_icons) ?? pickSrc(mcpEntry.server_icons))
       : null
     const FallbackIcon = getToolIcon(displayName)
     icon = mcpIconSrc ? (

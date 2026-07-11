@@ -15,6 +15,7 @@ import {
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ConnectorLogo } from '@/components/mcp/ConnectorLogo'
 
 export interface AvailableConnectorRowProps {
   row: WsAvailable
@@ -91,25 +92,34 @@ export function AvailableConnectorRow({
       className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-card/40 p-3"
       data-testid={`ws-available-row-${row.install?.connector_id ?? row.template?.template_id ?? 'unknown'}`}
     >
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold">{name}</span>
-          {provider && provider.toLowerCase() !== name.toLowerCase() ? (
-            <Badge variant="outline" className="text-[10px]">
-              {provider}
-            </Badge>
+      <div className="flex min-w-0 items-start gap-2.5">
+        <ConnectorLogo
+          name={name}
+          icon={row.template?.icon}
+          serverIcons={row.install?.server_icons}
+          size="sm"
+          className="mt-0.5"
+        />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-sm font-semibold">{name}</span>
+            {provider && provider.toLowerCase() !== name.toLowerCase() ? (
+              <Badge variant="outline" className="text-[10px]">
+                {provider}
+              </Badge>
+            ) : null}
+          </div>
+          {description ? (
+            <p className="line-clamp-1 text-xs text-muted-foreground">{description}</p>
           ) : null}
+          {hasSavedOrgCredential ? (
+            <p className="inline-flex items-center gap-1 text-xs text-success-fg">
+              <CheckCircle2 className="size-3" />
+              {t('orgCredentialAvailable')}
+            </p>
+          ) : null}
+          {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </div>
-        {description ? (
-          <p className="line-clamp-1 text-xs text-muted-foreground">{description}</p>
-        ) : null}
-        {hasSavedOrgCredential ? (
-          <p className="inline-flex items-center gap-1 text-xs text-success-fg">
-            <CheckCircle2 className="size-3" />
-            {t('orgCredentialAvailable')}
-          </p>
-        ) : null}
-        {error ? <p className="text-xs text-destructive">{error}</p> : null}
       </div>
       <Button
         type="button"

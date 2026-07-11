@@ -62,6 +62,19 @@ def test_intercom_catalog_declares_authorization_server_metadata_url() -> None:
     )
 
 
+def test_catalog_entries_have_brand_icon_keys() -> None:
+    """Every catalog template ships a stable icon key for frontend static assets."""
+    for entry in CATALOG:
+        icon = entry.template_metadata.get("icon")
+        assert isinstance(icon, str) and icon, f"{entry.slug} missing icon"
+        assert all(c.isalnum() or c in "-_" for c in icon)
+    # Cloudflare family shares one brand glyph.
+    cf = [e for e in CATALOG if e.slug.startswith("cloudflare-")]
+    assert cf
+    assert all(e.template_metadata["icon"] == "cloudflare" for e in cf)
+    assert next(e for e in CATALOG if e.slug == "linear").template_metadata["icon"] == "linear"
+
+
 def test_atlassian_catalog_uses_rovo_mcp_authv2_endpoint() -> None:
     atlassian = next(entry for entry in CATALOG if entry.slug == "atlassian")
 

@@ -399,6 +399,8 @@ export interface MCPToolIcon {
   sizes: string[] | null
   /** ``"light"`` / ``"dark"`` when the server supplies separate variants. */
   theme: string | null
+  /** data: URI when discovery materialised a remote https icon. */
+  cached_src?: string | null
 }
 
 /** One MCP tool surfaced to the chat UI from a workspace's enabled installs. */

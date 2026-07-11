@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, memo } from 'react'
+import { useEffect, useRef, useState, memo } from 'react'
 import type { MCPToolIcon, PendingConfirm, ToolCallRef } from '@cubebox/core'
 import { CheckCircle2, Circle, PanelRight, Plug } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
@@ -8,13 +8,24 @@ import { useMcpToolRegistryStore, useToolDetailStore } from '@cubebox/core'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { SandboxConfirmCard } from './SandboxConfirmCard'
 
-/** Pick the best icon variant: prefer per-tool over server icon; fall back
- * to the first entry when nothing else matches. Theme matching is best-effort
- * — the dom doesn't expose the current color scheme cleanly here, and the
- * spec says clients ignorant of theme should pick the first entry. */
-function pickIcon(toolIcons: MCPToolIcon[], serverIcons: MCPToolIcon[]): MCPToolIcon | null {
-  if (toolIcons.length > 0) return toolIcons[0]
-  if (serverIcons.length > 0) return serverIcons[0]
+/** Pick the best renderable icon src: prefer per-tool over server icon;
+ * prefer cached_src (offline data URI) over remote src. Theme matching is
+ * best-effort — the dom doesn't expose the current color scheme cleanly
+ * here, and the spec says clients ignorant of theme should pick the first
+ * entry. */
+function pickIconSrc(toolIcons: MCPToolIcon[], serverIcons: MCPToolIcon[]): string | null {
+  const allowRemote = (() => {
+    const raw = process.env.NEXT_PUBLIC_MCP_ALLOW_REMOTE_ICONS
+    if (raw === undefined || raw === '') return true
+    return raw !== '0' && raw.toLowerCase() !== 'false'
+  })()
+  for (const icon of [...toolIcons, ...serverIcons]) {
+    if (icon.cached_src) return icon.cached_src
+    const src = icon.src
+    if (!src) continue
+    if (src.startsWith('data:image/') || src.startsWith('/')) return src
+    if (allowRemote && (src.startsWith('https://') || src.startsWith('http://'))) return src
+  }
   return null
 }
 
@@ -83,7 +94,11 @@ export const ToolCallItem = memo(function ToolCallItem({
 
   const mcpEntry = useMcpToolRegistryStore((s) => s.lookup(name))
   const displayName = mcpEntry?.bare_name ?? name
-  const mcpIcon = mcpEntry ? pickIcon(mcpEntry.tool_icons, mcpEntry.server_icons) : null
+  const mcpIconSrc = mcpEntry ? pickIconSrc(mcpEntry.tool_icons, mcpEntry.server_icons) : null
+  const [mcpIconFailed, setMcpIconFailed] = useState(false)
+  useEffect(() => {
+    setMcpIconFailed(false)
+  }, [mcpIconSrc])
   const FallbackIcon = getToolIcon(displayName)
   const summary = summaryOverride ?? getParamSummary(displayName, args)
   const canOpen = Boolean(toolResult) || allowOpenWhenPending
@@ -109,9 +124,14 @@ export const ToolCallItem = memo(function ToolCallItem({
           py-2 text-sm transition-colors
           ${canOpen ? 'hover:bg-accent cursor-pointer' : ''}`}
       >
-        {mcpIcon ? (
+        {mcpIconSrc && !mcpIconFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={mcpIcon.src} alt="" className="size-3.5 rounded-sm shrink-0 object-contain" />
+          <img
+            src={mcpIconSrc}
+            alt=""
+            className="size-3.5 rounded-sm shrink-0 object-contain"
+            onError={() => setMcpIconFailed(true)}
+          />
         ) : mcpEntry ? (
           <Plug className="size-3.5 text-muted-foreground shrink-0" />
         ) : (

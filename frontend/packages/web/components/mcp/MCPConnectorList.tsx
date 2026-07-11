@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, LockKeyhole, PauseCircle, Plug } from 'luc
 import type { AdminOrgConnector, MCPConnectorFilter } from '@cubebox/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { ConnectorLogo } from '@/components/mcp/ConnectorLogo'
 
 interface MCPConnectorListProps {
   connectors: AdminOrgConnector[]
@@ -154,6 +155,12 @@ export function MCPConnectorList({
             )}
           >
             <div className="flex items-center gap-2">
+              <ConnectorLogo
+                name={nameOf(c)}
+                icon={c.template?.icon}
+                serverIcons={c.install.server_icons}
+                size="sm"
+              />
               <span className="truncate text-sm font-semibold">{nameOf(c)}</span>
               {providerOf(c) && providerOf(c).toLowerCase() !== nameOf(c).toLowerCase() ? (
                 <Badge variant="outline" className="shrink-0 text-[10px]">
