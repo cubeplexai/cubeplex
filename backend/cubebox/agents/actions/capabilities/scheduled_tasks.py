@@ -193,19 +193,22 @@ async def _handle_list_runs(ctx: ScopeContext, session: AsyncSession, inp: ListR
 
 async def _handle_create(ctx: ScopeContext, session: AsyncSession, inp: CreateInput) -> Any:
     from cubebox.services.schedule_destination import (
+        Intent,
         derive_schedule_destination_for_conversation,
     )
 
     # Shared with create_scheduled_task: current_conversation on an IM-bound
     # conversation upgrades to im_channel so results go back to the IM channel.
-    intent = "current_conversation" if inp.target == "current_conversation" else "new_each_run"
+    intent: Intent = (
+        "current_conversation" if inp.target == "current_conversation" else "new_each_run"
+    )
     try:
         dest = await derive_schedule_destination_for_conversation(
             session,
             org_id=ctx.org_id,
             workspace_id=ctx.workspace_id,
             conversation_id=ctx.conversation_id,
-            intent=intent,  # type: ignore[arg-type]
+            intent=intent,
         )
     except ValueError as exc:
         raise ActionInvalidInput(str(exc)) from exc
