@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-hidden="true">
-  <!-- Simple Icons: atlassian (CC0-1.0). Trademark of the respective owner. -->
-  <path fill="#0052CC" d="M7.12 11.084a.683.683 0 00-1.16.126L.075 22.974a.703.703 0 00.63 1.018h8.19a.678.678 0 00.63-.39c1.767-3.65.696-9.203-2.406-12.52zM11.434.386a15.515 15.515 0 00-.906 15.317l3.95 7.9a.703.703 0 00.628.388h8.19a.703.703 0 00.63-1.017L12.63.38a.664.664 0 00-1.196.006z"/>
+<svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid" viewBox="0 0 256 256">
+<!-- theSVG: atlassian/default (https://thesvg.org/icons/atlassian/default.svg). Brand trademark of the respective owner; for identification only. -->
+
+  <defs>
+    <linearGradient x1="99.7%" y1="15.8%" x2="39.8%" y2="97.4%" id="a">
+      <stop stop-color="#0052CC" offset="0%"/>
+      <stop stop-color="#2684FF" offset="92.3%"/>
+    </linearGradient>
+  </defs>
+  <path d="M76 118c-4-4-10-4-13 1L1 245a7 7 0 0 0 6 10h88c3 0 5-1 6-4 19-39 8-98-25-133Z" fill="url(#a)"/>
+  <path d="M122 4c-35 56-33 117-10 163l42 84c1 3 4 4 7 4h87a7 7 0 0 0 7-10L134 4c-2-5-9-5-12 0Z" fill="#2681FF"/>
 </svg>
