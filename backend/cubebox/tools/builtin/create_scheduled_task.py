@@ -31,6 +31,7 @@ from cubebox.db.engine import async_session_maker
 from cubebox.models import Role
 from cubebox.repositories import MembershipRepository
 from cubebox.services.schedule_destination import (
+    Intent,
     derive_schedule_destination_for_conversation,
 )
 from cubebox.services.schedule_target_spec import ScheduleTargetError, ScheduleTargetSpec
@@ -141,14 +142,14 @@ def make_create_scheduled_task_tool(
         del tool_call_id, signal, on_update
 
         async with async_session_maker() as session:
-            intent = args.target_mode if args.target_mode is not None else "auto"
+            intent: Intent = args.target_mode if args.target_mode is not None else "auto"
             try:
                 dest = await derive_schedule_destination_for_conversation(
                     session,
                     org_id=org_id,
                     workspace_id=workspace_id,
                     conversation_id=conversation_id,
-                    intent=intent,  # type: ignore[arg-type]
+                    intent=intent,
                     target_conversation_id=args.target_conversation_id,
                     explicit_topic_id=args.topic_id,
                 )
