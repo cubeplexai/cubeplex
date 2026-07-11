@@ -273,6 +273,17 @@ async def resolve_im_conversation(
                     )
                 await session.flush()
 
+    # After /new rotation the fresh conversation starts with an empty title.
+    # When the first real message reuses that row (``_make_conversation_id``
+    # does not run), stamp a provisional title from the message text — same
+    # as brand-new create via title_hint. Never overwrite a non-empty title.
+    if reused is not None and not (reused.title or "").strip():
+        hint = (title_hint or "").strip()
+        if hint:
+            reused.title = hint[:80]
+            session.add(reused)
+            await session.flush()
+
     # Topic visibility is gated on TopicParticipant (a topic conversation is
     # NOT visible to its creator unless they're also a participant). So ensure
     # the sender is a participant of ANY topic they're routed into — shared
@@ -440,7 +451,11 @@ async def reset_im_conversation(
         org_id=old.org_id,
         workspace_id=old.workspace_id,
         creator_user_id=old.creator_user_id,
-        title=old.title,
+        # Fresh conversation — do not copy the old title. A non-empty title
+        # would also block web auto-title (generate_and_apply_title skips
+        # when title != ""). The next inbound message stamps a provisional
+        # title from title_hint when the field is still empty.
+        title="",
         # The link is the authoritative Topic anchor — old.topic_id can lag it
         # (e.g. a conversation adopted into a topic after a mode change).
         topic_id=link.topic_id,
