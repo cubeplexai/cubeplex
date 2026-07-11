@@ -969,6 +969,9 @@ async def test_new_rotates_conversation_under_same_topic(
             )
         ).scalar_one()
         assert new_conv.topic_id == topic_id
+        # Must not inherit the previous conversation's title (that also blocked
+        # web auto-title, which skips when title is non-empty).
+        assert new_conv.title == ""
 
         # The old conversation survives as history (not soft-deleted).
         old_conv = (
@@ -976,3 +979,25 @@ async def test_new_rotates_conversation_under_same_topic(
         ).scalar_one()
         assert old_conv.deleted_at is None
         assert old_conv.topic_id == topic_id
+        assert old_conv.title == "before /new"
+
+    # First real message after /new stamps a provisional title from title_hint.
+    async with maker() as session:
+        r2 = await resolve_im_conversation(
+            session,
+            account,
+            channel_id=_CHANNEL,
+            scope_key="dm",
+            scope_kind="dm",
+            effective_user_id=_USER,
+            title_hint="hello after /new",
+            origin="inbound",
+        )
+        await session.commit()
+    async with maker() as session:
+        after = (
+            await session.execute(select(Conversation).where(Conversation.id == r2.conversation_id))
+        ).scalar_one()
+        assert after.title == "hello after /new"
+        assert r2.conversation_id != first_conv
+        assert r2.topic_id == topic_id
