@@ -192,7 +192,8 @@ async def list_workspace_active_tools(
     slug_counts: Counter[str] = Counter(proposed_slugs.values())
 
     def _icons_for(payload: list[dict[str, Any]] | None) -> list[McpIconOut]:
-        return [McpIconOut(**icon) for icon in (payload or [])]
+        # model_validate keeps optional cached_src from discovery materialisation.
+        return [McpIconOut.model_validate(icon) for icon in (payload or [])]
 
     items: list[McpActiveToolOut] = []
     for spec in specs:

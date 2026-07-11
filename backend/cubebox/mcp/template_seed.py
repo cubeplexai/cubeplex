@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -114,7 +114,34 @@ _ATLASSIAN_FIELDS = [
 ]
 
 
-CATALOG: list[MCPConnectorTemplateSeedEntry] = [
+def _default_icon_for_slug(slug: str) -> str:
+    """Map a catalog slug to a frontend ``/mcp-icons/{key}.svg`` brand key.
+
+    Cloudflare has several templates that share one brand glyph.
+    """
+    if slug.startswith("cloudflare-"):
+        return "cloudflare"
+    return slug
+
+
+def _with_default_icons(
+    entries: list[MCPConnectorTemplateSeedEntry],
+) -> list[MCPConnectorTemplateSeedEntry]:
+    """Ensure every catalog entry has ``template_metadata['icon']``.
+
+    Explicit per-entry ``icon`` wins; otherwise derived from slug.
+    """
+    out: list[MCPConnectorTemplateSeedEntry] = []
+    for entry in entries:
+        meta = dict(entry.template_metadata)
+        if not meta.get("icon"):
+            meta["icon"] = _default_icon_for_slug(entry.slug)
+            entry = replace(entry, template_metadata=meta)
+        out.append(entry)
+    return out
+
+
+_CATALOG_RAW: list[MCPConnectorTemplateSeedEntry] = [
     MCPConnectorTemplateSeedEntry(
         slug="github",
         name="GitHub",
@@ -557,6 +584,8 @@ CATALOG: list[MCPConnectorTemplateSeedEntry] = [
         },
     ),
 ]
+
+CATALOG: list[MCPConnectorTemplateSeedEntry] = _with_default_icons(_CATALOG_RAW)
 
 
 def _credential_name_for_slug(slug: str) -> str:

@@ -199,7 +199,7 @@ async def test_discover_tools_for_install_writes_tools_cache(
         )
         signer = build_user_token_signer()
         result = await discover_tools_for_install(
-            install_id=install_id,
+            connector_id=install_id,
             workspace_id=None,
             actor_user_id=user_id,
             session=session,
@@ -303,6 +303,9 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
         )
 
     monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    # Deterministic: do not outbound-fetch the fixture URL during this test.
+    # Materialisation is covered by unit tests with respx.
+    monkeypatch.setattr("cubebox.mcp.icons.icons_fetch_remote_enabled", lambda: False)
 
     from cubebox.credentials.dependencies import build_credential_service
     from cubebox.credentials.encryption import FernetBackend
@@ -317,7 +320,7 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
         )
         signer = build_user_token_signer()
         result = await discover_tools_for_install(
-            install_id=install_id,
+            connector_id=install_id,
             workspace_id=None,
             actor_user_id=user_id,
             session=session,
@@ -437,7 +440,7 @@ async def test_ws_active_tools_returns_namespaced_tools_with_icons(
             MCPWorkspaceConnectorState(
                 org_id=org_id,
                 workspace_id=ws_id,
-                install_id=install.id,
+                connector_id=install.id,
                 enabled=True,
                 credential_policy="none",
                 enablement_source="auto",
@@ -464,6 +467,7 @@ async def test_ws_active_tools_returns_namespaced_tools_with_icons(
             "mime_type": "image/svg+xml",
             "sizes": None,
             "theme": None,
+            "cached_src": None,
         }
     ]
     assert create["tool_icons"] == [
@@ -472,6 +476,7 @@ async def test_ws_active_tools_returns_namespaced_tools_with_icons(
             "mime_type": "image/svg+xml",
             "sizes": None,
             "theme": None,
+            "cached_src": None,
         }
     ]
 

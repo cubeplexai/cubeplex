@@ -169,24 +169,32 @@ def _icon_to_dict(icon: Any) -> dict[str, Any]:
     }
 
 
-def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any]:
+async def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any]:
     """Build the JSON shape persisted in ``MCPConnector.discovery_metadata``.
 
     Server icons + websiteUrl come from ``InitializeResult.serverInfo``;
     per-tool icons come from each ``Tool.icons``. Tools without icons are
     omitted from ``tool_icons`` (keeps the JSON small for installs whose
     server didn't bother).
+
+    Server ``https`` icons are best-effort materialised into ``cached_src``
+    (``data:`` URI) so air-gapped browsers can still render a logo when the
+    backend could reach the vendor CDN. Failures leave the original ``src``
+    and never fail discovery.
     """
     from cubepi.mcp.types import icons_from_raw, server_info_from_init_result
+
+    from cubebox.mcp.icons import enrich_server_icons
 
     server = server_info_from_init_result(discovered.init_result)
     server_dict: dict[str, Any] | None = None
     if server is not None:
+        raw_icons = [_icon_to_dict(i) for i in server.icons]
         server_dict = {
             "name": server.name,
             "version": server.version,
             "website_url": server.website_url,
-            "icons": [_icon_to_dict(i) for i in server.icons],
+            "icons": await enrich_server_icons(raw_icons),
         }
 
     tool_icons: dict[str, list[dict[str, Any]]] = {}
@@ -194,6 +202,7 @@ def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any]:
         icons = icons_from_raw(getattr(tool, "icons", None))
         if not icons:
             continue
+        # Tool icons are not materialised (can be large); UI uses src + onError.
         tool_icons[getattr(tool, "name", "")] = [_icon_to_dict(i) for i in icons]
 
     return {"server": server_dict, "tool_icons": tool_icons}
@@ -459,11 +468,12 @@ async def discover_tools_for_install(
             install.tool_citations = cleaned
 
     install.tools_cache = tools_cache_raw
-    install.discovery_metadata = _build_discovery_metadata(discovered)
+    install.discovery_metadata = await _build_discovery_metadata(discovered)
     install.discovery_status = "ok"
     install.last_error = None
     if connector is not None:
         connector.tools_cache = tools_cache_raw
+        connector.discovery_metadata = install.discovery_metadata
         connector.discovery_status = install.discovery_status
         connector.last_error = install.last_error
         await connector_repo.update(connector)

@@ -55,9 +55,31 @@ class MCPConnectorTemplateOut(BaseModel):
     static_form_schema: list[dict[str, Any]] | None
     status: str
     install_summary: dict[str, Any] | None = None
+    # Catalog brand key → frontend static asset /mcp-icons/{icon}.svg.
+    # Sourced from template_metadata["icon"]; never an absolute URL.
+    icon: str | None = None
 
 
 CitationConfigJSON = dict[str, Any]  # opaque shape; agent runtime validates
+
+
+class McpIconOut(BaseModel):
+    """One icon entry (MCP spec rev 2025-11-25 ``Icon`` shape).
+
+    ``src`` is either an HTTP/HTTPS URL or a ``data:`` URI. ``theme``
+    is ``"light"`` / ``"dark"`` when the server supplies separate
+    variants so the frontend can match the active UI theme.
+
+    ``cached_src`` is set when discovery successfully materialised a
+    remote ``https`` icon into an offline-safe ``data:`` URI. Prefer it
+    over ``src`` when present.
+    """
+
+    src: str
+    mime_type: str | None = None
+    sizes: list[str] | None = None
+    theme: str | None = None
+    cached_src: str | None = None
 
 
 class MCPToolEntry(BaseModel):
@@ -89,6 +111,8 @@ class MCPConnectorOut(BaseModel):
     tool_citations: dict[str, CitationConfigJSON]
     last_error: str | None
     auto_enroll_new_workspaces: bool
+    # Server icons from discovery_metadata (may include cached_src).
+    server_icons: list[McpIconOut] = Field(default_factory=list)
 
 
 class MCPWorkspaceConnectorStateOut(BaseModel):
@@ -401,20 +425,6 @@ class CreateGrantIn(BaseModel):
 # ---------------------------------------------------------------------------
 # Active-tools registry (GET /api/v1/ws/{ws}/mcp/active-tools)
 # ---------------------------------------------------------------------------
-
-
-class McpIconOut(BaseModel):
-    """One icon entry (MCP spec rev 2025-11-25 ``Icon`` shape).
-
-    ``src`` is either an HTTP/HTTPS URL or a ``data:`` URI. ``theme``
-    is ``"light"`` / ``"dark"`` when the server supplies separate
-    variants so the frontend can match the active UI theme.
-    """
-
-    src: str
-    mime_type: str | None = None
-    sizes: list[str] | None = None
-    theme: str | None = None
 
 
 class McpActiveToolOut(BaseModel):

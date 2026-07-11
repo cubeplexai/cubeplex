@@ -34,6 +34,16 @@ export interface CitationConfigJSON {
 
 // ---------------- Four-layer connector model ---------------- //
 
+/** One MCP Icon (spec) + optional discovery-time materialised cache. */
+export interface MCPIcon {
+  src: string
+  mime_type?: string | null
+  sizes?: string[] | null
+  theme?: string | null
+  /** data: URI when discovery fetched a remote https icon successfully. */
+  cached_src?: string | null
+}
+
 export interface MCPConnectorTemplate {
   template_id: string
   slug: string
@@ -47,6 +57,8 @@ export interface MCPConnectorTemplate {
   static_form_schema: unknown[] | null
   status: 'active' | 'deprecated' | 'disabled'
   install_summary?: Record<string, unknown> | null
+  /** Catalog brand key → frontend `/mcp-icons/{icon}.svg`. */
+  icon?: string | null
 }
 
 export interface MCPConnector {
@@ -67,6 +79,8 @@ export interface MCPConnector {
   tool_citations: Record<string, CitationConfigJSON>
   last_error: string | null
   auto_enroll_new_workspaces: boolean
+  /** Server icons from discovery_metadata (may include cached_src). */
+  server_icons?: MCPIcon[]
 }
 
 export interface MCPWorkspaceConnectorState {

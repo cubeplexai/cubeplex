@@ -91,6 +91,8 @@ def _template_to_out(
     *,
     install_summary: dict[str, Any] | None = None,
 ) -> MCPConnectorTemplateOut:
+    from cubebox.mcp.icons import template_icon_key
+
     return MCPConnectorTemplateOut(
         template_id=template.id,
         slug=template.slug,
@@ -104,6 +106,7 @@ def _template_to_out(
         static_form_schema=template.static_form_schema,
         status=template.status,
         install_summary=install_summary,
+        icon=template_icon_key(getattr(template, "template_metadata", None)),
     )
 
 
@@ -112,6 +115,9 @@ def _install_to_out(
     *,
     connector_id: str,
 ) -> MCPConnectorOut:
+    from cubebox.api.schemas.mcp import McpIconOut
+    from cubebox.mcp.icons import server_icons_from_discovery
+
     tools_cache = install.tools_cache or []
     tool_entries = [
         MCPToolEntry(
@@ -121,6 +127,10 @@ def _install_to_out(
         )
         for t in tools_cache
         if isinstance(t, dict) and t.get("name")
+    ]
+    server_icons = [
+        McpIconOut.model_validate(icon)
+        for icon in server_icons_from_discovery(getattr(install, "discovery_metadata", None))
     ]
     return MCPConnectorOut(
         connector_id=connector_id,
@@ -140,6 +150,7 @@ def _install_to_out(
         tool_citations=dict(install.tool_citations or {}),
         last_error=install.last_error,
         auto_enroll_new_workspaces=install.auto_enroll_new_workspaces,
+        server_icons=server_icons,
     )
 
 
