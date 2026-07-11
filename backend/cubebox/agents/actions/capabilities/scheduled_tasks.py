@@ -108,9 +108,10 @@ class CreateInput(BaseModel):
         default="new_each_run",
         description=(
             "Where the task runs. 'new_each_run' opens a fresh conversation each fire "
-            "(default). 'current_conversation' binds the task to the conversation this "
-            "tool was called from — you do NOT need to pass a conversation ID, the "
-            "backend reads it from the call context."
+            "(default). 'current_conversation' means 'here' — if this conversation is "
+            "IM-bound (Feishu/Slack/…), the schedule posts back to that IM channel "
+            "(survives /new); otherwise it binds to the current conversation. You do "
+            "NOT need to pass a conversation ID; the backend reads it from context."
         ),
     )
     end_at: datetime | None = Field(
@@ -132,6 +133,19 @@ class UpdateInput(BaseModel):
         ),
     )
     end_at: datetime | None = None
+
+
+class RetargetInput(BaseModel):
+    task_id: str
+    target: Literal["new_each_run", "current_conversation", "im_channel"] = Field(
+        description=(
+            "New destination. 'current_conversation' pins the conversation this "
+            "tool was called from. 'im_channel' resolves the IM binding for the "
+            "current conversation (or the task's existing fixed/topic anchor) — "
+            "fails if no IMThreadLink is found. 'new_each_run' opens a fresh "
+            "conversation each fire."
+        ),
+    )
 
 
 class PauseInput(BaseModel):
@@ -178,17 +192,23 @@ async def _handle_list_runs(ctx: ScopeContext, session: AsyncSession, inp: ListR
 
 
 async def _handle_create(ctx: ScopeContext, session: AsyncSession, inp: CreateInput) -> Any:
-    if inp.target == "current_conversation":
-        if ctx.conversation_id is None:
-            raise ActionInvalidInput(
-                "target='current_conversation' requires a conversation context; "
-                "either start from within a conversation or use target='new_each_run'."
-            )
-        target_mode = "fixed"
-        target_conversation_id: str | None = ctx.conversation_id
-    else:
-        target_mode = "new_each_run"
-        target_conversation_id = None
+    from cubebox.services.schedule_destination import (
+        derive_schedule_destination_for_conversation,
+    )
+
+    # Shared with create_scheduled_task: current_conversation on an IM-bound
+    # conversation upgrades to im_channel so results go back to the IM channel.
+    intent = "current_conversation" if inp.target == "current_conversation" else "new_each_run"
+    try:
+        dest = await derive_schedule_destination_for_conversation(
+            session,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            conversation_id=ctx.conversation_id,
+            intent=intent,  # type: ignore[arg-type]
+        )
+    except ValueError as exc:
+        raise ActionInvalidInput(str(exc)) from exc
 
     sched = inp.schedule
     match sched:
@@ -215,11 +235,32 @@ async def _handle_create(ctx: ScopeContext, session: AsyncSession, inp: CreateIn
         "interval_seconds": interval_seconds,
         "run_at": run_at,
         "timezone": timezone,
-        "target_mode": target_mode,
-        "target_conversation_id": target_conversation_id,
         "end_at": inp.end_at,
+        **dest.as_create_fields(),
     }
     task = await _svc.create(ctx, session, data)
+    return _task_summary(task)
+
+
+async def _handle_retarget(ctx: ScopeContext, session: AsyncSession, inp: RetargetInput) -> Any:
+    data: dict[str, Any]
+    if inp.target == "new_each_run":
+        data = {"target_mode": "new_each_run", "topic_id": None}
+    elif inp.target == "current_conversation":
+        if ctx.conversation_id is None:
+            raise ActionInvalidInput(
+                "target='current_conversation' requires a conversation context"
+            )
+        data = {
+            "target_mode": "fixed",
+            "target_conversation_id": ctx.conversation_id,
+        }
+    else:  # im_channel
+        data = {
+            "target_mode": "im_channel",
+            "anchor_conversation_id": ctx.conversation_id,
+        }
+    task = await _svc.retarget_destination(ctx, session, inp.task_id, data)
     return _task_summary(task)
 
 
@@ -250,10 +291,7 @@ async def _handle_update(ctx: ScopeContext, session: AsyncSession, inp: UpdateIn
             case OnceSchedule():
                 data["run_at"] = sched.run_at
 
-    # Destination fields (target_mode / target_conversation_id / im_*) are
-    # immutable after create — enforced by ScheduledTaskService.update so
-    # the DB CHECK constraint can never disagree with the agent's intent.
-    # See: backend/docs/scheduled-tasks-destinations.md (destination lock).
+    # Destination fields are not partial-updated here — use the retarget op.
 
     task = await _svc.update(ctx, session, inp.task_id, data)
     return _task_summary(task)
@@ -282,8 +320,9 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
     name="scheduled_tasks",
     description=(
         "Manage scheduled tasks in the current workspace. Each task runs a "
-        "prompt on a cron, interval, or one-shot schedule. Only mutate tasks "
-        "when the user has explicitly asked you to."
+        "prompt on a cron, interval, or one-shot schedule. Use retarget to "
+        "change where results go (including IM). Only mutate tasks when the "
+        "user has explicitly asked you to."
     ),
     # Mutating ops stay available on non-interactive triggers (IM, schedule
     # fires) so an IM "remind me at 9pm" works and a scheduled task can
@@ -332,10 +371,11 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
                 "  one-shot at a specific time:\n"
                 '    {"name":"remind","prompt":"...",'
                 '"schedule":{"kind":"once","run_at":"2026-06-10T15:00:00Z"}}\n'
-                "To bind the task to the conversation this tool was called from, add "
-                '`"target":"current_conversation"`. You do not need to know the '
-                "conversation ID — the backend fills it in from the call context. To "
-                "open a fresh conversation on each fire (default), omit `target` or "
+                'To send results \'here\', add `"target":"current_conversation"`. '
+                "You do not need the conversation ID — the backend fills it from "
+                "context. If this conversation is IM-bound, that routes to the IM "
+                "channel (survives /new); otherwise it pins the current conversation. "
+                "To open a fresh conversation on each fire (default), omit `target` or "
                 'pass `"new_each_run"`. Only call when the user has explicitly asked.'
             ),
             input_model=CreateInput,
@@ -347,10 +387,8 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
             description=(
                 "Update fields on an existing scheduled task. Omit any field to leave "
                 "it unchanged. `schedule` is replaced whole (same discriminated shape "
-                "as create); there is no partial-schedule update. The destination "
-                "(target_mode / conversation / IM channel) is fixed at create time "
-                "and cannot be changed via update — delete the schedule and create a "
-                "new one to move it. Examples:\n"
+                "as create); there is no partial-schedule update. Destination is "
+                "changed via the separate `retarget` operation, not update. Examples:\n"
                 "  rename only:\n"
                 '    {"task_id":"stask-1gBGEPTNA5c1Ou","name":"renamed"}\n'
                 "  switch to a different cron:\n"
@@ -360,6 +398,24 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
             ),
             input_model=UpdateInput,
             handler=_handle_update,
+            mutates=True,
+        ),
+        AgentOperation(
+            name="retarget",
+            description=(
+                "Replace where a scheduled task's runs are delivered (whole package). "
+                "Use when the user wants results in a different place. Examples:\n"
+                "  pin to this conversation:\n"
+                '    {"task_id":"stask-1gBGEPTNA5c1Ou","target":"current_conversation"}\n'
+                "  post back to the IM channel bound to this conversation:\n"
+                '    {"task_id":"stask-1gBGEPTNA5c1Ou","target":"im_channel"}\n'
+                "  fresh conversation each fire:\n"
+                '    {"task_id":"stask-1gBGEPTNA5c1Ou","target":"new_each_run"}\n'
+                "im_channel fails if this conversation/topic has no IMThreadLink. "
+                "Only call when the user has explicitly asked."
+            ),
+            input_model=RetargetInput,
+            handler=_handle_retarget,
             mutates=True,
         ),
         AgentOperation(

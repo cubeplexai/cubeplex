@@ -62,9 +62,9 @@ You control where each fire's agent run happens with the **Conversation target**
 - **New conversation each run** — each fire creates a fresh conversation. The agent starts with no prior context. Good for independent tasks like one-off reports. You can optionally pick a **Topic** to group these conversations together; new conversations inherit the topic's members and sandbox.
 - **This conversation (fixed)** — every fire runs in one existing conversation you own. Context accumulates across fires, so the agent can reference previous runs. Good for rolling summaries or monitoring tasks.
 
-A third mode, **IM channel**, posts results into a chat on a linked IM platform. This mode can't be selected here — it's created only from IM, by using a slash command inside the chat. See the IM integration guide for details.
+A third mode, **IM channel**, posts results into a chat on a linked IM platform (and survives `/new` in that chat). From the web UI you usually get this mode by creating the task in IM, or by **editing** an existing task whose conversation or topic already has an IM binding and switching the destination to **IM channel**. There is no free-form channel picker — the server resolves the binding from that conversation/topic; if none is found, the change is rejected.
 
-The conversation target is fixed at creation time. You can still edit the name, prompt, and schedule afterward, but to change the destination you delete and recreate the task.
+You can change the destination later (fixed ↔ new conversation each run ↔ IM channel) without deleting the task. Name, prompt, and schedule remain independently editable.
 
 ## Pause, resume, and missed runs
 

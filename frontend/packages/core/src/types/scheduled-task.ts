@@ -71,12 +71,9 @@ export interface ScheduledTaskCreate {
 /**
  * PATCH body for an existing scheduled task.
  *
- * The backend rejects mode-bound fields (`target_mode`, `target_conversation_id`,
- * `im_account_id`, `im_channel_id`, `im_scope_key`, `im_scope_kind`) with HTTP
- * 422 — destination is immutable after creation. Only `topic_id` is mutable
- * (and only when the current `target_mode === 'new_each_run'`). Type
- * narrowing here prevents callers from sending forbidden fields at compile
- * time; legacy `schedule_*` editing remains supported.
+ * Mode-bound destination fields are not partial-PATCHd — use
+ * `ScheduledTaskRetarget` / `retargetScheduledTaskDestination` instead.
+ * `topic_id` remains patchable only when the row is already `new_each_run`.
  */
 export interface ScheduledTaskPatch {
   name?: string
@@ -88,6 +85,19 @@ export interface ScheduledTaskPatch {
   timezone?: string
   topic_id?: string | null
   end_at?: string | null
+}
+
+/**
+ * Whole-package destination replacement.
+ *
+ * `im_channel` resolves IM fields server-side from `anchor_conversation_id`
+ * and/or the task's existing conversation/topic binding — do not send im_*.
+ */
+export interface ScheduledTaskRetarget {
+  target_mode: TargetMode
+  target_conversation_id?: string | null
+  topic_id?: string | null
+  anchor_conversation_id?: string | null
 }
 
 /** Optional filters accepted by `GET /api/v1/scheduled-tasks`. */

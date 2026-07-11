@@ -26,6 +26,7 @@ from cubebox.api.schemas.ws_scheduled_tasks import (
     ScheduledTaskListOut,
     ScheduledTaskOut,
     ScheduledTaskPatch,
+    ScheduledTaskRetarget,
     ScheduledTaskRunOut,
 )
 from cubebox.auth.context import RequestContext
@@ -145,23 +146,49 @@ async def patch_task(
     body: ScheduledTaskPatch,
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> ScheduledTaskOut:
-    # Mode-bound destination fields are immutable post-create. We gate on
-    # `model_fields_set` membership so an explicit `null` is rejected just
-    # like a non-null value would be — the user's intent is to change the
-    # destination shape, which only delete-and-recreate supports.
+    # Mode-bound destination fields are not partial-PATCH'd. Use
+    # PUT .../destination for a whole-package retarget instead.
     locked = _PATCH_MODE_LOCKED_FIELDS & body.model_fields_set
     if locked:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=(
                 "target_mode / target_conversation_id / im_* cannot be changed via PATCH; "
-                "delete and recreate the schedule"
+                "use PUT .../destination to retarget"
             ),
         )
     async with async_session_maker() as session:
         try:
             data = body.model_dump(exclude_unset=True)
             task = await _svc.update(_scope(ctx), session, task_id, data)
+        except ActionNotFound as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+        except ActionPermissionDenied as exc:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+        except ActionInvalidInput as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    return _to_out(task)
+
+
+@router.put("/{task_id}/destination", response_model=ScheduledTaskOut)
+async def retarget_task_destination(
+    task_id: str,
+    body: ScheduledTaskRetarget,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+) -> ScheduledTaskOut:
+    """Replace the schedule destination as one validated package.
+
+    Switching to ``im_channel`` resolves IM fields from an anchor
+    conversation / topic binding; free-form channel pickers are not supported.
+    """
+    async with async_session_maker() as session:
+        try:
+            task = await _svc.retarget_destination(
+                _scope(ctx),
+                session,
+                task_id,
+                body.model_dump(),
+            )
         except ActionNotFound as exc:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
         except ActionPermissionDenied as exc:

@@ -1,14 +1,13 @@
 """create_scheduled_task tool — cubepi.AgentTool with auto IM-origin detection.
 
 Factory: ``make_create_scheduled_task_tool(...)`` returns one
-``cubepi.AgentTool``. The tool detects whether the current conversation is
-bound to an IM thread (via ``IMThreadLink``) and derives sensible defaults
-so the agent can say "remind me every morning" without explicitly choosing
-between fixed / new_each_run / im_channel destinations.
+``cubepi.AgentTool``. Destination derivation is shared with the
+``scheduled_tasks_create`` capability via
+``cubebox.services.schedule_destination`` so both paths agree:
 
 Default derivation (when caller omits ``target_mode``):
-- IM origin (link exists)  → ``im_channel`` + im_* fields from the link
-- Web/API (no link)        → ``fixed`` + ``target_conversation_id`` = current conv
+- IM-bound conversation → ``im_channel`` (survives ``/new``)
+- Otherwise → ``fixed`` + current conversation
 
 When the caller passes ``target_mode='new_each_run'`` without ``topic_id``
 and the current conversation belongs to a topic, the tool inherits the
@@ -25,15 +24,15 @@ from typing import Any, Literal
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from cubebox.agents.actions.context import ScopeContext
 from cubebox.agents.actions.types import ActionInvalidInput
 from cubebox.db.engine import async_session_maker
 from cubebox.models import Role
-from cubebox.models.conversation import Conversation
-from cubebox.models.im_connector import IMThreadLink
 from cubebox.repositories import MembershipRepository
+from cubebox.services.schedule_destination import (
+    derive_schedule_destination_for_conversation,
+)
 from cubebox.services.schedule_target_spec import ScheduleTargetError, ScheduleTargetSpec
 from cubebox.services.scheduled_task import ScheduledTaskService
 
@@ -58,7 +57,10 @@ class CreateScheduledTaskArgs(BaseModel):
     )
     cron_expr: str | None = Field(
         default=None,
-        description="Five-field cron expression (minute hour day month weekday). Required when schedule_kind='cron'.",
+        description=(
+            "Five-field cron expression (minute hour day month weekday). "
+            "Required when schedule_kind='cron'."
+        ),
     )
     interval_seconds: int | None = Field(
         default=None,
@@ -74,18 +76,22 @@ class CreateScheduledTaskArgs(BaseModel):
     )
     timezone: str | None = Field(
         default=None,
-        description="IANA timezone the schedule is interpreted in (e.g. 'Asia/Shanghai'). Defaults to UTC.",
+        description=(
+            "IANA timezone the schedule is interpreted in (e.g. 'Asia/Shanghai'). Defaults to UTC."
+        ),
     )
     target_mode: Literal["fixed", "new_each_run", "im_channel"] | None = Field(
         default=None,
         description=(
             "How the schedule's runs are routed. Leave None to auto-derive: "
-            "IM origin → 'im_channel'; otherwise → 'fixed' (current conversation)."
+            "IM-bound conversation → 'im_channel'; otherwise → 'fixed' (current conversation)."
         ),
     )
     target_conversation_id: str | None = Field(
         default=None,
-        description="Existing conversation to fire into when target_mode='fixed'. Auto-filled when omitted.",
+        description=(
+            "Existing conversation to fire into when target_mode='fixed'. Auto-filled when omitted."
+        ),
     )
     topic_id: str | None = Field(
         default=None,
@@ -135,60 +141,29 @@ def make_create_scheduled_task_tool(
         del tool_call_id, signal, on_update
 
         async with async_session_maker() as session:
-            link_stmt = select(IMThreadLink).where(
-                IMThreadLink.conversation_id == conversation_id,  # type: ignore[arg-type]
-                IMThreadLink.org_id == org_id,  # type: ignore[arg-type]
-                IMThreadLink.workspace_id == workspace_id,  # type: ignore[arg-type]
-            )
-            link = (await session.execute(link_stmt)).scalar_one_or_none()
-
-            target_mode = args.target_mode
-            target_conversation_id = args.target_conversation_id
-            topic_id = args.topic_id
-            im_account_id: str | None = None
-            im_channel_id: str | None = None
-            im_scope_key: str | None = None
-            im_scope_kind: str | None = None
-
-            if target_mode is None:
-                if link is not None:
-                    target_mode = "im_channel"
-                    im_account_id = link.account_id
-                    im_channel_id = link.channel_id
-                    im_scope_key = link.scope_key
-                    im_scope_kind = link.scope_kind
-                else:
-                    target_mode = "fixed"
-                    if target_conversation_id is None:
-                        target_conversation_id = conversation_id
-            elif target_mode == "im_channel":
-                if link is None:
-                    return _error(
-                        "im_channel target requires this conversation to be bound "
-                        "to an IM channel; no IMThreadLink found for the current conversation."
-                    )
-                im_account_id = link.account_id
-                im_channel_id = link.channel_id
-                im_scope_key = link.scope_key
-                im_scope_kind = link.scope_kind
-            elif target_mode == "fixed":
-                if target_conversation_id is None:
-                    target_conversation_id = conversation_id
-
-            if target_mode == "new_each_run" and topic_id is None:
-                current_conv = await session.get(Conversation, conversation_id)
-                if current_conv is not None and current_conv.topic_id is not None:
-                    topic_id = current_conv.topic_id
+            intent = args.target_mode if args.target_mode is not None else "auto"
+            try:
+                dest = await derive_schedule_destination_for_conversation(
+                    session,
+                    org_id=org_id,
+                    workspace_id=workspace_id,
+                    conversation_id=conversation_id,
+                    intent=intent,  # type: ignore[arg-type]
+                    target_conversation_id=args.target_conversation_id,
+                    explicit_topic_id=args.topic_id,
+                )
+            except ValueError as exc:
+                return _error(str(exc))
 
             try:
                 ScheduleTargetSpec(
-                    target_mode=target_mode,
-                    target_conversation_id=target_conversation_id,
-                    topic_id=topic_id,
-                    im_account_id=im_account_id,
-                    im_channel_id=im_channel_id,
-                    im_scope_key=im_scope_key,
-                    im_scope_kind=im_scope_kind,
+                    target_mode=dest.target_mode,
+                    target_conversation_id=dest.target_conversation_id,
+                    topic_id=dest.topic_id,
+                    im_account_id=dest.im_account_id,
+                    im_channel_id=dest.im_channel_id,
+                    im_scope_key=dest.im_scope_key,
+                    im_scope_kind=dest.im_scope_kind,
                 ).validate()
             except ScheduleTargetError as exc:
                 return _error(str(exc))
@@ -216,13 +191,7 @@ def make_create_scheduled_task_tool(
                 "interval_seconds": args.interval_seconds,
                 "run_at": run_at_dt,
                 "timezone": args.timezone or "UTC",
-                "target_mode": target_mode,
-                "target_conversation_id": target_conversation_id,
-                "topic_id": topic_id,
-                "im_account_id": im_account_id,
-                "im_channel_id": im_channel_id,
-                "im_scope_key": im_scope_key,
-                "im_scope_kind": im_scope_kind,
+                **dest.as_create_fields(),
             }
 
             try:

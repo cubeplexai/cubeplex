@@ -21,16 +21,15 @@ from typing import Any, Literal
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 
 from cubebox.credentials.encryption import EncryptionBackend
 from cubebox.db.engine import async_session_maker
 from cubebox.models import Trigger
 from cubebox.models.conversation import Conversation
-from cubebox.models.im_connector import IMThreadLink
 from cubebox.models.public_id import PREFIX_TRIGGER, generate_public_id
 from cubebox.repositories import MembershipRepository, TriggerRepository
 from cubebox.services.credential import CredentialService
+from cubebox.services.schedule_destination import resolve_im_destination_for_conversation
 from cubebox.services.schedule_target_spec import (
     ScheduleTargetError,
     TriggerTargetSpec,
@@ -114,12 +113,12 @@ def make_create_trigger_tool(
         del tool_call_id, signal, on_update
 
         async with async_session_maker() as session:
-            link_stmt = select(IMThreadLink).where(
-                IMThreadLink.conversation_id == conversation_id,  # type: ignore[arg-type]
-                IMThreadLink.org_id == org_id,  # type: ignore[arg-type]
-                IMThreadLink.workspace_id == workspace_id,  # type: ignore[arg-type]
+            im = await resolve_im_destination_for_conversation(
+                session,
+                org_id=org_id,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
             )
-            link = (await session.execute(link_stmt)).scalar_one_or_none()
 
             conversation_policy = args.conversation_policy
             topic_id = args.topic_id
@@ -129,24 +128,25 @@ def make_create_trigger_tool(
             im_scope_kind: str | None = None
 
             if conversation_policy is None:
-                if link is not None:
+                if im is not None:
                     conversation_policy = "im_channel"
-                    im_account_id = link.account_id
-                    im_channel_id = link.channel_id
-                    im_scope_key = link.scope_key
-                    im_scope_kind = link.scope_kind
+                    im_account_id = im.im_account_id
+                    im_channel_id = im.im_channel_id
+                    im_scope_key = im.im_scope_key
+                    im_scope_kind = im.im_scope_kind
                 else:
                     conversation_policy = "new_each_time"
             elif conversation_policy == "im_channel":
-                if link is None:
+                if im is None:
                     return _error(
                         "im_channel target requires this conversation to be bound to an "
-                        "IM channel; no IMThreadLink found for the current conversation."
+                        "IM channel; no IMThreadLink (or attributes.im fallback) found "
+                        "for the current conversation."
                     )
-                im_account_id = link.account_id
-                im_channel_id = link.channel_id
-                im_scope_key = link.scope_key
-                im_scope_kind = link.scope_kind
+                im_account_id = im.im_account_id
+                im_channel_id = im.im_channel_id
+                im_scope_key = im.im_scope_key
+                im_scope_kind = im.im_scope_kind
 
             if conversation_policy == "new_each_time" and topic_id is None:
                 current_conv = await session.get(Conversation, conversation_id)

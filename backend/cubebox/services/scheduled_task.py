@@ -32,14 +32,19 @@ from cubebox.schedules.compute import (
     latest_due_before,
     next_fire_after,
 )
+from cubebox.services.schedule_destination import (
+    ImLinkSnapshot,
+    resolve_im_destination_for_conversation,
+    resolve_im_destination_for_topic,
+)
 from cubebox.services.schedule_target_spec import (
     ScheduleTargetError,
+    ScheduleTargetSpec,
     validate_destination_scope,
 )
 
-# Destination columns whose value is fixed at create time. Both REST and
-# agent paths share this lock so a PATCH (no matter the source) cannot
-# silently change where a schedule's runs land.
+# Destination columns must not be partially PATCH'd (mode-shaped CHECK).
+# Whole-package replacement goes through ``retarget_destination`` instead.
 _FORBIDDEN_PATCH_DESTINATION_FIELDS: frozenset[str] = frozenset(
     {
         "target_mode",
@@ -220,16 +225,13 @@ class ScheduledTaskService:
         task = await self._load_for_mutation(ctx, session, task_id)
         self._validate_patch(data)
 
-        # Destination immutability — defense in depth. The HTTP layer already
-        # blocks these via Pydantic's ``model_fields_set`` gate, but the
-        # legacy ``scheduled_tasks_update`` agent action sends a raw data
-        # dict and would otherwise bypass that. Reject here so every caller
-        # (route + tool + future action) hits the same wall.
+        # Partial destination PATCH is forbidden — use ``retarget_destination``
+        # for a whole-package mode switch. Defense in depth vs agent raw dicts.
         forbidden = _FORBIDDEN_PATCH_DESTINATION_FIELDS & data.keys()
         if forbidden:
             raise ActionInvalidInput(
-                f"Cannot change destination fields after creation: {sorted(forbidden)}. "
-                "Delete the schedule and create a new one instead."
+                f"Cannot change destination fields via update: {sorted(forbidden)}. "
+                "Use the destination retarget endpoint (or agent retarget) instead."
             )
 
         # topic_id is patchable only when the existing row is new_each_run;
@@ -293,6 +295,165 @@ class ScheduledTaskService:
         await session.commit()
         await session.refresh(task)
         return task
+
+    async def retarget_destination(
+        self,
+        ctx: ScopeContext,
+        session: AsyncSession,
+        task_id: str,
+        data: dict[str, Any],
+    ) -> ScheduledTask:
+        """Replace the task destination as one validated package.
+
+        ``target_mode`` plus the fields that mode requires are applied
+        atomically; fields illegal for the new mode are cleared. Switching
+        to ``im_channel`` resolves IM fields from an anchor conversation
+        and/or topic ``IMThreadLink`` — there is no free-form channel picker.
+        """
+        task = await self._load_for_mutation(ctx, session, task_id)
+        mode = data.get("target_mode")
+        if mode not in ("fixed", "new_each_run", "im_channel"):
+            raise ActionInvalidInput(f"unknown target_mode: {mode!r}")
+
+        if mode == "fixed":
+            conv_id = data.get("target_conversation_id")
+            if not conv_id:
+                raise ActionInvalidInput(
+                    "target_conversation_id is required when target_mode='fixed'"
+                )
+            await self._check_conversation_ownership(session, ctx, conv_id)
+            task.target_mode = "fixed"
+            task.target_conversation_id = conv_id
+            task.topic_id = None
+            self._clear_im_fields(task)
+
+        elif mode == "new_each_run":
+            topic_id = data.get("topic_id")
+            if topic_id is not None:
+                try:
+                    await validate_destination_scope(
+                        session,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        topic_id=topic_id,
+                        im_account_id=None,
+                    )
+                except ScheduleTargetError as exc:
+                    raise ActionInvalidInput(str(exc)) from exc
+            task.target_mode = "new_each_run"
+            task.target_conversation_id = None
+            task.topic_id = topic_id
+            self._clear_im_fields(task)
+
+        else:  # im_channel
+            im = await self._resolve_im_for_retarget(ctx, session, task, data)
+            if im is None:
+                raise ActionInvalidInput(
+                    "Cannot retarget to im_channel: no IM binding found for the "
+                    "anchor conversation or topic. Open an IM-bound conversation "
+                    "(or topic) and retry, or choose a different destination."
+                )
+            try:
+                await validate_destination_scope(
+                    session,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    topic_id=None,
+                    im_account_id=im.im_account_id,
+                )
+            except ScheduleTargetError as exc:
+                raise ActionInvalidInput(str(exc)) from exc
+            task.target_mode = "im_channel"
+            task.target_conversation_id = None
+            task.topic_id = None
+            task.im_account_id = im.im_account_id
+            task.im_channel_id = im.im_channel_id
+            task.im_scope_key = im.im_scope_key
+            task.im_scope_kind = im.im_scope_kind
+
+        try:
+            ScheduleTargetSpec(
+                target_mode=task.target_mode,
+                target_conversation_id=task.target_conversation_id,
+                topic_id=task.topic_id,
+                im_account_id=task.im_account_id,
+                im_channel_id=task.im_channel_id,
+                im_scope_key=task.im_scope_key,
+                im_scope_kind=task.im_scope_kind,
+            ).validate()
+        except ScheduleTargetError as exc:
+            raise ActionInvalidInput(str(exc)) from exc
+
+        task.updated_at = datetime.now(UTC)
+        await session.commit()
+        await session.refresh(task)
+        return task
+
+    async def _resolve_im_for_retarget(
+        self,
+        ctx: ScopeContext,
+        session: AsyncSession,
+        task: ScheduledTask,
+        data: dict[str, Any],
+    ) -> ImLinkSnapshot | None:
+        """Find IM four-tuple for im_channel retarget from anchors, in order."""
+        # 1. Explicit anchor conversation (form / agent context).
+        anchor = data.get("anchor_conversation_id")
+        if isinstance(anchor, str) and anchor:
+            im = await resolve_im_destination_for_conversation(
+                session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                conversation_id=anchor,
+            )
+            if im is not None:
+                return im
+
+        # 2. Current fixed conversation on the task.
+        if task.target_mode == "fixed" and task.target_conversation_id:
+            im = await resolve_im_destination_for_conversation(
+                session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                conversation_id=task.target_conversation_id,
+            )
+            if im is not None:
+                return im
+
+        # 3. Topic on the task or in the request body.
+        for topic_id in (data.get("topic_id"), task.topic_id):
+            if isinstance(topic_id, str) and topic_id:
+                im = await resolve_im_destination_for_topic(
+                    session,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    topic_id=topic_id,
+                )
+                if im is not None:
+                    return im
+
+        # 4. Already im_channel — re-apply existing fields (no-op retarget).
+        if (
+            task.target_mode == "im_channel"
+            and task.im_account_id
+            and task.im_channel_id
+            and task.im_scope_key
+            and task.im_scope_kind
+        ):
+            return ImLinkSnapshot(
+                im_account_id=task.im_account_id,
+                im_channel_id=task.im_channel_id,
+                im_scope_key=task.im_scope_key,
+                im_scope_kind=task.im_scope_kind,
+            )
+        return None
+
+    @staticmethod
+    def _clear_im_fields(task: ScheduledTask) -> None:
+        task.im_account_id = None
+        task.im_channel_id = None
+        task.im_scope_key = None
+        task.im_scope_kind = None
 
     async def pause(
         self,

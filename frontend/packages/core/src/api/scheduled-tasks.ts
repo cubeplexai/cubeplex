@@ -3,6 +3,7 @@ import type {
   ScheduledTaskListFilters,
   ScheduledTaskOut,
   ScheduledTaskPatch,
+  ScheduledTaskRetarget,
   ScheduledTaskRunOut,
 } from '../types/scheduled-task'
 import { toApiError, type ApiClient } from './client'
@@ -43,6 +44,16 @@ export async function patchScheduledTask(
   body: ScheduledTaskPatch,
 ): Promise<ScheduledTaskOut> {
   const res = await client.patch(`/api/v1/scheduled-tasks/${id}`, body)
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<ScheduledTaskOut>
+}
+
+export async function retargetScheduledTaskDestination(
+  client: ApiClient,
+  id: string,
+  body: ScheduledTaskRetarget,
+): Promise<ScheduledTaskOut> {
+  const res = await client.put(`/api/v1/scheduled-tasks/${id}/destination`, body)
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<ScheduledTaskOut>
 }
