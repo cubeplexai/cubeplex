@@ -76,10 +76,10 @@ Model Context Protocol (MCP) connectors let the agent call external APIs — dat
 
 **How the tool lifecycle works:**
 
-1. **Templates** — the catalog of available connectors (e.g., "GitHub", "Slack", "PostgreSQL").
-2. **Installs** — an admin installs a connector template into the workspace, providing credentials.
-3. **Grants** — the admin decides which workspace members can use the installed connector.
-4. **Active** — granted tools are available to the agent during conversations.
+1. **Templates** — the catalog of available connectors (e.g., "GitHub", "Slack", "PostgreSQL"). Templates live in the catalog with visibility scoped globally (all orgs), per-org, or per-workspace.
+2. **Enable** — a workspace admin (or org admin via distribute) enables a template for the workspace, making it available for credentialing.
+3. **Credentials** — the person using the tool connects credentials (org-, workspace-, or user-scoped), depending on the connector's authentication mode.
+4. **Runtime** — credentialed tools are available to the agent during conversations.
 
 **Authentication modes:**
 

@@ -1,15 +1,23 @@
-"""Workspace MCP routes: four-layer connector surface.
+"""Workspace MCP routes: template-centric catalog surface.
 
 All routes live under ``/ws/{workspace_id}/mcp`` and operate on the
-four-layer model — ``MCPConnectorTemplate`` / ``MCPConnector`` /
+template-centric model — ``MCPConnectorTemplate`` / ``MCPConnector`` /
 ``MCPWorkspaceConnectorState`` / ``MCPCredentialGrant``.
 
 Authorization recap (per spec §User Roles And Permissions):
 - All routes require workspace membership (``require_member``).
-- ``POST /installs``, ``DELETE /installs/{id}``, ``PATCH /connectors/{id}/state``,
-  and the workspace-scope grant routes require workspace admin
+- ``PUT .../templates/{id}/state``, ``POST .../templates``, and
+  ``POST .../templates/{id}/promote`` require workspace admin
   (``require_admin``).
 - ``*/grants/me*`` routes are open to any member.
+
+Removed (replaced by template-centric surface):
+  POST /installs, DELETE /installs/{id}, GET /available, GET /templates
+  (old list), PATCH /connectors/{id}/state
+
+Kept (unchanged):
+  GET /connectors, GET /active-tools, all grant endpoints,
+  /installs/{id}/refresh-discovery, /installs/{id}/tools/{tool}/invoke
 """
 
 import asyncio
@@ -23,16 +31,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.api.middleware.rate_limit import limiter
 from cubebox.api.routes.v1.admin_mcp import (
+    _connector_to_facts,
     _install_to_out,
     _template_to_out,
-    _validate_install_policy_pairing,
 )
 from cubebox.api.schemas.mcp import (
     CreateGrantIn,
     McpActiveToolListOut,
     McpActiveToolOut,
     MCPConnectorOut,
-    MCPConnectorTemplateListOut,
     MCPConnectorTemplateOut,
     MCPCredentialGrantStatusOut,
     MCPEffectiveConnectorListOut,
@@ -41,15 +48,16 @@ from cubebox.api.schemas.mcp import (
     MCPOAuthStartIn,
     MCPOAuthStartOut,
     MCPWorkspaceConnectorStateOut,
-    PatchWorkspaceStateIn,
     ToolInvokeOut,
-    WorkspaceCreateInstallIn,
     WsInstallInvokeIn,
     WsInstallRefreshIn,
 )
-from cubebox.api.schemas.mcp_ws_available import (
-    WsAvailableListOut,
-    WsAvailableOut,
+from cubebox.api.schemas.mcp_catalog import (
+    CreateTemplateIn,
+    MCPTemplateOut,
+    TemplateStateIn,
+    WorkspaceCatalogListOut,
+    WorkspaceCatalogRowOut,
 )
 from cubebox.audit.sink import AuditSink
 from cubebox.auth.context import RequestContext
@@ -59,7 +67,6 @@ from cubebox.db.session import get_session
 from cubebox.mcp.cubepi_runtime import _resolve_auth_from_spec
 from cubebox.mcp.dependencies import (
     get_audit_sink,
-    get_connector_template_service,
     get_oauth_start_service,
     get_oauth_token_manager,
     get_user_token_signer,
@@ -78,24 +85,50 @@ from cubebox.mcp.user_token import MCPUserTokenSigner
 from cubebox.models import User
 from cubebox.repositories.mcp import (
     MCPConnectorRepository,
+    MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
+    MCPTemplateSettingsRepository,
+    MCPWorkspaceConnectorStateRepository,
 )
 from cubebox.services.credential import CredentialService
+from cubebox.services.mcp_catalog import WorkspaceCatalogRow, build_workspace_catalog_rows
 from cubebox.services.mcp_discovery import (
     _build_runtime_spec_for_discovery,
     discover_tools_for_install,
     run_post_grant_discovery,
 )
 from cubebox.services.mcp_installs import MCPConnectorService
-from cubebox.services.mcp_templates import MCPConnectorTemplateService
 
 router = APIRouter(prefix="/ws/{workspace_id}/mcp", tags=["workspace-mcp"])
+
+
+# ---------------------------------------------------------------------------
+# Serialisation helpers
+# ---------------------------------------------------------------------------
+
+
+def _template_to_connector_template_out(template: Any) -> MCPConnectorTemplateOut:
+    """Map MCPConnectorTemplate → MCPConnectorTemplateOut for effective connector view."""
+    return MCPConnectorTemplateOut(
+        template_id=template.id,
+        slug=template.slug,
+        name=template.name,
+        provider=template.provider,
+        description=template.description,
+        server_url=template.server_url,
+        transport=template.transport,
+        supported_auth_methods=list(template.supported_auth_methods or []),
+        default_credential_policy=template.default_credential_policy,
+        static_form_schema=template.static_form_schema,
+        status=template.status,
+        install_summary=None,
+    )
 
 
 def _dto_to_effective_out(dto: MCPEffectiveConnectorDTO) -> MCPEffectiveConnectorOut:
     template_out: MCPConnectorTemplateOut | None = None
     if dto.template is not None:
-        template_out = _template_to_out(dto.template)
+        template_out = _template_to_connector_template_out(dto.template)
     state_out: MCPWorkspaceConnectorStateOut | None = None
     connector_id = ""
     if dto.workspace_state is not None:
@@ -121,15 +154,273 @@ def _dto_to_effective_out(dto: MCPEffectiveConnectorDTO) -> MCPEffectiveConnecto
     )
 
 
-@router.get("/templates", response_model=MCPConnectorTemplateListOut)
-async def list_workspace_templates(
-    workspace_id: str,  # noqa: ARG001 — path param, future workspace-scoped filtering
-    svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
-    _ctx: Annotated[RequestContext, Depends(require_member)],
-) -> MCPConnectorTemplateListOut:
-    """Workspace view over the global connector template catalog."""
-    templates = await svc.list_active()
-    return MCPConnectorTemplateListOut(items=[_template_to_out(t) for t in templates])
+def _row_to_catalog_out(
+    row: WorkspaceCatalogRow,
+    *,
+    dtos_by_connector_id: dict[str, MCPEffectiveConnectorDTO],
+) -> WorkspaceCatalogRowOut:
+    """Serialize a WorkspaceCatalogRow into WorkspaceCatalogRowOut.
+
+    Enriches with effective state (usable/reason/credential_availability_by_scope)
+    when a connector+state exists. Rows without a connector leave usable=None.
+    """
+    connector_facts = None
+    usable: bool | None = None
+    reason: str | None = None
+    cred_avail: dict[Literal["org", "workspace", "user"], bool] = {
+        "org": False,
+        "workspace": False,
+        "user": False,
+    }
+
+    if row.connector is not None:
+        connector_facts = _connector_to_facts(row.connector)
+        dto = dtos_by_connector_id.get(row.connector.id)
+        if dto is not None:
+            usable = dto.usable
+            reason = dto.reason if not dto.usable else None
+            cred_avail = dto.credential_availability_by_scope
+        # No dto means the connector exists but no workspace state row yet
+        # (connector was not yet enabled in this workspace): usable stays None
+
+    return WorkspaceCatalogRowOut(
+        template=_template_to_out(row.template),
+        connector=connector_facts,
+        enabled=row.enabled,
+        usable=usable,
+        reason=reason,
+        credential_availability_by_scope=cred_avail,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Catalog handler
+# ---------------------------------------------------------------------------
+
+
+@router.get("/catalog", response_model=WorkspaceCatalogListOut)
+async def ws_catalog(
+    workspace_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
+) -> WorkspaceCatalogListOut:
+    """Workspace template catalog: every visible non-disabled template with effective state."""
+    template_repo = MCPConnectorTemplateRepository(session)
+    connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
+    settings_repo = MCPTemplateSettingsRepository(session, org_id=ctx.org_id)
+
+    templates = await template_repo.list_visible_for_workspace(ctx.org_id, workspace_id)
+    connectors = await connector_repo.list_active()
+    connectors_by_template: dict[str, Any] = {c.template_id: c for c in connectors}
+
+    # States for this workspace keyed by connector_id
+    states = await state_repo.list_for_workspace(workspace_id)
+    states_by_connector: dict[str, Any] = {s.connector_id: s for s in states}
+
+    disabled_ids = await settings_repo.disabled_template_ids()
+
+    catalog_rows = build_workspace_catalog_rows(
+        templates=templates,
+        connectors_by_template_id=connectors_by_template,
+        states_by_connector_id=states_by_connector,
+        disabled_template_ids=disabled_ids,
+    )
+
+    # Enrich with effective state (usable/reason/credential_availability)
+    # by fetching the effective DTO list once (include_unusable=True so
+    # disabled-but-enabled rows surface with usable=False).
+    dtos = await effective_svc.list_for_workspace_user(
+        workspace_id, ctx.user.id, include_unusable=True
+    )
+    dtos_by_connector_id: dict[str, MCPEffectiveConnectorDTO] = {
+        dto.connector.id: dto for dto in dtos
+    }
+
+    items = [
+        _row_to_catalog_out(row, dtos_by_connector_id=dtos_by_connector_id) for row in catalog_rows
+    ]
+    return WorkspaceCatalogListOut(items=items)
+
+
+# ---------------------------------------------------------------------------
+# Template state (lazy-enable / disable)
+# ---------------------------------------------------------------------------
+
+
+@router.put(
+    "/templates/{template_id}/state",
+    response_model=WorkspaceCatalogRowOut,
+)
+async def put_template_state(
+    workspace_id: str,
+    template_id: str,
+    body: TemplateStateIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    effective_svc: Annotated[MCPEffectiveConnectorService, Depends(get_ws_effective_service)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> WorkspaceCatalogRowOut:
+    """Lazy-enable (or disable) a template in this workspace.
+
+    Route layer owns visibility + disabled rejections:
+    - 404 template_not_visible: template not in list_visible_for_workspace
+    - 409 template_disabled_in_org: org admin disabled this template
+    - 200 WorkspaceCatalogRowOut on success
+    """
+    template_repo = MCPConnectorTemplateRepository(session)
+    settings_repo = MCPTemplateSettingsRepository(session, org_id=ctx.org_id)
+
+    # Visibility check
+    visible = await template_repo.list_visible_for_workspace(ctx.org_id, workspace_id)
+    template = next((t for t in visible if t.id == template_id), None)
+    if template is None:
+        raise HTTPException(404, detail={"code": "template_not_visible"})
+
+    # Disabled check
+    disabled_ids = await settings_repo.disabled_template_ids()
+    if template_id in disabled_ids:
+        raise HTTPException(409, detail={"code": "template_disabled_in_org"})
+
+    # Delegate to service (lazy-ensure connector + upsert state row)
+    await svc.set_workspace_enabled(
+        template,
+        workspace_id=workspace_id,
+        enabled=body.enabled,
+        credential_policy=body.credential_policy,
+    )
+    await audit.record(
+        event="mcp.workspace_template.state_changed",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=template_id,
+        details={"workspace_id": workspace_id, "enabled": body.enabled},
+    )
+
+    # Build response row
+    connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    state_repo = MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id)
+
+    connector = await connector_repo.get_by_template_id(template_id)
+    connectors_by_template: dict[str, Any] = {template_id: connector} if connector else {}
+    states: dict[str, Any] = {}
+    if connector is not None:
+        state = await state_repo.get_by_connector(workspace_id, connector.id)
+        if state is not None:
+            states[connector.id] = state
+
+    rows = build_workspace_catalog_rows(
+        templates=[template],
+        connectors_by_template_id=connectors_by_template,
+        states_by_connector_id=states,
+        disabled_template_ids=set(),  # already checked above
+    )
+
+    dtos = await effective_svc.list_for_workspace_user(
+        workspace_id, ctx.user.id, include_unusable=True
+    )
+    dtos_by_connector_id: dict[str, MCPEffectiveConnectorDTO] = {
+        dto.connector.id: dto for dto in dtos
+    }
+
+    if rows:
+        return _row_to_catalog_out(rows[0], dtos_by_connector_id=dtos_by_connector_id)
+
+    # Fallback: template was excluded by disabled filter (shouldn't happen here
+    # since we checked above, but be defensive)
+    return WorkspaceCatalogRowOut(
+        template=_template_to_out(template),
+        connector=None,
+        enabled=body.enabled,
+        usable=None,
+        reason=None,
+        credential_availability_by_scope={"org": False, "workspace": False, "user": False},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Template CRUD (workspace-scoped)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/templates",
+    status_code=status.HTTP_201_CREATED,
+    response_model=MCPTemplateOut,
+)
+async def create_workspace_template(
+    workspace_id: str,
+    body: CreateTemplateIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPTemplateOut:
+    """Create a workspace-scoped custom MCP template."""
+    template_repo = MCPConnectorTemplateRepository(session)
+    try:
+        template = await template_repo.create_scoped(
+            scope="workspace",
+            org_id=ctx.org_id,
+            workspace_id=workspace_id,
+            created_by_user_id=ctx.user.id,
+            name=body.name,
+            server_url=body.server_url,
+            transport=body.transport,
+            supported_auth_methods=[body.auth_method],
+            default_credential_policy=body.default_credential_policy,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        raise HTTPException(409, detail={"code": code}) from exc
+    await audit.record(
+        event="mcp.template.created",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=template.id,
+        details={"scope": "workspace", "workspace_id": workspace_id, "name": body.name},
+    )
+    return _template_to_out(template)
+
+
+@router.post(
+    "/templates/{template_id}/promote",
+    response_model=MCPTemplateOut,
+)
+async def promote_workspace_template(
+    workspace_id: str,
+    template_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPTemplateOut:
+    """Promote a workspace-scoped template to org scope.
+
+    Only the owning workspace (template.workspace_id == path workspace_id)
+    may promote; otherwise 404.
+    """
+    template_repo = MCPConnectorTemplateRepository(session)
+    template = await template_repo.get(template_id)
+    if template is None or template.scope != "workspace" or template.workspace_id != workspace_id:
+        raise HTTPException(404, detail={"code": "template_not_owned_by_workspace"})
+
+    promoted = await template_repo.promote_to_org(template_id)
+    await session.commit()
+    await session.refresh(promoted)
+    await audit.record(
+        event="mcp.template.promoted",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=template_id,
+        details={"from_workspace_id": workspace_id},
+    )
+    return _template_to_out(promoted)
+
+
+# ---------------------------------------------------------------------------
+# Effective connector list (kept for chat surface + active-tools)
+# ---------------------------------------------------------------------------
 
 
 @router.get("/connectors", response_model=MCPEffectiveConnectorListOut)
@@ -230,189 +521,9 @@ async def list_workspace_active_tools(
     return McpActiveToolListOut(items=items)
 
 
-@router.get("/available", response_model=WsAvailableListOut)
-async def list_workspace_available(
-    workspace_id: str,
-    ctx: Annotated[RequestContext, Depends(require_member)],
-    install_svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
-    template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
-) -> WsAvailableListOut:
-    """Connectors the workspace can opt into.
-
-    Includes org installs not yet enabled in this workspace + templates
-    the workspace doesn't already have. Spec §3.2.
-    """
-    from cubebox.services.mcp_ws_available import compute_available_rows
-
-    org_installs = await install_svc._install_repo.list_org_installs()
-    ws_installs = await install_svc._install_repo.list_workspace_installs(workspace_id)
-    ws_states = await install_svc._state_repo.list_for_workspace(workspace_id)
-    templates = await template_svc.list_active()
-
-    rows = compute_available_rows(
-        ws_id=workspace_id,
-        org_installs=org_installs,
-        ws_installs=ws_installs,
-        ws_states=ws_states,
-        templates=templates,
-    )
-
-    installs_by_id = {i.id: i for i in org_installs}
-    templates_by_id = {t.id: t for t in templates}
-
-    connector_ids: dict[str, str] = {}
-    for inst in org_installs:
-        cid = await install_svc._connector_id_for_install(inst)
-        if cid is not None:
-            connector_ids[inst.id] = cid
-
-    items: list[WsAvailableOut] = []
-    for row in rows:
-        credential_availability_by_scope: dict[Literal["org", "workspace", "user"], bool] = {
-            "org": False,
-            "workspace": False,
-            "user": False,
-        }
-        if row.source == "org_install" and row.connector_id is not None:
-            connector_id = connector_ids.get(row.connector_id, row.connector_id)
-            org_grant = await install_svc._grant_repo.get_for_connector_scope(
-                connector_id=connector_id,
-                grant_scope="org",
-                workspace_id=None,
-                user_id=None,
-            )
-            workspace_grant = await install_svc._grant_repo.get_for_connector_scope(
-                connector_id=connector_id,
-                grant_scope="workspace",
-                workspace_id=workspace_id,
-                user_id=None,
-            )
-            user_grant = await install_svc._grant_repo.get_for_connector_scope(
-                connector_id=connector_id,
-                grant_scope="user",
-                workspace_id=workspace_id,
-                user_id=ctx.user.id,
-            )
-            credential_availability_by_scope = {
-                "org": org_grant is not None,
-                "workspace": workspace_grant is not None,
-                "user": user_grant is not None,
-            }
-        install_out = (
-            _install_to_out(
-                installs_by_id[row.connector_id],
-                connector_id=connector_ids.get(row.connector_id, ""),
-            )
-            if row.source == "org_install" and row.connector_id is not None
-            else None
-        )
-        template_out = (
-            _template_to_out(templates_by_id[row.template_id])
-            if row.template_id is not None and row.template_id in templates_by_id
-            else None
-        )
-        items.append(
-            WsAvailableOut(
-                source=row.source,
-                install=install_out,
-                template=template_out,
-                reason=row.reason,
-                credential_availability_by_scope=credential_availability_by_scope,
-            )
-        )
-    return WsAvailableListOut(items=items)
-
-
-@router.post(
-    "/installs",
-    status_code=status.HTTP_201_CREATED,
-    response_model=MCPConnectorOut,
-)
-async def create_workspace_install(
-    workspace_id: str,
-    body: WorkspaceCreateInstallIn,
-    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
-    template_svc: Annotated[MCPConnectorTemplateService, Depends(get_connector_template_service)],
-    ctx: Annotated[RequestContext, Depends(require_admin)],
-    audit: Annotated[AuditSink, Depends(get_audit_sink)],
-) -> MCPConnectorOut:
-    """Workspace-local install creation. Admin-only.
-
-    Uses :class:`WorkspaceCreateInstallIn` — ``install_scope`` is pinned
-    to ``"workspace"`` at the schema layer so attempts to POST an
-    ``install_scope: "org"`` body to this route are rejected with 422
-    before reaching the handler. The org-scope path lives under
-    ``POST /api/v1/admin/mcp/installs``.
-    """
-    if body.template_id is None:
-        raise HTTPException(
-            422,
-            detail=[
-                {
-                    "type": "value_error",
-                    "loc": ["body", "template_id"],
-                    "msg": "template_id is required for workspace installs",
-                    "input": None,
-                }
-            ],
-        )
-    try:
-        template = await template_svc.get_active(body.template_id)
-    except ValueError as exc:
-        raise HTTPException(404, detail={"code": "connector_template_not_found"}) from exc
-
-    try:
-        result = await svc.create_from_template_for_workspace(
-            template=template,
-            workspace_id=workspace_id,
-            auth_method=body.auth_method,
-            credential_policy=body.default_credential_policy,
-        )
-    except ValueError as exc:
-        # Service-side guards raise ValueError with a canonical code as
-        # the message (``auth_method_not_supported_by_template``,
-        # ``install_already_exists``). 409 for the uniqueness rule,
-        # 400 for everything else.
-        code = str(exc)
-        status_code = 409 if code == "install_already_exists" else 400
-        raise HTTPException(status_code, detail={"code": code}) from exc
-
-    await audit.record(
-        event="mcp.install.created",
-        actor_user_id=ctx.user.id,
-        org_id=ctx.org_id,
-        target_id=result.install.id,
-        details={"scope": "workspace", "workspace_id": workspace_id},
-    )
-    return _install_to_out(result.install, connector_id=result.connector_id)
-
-
-@router.delete(
-    "/installs/{connector_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_workspace_install(
-    workspace_id: str,
-    connector_id: str,
-    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
-    ctx: Annotated[RequestContext, Depends(require_admin)],
-    audit: Annotated[AuditSink, Depends(get_audit_sink)],
-) -> None:
-    install = await svc._install_repo.get(connector_id)
-    state = await svc._state_repo.get(workspace_id, connector_id)
-    if install is None or state is None:
-        raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-    try:
-        await svc.uninstall(connector_id)
-    except ValueError as exc:
-        raise HTTPException(404, detail={"code": "mcp_install_not_found"}) from exc
-    await audit.record(
-        event="mcp.install.uninstalled",
-        actor_user_id=ctx.user.id,
-        org_id=ctx.org_id,
-        target_id=connector_id,
-        details={"workspace_id": workspace_id},
-    )
+# ---------------------------------------------------------------------------
+# Workspace refresh-discovery (connector-keyed, kept)
+# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -461,117 +572,32 @@ async def ws_refresh_discovery(
     return _install_to_out(refreshed, connector_id=cid)
 
 
-@router.patch(
-    "/connectors/{connector_id}/state",
-    response_model=MCPWorkspaceConnectorStateOut,
-)
-async def patch_workspace_connector_state(
-    workspace_id: str,
+# ---------------------------------------------------------------------------
+# Grants (workspace + user scope) — all connector-keyed, kept unchanged
+# ---------------------------------------------------------------------------
+
+
+async def _reject_ws_grant_if_template_disabled(
+    session: AsyncSession,
+    *,
+    org_id: str,
     connector_id: str,
-    body: PatchWorkspaceStateIn,
-    svc: Annotated[MCPConnectorService, Depends(get_ws_install_service)],
-    ctx: Annotated[RequestContext, Depends(require_admin)],
-    audit: Annotated[AuditSink, Depends(get_audit_sink)],
-) -> MCPWorkspaceConnectorStateOut:
-    """Workspace-admin-only enablement / credential-policy edit.
+) -> None:
+    """Raise 409 template_disabled_in_org if the connector's template is org-disabled.
 
-    The path lives under ``/connectors`` (not ``/installs``) by design —
-    per spec, install-lifecycle operations stay under ``/installs`` while
-    per-workspace state edits sit under the effective-connector view.
+    Mirrors admin_mcp._reject_if_template_disabled but loads the connector first
+    because ws grant routes are connector-keyed (not template-keyed).
     """
-    install = await svc._install_repo.get(connector_id)
-    if install is None:
+    connector_repo = MCPConnectorRepository(session, org_id=org_id)
+    connector = await connector_repo.get(connector_id)
+    if connector is None:
         raise HTTPException(404, detail={"code": "mcp_install_not_found"})
-
-    current = await svc._state_repo.get(workspace_id, connector_id)
-    if current is None:
-        # No state row exists. For org-scope installs in the caller's org this
-        # is the normal shape when ``auto_enable.mode`` was ``none`` or only
-        # distributed to other workspaces — the admin UI surfaces the install
-        # as "disabled" and this PATCH is the path to selectively enable it.
-        # Upsert in that case using the body (or the install's default policy
-        # when ``credential_policy`` is omitted), with
-        # ``enablement_source='workspace_manual'``. For workspace-scope installs
-        # a missing state row is an internal inconsistency (the install-create
-        # flow writes it) — keep 404 there.
-        if install.install_scope != "org":
-            raise HTTPException(404, detail={"code": "mcp_workspace_state_not_found"})
-        # Repository scoping already guarantees this, but assert explicitly so
-        # a future refactor can't quietly cross orgs.
-        assert install.org_id == ctx.org_id, "install.org_id must match request context org"
-
-        new_policy = (
-            body.credential_policy
-            if body.credential_policy is not None
-            else install.default_credential_policy
-        )
-        _validate_install_policy_pairing(
-            install=install,
-            requested_policy=new_policy,
-            field="credential_policy",
-        )
-        new_enabled = body.enabled if body.enabled is not None else True
-
-        connector_id = install.id
-        saved = await svc._state_repo.upsert_for_connector(
-            workspace_id=workspace_id,
-            connector_id=connector_id,
-            enabled=new_enabled,
-            credential_policy=new_policy,
-            enablement_source="workspace_manual",
-            updated_by_user_id=ctx.user.id,
-        )
-        await audit.record(
-            event="mcp.workspace_state.patched",
-            actor_user_id=ctx.user.id,
-            org_id=ctx.org_id,
-            target_id=connector_id,
-            details={"workspace_id": workspace_id, "created": True},
-        )
-        return MCPWorkspaceConnectorStateOut(
-            workspace_id=saved.workspace_id,
-            connector_id=saved.connector_id,
-            enabled=saved.enabled,
-            credential_policy=saved.credential_policy,  # type: ignore[arg-type]
-            enablement_source=saved.enablement_source,
-        )
-
-    new_policy = (
-        body.credential_policy if body.credential_policy is not None else current.credential_policy
-    )
-    if body.credential_policy is not None:
-        _validate_install_policy_pairing(
-            install=install,
-            requested_policy=new_policy,
-            field="credential_policy",
-        )
-    new_enabled = body.enabled if body.enabled is not None else current.enabled
-
-    saved = await svc._state_repo.upsert_for_connector(
-        workspace_id=workspace_id,
-        connector_id=current.connector_id,
-        enabled=new_enabled,
-        credential_policy=new_policy,
-        enablement_source=current.enablement_source,
-        updated_by_user_id=ctx.user.id,
-    )
-    await audit.record(
-        event="mcp.workspace_state.patched",
-        actor_user_id=ctx.user.id,
-        org_id=ctx.org_id,
-        target_id=connector_id,
-        details={"workspace_id": workspace_id},
-    )
-    return MCPWorkspaceConnectorStateOut(
-        workspace_id=saved.workspace_id,
-        connector_id=saved.connector_id,
-        enabled=saved.enabled,
-        credential_policy=saved.credential_policy,  # type: ignore[arg-type]
-        enablement_source=saved.enablement_source,
-    )
-
-
-# ---------------- workspace + user grants ---------------- #
+    if connector.template_id is None:
+        return
+    settings_repo = MCPTemplateSettingsRepository(session, org_id=org_id)
+    disabled_ids = await settings_repo.disabled_template_ids()
+    if connector.template_id in disabled_ids:
+        raise HTTPException(409, detail={"code": "template_disabled_in_org"})
 
 
 @router.post(
@@ -591,6 +617,9 @@ async def create_my_user_grant(
     ctx: Annotated[RequestContext, Depends(require_member)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPCredentialGrantStatusOut:
+    await _reject_ws_grant_if_template_disabled(
+        session, org_id=ctx.org_id, connector_id=connector_id
+    )
     if body.credential_plaintext is None:
         raise HTTPException(
             422,
@@ -613,6 +642,10 @@ async def create_my_user_grant(
             name=body.name,
         )
     except ValueError as exc:
+        if str(exc) == "auth_method_not_supported_by_template":
+            raise HTTPException(
+                422, detail={"code": "auth_method_not_supported_by_template"}
+            ) from exc
         raise HTTPException(400, detail={"code": "invalid_grant", "msg": str(exc)}) from exc
     await audit.record(
         event="mcp.grant.created",
@@ -676,9 +709,13 @@ async def my_user_grant_oauth_start(
     connector_id: str,
     body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_member)],
 ) -> MCPOAuthStartOut:
     """Start an OAuth flow that produces a user-scope grant."""
+    await _reject_ws_grant_if_template_disabled(
+        session, org_id=ctx.org_id, connector_id=connector_id
+    )
     try:
         result = await svc.start_oauth_flow(
             connector_id=connector_id,
@@ -718,6 +755,9 @@ async def create_workspace_grant(
     ctx: Annotated[RequestContext, Depends(require_admin)],
     audit: Annotated[AuditSink, Depends(get_audit_sink)],
 ) -> MCPCredentialGrantStatusOut:
+    await _reject_ws_grant_if_template_disabled(
+        session, org_id=ctx.org_id, connector_id=connector_id
+    )
     if body.credential_plaintext is None:
         raise HTTPException(
             422,
@@ -739,6 +779,10 @@ async def create_workspace_grant(
             name=body.name,
         )
     except ValueError as exc:
+        if str(exc) == "auth_method_not_supported_by_template":
+            raise HTTPException(
+                422, detail={"code": "auth_method_not_supported_by_template"}
+            ) from exc
         raise HTTPException(400, detail={"code": "invalid_grant", "msg": str(exc)}) from exc
     await audit.record(
         event="mcp.grant.created",
@@ -801,9 +845,13 @@ async def workspace_grant_oauth_start(
     connector_id: str,
     body: MCPOAuthStartIn,
     svc: Annotated[OAuthStartService, Depends(get_oauth_start_service)],
+    session: Annotated[AsyncSession, Depends(get_session)],
     ctx: Annotated[RequestContext, Depends(require_admin)],
 ) -> MCPOAuthStartOut:
     """Start an OAuth flow that produces a workspace-scope grant."""
+    await _reject_ws_grant_if_template_disabled(
+        session, org_id=ctx.org_id, connector_id=connector_id
+    )
     try:
         result = await svc.start_oauth_flow(
             connector_id=connector_id,

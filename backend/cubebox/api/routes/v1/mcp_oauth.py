@@ -1,8 +1,8 @@
 """MCP OAuth callback route.
 
 Delegates to :class:`cubebox.mcp.oauth.OAuthCallbackHandler`, which decodes
-the HMAC-signed state token, exchanges the auth code for tokens, writes
-the grant row, and conditionally flips ``install.auth_status``.
+the HMAC-signed state token, exchanges the auth code for tokens, and writes
+the grant row. The canonical authorized signal is ``grant.grant_status == 'valid'``.
 """
 
 from __future__ import annotations

@@ -77,7 +77,7 @@ MCP connectors let the agent interact with external services.
 3. Provide authentication credentials (a static credential, OAuth, or none, depending on the connector).
 4. Choose which workspace members should have access via **Grants**.
 
-Once installed and granted, the tools are available to the agent in conversations. See the [MCP Tools guide](../guides/mcp/overview.md) for a full walkthrough.
+Once enabled and credentialed, the tools are available to the agent in conversations. See the [MCP Tools guide](../guides/mcp/overview.md) for a full walkthrough.
 
 ## Install skills
 

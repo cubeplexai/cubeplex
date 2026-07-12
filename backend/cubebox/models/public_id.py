@@ -57,6 +57,7 @@ PREFIX_EXTERNAL_IDENTITY: str = "eid"
 PREFIX_API_KEY: str = "ak"
 PREFIX_ORG_INVITE: str = "oinv"
 PREFIX_MCP_CONNECTOR: str = "mcpco"
+PREFIX_MCP_TEMPLATE_SETTINGS: str = "mcts"
 
 
 @dataclass

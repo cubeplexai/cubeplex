@@ -92,20 +92,20 @@ class MCPToolEntry(BaseModel):
 
 
 class MCPConnectorOut(BaseModel):
-    """One ``MCPConnector`` row."""
+    """One ``MCPConnector`` row.
+
+    In the template-centric model, auth_method lives on the template, not the
+    connector. The connector tracks status, discovery state, and tool cache.
+    """
 
     connector_id: str
     template_id: str | None
-    install_scope: Literal["org", "workspace"]
-    workspace_id: str | None
     name: str
     server_url: str
     transport: str
-    auth_method: AuthMethodLiteral
     default_credential_policy: CredentialPolicyLiteral
-    auth_status: str
     discovery_status: str
-    install_state: str
+    status: str
     tool_count: int
     tools: list[MCPToolEntry]
     tool_citations: dict[str, CitationConfigJSON]
@@ -164,129 +164,20 @@ class MCPEffectiveConnectorListOut(BaseModel):
     items: list[MCPEffectiveConnectorOut]
 
 
-class MCPAdminInstallEffectiveOut(BaseModel):
-    """Org-row effective state for the admin page.
-
-    Bypasses the workspace lens — see spec §4 admin row.
-    """
-
-    connector_id: str
-    usable: bool
-    reason: Literal[
-        "usable",
-        "pending_oauth",
-        "missing_org_grant",
-        "grant_expired",
-        "discovery_failed",
-    ]
-
-
-class AutoEnableIn(BaseModel):
-    """Distribution payload for org-scope installs."""
-
-    mode: Literal["all", "selected", "none"]
-    workspace_ids: list[str] | None = None
-
-
-class AdminCreateInstallIn(BaseModel):
-    """Body of POST /api/v1/admin/mcp/installs.
-
-    Cross-field validation: ``credential_policy="none"`` is allowed only when
-    ``auth_method="none"`` — otherwise the install would be a credentialed
-    connector with no grant slot.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    template_id: str | None = None
-    install_scope: Literal["org"] = "org"
-    auth_method: AuthMethodLiteral
-    default_credential_policy: CredentialPolicyLiteral
-    auto_enable: AutoEnableIn = Field(default_factory=lambda: AutoEnableIn(mode="none"))
-
-    # Custom-install fields (used when template_id is None or to override the
-    # template). Optional in both cases.
-    name: str | None = Field(default=None, min_length=1, max_length=64)
-    server_url: str | None = Field(default=None, min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse"] | None = None
-    headers: dict[str, str] | None = None
-
-    # Org-policy static one-shot grant: when provided alongside a custom
-    # static install with org-scope policy, the route creates the grant
-    # immediately so the connector lands in a usable state on creation.
-    credential_plaintext: str | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def _validate_policy_vs_auth(self) -> "AdminCreateInstallIn":
-        if self.default_credential_policy == "none" and self.auth_method != "none":
-            raise ValueError(
-                "default_credential_policy='none' is only valid when auth_method='none'"
-            )
-        if self.auth_method == "none" and self.default_credential_policy != "none":
-            raise ValueError("auth_method='none' requires default_credential_policy='none'")
-        if self.template_id is None:
-            # Custom install: name/server_url/transport are required.
-            if not (self.name and self.server_url and self.transport):
-                raise ValueError("name_server_url_transport_required_for_custom_installs")
-        if self.credential_plaintext is not None:
-            if self.auth_method != "static":
-                raise ValueError("credential_plaintext_only_valid_with_static_auth")
-            if self.default_credential_policy != "org":
-                raise ValueError("credential_plaintext_only_valid_for_org_policy")
-        return self
-
-
-class WorkspaceCreateInstallIn(BaseModel):
-    """Body of POST /api/v1/ws/{workspace_id}/mcp/installs.
-
-    Mirrors :class:`AdminCreateInstallIn` but pins ``install_scope`` to
-    ``"workspace"`` so the workspace install handler distinguishes its
-    request shape from the admin shape at the schema layer. The
-    ``credential_policy='none'`` cross-field validator is kept in sync.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    template_id: str | None = None
-    install_scope: Literal["workspace"] = "workspace"
-    auth_method: AuthMethodLiteral
-    default_credential_policy: CredentialPolicyLiteral
-
-    # Custom-install fields (used when template_id is None or to override the
-    # template). Optional in both cases.
-    name: str | None = Field(default=None, min_length=1, max_length=64)
-    server_url: str | None = Field(default=None, min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse"] | None = None
-    headers: dict[str, str] | None = None
-
-    @model_validator(mode="after")
-    def _validate_policy_vs_auth(self) -> "WorkspaceCreateInstallIn":
-        if self.default_credential_policy == "none" and self.auth_method != "none":
-            raise ValueError(
-                "default_credential_policy='none' is only valid when auth_method='none'"
-            )
-        if self.auth_method == "none" and self.default_credential_policy != "none":
-            raise ValueError("auth_method='none' requires default_credential_policy='none'")
-        return self
-
-
 class PatchInstallIn(BaseModel):
     """Body of PATCH /api/v1/admin/mcp/installs/{connector_id}.
 
-    Reject unknown keys via ``extra="forbid"``. The auth_method ↔ policy
-    pairing cannot be validated here (body may omit one); the service layer
-    re-validates with the loaded install row.
+    Reduced surface: only name, headers, and default_credential_policy are
+    patchable here. Server config (server_url, transport) belongs to the
+    template; auth_method and auto_enroll_new_workspaces moved to distribute.
+    Reject unknown keys via ``extra="forbid"``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    auth_method: AuthMethodLiteral | None = None
     default_credential_policy: CredentialPolicyLiteral | None = None
-    auto_enroll_new_workspaces: bool | None = None
     headers: dict[str, str] | None = None
     name: str | None = Field(default=None, min_length=1, max_length=64)
-    server_url: str | None = Field(default=None, min_length=1, max_length=2048)
-    transport: Literal["streamable_http", "sse"] | None = None
 
 
 class PatchWorkspaceStateIn(BaseModel):
@@ -340,14 +231,6 @@ class ToolCitationUpsertIn(BaseModel):
 
     tool_name: str
     config: dict[str, Any] | None = None
-
-
-class PromoteInstallIn(BaseModel):
-    """Body of ``POST /admin/mcp/installs/{id}/promote-to-org``."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    distribution: AutoEnableIn = Field(default_factory=lambda: AutoEnableIn(mode="none"))
 
 
 class TestConnectionIn(BaseModel):

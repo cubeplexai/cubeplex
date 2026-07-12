@@ -24,6 +24,7 @@ from cubebox.models.im_connector import (
 from cubebox.models.mcp import (
     MCPConnector,
     MCPConnectorTemplate,
+    MCPConnectorTemplateSettings,
     MCPCredentialGrant,
     MCPWorkspaceConnectorState,
 )
@@ -80,6 +81,7 @@ __all__ = [
     "LlmBillingEvent",
     "MCPConnector",
     "MCPConnectorTemplate",
+    "MCPConnectorTemplateSettings",
     "MCPCredentialGrant",
     "MCPWorkspaceConnectorState",
     "MemoryItem",

@@ -18,6 +18,7 @@ from cubebox.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
+    MCPTemplateSettingsRepository,
     MCPWorkspaceConnectorStateRepository,
 )
 
@@ -29,6 +30,7 @@ MCPEffectiveReason = Literal[
     "not_enabled_in_workspace",
     "install_uninstalled",
     "template_deprecated",
+    "template_disabled_in_org",
     "pending_oauth",
     "missing_org_grant",
     "missing_workspace_grant",
@@ -44,6 +46,7 @@ class MCPGrantInput:
     scope: str
     status: str
     has_refresh: bool
+    auth_method: str
 
 
 @dataclass(frozen=True)
@@ -53,8 +56,9 @@ class MCPEffectiveInput:
     install_state: str
     workspace_state_present: bool
     workspace_enabled: bool
-    auth_method: str
-    auth_status: str
+    org_disabled: bool
+    auth_required: bool
+    oauth_supported: bool
     discovery_status: str
     credential_policy: CredentialPolicy
     grant: MCPGrantInput | None
@@ -79,6 +83,8 @@ def _missing_grant_reason(policy: CredentialPolicy) -> MCPEffectiveReason:
 
 
 def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
+    if value.org_disabled:
+        return MCPEffectiveResult(False, "template_disabled_in_org", "missing")
     if not value.install_present:
         return MCPEffectiveResult(False, "not_installed", "missing")
     if value.install_state == "uninstalled":
@@ -87,16 +93,11 @@ def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
         return MCPEffectiveResult(False, "template_deprecated", "missing")
     if not value.workspace_state_present or not value.workspace_enabled:
         return MCPEffectiveResult(False, "not_enabled_in_workspace", "missing")
-    if value.auth_method == "none":
+    if not value.auth_required:
         return MCPEffectiveResult(True, "usable", "not_required")
-    if (
-        value.auth_method == "oauth"
-        and value.credential_policy in {"org", "workspace"}
-        and value.auth_status == "pending"
-        and value.grant is None
-    ):
-        return MCPEffectiveResult(False, "pending_oauth", "missing")
     if value.grant is None:
+        if value.oauth_supported and value.credential_policy in {"org", "workspace"}:
+            return MCPEffectiveResult(False, "pending_oauth", "missing")
         return MCPEffectiveResult(False, _missing_grant_reason(value.credential_policy), "missing")
     if value.grant.status == "expired":
         return MCPEffectiveResult(False, "grant_expired", "missing")
@@ -161,6 +162,7 @@ class MCPEffectiveConnectorService:
         self,
         *,
         template_repo: MCPConnectorTemplateRepository,
+        settings_repo: MCPTemplateSettingsRepository,
         state_repo: MCPWorkspaceConnectorStateRepository,
         grant_repo: MCPCredentialGrantRepository,
         org_id: str,
@@ -169,6 +171,7 @@ class MCPEffectiveConnectorService:
         token_manager: OAuthTokenManager | None = None,
     ) -> None:
         self._template_repo = template_repo
+        self._settings_repo = settings_repo
         resolved_connector_repo = connector_repo or install_repo
         if resolved_connector_repo is None:
             raise TypeError("connector_repo is required")
@@ -211,7 +214,7 @@ class MCPEffectiveConnectorService:
                 name=row.connector.name,
                 server_url=row.connector.server_url,
                 transport=row.connector.transport,
-                auth_method=row.connector.auth_method,
+                auth_method=row.grant.auth_method if row.grant is not None else "none",
                 grant_scope=row.grant.grant_scope if row.grant is not None else None,
                 credential_id=row.grant.credential_id if row.grant is not None else None,
                 refresh_credential_id=(
@@ -265,6 +268,9 @@ class MCPEffectiveConnectorService:
             if template is not None:
                 templates_by_id[template_id] = template
 
+        # Load disabled template IDs once for the whole batch.
+        disabled_ids = await self._settings_repo.disabled_template_ids()
+
         rows: list[MCPEffectiveConnectorDTO] = []
         for connector in visible:
             state = states_by_connector.get(connector.id)
@@ -273,20 +279,25 @@ class MCPEffectiveConnectorService:
                 if state is not None
                 else connector.default_credential_policy
             )
-            template = (
-                templates_by_id.get(connector.template_id)
-                if connector.template_id is not None
-                else None
-            )
+            template = templates_by_id.get(connector.template_id)
             template_status = template.status if template is not None else None
+
+            # Derive auth flags from the template (no longer from the connector row).
+            methods = set(template.supported_auth_methods or []) if template is not None else set()
+            auth_required = bool(methods - {"none"})
+            oauth_supported = "oauth" in methods
+            org_disabled = connector.template_id in disabled_ids
+
             grant = await self._resolve_grant(
                 connector=connector,
+                template=template,
                 policy=policy,
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
             credential_availability_by_scope = await self._credential_availability_by_scope(
                 connector=connector,
+                auth_required=auth_required,
                 workspace_id=workspace_id,
                 user_id=user_id,
             )
@@ -295,6 +306,7 @@ class MCPEffectiveConnectorService:
                     scope=grant.grant_scope,
                     status=grant.grant_status,
                     has_refresh=grant.refresh_credential_id is not None,
+                    auth_method=grant.auth_method,
                 )
                 if grant is not None
                 else None
@@ -306,8 +318,9 @@ class MCPEffectiveConnectorService:
                     install_state=connector.status,
                     workspace_state_present=state is not None,
                     workspace_enabled=state.enabled if state is not None else False,
-                    auth_method=connector.auth_method,
-                    auth_status=connector.auth_status,
+                    org_disabled=org_disabled,
+                    auth_required=auth_required,
+                    oauth_supported=oauth_supported,
                     discovery_status=connector.discovery_status,
                     credential_policy=_cast_policy(policy),
                     grant=grant_input,
@@ -336,10 +349,11 @@ class MCPEffectiveConnectorService:
         self,
         *,
         connector: MCPConnector,
+        auth_required: bool,
         workspace_id: str,
         user_id: str,
     ) -> dict[Literal["org", "workspace", "user"], bool]:
-        if connector.auth_method == "none":
+        if not auth_required:
             return {"org": False, "workspace": False, "user": False}
         org_grant = await self._grant_repo.get_for_connector_scope(
             connector_id=connector.id,
@@ -369,6 +383,7 @@ class MCPEffectiveConnectorService:
         self,
         *,
         connector: MCPConnector,
+        template: MCPConnectorTemplate | None,
         policy: str,
         workspace_id: str,
         user_id: str,
@@ -381,11 +396,7 @@ class MCPEffectiveConnectorService:
             workspace_id=workspace_id if policy in {"workspace", "user"} else None,
             user_id=user_id if policy == "user" else None,
         )
-        if (
-            grant is not None
-            and connector.auth_method == "oauth"
-            and self._token_manager is not None
-        ):
+        if grant is not None and grant.auth_method == "oauth" and self._token_manager is not None:
             try:
                 await self._token_manager.get_access_token_for_grant(
                     grant=grant,

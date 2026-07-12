@@ -7,35 +7,42 @@ authoritative source for design decisions remains the spec at
 
 ## Architecture
 
-There are two layers:
+Four layers, each with distinct ownership and lifecycle:
 
-1. **Catalog layer (system-wide).** A curated list of available
-   connectors lives in `mcp_catalog_connectors`. Catalog rows are
-   templates: server URL, transport, supported auth methods, OAuth
-   metadata (DCR-supported flag, default scope, optional pre-registered
-   client credentials), and static-form schema. They contain no
-   tenant-scoped credentials and no tools. The list is materialized
-   from a Python source-of-truth (`cubebox.mcp.catalog_seed.CATALOG`)
-   via an explicit deploy step (see "Deploy: catalog seed step" below).
+1. **Template layer (system-wide catalog).** `mcp_connector_templates`
+   rows define what connectors are available: server URL, transport,
+   `auth_method`, OAuth metadata (DCR flag, default scope, optional
+   pre-registered client credentials), and static-form schema. These are
+   immutable from a tenant's perspective — org admins cannot edit them.
+   The list is materialized from a Python source-of-truth
+   (`cubebox.mcp.catalog_seed.CATALOG`) via an explicit deploy step
+   (see "Deploy: catalog seed step" below).
 
-2. **Connector identity layer (org-owned).** When an admin adds a
-   catalog connector, an `mcp_connectors` row is created. This is the
-   connector identity — org-owned, keyed by `connector_id`, and shared
-   across workspaces. Workspace state and credential grants reference
-   this identity:
-   - **`MCPWorkspaceConnectorState`** — per-workspace enablement,
-     keyed by `connector_id`. Controls whether a workspace sees the
-     connector's tools.
-   - **`MCPCredentialGrant`** — per-scope credential pointers, keyed
-     by `connector_id`. Credentials can be scoped to the org, a
-     workspace, or an individual user; there is no implicit fallback
-     between scopes.
+2. **Connector layer (org-scoped).** `mcp_connectors` rows are created
+   when an admin distributes a template to the org (via
+   `POST /api/v1/admin/mcp/templates/{template_id}/distribute`). One
+   connector per `(org_id, template_id)`. The connector owns tool
+   discovery state and the `auto_enroll_new_workspaces` flag. It does
+   not store `auth_method` or credential-level status — those live on
+   the template and grants respectively.
 
-The runtime (`cubebox/mcp/runtime.py`) walks both layers when listing
-connectors for a workspace: catalog rows describe what *could* be
-added, connector rows describe what *is* added, and the workspace
-state rows determine which connectors are enabled for a given
-workspace.
+3. **Workspace-connector state layer (workspace-scoped).** `mcp_workspace_connector_states`
+   rows track whether a given connector is enabled or disabled in a
+   specific workspace. Org admins can force-disable a template for the
+   whole org (`PUT /admin/mcp/templates/{id}/disable`); workspace
+   members can toggle individual connectors via the catalog UI.
+
+4. **Credential grant layer (scope-keyed).** `mcp_credential_grants`
+   rows hold the actual credentials, one row per
+   `(connector_id, grant_scope)`. Scope is `org`, `workspace`, or
+   `user`. For OAuth connectors, the grant points at the encrypted
+   access-token and refresh-token credentials; `grant.grant_status`
+   is the canonical auth signal (`valid` / `expired` / `pending`).
+
+The runtime (`cubebox/mcp/runtime.py`) walks all four layers when
+building the tool list for a workspace turn: templates describe what
+exists, connectors describe what the org has adopted, workspace-state
+rows determine which are enabled, and grants supply the credentials.
 
 ## Data model
 
@@ -43,55 +50,100 @@ Field-level details live in spec §4; this is the operator-level summary.
 
 | Table | Purpose |
 | --- | --- |
-| `mcp_connector_templates` | System catalog. Keyed by `slug`. Holds the connector template, OAuth metadata, and (for static-client connectors) a FK to a system-level `Credential` row that stores the encrypted client secret. |
-| `mcp_connector_installs` | A specific install. References a catalog row (`template_id`). Stores the chosen `auth_method`, `credential_scope`, the tools cache, and last-discovered metadata. |
-| `mcp_connectors` | The connector identity table. Org-owned, keyed by `connector_id`. Groups credentials and per-workspace state under a single identity shared across workspaces. |
-| `mcp_workspace_connector_states` | Per-workspace enablement state, keyed by `connector_id`. Controls whether a workspace sees and can use the connector's tools. |
-| `mcp_credential_grants` | Per-scope credential pointers, keyed by `connector_id`. One row per `(connector_id, scope)`. FKs into `credentials` (the credential vault). User-scope rows additionally hold the OAuth refresh-token credential id and `oauth_expires_at`. |
+| `mcp_connector_templates` | System catalog. Keyed by `slug`. Holds `auth_method`, OAuth metadata, and (for static-client connectors) a FK to a system-level `Credential` row storing the encrypted client secret. |
+| `mcp_connectors` | Org-owned connector identity, one per `(org_id, template_id)`. Holds tool discovery state (`tools_cache`, `discovery_status`, `last_error`), `status`, and `auto_enroll_new_workspaces`. No `auth_method` — inherited from the template. |
+| `mcp_workspace_connector_states` | Per-workspace enablement, keyed by `(connector_id, workspace_id)`. Tracks org-level disable overrides (`org_disabled`) and workspace-member toggles. |
+| `mcp_connector_template_settings` | Per-org template-level overrides (e.g., org-wide disable). One row per `(org_id, template_id)`. |
+| `mcp_credential_grants` | Per-scope credentials, one row per `(connector_id, grant_scope)`. Scope = `org | workspace | user`. `grant_status` (`valid` / `expired` / `pending`) is the canonical auth signal. User-scope rows also hold the OAuth refresh-token credential id and `oauth_expires_at`. |
 
-The credential vault (`credentials` table) is shared across kinds. New
-MCP-related kinds: `mcp_oauth_client_secret` (system row, `org_id IS
-NULL`), `mcp_oauth_access_token`, `mcp_oauth_refresh_token`, and the
-existing `mcp_static_token` for non-OAuth connectors.
+The credential vault (`credentials` table) is shared across kinds. MCP-related
+kinds: `mcp_oauth_client_secret` (system row, `org_id IS NULL`),
+`mcp_oauth_access_token`, `mcp_oauth_refresh_token`, and `mcp_static_token`
+for non-OAuth connectors.
 
 ## API endpoints
 
 High-level summary; route bodies live in
-`backend/cubebox/api/routes/v1/`.
+`backend/cubebox/api/routes/v1/`. All scoped routes require workspace
+membership; admin routes require org admin.
 
-- **Catalog (workspace):** `GET /api/v1/ws/{ws}/mcp/catalog` — the
-  single catalog read endpoint. The catalog is intentionally
-  workspace-scoped (not exposed under `/admin/...`) because each entry
-  carries per-`(workspace, user)` status fields — `connector_added`,
-  `enabled`, `disabled`, and (for OAuth) `authed`
-  — that only make sense in workspace context. Org admins use the same
-  endpoint by selecting a workspace.
-- **Static add:** `POST /api/v1/admin/mcp/installs` and
-  `POST /api/v1/ws/{ws}/mcp/installs` — create an `mcp_connectors`
-  row, encrypt the static credential, kick off discovery.
-- **OAuth start:** `POST /api/v1/admin/mcp/installs/oauth/start` and
-  `POST /api/v1/ws/{ws}/mcp/installs/oauth/start` — return the
-  authorization URL with PKCE + state. The callback ticket is set as
-  an HttpOnly cookie scoped to `/api/v1/oauth/mcp/callback`.
-- **OAuth callback:** `GET /api/v1/oauth/mcp/callback` — single,
-  unscoped callback that demultiplexes via state. Exchanges the code,
-  writes vault rows, finalizes the connector, and 302s back to
+### Admin routes (`/api/v1/admin/mcp/...`)
+
+- **Catalog:** `GET /api/v1/admin/mcp/catalog` — same composition as
+  the workspace catalog below, but scoped to the org (not a specific
+  workspace). Returns all templates with per-org install status. This
+  is the canonical discovery surface for the admin UI; it replaces the
+  former `/admin/mcp/templates` list endpoint.
+- **Template create/delete:** `POST` / `DELETE /api/v1/admin/mcp/templates/{template_id}` —
+  add or remove a custom (non-catalog) template. Catalog-seeded
+  templates are managed via the seeder, not via the API.
+- **Distribute:** `POST /api/v1/admin/mcp/templates/{template_id}/distribute` —
+  creates an `mcp_connectors` row for the org if one doesn't exist,
+  and upserts workspace-state rows for all workspaces that should
+  receive it (controlled by `auto_enroll_new_workspaces`).
+- **Org-level disable / re-enable:** `PUT` / `DELETE /api/v1/admin/mcp/templates/{template_id}/disable` —
+  writes an `mcp_connector_template_settings` row that disables the
+  template for every workspace in the org.
+- **Purge:** `POST /api/v1/admin/mcp/templates/{template_id}/purge` —
+  deletes the connector, all workspace states, and all grants. Use with
+  care; credential vault rows for existing grants are also removed.
+- **Install read / update:** `GET` / `PATCH /api/v1/admin/mcp/installs/{connector_id}` —
+  fetch or update a connector row (e.g., patch `auto_enroll_new_workspaces`).
+- **Org credential grants:**
+  `POST` / `DELETE /api/v1/admin/mcp/installs/{connector_id}/grants/org` —
+  create or revoke the org-scope static credential grant.
+  `POST /api/v1/admin/mcp/installs/{connector_id}/grants/org/oauth/start` —
+  begin OAuth for the org-scope grant (returns `{ authorization_url }`).
+
+### Workspace routes (`/api/v1/ws/{ws}/mcp/...`)
+
+- **Catalog:** `GET /api/v1/ws/{ws}/mcp/catalog` — per-`(workspace, user)`
+  view. Each entry carries `connector_added`, `enabled`, `org_disabled`,
+  and (for OAuth) `authed`. The canonical discovery surface for the
+  workspace settings UI; it replaces the former `/ws/{ws}/mcp/templates`
+  list endpoint.
+- **Template create / promote:**
+  `POST /api/v1/ws/{ws}/mcp/templates` — create a workspace-private
+  custom template and immediately distribute it to this workspace.
+  `POST /api/v1/ws/{ws}/mcp/templates/{template_id}/promote` — escalate
+  a workspace-private template to org scope (admin-only within a
+  workspace context).
+- **Workspace-connector state:**
+  `PUT /api/v1/ws/{ws}/mcp/templates/{template_id}/state` — toggle
+  enable / disable for this workspace.
+- **Connectors list:** `GET /api/v1/ws/{ws}/mcp/connectors` — list of
+  `MCPConnector` rows active for the workspace (status fields only;
+  no credential details).
+- **Active tools:** `GET /api/v1/ws/{ws}/mcp/active-tools` — flattened
+  list of tools from all enabled connectors in the workspace; used by
+  the agent runtime to build the tool manifest.
+- **Workspace credential grants:**
+  `POST` / `DELETE /api/v1/ws/{ws}/mcp/installs/{connector_id}/grants/workspace` —
+  workspace-scope static grant.
+  `POST /api/v1/ws/{ws}/mcp/installs/{connector_id}/grants/workspace/oauth/start` —
+  OAuth start for the workspace-scope grant.
+- **User credential grants:**
+  `POST` / `DELETE /api/v1/ws/{ws}/mcp/installs/{connector_id}/grants/me` —
+  user-scope static grant.
+  `POST /api/v1/ws/{ws}/mcp/installs/{connector_id}/grants/me/oauth/start` —
+  OAuth start for the user-scope grant.
+
+### OAuth callback (shared)
+
+- `GET /api/v1/oauth/mcp/callback` — single unscoped callback.
+  Demultiplexes via signed state. Exchanges the code, writes vault rows,
+  sets `grant.grant_status = "valid"`, runs tool discovery, and 302s to
   `${frontend_base_url}/oauth/mcp/return`.
-- **Disable / enable:** per-workspace enablement state for org-owned
-  connectors.
-
-All scoped routes require workspace membership; admin routes require
-org admin.
 
 ## OAuth flow
 
 ```
-[start]    POST  /api/v1/{admin|ws}/mcp/installs/oauth/start
-           ├─ resolve catalog row (slug → server_url, oauth metadata)
-           ├─ if oauth_dcr_supported: discover AS metadata, register
-           │  a client at /register, encrypt the new client_secret into
-           │  a tenant-scoped credential
-           ├─ else: use catalog row's pre-registered client_id +
+[start]    POST  /api/v1/{admin|ws}/mcp/installs/{connector_id}/grants/{scope}/oauth/start
+           ├─ look up connector → template (for auth_method, OAuth metadata)
+           ├─ if oauth_dcr_supported: discover AS metadata, register a
+           │  client at /register, encrypt new client_secret into a
+           │  tenant-scoped credential
+           ├─ else: use template's pre-registered client_id +
            │  decrypt the system-level client_secret credential
            ├─ generate state (signed), PKCE pair (verifier in redis),
            │  callback ticket (HttpOnly cookie)
@@ -103,14 +155,14 @@ org admin.
            ├─ verify state signature, age, actor matches ticket cookie
            ├─ exchange code+verifier at the token endpoint
            ├─ encrypt access_token (+ refresh_token if returned) into
-           │  vault rows, link via credential grant on the connector
-           ├─ flip authed=true, run tool discovery, populate tools_cache
-           └─ 302 to ${frontend_base_url}/oauth/mcp/return?install_id=...
+           │  vault rows, link via MCPCredentialGrant row
+           ├─ set grant.grant_status = "valid", run tool discovery
+           └─ 302 to ${frontend_base_url}/oauth/mcp/return
 
 [runtime]  agent step, request tools for a workspace
            ├─ resolve mcp_connectors rows for the workspace
            ├─ check MCPWorkspaceConnectorState (enabled?)
-           ├─ pick the right MCPCredentialGrant by scope
+           ├─ pick the right MCPCredentialGrant by scope (user > workspace > org)
            └─ if access_token expired: refresh (see below)
 ```
 
@@ -141,10 +193,11 @@ read / refresh / persist cycle for OAuth-scoped connectors. Behavior:
   (default 60s pre-expiry), the manager calls the AS `/token`
   endpoint with `grant_type=refresh_token`, encrypts the new pair, and
   swaps in the new credential ids inside a single DB transaction.
-- If refresh fails (HTTP 4xx, network error, etc.), the manager flips
-  `mcp_connectors.authed = false`, records `last_error`, and surfaces a
-  reauthorization-required signal to the UI; the user gets a
-  "Reconnect" prompt at the next interaction with the connector.
+- If refresh fails (HTTP 4xx, network error, etc.), the manager sets
+  `grant.grant_status = "expired"`, records `last_error` on the
+  connector, and surfaces a reauthorization-required signal to the UI;
+  the user gets a "Reconnect" prompt at the next interaction with the
+  connector.
 
 ## Catalog seeder
 
@@ -224,7 +277,8 @@ would change without committing.
 4. Deploy the new code.
 5. Run the seeder: `python -m cubebox.cli seed-mcp-templates`.
 6. Verify `GET /api/v1/ws/{ws}/mcp/catalog` (from any workspace) lists
-   the new connector with `status="active"`.
+   the new template with `status="active"`.
+7. (Optional) Distribute to the org: `POST /api/v1/admin/mcp/templates/{template_id}/distribute`.
 
 ### Removing a catalog connector
 
@@ -259,12 +313,10 @@ would change without committing.
   the AS response. The UI surfaces a "Reauthorize" affordance —
   clicking re-enters the OAuth start route and overwrites the
   credential.
-- **Tools missing after adding a connector**: discovery runs once when
-  the connector is added or reauthorized. Re-trigger by hitting
-  `POST /api/v1/admin/mcp/installs/{install_id}/refresh-discovery`
-  or `POST /api/v1/ws/{ws}/mcp/installs/{install_id}/refresh-discovery`;
-  the tools cache is repopulated from the server's `tools/list`
-  response.
+- **Tools missing after distributing a connector**: discovery runs once
+  on distribute and again after each successful OAuth grant. Re-trigger
+  via `POST /api/v1/admin/mcp/installs/{connector_id}/refresh-discovery`;
+  the tools cache is repopulated from the server's `tools/list` response.
 
 ## Manual staging verification
 

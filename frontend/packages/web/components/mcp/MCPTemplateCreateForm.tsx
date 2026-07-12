@@ -4,13 +4,12 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { CheckCircle2, Eye, EyeOff, Loader2, XCircle } from 'lucide-react'
 import {
-  adminCreateInstall,
+  adminCreateTemplate,
   adminTestConnection,
-  wsCreateInstall,
   type ApiClient,
   type MCPAuthMethod,
-  type MCPConnector,
   type MCPCredentialScope,
+  type MCPTemplate,
   type MCPTransport,
   type TestConnectionResult,
 } from '@cubebox/core'
@@ -26,29 +25,35 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-interface MCPCustomCreatePanelProps {
-  client: ApiClient
-  scope?: 'org' | 'workspace'
-  wsId?: string
-  onCreated: (install: MCPConnector) => void
+export interface CreateTemplateBody {
+  name: string
+  server_url: string
+  transport: MCPTransport
+  auth_method: MCPAuthMethod
+  supported_auth_methods: MCPAuthMethod[]
+  default_credential_policy: MCPCredentialScope
 }
 
-export function MCPCustomCreatePanel({
-  client,
-  scope = 'org',
-  wsId,
-  onCreated,
-}: MCPCustomCreatePanelProps) {
-  const t = useTranslations('mcpAdmin')
-  const isWorkspaceScope = scope === 'workspace'
+interface MCPTemplateCreateFormProps {
+  client: ApiClient
+  onCreated: (template: MCPTemplate) => void
+  /** 'admin' (default) shows the org-level create title; 'workspace' shows the ws-level title. */
+  variant?: 'admin' | 'workspace'
+  /** Custom submit handler; if provided, replaces adminCreateTemplate call. */
+  onSubmit?: (body: CreateTemplateBody) => Promise<MCPTemplate>
+}
 
+export function MCPTemplateCreateForm({
+  client,
+  onCreated,
+  variant = 'admin',
+  onSubmit,
+}: MCPTemplateCreateFormProps) {
+  const t = useTranslations('mcpAdmin')
   const [name, setName] = useState('')
   const [serverUrl, setServerUrl] = useState('')
   const [transport, setTransport] = useState<MCPTransport>('streamable_http')
   const [authMethod, setAuthMethod] = useState<MCPAuthMethod>('static')
-  const [credentialPolicy, setCredentialPolicy] = useState<MCPCredentialScope>(
-    isWorkspaceScope ? 'workspace' : 'org',
-  )
   const [credentialPlaintext, setCredentialPlaintext] = useState('')
   const [revealSecret, setRevealSecret] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -58,15 +63,9 @@ export function MCPCustomCreatePanel({
 
   function handleAuthMethodChange(next: MCPAuthMethod): void {
     setAuthMethod(next)
-    if (next === 'none') {
-      setCredentialPolicy('none')
-    } else if (credentialPolicy === 'none') {
-      setCredentialPolicy(isWorkspaceScope ? 'workspace' : 'org')
-    }
   }
 
-  const credentialFieldsNeeded =
-    !isWorkspaceScope && authMethod === 'static' && credentialPolicy === 'org'
+  const credentialFieldsNeeded = authMethod === 'static'
   const canSubmit =
     !submitting &&
     name.trim().length > 0 &&
@@ -103,23 +102,15 @@ export function MCPCustomCreatePanel({
     setSubmitting(true)
     setError(null)
     try {
-      const body: Record<string, unknown> = {
-        template_id: null,
-        install_scope: scope,
-        auth_method: authMethod,
-        default_credential_policy: credentialPolicy,
+      const body: CreateTemplateBody = {
         name: name.trim(),
         server_url: serverUrl.trim(),
         transport,
-        auto_enable: { mode: 'none' },
+        auth_method: authMethod,
+        supported_auth_methods: [authMethod] as MCPAuthMethod[],
+        default_credential_policy: (authMethod === 'none' ? 'none' : 'org') as MCPCredentialScope,
       }
-      if (credentialFieldsNeeded) {
-        body.credential_plaintext = credentialPlaintext
-      }
-      const created =
-        isWorkspaceScope && wsId
-          ? await wsCreateInstall(client, wsId, body)
-          : await adminCreateInstall(client, body)
+      const created = onSubmit ? await onSubmit(body) : await adminCreateTemplate(client, body)
       onCreated(created)
     } catch (err) {
       setError((err as Error).message)
@@ -128,15 +119,15 @@ export function MCPCustomCreatePanel({
     }
   }
 
+  const titleKey = variant === 'workspace' ? 'customCreateWorkspaceTitle' : 'customCreateTitle'
+  const subtitleKey =
+    variant === 'workspace' ? 'customCreateWorkspaceSubtitle' : 'customCreateSubtitle'
+
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-custom-form">
       <header className="flex flex-col gap-1">
-        <h3 className="text-xl font-semibold tracking-tight">
-          {isWorkspaceScope ? t('customCreateWorkspaceTitle') : t('customCreateTitle')}
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          {isWorkspaceScope ? t('customCreateWorkspaceSubtitle') : t('customCreateSubtitle')}
-        </p>
+        <h3 className="text-xl font-semibold tracking-tight">{t(titleKey)}</h3>
+        <p className="text-sm text-muted-foreground">{t(subtitleKey)}</p>
       </header>
 
       <form
@@ -223,64 +214,31 @@ export function MCPCustomCreatePanel({
           </CardContent>
         </Card>
 
-        {authMethod !== 'none' ? (
+        {credentialFieldsNeeded ? (
           <Card>
             <CardHeader>
               <CardTitle>{t('customSectionCredential')}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="custom-policy">{t('customFieldScope')}</Label>
-                <Select
-                  value={credentialPolicy}
-                  onValueChange={(v) => {
-                    if (v) setCredentialPolicy(v as MCPCredentialScope)
-                  }}
-                >
-                  <SelectTrigger id="custom-policy" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {!isWorkspaceScope ? (
-                      <SelectItem value="org">{t('customScopeOrg')}</SelectItem>
-                    ) : null}
-                    <SelectItem value="workspace">{t('scopeWorkspace')}</SelectItem>
-                    <SelectItem value="user">{t('customScopeUser')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {credentialFieldsNeeded ? (
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="custom-secret">{t('customFieldCredPlaintext')}</Label>
-                  <div className="relative">
-                    <Input
-                      id="custom-secret"
-                      type={revealSecret ? 'text' : 'password'}
-                      value={credentialPlaintext}
-                      onChange={(e) => setCredentialPlaintext(e.target.value)}
-                      name="mcp-credential-plaintext"
-                      autoComplete="new-password"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      required
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      onClick={() => setRevealSecret((v) => !v)}
-                      aria-label={revealSecret ? t('hideSecret') : t('revealSecret')}
-                    >
-                      {revealSecret ? (
-                        <EyeOff className="size-3.5" />
-                      ) : (
-                        <Eye className="size-3.5" />
-                      )}
-                    </button>
-                  </div>
+                <Label htmlFor="custom-secret">{t('customFieldCredPlaintext')}</Label>
+                <div className="relative">
+                  <Input
+                    id="custom-secret"
+                    type={revealSecret ? 'text' : 'password'}
+                    value={credentialPlaintext}
+                    onChange={(e) => setCredentialPlaintext(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setRevealSecret((v) => !v)}
+                    aria-label={revealSecret ? t('hideSecret') : t('revealSecret')}
+                  >
+                    {revealSecret ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  </button>
                 </div>
-              ) : null}
+              </div>
             </CardContent>
           </Card>
         ) : null}

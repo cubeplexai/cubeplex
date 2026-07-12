@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
-from cubebox.models.mcp import MCPConnector, MCPConnectorTemplate
+from cubebox.models.mcp import MCPConnector
 from cubebox.services.mcp_installs import MCPConnectorService
 
 # ---------------------------------------------------------------------------
@@ -38,6 +38,9 @@ class _NoConflictSession:
                 return self
 
             def first(self) -> None:
+                return None
+
+            def scalar_one_or_none(self) -> None:
                 return None
 
         return _EmptyResult()
@@ -118,54 +121,6 @@ class _FakeStateRepo:
         self.upserts.append(kwargs)
 
 
-class _FakeWorkspace:
-    def __init__(self, ws_id: str) -> None:
-        self.id = ws_id
-
-
-class _FakeWorkspaceRepo:
-    def __init__(self, workspace_ids: list[str]) -> None:
-        self._workspaces = [_FakeWorkspace(wid) for wid in workspace_ids]
-
-    async def list_for_org(self, org_id: str) -> list[_FakeWorkspace]:  # noqa: ARG002
-        return list(self._workspaces)
-
-
-def _make_template() -> MCPConnectorTemplate:
-    """A minimal template that supports static auth — enough for create."""
-    return MCPConnectorTemplate(
-        slug="t-static",
-        name="Static Test Template",
-        description="x",
-        provider="acme",
-        server_url="https://t.example.com/mcp",
-        transport="streamable_http",
-        supported_auth_methods=["static", "none"],
-        default_credential_policy="org",
-    )
-
-
-def _make_service(
-    *,
-    workspace_ids: list[str] | None = None,
-) -> tuple[MCPConnectorService, _FakeConnectorRepo, _FakeStateRepo]:
-    connector_repo = _FakeConnectorRepo()
-    state_repo = _FakeStateRepo()
-    grant_repo = object()  # not used by these paths
-    cred_service = object()  # not used by these paths
-    workspace_repo = _FakeWorkspaceRepo(workspace_ids) if workspace_ids is not None else None
-    svc = MCPConnectorService(
-        state_repo=state_repo,  # type: ignore[arg-type]
-        grant_repo=grant_repo,  # type: ignore[arg-type]
-        cred_service=cred_service,  # type: ignore[arg-type]
-        org_id="org-1",
-        actor_user_id="usr-1",
-        workspace_repo=workspace_repo,  # type: ignore[arg-type]
-        connector_repo=connector_repo,
-    )
-    return svc, connector_repo, state_repo
-
-
 def _make_static_connector(**overrides: Any) -> MCPConnector:
     values: dict[str, Any] = {
         "id": "mcpco-static",
@@ -182,44 +137,6 @@ def _make_static_connector(**overrides: Any) -> MCPConnector:
     }
     values.update(overrides)
     return MCPConnector(**values)
-
-
-# ---------------------------------------------------------------------------
-# template identity conflicts must not mutate partial matches
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_template_create_rejects_partial_identity_match_without_mutating() -> None:
-    existing = _make_static_connector(
-        id="mcpco-existing",
-        template_id=None,
-        name="Custom Static",
-        server_url="https://t.example.com/mcp",
-        server_url_hash="different-hash",
-    )
-    connector_repo = _FakeConnectorRepo(existing=existing)
-    state_repo = _FakeStateRepo()
-    svc = MCPConnectorService(
-        state_repo=state_repo,  # type: ignore[arg-type]
-        grant_repo=object(),  # type: ignore[arg-type]
-        cred_service=object(),  # type: ignore[arg-type]
-        org_id="org-1",
-        actor_user_id="usr-1",
-        workspace_repo=_FakeWorkspaceRepo(["ws-a"]),  # type: ignore[arg-type]
-        connector_repo=connector_repo,
-    )
-
-    with pytest.raises(ValueError, match="install_already_exists"):
-        await svc.create_from_template_for_workspace(
-            template=_make_template(),
-            workspace_id="ws-a",
-            auth_method="static",
-            credential_policy="workspace",
-        )
-
-    assert connector_repo.updated == []
-    assert state_repo.upserts == []
 
 
 # ---------------------------------------------------------------------------
@@ -291,67 +208,6 @@ async def test_static_user_grants_default_to_distinct_credential_names() -> None
         f"mcp:{connector.id}:user:ws-a:usr-a",
         f"mcp:{connector.id}:user:ws-a:usr-b",
     ]
-
-
-# ---------------------------------------------------------------------------
-# auto_enroll_new_workspaces derivation at connector create time
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_create_org_connector_selected_disables_auto_enroll() -> None:
-    """``distribution.mode='selected'`` must persist ``auto_enroll_new_workspaces=False``.
-
-    An admin asking for a curated workspace list does NOT want the install
-    to silently fan out to workspaces created later. Without this, the
-    model's ``server_default=true`` leaks the scope.
-    """
-    svc, connector_repo, _ = _make_service(workspace_ids=["ws-a"])
-    saved = await svc.create_from_template_for_org(
-        template=_make_template(),
-        auth_method="static",
-        credential_policy="org",
-        distribution={"mode": "selected", "workspace_ids": ["ws-a"]},
-    )
-    assert saved.connector.auto_enroll_new_workspaces is False
-    assert connector_repo.added[0].auto_enroll_new_workspaces is False
-
-
-@pytest.mark.asyncio
-async def test_create_org_connector_none_disables_auto_enroll() -> None:
-    """``distribution.mode='none'`` must persist ``auto_enroll_new_workspaces=False``.
-
-    Mode 'none' means "install row only, no state rows yet"; the admin will
-    enable workspaces by hand later. Auto-enrolling into newly-created
-    workspaces would contradict that intent.
-    """
-    svc, connector_repo, _ = _make_service(workspace_ids=[])
-    saved = await svc.create_from_template_for_org(
-        template=_make_template(),
-        auth_method="static",
-        credential_policy="org",
-        distribution={"mode": "none"},
-    )
-    assert saved.connector.auto_enroll_new_workspaces is False
-    assert connector_repo.added[0].auto_enroll_new_workspaces is False
-
-
-@pytest.mark.asyncio
-async def test_create_org_connector_all_enables_auto_enroll() -> None:
-    """``distribution.mode='all'`` must persist ``auto_enroll_new_workspaces=True``.
-
-    'all' is the only mode where future workspaces should inherit the
-    install automatically — the admin explicitly opted into org-wide reach.
-    """
-    svc, connector_repo, _ = _make_service(workspace_ids=["ws-a", "ws-b"])
-    saved = await svc.create_from_template_for_org(
-        template=_make_template(),
-        auth_method="static",
-        credential_policy="org",
-        distribution={"mode": "all"},
-    )
-    assert saved.connector.auto_enroll_new_workspaces is True
-    assert connector_repo.added[0].auto_enroll_new_workspaces is True
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +285,13 @@ async def test_bootstrap_hook_skips_connector_with_auto_enroll_disabled(
                 if connector.status == "active" and connector.auto_enroll_new_workspaces is True
             ]
 
+    class _FakeTemplateSettingsRepo:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
+            pass
+
+        async def disabled_template_ids(self) -> set[str]:
+            return set()
+
     monkeypatch.setattr(
         "cubebox.mcp.workspace_bootstrap.MCPWorkspaceConnectorStateRepository",
         _FakeStateRepoBootstrap,
@@ -436,6 +299,10 @@ async def test_bootstrap_hook_skips_connector_with_auto_enroll_disabled(
     monkeypatch.setattr(
         "cubebox.mcp.workspace_bootstrap.MCPConnectorRepository",
         _FakeConnectorRepoBootstrap,
+    )
+    monkeypatch.setattr(
+        "cubebox.mcp.workspace_bootstrap.MCPTemplateSettingsRepository",
+        _FakeTemplateSettingsRepo,
     )
 
     session = object()

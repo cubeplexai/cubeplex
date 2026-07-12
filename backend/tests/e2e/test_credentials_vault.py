@@ -13,7 +13,7 @@ from cubebox.credentials.exceptions import (
     CredentialKindMismatch,
     CredentialNotFound,
 )
-from cubebox.models.mcp import MCPConnector, MCPCredentialGrant
+from cubebox.models.mcp import MCPConnector, MCPConnectorTemplate, MCPCredentialGrant
 from cubebox.repositories.credential import CredentialRepository
 from cubebox.repositories.mcp import (
     MCPConnectorRepository,
@@ -197,16 +197,30 @@ async def test_delete_credential_referenced_by_mcp_grant_raises(
         name=_name("mcp-ref"),
         plaintext="secret",
     )
+    # template_id is NOT NULL (FK); create a minimal global template first.
+    tpl = MCPConnectorTemplate(
+        slug=f"vault-mcp-ref-{uuid7()}",
+        name="Vault MCP Ref Template",
+        description="test",
+        provider="test",
+        server_url="https://mcp-ref",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_policy="org",
+        scope="global",
+    )
+    db_session.add(tpl)
+    await db_session.flush()
+
     connector_repo = MCPConnectorRepository(db_session, org_id="org-vault-mcp-ref")
     connector = await connector_repo.add(
         MCPConnector(
             org_id="org-vault-mcp-ref",
-            template_id=None,
+            template_id=tpl.id,
             name=_name("ins"),
             server_url="https://mcp-ref",
             server_url_hash=_name("mcp-ref-hash"),
             transport="streamable_http",
-            auth_method="static",
             default_credential_policy="org",
             created_by_user_id="user-1",
         )
@@ -217,6 +231,7 @@ async def test_delete_credential_referenced_by_mcp_grant_raises(
             org_id="org-vault-mcp-ref",
             connector_id=connector.id,
             grant_scope="org",
+            auth_method="static",
             workspace_id=None,
             user_id=None,
             credential_id=credential_id,

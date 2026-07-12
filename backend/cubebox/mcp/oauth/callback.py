@@ -10,8 +10,8 @@ which:
 4. Encrypts the access token (and refresh token, if present) into the vault.
 5. Upserts an MCPCredentialGrant at the scope the state token committed to,
    pointing at the new credential ids.
-6. Updates ``install.auth_status`` from 'pending' → 'authorized' iff the new
-   grant's scope matches the install's currently-effective required scope.
+
+The canonical authorized signal is ``grant.grant_status == 'valid'``.
 """
 
 from __future__ import annotations
@@ -325,6 +325,7 @@ class OAuthCallbackHandler:
                 org_id=install.org_id,
                 connector_id=payload.connector_id,
                 grant_scope=payload.grant_scope,
+                auth_method="oauth",
                 workspace_id=payload.workspace_id,
                 user_id=payload.user_id,
                 credential_id=access_id,
@@ -359,17 +360,11 @@ class OAuthCallbackHandler:
         grant: MCPCredentialGrant,
         install_repo: MCPConnectorRepository,
     ) -> None:
-        """Flip ``auth_status`` only when the scope matches the required policy.
+        """No-op. Kept for future connector-level side-effects post-grant.
 
-        For org/workspace policies the install becomes 'authorized' as soon as
-        a grant at the matching scope lands. For user policy, every member has
-        their own grant — ``auth_status`` stays 'pending' (per-install bit,
-        not per-user).
+        The canonical authorized signal is ``grant.grant_status == 'valid'``
+        at the appropriate scope.
         """
-        required_scope = install.default_credential_policy
-        if required_scope == grant.grant_scope and required_scope in {"org", "workspace"}:
-            install.auth_status = "authorized"
-            await install_repo.update(install)
 
 
 def _redirect_uri(frontend_origin: str | None = None) -> str:

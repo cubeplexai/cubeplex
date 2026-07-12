@@ -23,13 +23,16 @@ not an oversight.
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import ColumnElement
 
+from cubebox.mcp._constants import server_url_hash, slugify_for_namespace
 from cubebox.models import (
     MCPConnector,
     MCPConnectorTemplate,
+    MCPConnectorTemplateSettings,
     MCPCredentialGrant,
     MCPWorkspaceConnectorState,
 )
@@ -179,6 +182,170 @@ class MCPConnectorTemplateRepository:
                 await self.session.refresh(row)
         return changed
 
+    async def list_visible_for_org(self, org_id: str) -> list[MCPConnectorTemplate]:
+        """All active templates visible to an org: global + any owned by the org
+        (both org-scoped and workspace-scoped rows count — the workspace ones are
+        the org's own custom connectors, not foreign-org data)."""
+        stmt = select(MCPConnectorTemplate).where(
+            cast("ColumnElement[bool]", MCPConnectorTemplate.status == "active"),
+            or_(
+                cast("ColumnElement[bool]", MCPConnectorTemplate.scope == "global"),
+                cast("ColumnElement[bool]", MCPConnectorTemplate.org_id == org_id),
+            ),
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_visible_for_workspace(
+        self, org_id: str, workspace_id: str
+    ) -> list[MCPConnectorTemplate]:
+        """Active templates visible inside a specific workspace.
+
+        Includes: global templates; org-scoped templates for this org;
+        workspace-scoped templates whose workspace_id matches exactly.
+        Workspace-scoped templates from sibling workspaces are excluded.
+        """
+        stmt = select(MCPConnectorTemplate).where(
+            cast("ColumnElement[bool]", MCPConnectorTemplate.status == "active"),
+            or_(
+                cast("ColumnElement[bool]", MCPConnectorTemplate.scope == "global"),
+                and_(
+                    cast("ColumnElement[bool]", MCPConnectorTemplate.scope == "org"),
+                    cast("ColumnElement[bool]", MCPConnectorTemplate.org_id == org_id),
+                ),
+                and_(
+                    cast("ColumnElement[bool]", MCPConnectorTemplate.scope == "workspace"),
+                    cast("ColumnElement[bool]", MCPConnectorTemplate.workspace_id == workspace_id),
+                ),
+            ),
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def create_scoped(
+        self,
+        *,
+        scope: str,
+        org_id: str,
+        workspace_id: str | None,
+        created_by_user_id: str,
+        name: str,
+        server_url: str,
+        transport: str,
+        supported_auth_methods: list[str],
+        default_credential_policy: str,
+    ) -> MCPConnectorTemplate:
+        """Create a custom org- or workspace-scoped connector template.
+
+        Slug is generated as ``custom-<slugified-name>-<last-6-of-org_id>``.
+        Raises ``ValueError("connector_name_conflict")`` if the slug already exists.
+        """
+        name_slug = slugify_for_namespace(name)
+        slug = f"custom-{name_slug}-{org_id[-6:]}"
+        existing = await self.get_by_slug(slug)
+        if existing is not None:
+            raise ValueError("connector_name_conflict")
+        row = MCPConnectorTemplate(
+            slug=slug,
+            name=name,
+            description="",
+            provider="custom",
+            server_url=server_url,
+            transport=transport,
+            supported_auth_methods=supported_auth_methods,
+            default_credential_policy=default_credential_policy,
+            scope=scope,
+            org_id=org_id,
+            workspace_id=workspace_id,
+            created_by_user_id=created_by_user_id,
+            status="active",
+        )
+        self.session.add(row)
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            await self.session.rollback()
+            raise ValueError("connector_name_conflict") from None
+        await self.session.commit()
+        await self.session.refresh(row)
+        return row
+
+    async def promote_to_org(self, template_id: str) -> MCPConnectorTemplate:
+        """Promote a workspace-scoped template to org scope.
+
+        Clears ``workspace_id`` and sets ``scope='org'``.
+        Raises ``ValueError("template_not_owned_by_workspace")`` if the template
+        is not currently workspace-scoped.
+        """
+        row = await self.get(template_id)
+        if row is None or row.scope != "workspace":
+            raise ValueError("template_not_owned_by_workspace")
+        row.scope = "org"
+        row.workspace_id = None
+        row.updated_at = datetime.now(UTC)
+        self.session.add(row)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return row
+
+
+class MCPTemplateSettingsRepository:
+    """Org-scoped per-(org, template) settings.
+
+    Absence of a row means all defaults apply (spec §3.4). The ``org_id``
+    constructor argument is force-set on every write to defend against
+    cross-org mutations.
+    """
+
+    def __init__(self, session: AsyncSession, *, org_id: str) -> None:
+        self.session = session
+        self.org_id = org_id
+
+    async def get(self, template_id: str) -> MCPConnectorTemplateSettings | None:
+        stmt = select(MCPConnectorTemplateSettings).where(
+            cast("ColumnElement[bool]", MCPConnectorTemplateSettings.org_id == self.org_id),
+            cast("ColumnElement[bool]", MCPConnectorTemplateSettings.template_id == template_id),
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def set_disabled(
+        self,
+        template_id: str,
+        disabled: bool,
+        *,
+        updated_by_user_id: str | None,
+    ) -> MCPConnectorTemplateSettings:
+        """Upsert the disabled flag for a (org, template) pair.
+
+        One row per (org, template); re-calling is idempotent — same row id.
+        """
+        existing = await self.get(template_id)
+        if existing is not None:
+            existing.disabled = disabled
+            existing.updated_by_user_id = updated_by_user_id
+            existing.updated_at = datetime.now(UTC)
+            self.session.add(existing)
+            await self.session.commit()
+            await self.session.refresh(existing)
+            return existing
+        row = MCPConnectorTemplateSettings(
+            org_id=self.org_id,
+            template_id=template_id,
+            disabled=disabled,
+            updated_by_user_id=updated_by_user_id,
+        )
+        self.session.add(row)
+        await self.session.commit()
+        await self.session.refresh(row)
+        return row
+
+    async def disabled_template_ids(self) -> set[str]:
+        """IDs of templates that have an explicit disabled=True setting for this org."""
+        stmt = select(MCPConnectorTemplateSettings).where(
+            cast("ColumnElement[bool]", MCPConnectorTemplateSettings.org_id == self.org_id),
+            cast("ColumnElement[bool]", MCPConnectorTemplateSettings.disabled == True),  # noqa: E712
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        return {row.template_id for row in rows}
+
 
 class MCPConnectorRepository:
     """Org-scoped repository for connector identity rows."""
@@ -193,6 +360,53 @@ class MCPConnectorRepository:
             cast("ColumnElement[bool]", MCPConnector.org_id == self.org_id),
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_by_template_id(self, template_id: str) -> MCPConnector | None:
+        """Return the active connector for this org that was created from ``template_id``."""
+        stmt = select(MCPConnector).where(
+            cast("ColumnElement[bool]", MCPConnector.org_id == self.org_id),
+            cast("ColumnElement[bool]", MCPConnector.template_id == template_id),
+            cast("ColumnElement[bool]", MCPConnector.status == "active"),
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
+    async def get_or_create_for_template(
+        self,
+        template: MCPConnectorTemplate,
+        *,
+        created_by_user_id: str,
+    ) -> MCPConnector:
+        """Lazily create an org connector from a template snapshot.
+
+        Race-safe: on ``IntegrityError`` (concurrent create won the race),
+        roll back and re-fetch the row that the winner inserted.
+        """
+        existing = await self.get_by_template_id(template.id)
+        if existing is not None:
+            return existing
+        row = MCPConnector(
+            org_id=self.org_id,
+            template_id=template.id,
+            name=template.name,
+            slug_name=slugify_for_namespace(template.name),
+            server_url=template.server_url,
+            server_url_hash=server_url_hash(template.server_url),
+            transport=template.transport,
+            default_credential_policy=template.default_credential_policy,
+            static_auth_style=template.static_auth_style,
+            static_auth_header_name=template.static_auth_header_name,
+            static_auth_query_param=template.static_auth_query_param,
+            tool_citations=dict(template.tool_citation_defaults),
+            created_by_user_id=created_by_user_id,
+        )
+        try:
+            return await self.add(row)
+        except IntegrityError:
+            await self.session.rollback()
+            raced = await self.get_by_template_id(template.id)
+            if raced is None:
+                raise
+            return raced
 
     async def get_active_by_identity(
         self,
@@ -234,9 +448,6 @@ class MCPConnectorRepository:
 
     async def list_org_installs(self) -> list[MCPConnector]:
         return await self.list_active()
-
-    async def list_workspace_installs(self, _workspace_id: str) -> list[MCPConnector]:
-        return []
 
     async def get_connector_id_for_install(self, connector: MCPConnector) -> str | None:
         return connector.id
@@ -311,8 +522,12 @@ class MCPWorkspaceConnectorStateRepository:
     async def list_for_install(self, connector_id: str) -> list[MCPWorkspaceConnectorState]:
         return await self.list_for_connector(connector_id)
 
-    async def delete_for_connector(self, connector_id: str) -> int:
-        """Bulk-delete every state row for ``connector_id``. Returns count."""
+    async def delete_for_connector(self, connector_id: str, *, flush_only: bool = False) -> int:
+        """Bulk-delete every state row for ``connector_id``. Returns count.
+
+        When ``flush_only=True``, flushes deletes to the DB without committing
+        so that the caller can include them in a larger atomic transaction.
+        """
         stmt = select(MCPWorkspaceConnectorState).where(
             MCPWorkspaceConnectorState.org_id == self.org_id,  # type: ignore[arg-type]
             MCPWorkspaceConnectorState.connector_id == connector_id,  # type: ignore[arg-type]
@@ -321,7 +536,10 @@ class MCPWorkspaceConnectorStateRepository:
         for row in rows:
             await self.session.delete(row)
         if rows:
-            await self.session.commit()
+            if flush_only:
+                await self.session.flush()
+            else:
+                await self.session.commit()
         return len(rows)
 
     async def delete_for_install(self, connector_id: str) -> int:
@@ -483,8 +701,12 @@ class MCPCredentialGrantRepository:
             workspace_id=workspace_id,
         )
 
-    async def delete_for_connector(self, connector_id: str) -> int:
-        """Bulk-delete every grant for ``connector_id``. Returns count."""
+    async def delete_for_connector(self, connector_id: str, *, flush_only: bool = False) -> int:
+        """Bulk-delete every grant for ``connector_id``. Returns count.
+
+        When ``flush_only=True``, flushes deletes to the DB without committing
+        so that the caller can include them in a larger atomic transaction.
+        """
         stmt = select(MCPCredentialGrant).where(
             MCPCredentialGrant.org_id == self.org_id,  # type: ignore[arg-type]
             MCPCredentialGrant.connector_id == connector_id,  # type: ignore[arg-type]
@@ -493,7 +715,10 @@ class MCPCredentialGrantRepository:
         for row in rows:
             await self.session.delete(row)
         if rows:
-            await self.session.commit()
+            if flush_only:
+                await self.session.flush()
+            else:
+                await self.session.commit()
         return len(rows)
 
     async def delete_scope(

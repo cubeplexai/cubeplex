@@ -23,7 +23,7 @@ from sqlalchemy import (
 from sqlmodel import Field
 
 from cubebox.models.mixins import CubeboxBase
-from cubebox.models.public_id import PREFIX_MCP_CONNECTOR
+from cubebox.models.public_id import PREFIX_MCP_CONNECTOR, PREFIX_MCP_TEMPLATE_SETTINGS
 
 
 class MCPConnectorTemplate(CubeboxBase, table=True):
@@ -35,7 +35,15 @@ class MCPConnectorTemplate(CubeboxBase, table=True):
 
     _PREFIX: ClassVar[str] = "mctpl"
     __tablename__ = "mcp_connector_templates"
-    __table_args__ = (UniqueConstraint("slug", name="uq_mcp_connector_template_slug"),)
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_mcp_connector_template_slug"),
+        CheckConstraint(
+            "(scope='global' AND org_id IS NULL AND workspace_id IS NULL)"
+            " OR (scope='org' AND org_id IS NOT NULL AND workspace_id IS NULL)"
+            " OR (scope='workspace' AND org_id IS NOT NULL AND workspace_id IS NOT NULL)",
+            name="ck_mcp_connector_templates_scope_shape",
+        ),
+    )
 
     slug: str = Field(max_length=64, index=True)
     name: str = Field(max_length=128)
@@ -85,6 +93,22 @@ class MCPConnectorTemplate(CubeboxBase, table=True):
         sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
     )
     status: str = Field(default="active", max_length=16)
+    # Visibility scope (spec §3.1). 'global' rows are the seeded catalog and
+    # carry no owner; 'org'/'workspace' rows are custom templates.
+    scope: str = Field(
+        default="global",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'global'")},
+    )
+    org_id: str | None = Field(
+        default=None, foreign_key="organizations.id", max_length=20, nullable=True, index=True
+    )
+    workspace_id: str | None = Field(
+        default=None, foreign_key="workspaces.id", max_length=20, nullable=True, index=True
+    )
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
 
 
 class MCPConnector(CubeboxBase, table=True):
@@ -93,10 +117,6 @@ class MCPConnector(CubeboxBase, table=True):
     _PREFIX: ClassVar[str] = PREFIX_MCP_CONNECTOR
     __tablename__ = "mcp_connectors"
     __table_args__ = (
-        CheckConstraint(
-            "auth_method IN ('oauth','static','none')",
-            name="ck_mcp_connectors_auth_method",
-        ),
         Index(
             "uq_mcp_connector_slug_per_org",
             "org_id",
@@ -109,7 +129,7 @@ class MCPConnector(CubeboxBase, table=True):
             "org_id",
             "template_id",
             unique=True,
-            postgresql_where="status = 'active' AND template_id IS NOT NULL",
+            postgresql_where="status = 'active'",
         ),
         Index(
             "uq_mcp_connector_url_per_org",
@@ -121,9 +141,7 @@ class MCPConnector(CubeboxBase, table=True):
     )
 
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
-    template_id: str | None = Field(
-        default=None, foreign_key="mcp_connector_templates.id", max_length=20, index=True
-    )
+    template_id: str = Field(foreign_key="mcp_connector_templates.id", max_length=20, index=True)
 
     name: str = Field(max_length=64)
     slug_name: str = Field(
@@ -138,16 +156,10 @@ class MCPConnector(CubeboxBase, table=True):
     server_url_hash: str = Field(max_length=64)
     transport: str = Field(max_length=16)
 
-    auth_method: str = Field(max_length=16)
     default_credential_policy: str = Field(
         default="org",
         max_length=16,
         sa_column_kwargs={"server_default": text("'org'")},
-    )
-    auth_status: str = Field(
-        default="pending",
-        max_length=16,
-        sa_column_kwargs={"server_default": text("'pending'")},
     )
     oauth_client_config: dict[str, Any] = Field(
         default_factory=dict,
@@ -196,22 +208,6 @@ class MCPConnector(CubeboxBase, table=True):
     created_by_user_id: str | None = Field(
         default=None, foreign_key="users.id", max_length=20, nullable=True
     )
-
-    @property
-    def install_scope(self) -> str:
-        return "org"
-
-    @property
-    def workspace_id(self) -> str | None:
-        return None
-
-    @property
-    def install_state(self) -> str:
-        return self.status
-
-    @install_state.setter
-    def install_state(self, value: str) -> None:
-        self.status = value
 
 
 class MCPWorkspaceConnectorState(CubeboxBase, table=True):
@@ -264,6 +260,10 @@ class MCPCredentialGrant(CubeboxBase, table=True):
             " OR (grant_scope='user' AND workspace_id IS NOT NULL AND user_id IS NOT NULL)",
             name="ck_mcp_credential_grants_scope_columns",
         ),
+        CheckConstraint(
+            "auth_method IN ('oauth','static')",
+            name="ck_mcp_credential_grants_auth_method",
+        ),
         # Partial unique indexes (one grant per install per scope). These match
         # the DB created by migration 3fcdfc800664 — declared here (not
         # migration-only) so autogenerate sees no drift.
@@ -293,6 +293,7 @@ class MCPCredentialGrant(CubeboxBase, table=True):
     org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
     connector_id: str = Field(foreign_key="mcp_connectors.id", max_length=20, index=True)
     grant_scope: str = Field(max_length=16)
+    auth_method: str = Field(max_length=16)
     workspace_id: str | None = Field(
         default=None, foreign_key="workspaces.id", max_length=20, index=True, nullable=True
     )
@@ -314,6 +315,28 @@ class MCPCredentialGrant(CubeboxBase, table=True):
         sa_column_kwargs={"server_default": text("'valid'")},
     )
     created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# slug_name invariant — set/refresh on every ORM write
+# ---------------------------------------------------------------------------
+
+
+class MCPConnectorTemplateSettings(CubeboxBase, table=True):
+    """Per-(org, template) settings. Absent row = all defaults (spec §3.4)."""
+
+    _PREFIX: ClassVar[str] = PREFIX_MCP_TEMPLATE_SETTINGS
+    __tablename__ = "mcp_connector_templates_settings"
+    __table_args__ = (
+        UniqueConstraint("org_id", "template_id", name="uq_mcp_connector_templates_settings"),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    template_id: str = Field(foreign_key="mcp_connector_templates.id", max_length=20, index=True)
+    disabled: bool = Field(default=False, sa_column_kwargs={"server_default": text("false")})
+    updated_by_user_id: str | None = Field(
         default=None, foreign_key="users.id", max_length=20, nullable=True
     )
 
