@@ -1,6 +1,6 @@
 # Discord IM Connector
 
-Adds Discord as the second IM platform in cubebox, following the existing
+Adds Discord as the second IM platform in cubeplex, following the existing
 Feishu connector. The existing connector-neutral pipeline (inbound
 transaction, queue worker, identity resolution, resume) is fully reused;
 Discord-specific logic lives in a new `im/discord/` module and a
@@ -144,7 +144,7 @@ same channel (regular vs thread).
 ## Identity Resolution
 
 v1 skips the identity gate. All Discord messages execute agent runs as
-`account.acting_user_id` (the cubebox user who connected the bot). This is
+`account.acting_user_id` (the cubeplex user who connected the bot). This is
 the existing fallback behavior in `identity.py` when no `IMIdentityLink`
 exists and no `identity_resolver` is provided.
 
@@ -309,7 +309,7 @@ shape as `feishu.ts`:
 - `PlatformDescriptor.id`: add `'discord'` to the union
 - `buildPayload` return type: generalize from `ConnectFeishuAccountIn` to
   a union type or generic `ConnectIMAccountIn`
-- `@cubebox/core`: add `ConnectDiscordAccountIn` schema
+- `@cubeplex/core`: add `ConnectDiscordAccountIn` schema
 
 ### Backend Connect Route
 
@@ -354,7 +354,7 @@ ID are stored in the credential vault at connect time.
 | `im/discord/interactions.py` | Button interaction handling |
 | `im/discord/commands.py` | /new /reset slash commands |
 | `frontend/.../platforms/discord.ts` | Platform descriptor |
-| `@cubebox/core` schema | ConnectDiscordAccountIn |
+| `@cubeplex/core` schema | ConnectDiscordAccountIn |
 
 ### Modified Files
 

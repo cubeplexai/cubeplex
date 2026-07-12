@@ -3,9 +3,9 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.models import Role
-from cubebox.plugins import PermissionChecker, PermissionResource
-from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
+from cubeplex.models import Role
+from cubeplex.plugins import PermissionChecker, PermissionResource
+from cubeplex.plugins.defaults.permissions import DefaultPermissionChecker
 
 
 def test_default_permission_checker_satisfies_protocol() -> None:

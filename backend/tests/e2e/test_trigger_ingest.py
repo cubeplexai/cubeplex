@@ -15,8 +15,8 @@ import httpx
 import pytest
 import pytest_asyncio
 
-from cubebox.models import Role
-from cubebox.triggers.signature import sign
+from cubeplex.models import Role
+from cubeplex.triggers.signature import sign
 from tests.e2e.conftest import _lifespan_context, _login_and_attach, _make_isolated_user
 
 # ---------------------------------------------------------------------------

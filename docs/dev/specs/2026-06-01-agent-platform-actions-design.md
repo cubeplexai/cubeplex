@@ -6,7 +6,7 @@
 
 ## Problem
 
-cubebox exposes platform capabilities (skills, scheduled tasks, conversations,
+cubeplex exposes platform capabilities (skills, scheduled tasks, conversations,
 MCP connectors, memory, …) as workspace-scoped REST routes. We want the
 in-conversation agent to perform those same operations on the user's behalf.
 
@@ -96,7 +96,7 @@ facade over it.
 ### New module layout
 
 ```
-backend/cubebox/
+backend/cubeplex/
 ├── agents/actions/
 │   ├── context.py        ScopeContext + builder from RequestContext / RunContext
 │   ├── capability.py     AgentOperation, AgentCapability, domain exceptions

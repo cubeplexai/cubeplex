@@ -25,7 +25,7 @@ vi.mock('next/navigation', () => ({
   }),
 }))
 
-vi.mock('@cubebox/core', () => {
+vi.mock('@cubeplex/core', () => {
   const attachmentState = {
     upload: storeMocks.upload,
     clear: storeMocks.clear,

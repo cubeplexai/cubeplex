@@ -2,9 +2,9 @@
 
 import pytest
 
-from cubebox.llm.builder import build_provider
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot
+from cubeplex.llm.builder import build_provider
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot
 
 
 def _snap(**provider_kwargs: object) -> LLMSnapshot:
@@ -26,7 +26,7 @@ def test_build_provider_openai_completions() -> None:
 def test_build_provider_anthropic_messages_with_cache_policy() -> None:
     from cubepi.providers.anthropic import AnthropicProvider
 
-    from cubebox.llm.cache_markers import CubeboxCacheMarkerPolicy
+    from cubeplex.llm.cache_markers import CubeplexCacheMarkerPolicy
 
     snap = LLMSnapshot(
         providers={
@@ -39,7 +39,7 @@ def test_build_provider_anthropic_messages_with_cache_policy() -> None:
         model_presets=(),
         task_routing={},
     )
-    p = build_provider(snap, "anthr", cache_policy=CubeboxCacheMarkerPolicy())
+    p = build_provider(snap, "anthr", cache_policy=CubeplexCacheMarkerPolicy())
     assert isinstance(p, AnthropicProvider)
 
 

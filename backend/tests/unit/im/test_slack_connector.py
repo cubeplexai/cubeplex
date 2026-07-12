@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from cubebox.im.slack.connector import SlackConnector
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.slack.connector import SlackConnector
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 def _make_event(

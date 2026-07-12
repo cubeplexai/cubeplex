@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { ArrowUpCircle, Download, Trash2, X, Check } from 'lucide-react'
-import type { SkillDetail } from '@cubebox/core'
+import type { SkillDetail } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { jsonHeaders, csrfHeaders, readApiError } from '@/lib/csrf'
 

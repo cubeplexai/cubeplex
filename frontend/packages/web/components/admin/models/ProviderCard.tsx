@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { Provider } from '@cubebox/core'
+import type { Provider } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { ProviderLogo } from './ProviderLogo'
 import { cn } from '@/lib/utils'

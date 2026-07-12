@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.models.user_sandbox import UserSandbox
+from cubeplex.models.user_sandbox import UserSandbox
 
 
 def _make_record(

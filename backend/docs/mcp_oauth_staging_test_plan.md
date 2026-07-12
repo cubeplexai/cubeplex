@@ -22,7 +22,7 @@ changes, or token-manager changes.
   non-DCR connectors (GitHub, Slack, Google Workspace) — see
   `backend/.env.example`.
 - Seeder run after env var changes:
-  `python -m cubebox.cli seed-mcp-catalog`.
+  `python -m cubeplex.cli seed-mcp-catalog`.
 - A staging org with at least two workspaces and three users
   (one org admin, one workspace admin, one workspace member).
 
@@ -38,7 +38,7 @@ DCR-supporting connectors additionally run scenario E.
 3. Click the connector card → Install Drawer.
 4. Choose "Connect with OAuth".
 5. Complete the vendor auth flow (consent screen → vendor redirects
-   back to the cubebox callback).
+   back to the cubeplex callback).
 6. **Verify:** drawer dismisses, success toast, install row appears in
    `GET /api/v1/admin/mcp/catalog` with `installed_org_wide=true,
    authed=true`.
@@ -74,7 +74,7 @@ DCR-supporting connectors additionally run scenario E.
 ### Scenario D — Server-side revocation
 
 1. In the vendor's connected-apps UI (e.g. GitHub → Settings →
-   Applications), revoke the cubebox app's access for the test user.
+   Applications), revoke the cubeplex app's access for the test user.
 2. Trigger an agent run that calls a tool on the connector.
 3. **Verify:** the refresh attempt fails (4xx from the AS); the install
    row flips to `authed=false` with `last_error` populated; the UI
@@ -92,7 +92,7 @@ install row references the catalog row).
    pre-registered `oauth_static_client_id`.
 2. Trigger Scenario A.
 3. **Verify network:** the OAuth-start step hits the AS metadata's
-   `/register` endpoint with the cubebox redirect URI in
+   `/register` endpoint with the cubeplex redirect URI in
    `redirect_uris`.
 4. **Verify DB:** the resulting install row's `oauth_client_config`
    contains a freshly minted `client_id`. The encrypted
@@ -109,7 +109,7 @@ install row references the catalog row).
   is best-effort; for connectors that issue long-lived tokens
   (no refresh) it is N/A.
 - **Scenario E** must pass for at least one DCR connector per release
-  that touches `cubebox.mcp.oauth.dcr`.
+  that touches `cubeplex.mcp.oauth.dcr`.
 
 A connector that fails scenario D (revocation handling) blocks
 release, even on Tier 2 — silent token failure is the worst class of

@@ -6,7 +6,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Organization, OrganizationMembership, User
+from cubeplex.models import Organization, OrganizationMembership, User
 from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
@@ -34,7 +34,7 @@ async def test_onboarding_full_multi_tenant(
     """Full onboarding (multi_tenant): register -> login -> onboard -> me has workspace."""
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
     email = f"onboard-full-{secrets.token_hex(4)}@example.com"
     password = "StrongPass1!"
     org_slug = f"full-{secrets.token_hex(4)}"
@@ -88,7 +88,7 @@ async def test_onboarding_full_single_tenant(
 ) -> None:
     """Full onboarding (single_tenant first owner): register -> login -> onboard."""
 
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
     email = f"onboard-st-{secrets.token_hex(4)}@example.com"
     password = "StrongPass1!"
     org_slug = f"st-{secrets.token_hex(4)}"
@@ -130,14 +130,14 @@ async def test_onboarding_workspace_only(
     """Workspace-only: user with org membership but no workspace -> onboarding creates workspace."""
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    from cubebox.auth.users import _slugify_org_name
-    from cubebox.models import OrgRole
-    from cubebox.repositories import (
+    from cubeplex.auth.users import _slugify_org_name
+    from cubeplex.models import OrgRole
+    from cubeplex.repositories import (
         OrganizationMembershipRepository,
         OrganizationRepository,
     )
 
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
     email = f"onboard-wsonly-{secrets.token_hex(4)}@example.com"
     password = "StrongPass1!"
 
@@ -183,7 +183,7 @@ async def test_onboarding_slug_collision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Slug collision returns 409 slug_taken."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
     slug = f"shared-{secrets.token_hex(4)}"
 
     # First user registers and onboard with slug
@@ -224,7 +224,7 @@ async def test_onboarding_already_onboarded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Already-onboarded user returns 409 onboarding_not_required."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
     email = f"already-{secrets.token_hex(4)}@example.com"
     slug = f"already-{secrets.token_hex(4)}"
 
@@ -260,12 +260,12 @@ async def test_onboarding_rollback_on_failure(
     """When bootstrap raises, onboarding returns 500 and no org row is created."""
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
 
     async def _fail(*args: object, **kwargs: object) -> None:
         raise RuntimeError("injected failure")
 
-    monkeypatch.setattr("cubebox.auth.users._bootstrap_org_and_workspace", _fail)
+    monkeypatch.setattr("cubeplex.auth.users._bootstrap_org_and_workspace", _fail)
 
     email = f"rollback-{secrets.token_hex(4)}@example.com"
 

@@ -20,7 +20,7 @@ import {
   type MCPTemplate,
   type MCPTemplateScope,
   type WorkspaceCatalogRow,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'

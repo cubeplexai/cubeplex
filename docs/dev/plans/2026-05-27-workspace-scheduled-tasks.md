@@ -11,14 +11,14 @@
 ---
 
 > **Worktree first.** This plan executes inside
-> `/home/chris/cubebox/.worktrees/feat/workspace-scheduled-tasks` on branch
+> `/home/chris/cubeplex/.worktrees/feat/workspace-scheduled-tasks` on branch
 > `feat/workspace-scheduled-tasks`. First commands in any fresh session:
 > ```bash
-> cat .worktree.env            # ports 8091 / 3091, DB cubebox_feat_workspace_scheduled_tasks
+> cat .worktree.env            # ports 8091 / 3091, DB cubeplex_feat_workspace_scheduled_tasks
 > ./scripts/worktree-env doctor
 > ```
 > All `uv run` / `alembic` / `pytest` commands below run from `backend/`. The
-> conftest auto-routes worktree tests to `cubebox_test_<slug>` — plain
+> conftest auto-routes worktree tests to `cubeplex_test_<slug>` — plain
 > `uv run pytest` never touches the dev DB.
 
 ---
@@ -26,15 +26,15 @@
 ## File Structure
 
 **New files:**
-- `backend/cubebox/models/scheduled_task.py` — `ScheduledTask` + `ScheduledTaskRun` SQLModel tables.
-- `backend/cubebox/schedules/__init__.py` — package marker.
-- `backend/cubebox/schedules/compute.py` — pure functions: `next_fire_after`, `latest_due_before`, `decide_missed`.
-- `backend/cubebox/repositories/scheduled_task.py` — `ScheduledTaskRepository` + `ScheduledTaskRunRepository` (claim SQL).
-- `backend/cubebox/schedules/dispatch.py` — `resolve_target` + `dispatch_scheduled_run` (the shared seam).
-- `backend/cubebox/schedules/poller.py` — `ScheduledTaskPoller` loop.
-- `backend/cubebox/schedules/completion_hook.py` — `record_scheduled_run_terminal_state`.
-- `backend/cubebox/api/schemas/ws_scheduled_tasks.py` — request/response Pydantic models.
-- `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py` — workspace router.
+- `backend/cubeplex/models/scheduled_task.py` — `ScheduledTask` + `ScheduledTaskRun` SQLModel tables.
+- `backend/cubeplex/schedules/__init__.py` — package marker.
+- `backend/cubeplex/schedules/compute.py` — pure functions: `next_fire_after`, `latest_due_before`, `decide_missed`.
+- `backend/cubeplex/repositories/scheduled_task.py` — `ScheduledTaskRepository` + `ScheduledTaskRunRepository` (claim SQL).
+- `backend/cubeplex/schedules/dispatch.py` — `resolve_target` + `dispatch_scheduled_run` (the shared seam).
+- `backend/cubeplex/schedules/poller.py` — `ScheduledTaskPoller` loop.
+- `backend/cubeplex/schedules/completion_hook.py` — `record_scheduled_run_terminal_state`.
+- `backend/cubeplex/api/schemas/ws_scheduled_tasks.py` — request/response Pydantic models.
+- `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py` — workspace router.
 - `backend/tests/unit/test_schedule_compute.py` — pure-function unit tests.
 - `backend/tests/e2e/test_scheduled_tasks_api.py` — CRUD + auth E2E.
 - `backend/tests/e2e/test_scheduled_tasks_firing.py` — firing / missed-run / concurrency E2E.
@@ -49,13 +49,13 @@
   - `frontend/packages/core/src/hooks/useScheduledTasks.ts` (+ api client in
     `packages/core/src/api/`) — data hooks.
   (Match the exact file conventions of the existing `w/[wsId]/conversations`
-  feature; build `@cubebox/core` before the web app sees new types.)
+  feature; build `@cubeplex/core` before the web app sees new types.)
 
 **Modified files:**
-- `backend/cubebox/models/__init__.py` — export the two new models.
-- `backend/cubebox/api/app.py` — start/stop the poller in lifespan; include the router.
-- `backend/cubebox/streams/run_manager.py` — call the completion hook at terminal status.
-- `backend/cubebox/api/routes/v1/__init__.py` — re-export the router.
+- `backend/cubeplex/models/__init__.py` — export the two new models.
+- `backend/cubeplex/api/app.py` — start/stop the poller in lifespan; include the router.
+- `backend/cubeplex/streams/run_manager.py` — call the completion hook at terminal status.
+- `backend/cubeplex/api/routes/v1/__init__.py` — re-export the router.
 - `backend/pyproject.toml` / `backend/uv.lock` — add `croniter` (via `uv add`).
 - Frontend nav (sidebar / workspace nav) — add a "Scheduled tasks" entry
   pointing at the new route, mirroring how the other `w/[wsId]` features
@@ -65,11 +65,11 @@
 
 ## Conventions locked in (read once)
 
-- **Models:** `class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True)` with
+- **Models:** `class ScheduledTask(CubeplexBase, OrgScopedMixin, table=True)` with
   `_PREFIX: ClassVar[str] = "stask"` and `_PREFIX = "stkrn"` for runs. PK auto-fills
   via `model_post_init`. Mirror `Conversation`'s soft-delete + partial deleted_at index.
 - **Datetimes:** all DB datetimes surfaced through the API use `utc_isoformat()`
-  (`from cubebox.utils.time import utc_isoformat`). Stored times are UTC-naive-aware
+  (`from cubeplex.utils.time import utc_isoformat`). Stored times are UTC-naive-aware
   `datetime` with `tzinfo=UTC`.
 - **Scoping:** repositories subclass `ScopedRepository[T]` so `(org_id, workspace_id)`
   is structural. `ConversationRepository(session, org_id, workspace_id, user_id=owner)`
@@ -123,8 +123,8 @@ These are the only pieces worth isolating as units (DST/grace logic). Everything
 else is covered E2E.
 
 **Files:**
-- Create: `backend/cubebox/schedules/__init__.py`
-- Create: `backend/cubebox/schedules/compute.py`
+- Create: `backend/cubeplex/schedules/__init__.py`
+- Create: `backend/cubeplex/schedules/compute.py`
 - Test: `backend/tests/unit/test_schedule_compute.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -135,7 +135,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from cubebox.schedules.compute import (
+from cubeplex.schedules.compute import (
     MissedDecision,
     decide_missed,
     latest_due_before,
@@ -218,17 +218,17 @@ def test_compute_accepts_naive_db_datetimes() -> None:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/unit/test_schedule_compute.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.schedules'`.
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.schedules'`.
 
 - [ ] **Step 3: Implement the pure functions**
 
 ```python
-# backend/cubebox/schedules/__init__.py
+# backend/cubeplex/schedules/__init__.py
 ```
 (empty file)
 
 ```python
-# backend/cubebox/schedules/compute.py
+# backend/cubeplex/schedules/compute.py
 """Pure schedule arithmetic: next-fire, latest-due catch-up, missed-run decision.
 
 Cron is evaluated in the task's IANA timezone; all returned datetimes are UTC.
@@ -252,7 +252,7 @@ class MissedDecision(StrEnum):
 def as_utc(dt: datetime) -> datetime:
     """Attach UTC to a naive datetime; pass through aware ones.
 
-    cubebox stores `timestamp without time zone`, so datetimes read back from
+    cubeplex stores `timestamp without time zone`, so datetimes read back from
     the DB are NAIVE. The compute/poller arithmetic mixes those with
     `datetime.now(UTC)` (AWARE); comparing or subtracting the two raises
     TypeError. Every datetime that came from the DB MUST pass through this
@@ -344,7 +344,7 @@ Expected: PASS — 7 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/schedules/__init__.py backend/cubebox/schedules/compute.py backend/tests/unit/test_schedule_compute.py
+git add backend/cubeplex/schedules/__init__.py backend/cubeplex/schedules/compute.py backend/tests/unit/test_schedule_compute.py
 git commit -m "feat(schedules): pure cron/interval next-fire + missed-run compute"
 ```
 
@@ -353,13 +353,13 @@ git commit -m "feat(schedules): pure cron/interval next-fire + missed-run comput
 ### Task 3: The two SQLModel tables + public_id prefixes
 
 **Files:**
-- Create: `backend/cubebox/models/scheduled_task.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/scheduled_task.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Write the model module**
 
 ```python
-# backend/cubebox/models/scheduled_task.py
+# backend/cubeplex/models/scheduled_task.py
 """Scheduled-task tables.
 
 ``ScheduledTask`` is the schedule definition; ``ScheduledTaskRun`` is the
@@ -378,10 +378,10 @@ from typing import Any, ClassVar
 from sqlalchemy import Column, Index, Integer, UniqueConstraint, text
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
 
 
-class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
+class ScheduledTask(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = "stask"
     __tablename__ = "scheduled_tasks"
     __table_args__ = (
@@ -420,7 +420,7 @@ class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
     deleted_at: datetime | None = Field(default=None)
 
 
-class ScheduledTaskRun(CubeboxBase, OrgScopedMixin, table=True):
+class ScheduledTaskRun(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = "stkrn"
     __tablename__ = "scheduled_task_runs"
     __table_args__ = (
@@ -462,10 +462,10 @@ class ScheduledTaskRun(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: Export the models**
 
-In `backend/cubebox/models/__init__.py`, add an import next to the
+In `backend/cubeplex/models/__init__.py`, add an import next to the
 `Conversation` import and the names to `__all__`:
 ```python
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
 ```
 and inside `__all__` add `"ScheduledTask",` and `"ScheduledTaskRun",`.
 
@@ -473,14 +473,14 @@ and inside `__all__` add `"ScheduledTask",` and `"ScheduledTaskRun",`.
 
 Run (from `backend/`):
 ```bash
-uv run python -c "from cubebox.models import ScheduledTask, ScheduledTaskRun; t=ScheduledTask(name='x', schedule_kind='once', prompt='p', target_mode='new_each_run', org_id='o', workspace_id='w', owner_user_id='u'); print(t.id[:6])"
+uv run python -c "from cubeplex.models import ScheduledTask, ScheduledTaskRun; t=ScheduledTask(name='x', schedule_kind='once', prompt='p', target_mode='new_each_run', org_id='o', workspace_id='w', owner_user_id='u'); print(t.id[:6])"
 ```
 Expected: prints `stask-` (the auto-filled prefixed id).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/models/scheduled_task.py backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/scheduled_task.py backend/cubeplex/models/__init__.py
 git commit -m "feat(models): scheduled_tasks + scheduled_task_runs tables"
 ```
 
@@ -536,7 +536,7 @@ git commit -m "feat(db): migration for scheduled_tasks tables"
 ### Task 5: Repositories — scoped CRUD + the SKIP LOCKED claim query
 
 **Files:**
-- Create: `backend/cubebox/repositories/scheduled_task.py`
+- Create: `backend/cubeplex/repositories/scheduled_task.py`
 - Test: covered by the E2E firing test in Task 9 (the claim query needs a real
   Postgres connection; `SKIP LOCKED` cannot be simulated in SQLite, so per
   CLAUDE.md E2E-priority this is validated E2E, not unit-mocked).
@@ -557,7 +557,7 @@ These four constants are surfaced as `ScheduledTaskPoller.__init__` arguments
 - [ ] **Step 1: Implement both repositories**
 
 ```python
-# backend/cubebox/repositories/scheduled_task.py
+# backend/cubeplex/repositories/scheduled_task.py
 """Repositories for scheduled tasks and their occurrence history.
 
 ``ScheduledTaskRunRepository.claim_due_tasks`` is the poller's hot path. It uses
@@ -574,8 +574,8 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.repositories.base import ScopedRepository
 
 
 class ScheduledTaskRepository(ScopedRepository[ScheduledTask]):
@@ -728,13 +728,13 @@ Add `from sqlalchemy import update` to the imports if not already present.
 
 - [ ] **Step 2: Verify it imports**
 
-Run: `uv run python -c "from cubebox.repositories.scheduled_task import claim_due_tasks, claim_stale_runs, claim_busy_postponed_runs, fail_stale_started_runs, ScheduledTaskRepository, ScheduledTaskRunRepository; print('ok')"`
+Run: `uv run python -c "from cubeplex.repositories.scheduled_task import claim_due_tasks, claim_stale_runs, claim_busy_postponed_runs, fail_stale_started_runs, ScheduledTaskRepository, ScheduledTaskRunRepository; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/repositories/scheduled_task.py
+git add backend/cubeplex/repositories/scheduled_task.py
 git commit -m "feat(repos): scheduled-task repos + SKIP LOCKED claim queries"
 ```
 
@@ -743,12 +743,12 @@ git commit -m "feat(repos): scheduled-task repos + SKIP LOCKED claim queries"
 ### Task 6: Dispatch seam — resolve target + start_run
 
 **Files:**
-- Create: `backend/cubebox/schedules/dispatch.py`
+- Create: `backend/cubeplex/schedules/dispatch.py`
 
 - [ ] **Step 1: Implement the dispatch seam**
 
 ```python
-# backend/cubebox/schedules/dispatch.py
+# backend/cubeplex/schedules/dispatch.py
 """The shared 'something decided to run an agent' seam.
 
 ``dispatch_scheduled_run`` resolves/creates the target conversation, builds a
@@ -760,11 +760,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.scheduled_task import ScheduledTask
-from cubebox.repositories.conversation import ConversationRepository
-from cubebox.repositories.membership import MembershipRepository
-from cubebox.streams.run_manager import RunContext, RunManager
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.scheduled_task import ScheduledTask
+from cubeplex.repositories.conversation import ConversationRepository
+from cubeplex.repositories.membership import MembershipRepository
+from cubeplex.streams.run_manager import RunContext, RunManager
 
 
 class TargetUnavailableError(Exception):
@@ -862,7 +862,7 @@ async def dispatch_scheduled_run(
 ```
 
 > **DECISION REQUIRED — `agent_config_id` must not be store-and-ignore.** Today
-> `RunContext` (`backend/cubebox/streams/run_manager.py:30`) has **only**
+> `RunContext` (`backend/cubeplex/streams/run_manager.py:30`) has **only**
 > `user_id` / `org_id` / `workspace_id`, and `_execute_run` always loads the
 > *workspace-default* `AgentConfig` (lines ~1772-1797). So a `task.agent_config_id`
 > the spec defines (design §4, "null = workspace default") is silently dropped.
@@ -884,13 +884,13 @@ async def dispatch_scheduled_run(
 
 - [ ] **Step 2: Verify it imports**
 
-Run: `uv run python -c "from cubebox.schedules.dispatch import dispatch_scheduled_run, resolve_target, TargetUnavailableError, ConversationBusyError; print('ok')"`
+Run: `uv run python -c "from cubeplex.schedules.dispatch import dispatch_scheduled_run, resolve_target, TargetUnavailableError, ConversationBusyError; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/schedules/dispatch.py
+git add backend/cubeplex/schedules/dispatch.py
 git commit -m "feat(schedules): dispatch seam reusing run_manager.start_run"
 ```
 
@@ -899,13 +899,13 @@ git commit -m "feat(schedules): dispatch seam reusing run_manager.start_run"
 ### Task 7: Run-completion hook (started → succeeded/failed)
 
 **Files:**
-- Create: `backend/cubebox/schedules/completion_hook.py`
-- Modify: `backend/cubebox/streams/run_manager.py` (3 terminal-status sites)
+- Create: `backend/cubeplex/schedules/completion_hook.py`
+- Modify: `backend/cubeplex/streams/run_manager.py` (3 terminal-status sites)
 
 - [ ] **Step 1: Implement the hook**
 
 ```python
-# backend/cubebox/schedules/completion_hook.py
+# backend/cubeplex/schedules/completion_hook.py
 """Copy a run's terminal outcome back onto its scheduled_task_runs row.
 
 Keyed by run_id: interactive runs (no matching row) are a no-op. Best-effort —
@@ -919,8 +919,8 @@ from datetime import UTC, datetime
 from loguru import logger
 from sqlalchemy import select, update
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.scheduled_task import ScheduledTaskRun
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.scheduled_task import ScheduledTaskRun
 
 # RunManager status -> occurrence terminal state.
 _TERMINAL_MAP = {"completed": "succeeded", "failed": "failed", "cancelled": "failed"}
@@ -955,11 +955,11 @@ async def record_scheduled_run_terminal_state(*, run_id: str, run_status: str) -
 
 - [ ] **Step 2: Call the hook at all three terminal-status sites**
 
-In `backend/cubebox/streams/run_manager.py` `_execute_run`, immediately after
+In `backend/cubeplex/streams/run_manager.py` `_execute_run`, immediately after
 each `await update_run_meta(..., status=...)` call (the `completed`, `cancelled`,
 and `failed` blocks around lines 1895/1903/1921), add:
 ```python
-from cubebox.schedules.completion_hook import record_scheduled_run_terminal_state
+from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
 
 await record_scheduled_run_terminal_state(run_id=run_id, run_status="completed")
 ```
@@ -969,13 +969,13 @@ module-level import cycle.
 
 - [ ] **Step 3: Verify import + run_manager still imports**
 
-Run: `uv run python -c "import cubebox.streams.run_manager; from cubebox.schedules.completion_hook import record_scheduled_run_terminal_state; print('ok')"`
+Run: `uv run python -c "import cubeplex.streams.run_manager; from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/schedules/completion_hook.py backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/schedules/completion_hook.py backend/cubeplex/streams/run_manager.py
 git commit -m "feat(schedules): run-completion hook writes occurrence terminal state"
 ```
 
@@ -984,13 +984,13 @@ git commit -m "feat(schedules): run-completion hook writes occurrence terminal s
 ### Task 8: The poller loop
 
 **Files:**
-- Create: `backend/cubebox/schedules/poller.py`
-- Modify: `backend/cubebox/api/app.py` (start in lifespan, drain on shutdown)
+- Create: `backend/cubeplex/schedules/poller.py`
+- Modify: `backend/cubeplex/api/app.py` (start in lifespan, drain on shutdown)
 
 - [ ] **Step 1: Implement the poller**
 
 ```python
-# backend/cubebox/schedules/poller.py
+# backend/cubeplex/schedules/poller.py
 """Per-replica poller that claims due scheduled tasks and dispatches runs.
 
 Every replica runs one of these. Claiming is done with SELECT … FOR UPDATE SKIP
@@ -1009,27 +1009,27 @@ from datetime import UTC, datetime, timedelta
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.repositories.scheduled_task import (
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.repositories.scheduled_task import (
     claim_busy_postponed_runs,
     claim_due_tasks,
     claim_stale_runs,
     fail_stale_started_runs,
 )
-from cubebox.schedules.compute import (
+from cubeplex.schedules.compute import (
     MissedDecision,
     as_utc,
     decide_missed,
     latest_due_before,
     next_fire_after,
 )
-from cubebox.schedules.dispatch import (
+from cubeplex.schedules.dispatch import (
     ConversationBusyError,
     TargetUnavailableError,
     dispatch_scheduled_run,
 )
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 
 
 class ScheduledTaskPoller:
@@ -1271,11 +1271,11 @@ class ScheduledTaskPoller:
 
 - [ ] **Step 2: Wire into lifespan**
 
-In `backend/cubebox/api/app.py`, after `run_manager` is created and
+In `backend/cubeplex/api/app.py`, after `run_manager` is created and
 `_app.state.run_manager = run_manager` is set (around line 175), add:
 ```python
-from cubebox.schedules.poller import ScheduledTaskPoller
-from cubebox.config import config as _sched_cfg
+from cubeplex.schedules.poller import ScheduledTaskPoller
+from cubeplex.config import config as _sched_cfg
 
 poller = ScheduledTaskPoller(
     run_manager=run_manager,
@@ -1298,13 +1298,13 @@ if poller is not None:
 
 - [ ] **Step 3: Verify the app boots with the poller**
 
-Run: `uv run python -c "import cubebox.schedules.poller; from cubebox.schedules.poller import ScheduledTaskPoller; print('ok')"`
+Run: `uv run python -c "import cubeplex.schedules.poller; from cubeplex.schedules.poller import ScheduledTaskPoller; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/schedules/poller.py backend/cubebox/api/app.py
+git add backend/cubeplex/schedules/poller.py backend/cubeplex/api/app.py
 git commit -m "feat(schedules): per-replica poller + lifespan wiring"
 ```
 
@@ -1313,15 +1313,15 @@ git commit -m "feat(schedules): per-replica poller + lifespan wiring"
 ### Task 9: Workspace routes (scope-isolated) + schemas + owner/admin auth
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/ws_scheduled_tasks.py`
-- Create: `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py` (re-export)
-- Modify: `backend/cubebox/api/app.py` (include router)
+- Create: `backend/cubeplex/api/schemas/ws_scheduled_tasks.py`
+- Create: `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py` (re-export)
+- Modify: `backend/cubeplex/api/app.py` (include router)
 
 - [ ] **Step 1: Schemas**
 
 ```python
-# backend/cubebox/api/schemas/ws_scheduled_tasks.py
+# backend/cubeplex/api/schemas/ws_scheduled_tasks.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -1442,7 +1442,7 @@ class ScheduledTaskListOut(BaseModel):
 - [ ] **Step 2: Router with member-read / owner-or-admin-mutate**
 
 ```python
-# backend/cubebox/api/routes/v1/ws_scheduled_tasks.py
+# backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py
 """Workspace scheduled-task routes. Scope-isolated: no admin/cross-ws variant.
 
 Reads require membership; mutations (edit/pause/resume/delete) require being the
@@ -1457,25 +1457,25 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from cubebox.api.schemas.ws_scheduled_tasks import (
+from cubeplex.api.schemas.ws_scheduled_tasks import (
     ScheduledTaskCreate,
     ScheduledTaskListOut,
     ScheduledTaskOut,
     ScheduledTaskPatch,
     ScheduledTaskRunOut,
 )
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.db.engine import async_session_maker
-from cubebox.models import Role
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.repositories.conversation import ConversationRepository
-from cubebox.repositories.scheduled_task import (
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models import Role
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.repositories.conversation import ConversationRepository
+from cubeplex.repositories.scheduled_task import (
     ScheduledTaskRepository,
     ScheduledTaskRunRepository,
 )
-from cubebox.schedules.compute import as_utc, latest_due_before, next_fire_after
-from cubebox.utils.time import utc_isoformat
+from cubeplex.schedules.compute import as_utc, latest_due_before, next_fire_after
+from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/scheduled-tasks", tags=["scheduled-tasks"])
 
@@ -1749,10 +1749,10 @@ async def list_task_runs(
 
 - [ ] **Step 3: Register the router**
 
-In `backend/cubebox/api/routes/v1/__init__.py`, add `ws_scheduled_tasks` to the
+In `backend/cubeplex/api/routes/v1/__init__.py`, add `ws_scheduled_tasks` to the
 import block and to `__all__` (alphabetically near `ws_sandbox_env`). In
-`backend/cubebox/api/app.py`, add `ws_scheduled_tasks` to the
-`from cubebox.api.routes.v1 import (...)` tuple (around line 444) and add:
+`backend/cubeplex/api/app.py`, add `ws_scheduled_tasks` to the
+`from cubeplex.api.routes.v1 import (...)` tuple (around line 444) and add:
 ```python
 app.include_router(ws_scheduled_tasks.router, prefix="/api/v1")
 ```
@@ -1760,13 +1760,13 @@ next to the other `ws_*` includes.
 
 - [ ] **Step 4: Verify the app imports the router**
 
-Run: `uv run python -c "from cubebox.api.routes.v1 import ws_scheduled_tasks; print([r.path for r in ws_scheduled_tasks.router.routes])"`
+Run: `uv run python -c "from cubeplex.api.routes.v1 import ws_scheduled_tasks; print([r.path for r in ws_scheduled_tasks.router.routes])"`
 Expected: lists the 8 paths (`POST ''`, `GET ''`, `GET /{task_id}`, `PATCH`, pause, resume, delete, `/{task_id}/runs`).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/ws_scheduled_tasks.py backend/cubebox/api/routes/v1/ws_scheduled_tasks.py backend/cubebox/api/routes/v1/__init__.py backend/cubebox/api/app.py
+git add backend/cubeplex/api/schemas/ws_scheduled_tasks.py backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py backend/cubeplex/api/routes/v1/__init__.py backend/cubeplex/api/app.py
 git commit -m "feat(api): workspace scheduled-task routes (member read, owner/admin mutate)"
 ```
 
@@ -1962,9 +1962,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.schedules.poller import ScheduledTaskPoller
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.schedules.poller import ScheduledTaskPoller
 from tests.e2e.conftest import DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
@@ -2142,7 +2142,7 @@ file, modules are the reuse boundary, no `mode?` prop).
 - Modify: workspace nav to add the "Scheduled tasks" entry.
 
 - [ ] **Step 1: Types + core build.** Add the shared types and build
-  `@cubebox/core` (`pnpm build` in the core package) so the web app sees them.
+  `@cubeplex/core` (`pnpm build` in the core package) so the web app sees them.
 - [ ] **Step 2: Proxy routes.** Add the `app/api/.../scheduled-tasks` handlers
   mirroring the conversations proxy; verify each forwards method + body + auth.
 - [ ] **Step 3: Page + modules.** Build the page assembling list/detail/form
@@ -2171,15 +2171,15 @@ file, modules are the reuse boundary, no `mode?` prop).
 
 Run (from `backend/`):
 ```bash
-uv run mypy cubebox/schedules cubebox/models/scheduled_task.py cubebox/repositories/scheduled_task.py cubebox/api/routes/v1/ws_scheduled_tasks.py cubebox/api/schemas/ws_scheduled_tasks.py
-uv run ruff check cubebox/schedules cubebox/api/routes/v1/ws_scheduled_tasks.py
+uv run mypy cubeplex/schedules cubeplex/models/scheduled_task.py cubeplex/repositories/scheduled_task.py cubeplex/api/routes/v1/ws_scheduled_tasks.py cubeplex/api/schemas/ws_scheduled_tasks.py
+uv run ruff check cubeplex/schedules cubeplex/api/routes/v1/ws_scheduled_tasks.py
 ```
 Expected: `Success: no issues found` and ruff clean (no findings). Fix any
 100-char line-length or typing issues inline.
 
 - [ ] **Step 1b: Frontend checks**
 
-Run (from `frontend/`): `pnpm build` (build `@cubebox/core` first), then
+Run (from `frontend/`): `pnpm build` (build `@cubeplex/core` first), then
 `pnpm lint && pnpm type-check`. Expected: clean.
 
 - [ ] **Step 2: Run all new tests together**
@@ -2198,7 +2198,7 @@ Expected: `No new upgrade operations detected.` (the model and DB schema agree).
 - [ ] **Step 4: Commit any sweep fixes**
 
 ```bash
-git add -A backend/cubebox backend/tests
+git add -A backend/cubeplex backend/tests
 git commit -m "chore(schedules): mypy/ruff sweep fixes"
 ```
 (Skip this commit if Steps 1–3 produced no changes.)
@@ -2265,7 +2265,7 @@ git commit -m "chore(schedules): mypy/ruff sweep fixes"
 Per the codebase convention (Task 3, confirmed against `conversation.py` /
 `user_sandbox.py`), per-table prefixes are declared as `_PREFIX` ClassVars on the
 model, NOT as module constants in `public_id.py` (those constants are only for
-non-`CubeboxBase` tables like memory/sandbox-env). So no edit to `public_id.py`
+non-`CubeplexBase` tables like memory/sandbox-env). So no edit to `public_id.py`
 is required; this is the correct interpretation of the "new table → public_id
 prefix" rule, not a gap.
 

@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Plus } from 'lucide-react'
-import { createApiClient, useMemberStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useMemberStore, useWorkspaceStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { SETTINGS_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
 import { cn } from '@/lib/utils'

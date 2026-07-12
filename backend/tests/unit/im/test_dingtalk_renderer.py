@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cubebox.im.dingtalk.renderer import DingtalkOpDispatcher
-from cubebox.im.types import RenderState
+from cubeplex.im.dingtalk.renderer import DingtalkOpDispatcher
+from cubeplex.im.types import RenderState
 
 
 @pytest.fixture()

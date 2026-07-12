@@ -1,8 +1,8 @@
 'use client'
 
 import { memo, useState, useCallback } from 'react'
-import type { Artifact } from '@cubebox/core'
-import { usePanelStore } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
+import { usePanelStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { buildPreviewUrl } from '@/components/panel/artifact/previewUtils'

@@ -1,4 +1,4 @@
-cubebox — open-source notices & credits
+cubeplex — open-source notices & credits
 
 This product includes avatar assets generated with DiceBear 10.x
 (https://www.dicebear.com). Style license info is from the DiceBear

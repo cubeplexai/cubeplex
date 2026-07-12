@@ -1,6 +1,6 @@
 'use client'
 
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 import { getFileVisual } from '@/lib/fileIcons'
 import { cn } from '@/lib/utils'
 

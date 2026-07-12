@@ -25,8 +25,8 @@ from unittest.mock import AsyncMock, MagicMock
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.run_events import create_run, update_run_meta
-from cubebox.streams.run_manager import RunContext, RunManager
+from cubeplex.streams.run_events import create_run, update_run_meta
+from cubeplex.streams.run_manager import RunContext, RunManager
 
 PREFIX = "test_start_run_paused"
 
@@ -66,7 +66,7 @@ def stub_no_db_pending(monkeypatch: pytest.MonkeyPatch) -> None:
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.shared_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
 
@@ -127,7 +127,7 @@ async def test_start_run_rejects_when_db_pending_present(
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.shared_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
 
@@ -138,11 +138,11 @@ async def test_start_run_rejects_when_db_pending_present(
         return None
 
     monkeypatch.setattr(
-        "cubebox.streams.run_manager.create_run",
+        "cubeplex.streams.run_manager.create_run",
         _create_run_conflict,
     )
     monkeypatch.setattr(
-        "cubebox.streams.run_manager.get_active_run",
+        "cubeplex.streams.run_manager.get_active_run",
         _get_active_none,
     )
 
@@ -175,7 +175,7 @@ async def test_start_run_succeeds_when_no_pending(
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.shared_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
 

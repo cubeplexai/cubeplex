@@ -1,4 +1,4 @@
-# Contributing to cubebox
+# Contributing to cubeplex
 
 Thanks for your interest! This doc covers how to set up your local environment so commits and pushes pass CI on the first try.
 
@@ -12,8 +12,8 @@ Thanks for your interest! This doc covers how to set up your local environment s
 ## First-time setup
 
 ```bash
-git clone https://github.com/xfgong/cubebox.git
-cd cubebox
+git clone https://github.com/xfgong/cubeplex.git
+cd cubeplex
 
 # Backend
 cd backend

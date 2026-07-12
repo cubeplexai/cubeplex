@@ -19,11 +19,11 @@ and resume it from.
 cubepi has since shipped a full HITL channel (`dev/specs/2026-05-28-hitl-channel.md`
 in the cubepi repo): a `HitlChannel` protocol, `ApprovalPolicyMiddleware`,
 per-run `Agent(channel=...)` wiring, and `HitlRequestEvent` / `HitlAnswerEvent`
-on the agent event stream. This spec wires that primitive into cubebox so a
+on the agent event stream. This spec wires that primitive into cubeplex so a
 `confirm` rule does what its name says: pause the `execute` tool, surface the
 command to the user, and run or skip it based on their answer.
 
-This is the cubebox half of the work the original spec flagged as
+This is the cubeplex half of the work the original spec flagged as
 "External follow-up — cubepi HITL (OQ-1/OQ-2)". The acceptance criteria
 stated there carry over verbatim:
 
@@ -54,7 +54,7 @@ stated there carry over verbatim:
 - **Edit path.** `ApproveAnswer.decision == "edit"` is rejected in v1 (the
   middleware raises so a mis-wired client can't silently mutate a command).
   Edit needs its own UX design.
-- **Cross-process durable resume.** See §6 — cubebox runs are single-process
+- **Cross-process durable resume.** See §6 — cubeplex runs are single-process
   and not resumable across worker death today; HITL does not change that.
 - **Command rules on `write_file` / `edit_file`.** v1 covers `execute` only
   (carries over OQ-10 from the original spec).
@@ -62,22 +62,22 @@ stated there carry over verbatim:
 
 ## 3. Current state (what we're changing)
 
-`backend/cubebox/middleware/sandbox.py::_make_execute_tool._execute`
+`backend/cubeplex/middleware/sandbox.py::_make_execute_tool._execute`
 evaluates command rules inside the tool body and, on `confirm`, returns an
 `is_error=True` "not yet supported" result (lines ~154–180). That whole branch
 goes away.
 
-`backend/cubebox/streams/run_manager.py::_run_cubepi_path` builds
+`backend/cubeplex/streams/run_manager.py::_run_cubepi_path` builds
 `SandboxMiddleware` (around line 1273) and the `Agent` (via
-`create_cubebox_agent`). Neither knows about a channel today. The Redis
+`create_cubeplex_agent`). Neither knows about a channel today. The Redis
 control channel (`{key_prefix}:control`) already carries `steer` / `cancel`
 messages handled in `_handle_control`.
 
-`backend/cubebox/agents/stream.py::convert_agent_event_to_sse` silently drops
+`backend/cubeplex/agents/stream.py::convert_agent_event_to_sse` silently drops
 every AgentEvent it doesn't recognise — including the new HITL events until we
 add cases.
 
-HITL is wired **nowhere** in cubebox yet; this is a greenfield integration on
+HITL is wired **nowhere** in cubeplex yet; this is a greenfield integration on
 top of an upstream primitive.
 
 ## 4. Backend design
@@ -138,7 +138,7 @@ Current alembic head to chain onto: `28c4c57516f6`.
 > Note: v1 uses `InMemoryChannel` (§4.3), so `pending_request` stays NULL at
 > runtime — cubepi only writes it from `CheckpointedChannel`. The migration is
 > still mandatory (version check) and the column is a free forward-investment:
-> if cubebox later makes whole runs durable, the storage is already there with
+> if cubeplex later makes whole runs durable, the storage is already there with
 > no second schema change.
 
 ### 4.2 `SandboxMiddleware` owns the policy gate (`before_tool_call`)
@@ -212,13 +212,13 @@ criterion "TTL not paused" holds structurally.
 
 In `_run_cubepi_path`, when a sandbox is present, create one
 `InMemoryChannel(default_timeout=180.0)` per run, pass it to both
-`SandboxMiddleware(channel=...)` and `create_cubebox_agent(channel=...)`
+`SandboxMiddleware(channel=...)` and `create_cubeplex_agent(channel=...)`
 (`Agent(channel=...)` — single channel per agent, cubepi's design), and
 register it in a new `self._hitl_channels: dict[str, HitlChannel]` keyed by
 `run_id`, alongside the existing `self._agents`. The `finally` teardown pops it
 just like `self._agents.pop(run_id, None)`.
 
-`create_cubebox_agent` gains a `channel` kwarg forwarded to `Agent`.
+`create_cubeplex_agent` gains a `channel` kwarg forwarded to `Agent`.
 
 ### 4.4 Answer transport: existing Redis control channel
 
@@ -295,16 +295,16 @@ channel we use; "avoiding a schema change" is **not** a reason to pick
 
 `CheckpointedChannel`'s only added capability is **cross-process durable
 resume**: a worker that dies mid-wait can be picked up by another process via
-`agent.respond()`. That capability is hollow in cubebox today:
+`agent.respond()`. That capability is hollow in cubeplex today:
 
 1. **Answers return to the same process anyway.** The worker running
    `agent.prompt()` is the one subscribed to its Redis control channel; the
    approve/deny lands in that same process while it is blocked in
    `before_tool_call`. Cubepi's same-process fast path (§5.4) applies — no
    resume needed.
-2. **cubebox runs are not cross-process resumable at all.** The agent loop is
+2. **cubeplex runs are not cross-process resumable at all.** The agent loop is
    a single in-process `agent.prompt()` run to completion. If the worker dies,
-   the whole run dies (SSE breaks, `_agents` entry gone); cubebox does not
+   the whole run dies (SSE breaks, `_agents` entry gone); cubeplex does not
    resume dead runs. Adding `CheckpointedChannel` for just the confirm wait
    would make one 180-second window durable inside an otherwise
    non-resumable run — a false sense of durability for a lot of
@@ -312,7 +312,7 @@ resume**: a worker that dies mid-wait can be picked up by another process via
 3. **The wait is short.** 180s cap, human-clicks-a-button scale. Same-process
    blocking is the natural fit; durable resume targets hours/days waits.
 
-`InMemoryChannel` is chosen because it matches cubebox's existing
+`InMemoryChannel` is chosen because it matches cubeplex's existing
 "single-process, run-not-resumable" model. The correct path to
 `CheckpointedChannel` is to first make whole runs resumable (a separate, large
 effort); the migration shipped here pre-provisions the storage for that future

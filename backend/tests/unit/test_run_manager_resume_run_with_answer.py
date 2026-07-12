@@ -20,8 +20,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.streams.hitl_resume import ClaimResumeOutcome, ClaimResumeResult
-from cubebox.streams.run_manager import (
+from cubeplex.streams.hitl_resume import ClaimResumeOutcome, ClaimResumeResult
+from cubeplex.streams.run_manager import (
     ResumeConflict,
     ResumeInFlight,
     ResumeNoPending,
@@ -59,7 +59,7 @@ def _patch_checkpointer(monkeypatch: pytest.MonkeyPatch, *, pending: Any) -> Asy
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.shared_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_cm,
     )
     return load_mock
@@ -77,7 +77,7 @@ def _patch_claim_resume(
     )
     mock = AsyncMock(return_value=result)
     monkeypatch.setattr(
-        "cubebox.streams.hitl_resume.claim_resume",
+        "cubeplex.streams.hitl_resume.claim_resume",
         mock,
     )
     return mock

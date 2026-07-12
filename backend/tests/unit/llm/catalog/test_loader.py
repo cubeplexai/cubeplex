@@ -1,7 +1,7 @@
 import pytest
 
-from cubebox.llm.catalog.loader import build_catalog, preset_key_for, resolve_capability
-from cubebox.llm.catalog.types import Endpoint, Vendor
+from cubeplex.llm.catalog.loader import build_catalog, preset_key_for, resolve_capability
+from cubeplex.llm.catalog.types import Endpoint, Vendor
 
 PROFILES: dict[str, dict[str, object]] = {"x": {}}
 
@@ -244,7 +244,7 @@ def test_duplicate_endpoint_tuple_rejected_even_with_distinct_key_overrides():
 
 
 def test_catalog_to_api_shape():
-    from cubebox.llm.catalog import load_catalog
+    from cubeplex.llm.catalog import load_catalog
 
     api = load_catalog().to_api()
     assert isinstance(api, list)
@@ -275,7 +275,7 @@ def test_catalog_to_api_shape():
 
 
 def test_catalog_excludes_cli_subscription_presets():
-    from cubebox.llm.catalog import load_catalog
+    from cubeplex.llm.catalog import load_catalog
 
     api = load_catalog().to_api()
     vendors = {v["vendor"] for v in api}
@@ -288,7 +288,7 @@ def test_catalog_excludes_cli_subscription_presets():
 
 
 def test_catalog_capabilities_use_standard_reasoning_shape():
-    from cubebox.llm.catalog import load_catalog
+    from cubeplex.llm.catalog import load_catalog
 
     api = load_catalog().to_api()
     endpoints = [ep for vendor in api for ep in vendor["endpoints"]]

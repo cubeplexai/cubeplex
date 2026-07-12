@@ -6,7 +6,7 @@ import {
   formatPercent,
   capTimeseries,
 } from './helpers'
-import type { TimeseriesResponse, TimeseriesSeries } from '@cubebox/core'
+import type { TimeseriesResponse, TimeseriesSeries } from '@cubeplex/core'
 
 function makeSeries(bucket: string, dailyCost: Record<string, number>): TimeseriesSeries {
   return {

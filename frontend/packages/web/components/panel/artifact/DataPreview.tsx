@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import { PreviewLoading } from './PreviewLoading'
 import { buildPreviewUrl } from './previewUtils'
 import { CsvTable } from '@/components/shared/previews'

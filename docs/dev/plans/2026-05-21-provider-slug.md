@@ -6,28 +6,28 @@
 
 **Architecture:** Add a `slug` column to `providers` (unique per `org_id`), derive it from `name` at create (overridable, immutable after), and switch the LLM resolver's merged-config map to be keyed by slug. A single Alembic revision backfills slugs and rewrites existing OrgSettings refs name→slug (clean cutover). Frontend builds refs from `provider.slug` and surfaces the slug in the provider UI.
 
-**Tech Stack:** FastAPI + SQLModel + Alembic + Postgres (backend); Next.js/React + `@cubebox/core` (frontend). Spec: `docs/dev/specs/2026-05-20-provider-slug-design.md`.
+**Tech Stack:** FastAPI + SQLModel + Alembic + Postgres (backend); Next.js/React + `@cubeplex/core` (frontend). Spec: `docs/dev/specs/2026-05-20-provider-slug-design.md`.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/model-mgmt-followup` (branch `feat/model-mgmt-followup`). Run `cat .worktree.env` first; backend port 8015, DB `cubebox_feat_model_mgmt_followup`. Backend commands: `cd backend && uv run …`. Tests that hit the DB run against the worktree DB (already migrated to the M5 head).
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/model-mgmt-followup` (branch `feat/model-mgmt-followup`). Run `cat .worktree.env` first; backend port 8015, DB `cubeplex_feat_model_mgmt_followup`. Backend commands: `cd backend && uv run …`. Tests that hit the DB run against the worktree DB (already migrated to the M5 head).
 
 ---
 
 ## File map
 
-- **Create** `backend/cubebox/utils/slug.py` — `slugify(name)` pure helper.
+- **Create** `backend/cubeplex/utils/slug.py` — `slugify(name)` pure helper.
 - **Create** `backend/tests/unit/test_slug.py` — slugify unit tests.
-- **Modify** `backend/cubebox/models/provider.py` — add `slug` column + `(org_id, slug)` unique constraint.
+- **Modify** `backend/cubeplex/models/provider.py` — add `slug` column + `(org_id, slug)` unique constraint.
 - **Create** `backend/alembic/versions/<rev>_add_provider_slug.py` — column + backfill + constraint + OrgSettings ref rewrite.
-- **Modify** `backend/cubebox/api/schemas/provider.py` — `ProviderCreate.slug` optional; `ProviderOut.slug`.
-- **Modify** `backend/cubebox/repositories/provider.py` — `get_by_slug`.
-- **Modify** `backend/cubebox/services/provider_service.py` — derive/validate slug in `create_provider`; add `ProviderSlugConflictError`.
-- **Modify** `backend/cubebox/api/routes/v1/admin_providers.py` — map the new error to 409; emit `slug` in `_provider_out`.
-- **Modify** `backend/cubebox/seeders/provider_seeder.py` — set `slug = slugify(name)` on seed create + update.
-- **Modify** `backend/cubebox/llm/factory.py` — key merged config by slug; rename `_parse_model_ref` return.
-- **Modify** `backend/cubebox/services/task_model_resolver.py` — variable rename (provider_name → slug).
-- **Modify** `backend/cubebox/services/provider_service.py` — also `_validate_model_ref` (settings-save write path) → slug + `get_by_slug`.
-- **Modify** `backend/cubebox/llm/runtime_writeback.py` — resolve provider by slug; rename `provider_name` → `provider_slug` through the public API.
-- **Modify** `backend/cubebox/services/conversation_title.py` + `backend/cubebox/streams/run_manager.py` — writeback call sites pass `provider_slug`.
+- **Modify** `backend/cubeplex/api/schemas/provider.py` — `ProviderCreate.slug` optional; `ProviderOut.slug`.
+- **Modify** `backend/cubeplex/repositories/provider.py` — `get_by_slug`.
+- **Modify** `backend/cubeplex/services/provider_service.py` — derive/validate slug in `create_provider`; add `ProviderSlugConflictError`.
+- **Modify** `backend/cubeplex/api/routes/v1/admin_providers.py` — map the new error to 409; emit `slug` in `_provider_out`.
+- **Modify** `backend/cubeplex/seeders/provider_seeder.py` — set `slug = slugify(name)` on seed create + update.
+- **Modify** `backend/cubeplex/llm/factory.py` — key merged config by slug; rename `_parse_model_ref` return.
+- **Modify** `backend/cubeplex/services/task_model_resolver.py` — variable rename (provider_name → slug).
+- **Modify** `backend/cubeplex/services/provider_service.py` — also `_validate_model_ref` (settings-save write path) → slug + `get_by_slug`.
+- **Modify** `backend/cubeplex/llm/runtime_writeback.py` — resolve provider by slug; rename `provider_name` → `provider_slug` through the public API.
+- **Modify** `backend/cubeplex/services/conversation_title.py` + `backend/cubeplex/streams/run_manager.py` — writeback call sites pass `provider_slug`.
 - **Modify** `frontend/packages/core/src/types/provider.ts` — `Provider.slug`.
 - **Modify** `frontend/packages/web/hooks/useAllModels.ts` — `ref = ${slug}/${modelId}` + `providerSlug`.
 - **Modify** `frontend/packages/web/components/admin/models/ProviderConfigForm.tsx` — editable slug field (create) / read-only (edit).
@@ -39,7 +39,7 @@
 ## Task 1: `slugify` helper
 
 **Files:**
-- Create: `backend/cubebox/utils/slug.py`
+- Create: `backend/cubeplex/utils/slug.py`
 - Test: `backend/tests/unit/test_slug.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -48,7 +48,7 @@
 # backend/tests/unit/test_slug.py
 import pytest
 
-from cubebox.utils.slug import slugify
+from cubeplex.utils.slug import slugify
 
 
 @pytest.mark.parametrize(
@@ -71,12 +71,12 @@ def test_slugify(name: str, expected: str) -> None:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/unit/test_slug.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.utils.slug'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.utils.slug'`
 
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/utils/slug.py
+# backend/cubeplex/utils/slug.py
 """Slugify provider names into stable, URL-safe identifiers."""
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ Expected: PASS (8 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/utils/slug.py backend/tests/unit/test_slug.py
+git add backend/cubeplex/utils/slug.py backend/tests/unit/test_slug.py
 git commit -m "feat(provider): add slugify helper"
 ```
 
@@ -114,7 +114,7 @@ git commit -m "feat(provider): add slugify helper"
 ## Task 2: `Provider.slug` column + uniqueness constraint (model)
 
 **Files:**
-- Modify: `backend/cubebox/models/provider.py:18,23`
+- Modify: `backend/cubeplex/models/provider.py:18,23`
 
 This task adds the field to the SQLModel only. The DB migration is Task 3; do not run the app against an un-migrated DB between these tasks.
 
@@ -126,7 +126,7 @@ credential-vault pattern (`models/credential.py`): two **partial unique
 indexes** — one for the org bucket, one for the system bucket. Add `Index` to
 the SQLAlchemy import.
 
-In `backend/cubebox/models/provider.py`:
+In `backend/cubeplex/models/provider.py`:
 
 ```python
 from sqlalchemy import Column, Index, UniqueConstraint  # add Index
@@ -161,7 +161,7 @@ from sqlalchemy import Column, Index, UniqueConstraint  # add Index
 
 - [ ] **Step 2: Verify it imports**
 
-Run: `cd backend && uv run python -c "from cubebox.models.provider import Provider; print('slug' in Provider.model_fields)"`
+Run: `cd backend && uv run python -c "from cubeplex.models.provider import Provider; print('slug' in Provider.model_fields)"`
 Expected: `True`
 
 - [ ] **Step 3: Update existing direct `Provider(...)` test fixtures**
@@ -184,7 +184,7 @@ Expected: PASS (no "field required: slug" construction errors).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/provider.py backend/tests/
+git add backend/cubeplex/models/provider.py backend/tests/
 git commit -m "feat(provider): add slug column to Provider model; update fixtures"
 ```
 
@@ -354,10 +354,10 @@ Expected: runs the new revision with no error.
 
 - [ ] **Step 4: Verify the column + a sample slug**
 
-The worktree env exposes `CUBEBOX_DATABASE__NAME` (not a full URL). Query via the
+The worktree env exposes `CUBEPLEX_DATABASE__NAME` (not a full URL). Query via the
 shared docker Postgres:
 
-Run: `source backend/../.worktree.env 2>/dev/null; docker exec -e PGPASSWORD=postgres infra-postgresql psql -h localhost -U postgres -d "$CUBEBOX_DATABASE__NAME" -c "SELECT name, slug, org_id FROM providers ORDER BY name;"`
+Run: `source backend/../.worktree.env 2>/dev/null; docker exec -e PGPASSWORD=postgres infra-postgresql psql -h localhost -U postgres -d "$CUBEPLEX_DATABASE__NAME" -c "SELECT name, slug, org_id FROM providers ORDER BY name;"`
 Expected: every row has a non-null slug; `DeepSeek (Anthropic shape)` → `deepseek-anthropic-shape`; `deepseek` → `deepseek`.
 
 - [ ] **Step 5: Migration data test (fail-first risk coverage)**
@@ -391,10 +391,10 @@ git commit -m "feat(provider): migration — add slug, backfill, rewrite OrgSett
 ## Task 4: API — derive/validate slug on create, expose on read
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/provider.py:13-25` (ProviderCreate) and ProviderOut block (after `name`)
-- Modify: `backend/cubebox/repositories/provider.py` (add `get_by_slug`)
-- Modify: `backend/cubebox/services/provider_service.py` (`create_provider`, new error class)
-- Modify: `backend/cubebox/api/routes/v1/admin_providers.py` (`_provider_out`, error→409)
+- Modify: `backend/cubeplex/api/schemas/provider.py:13-25` (ProviderCreate) and ProviderOut block (after `name`)
+- Modify: `backend/cubeplex/repositories/provider.py` (add `get_by_slug`)
+- Modify: `backend/cubeplex/services/provider_service.py` (`create_provider`, new error class)
+- Modify: `backend/cubeplex/api/routes/v1/admin_providers.py` (`_provider_out`, error→409)
 - Test: `backend/tests/e2e/test_admin_providers_crud.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -443,7 +443,7 @@ Expected: FAIL (slug not in response / no 409).
 
 - [ ] **Step 3: Schemas — add slug**
 
-In `backend/cubebox/api/schemas/provider.py`, add to `ProviderCreate` (after `name`):
+In `backend/cubeplex/api/schemas/provider.py`, add to `ProviderCreate` (after `name`):
 
 ```python
     slug: str | None = Field(default=None, max_length=64)
@@ -459,7 +459,7 @@ Add to `ProviderOut` (after `name`):
 
 - [ ] **Step 4: Repo — `get_by_slug`**
 
-In `backend/cubebox/repositories/provider.py`, add (mirror `get_by_name`):
+In `backend/cubeplex/repositories/provider.py`, add (mirror `get_by_name`):
 
 ```python
     async def get_by_slug(self, slug: str) -> Provider | None:
@@ -483,7 +483,7 @@ In `backend/cubebox/repositories/provider.py`, add (mirror `get_by_name`):
 
 - [ ] **Step 5: Service — derive + validate slug, new error**
 
-In `backend/cubebox/services/provider_service.py`: add the error class near the other provider errors:
+In `backend/cubeplex/services/provider_service.py`: add the error class near the other provider errors:
 
 ```python
 class ProviderSlugConflictError(Exception):
@@ -494,7 +494,7 @@ Add a private helper and use it in `create_provider` (insert after the existing 
 
 ```python
     import re
-    from cubebox.utils.slug import slugify  # add to module imports at top
+    from cubeplex.utils.slug import slugify  # add to module imports at top
 
     _SLUG_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")  # module-level constant
 
@@ -533,7 +533,7 @@ and pass `slug=slug` into the `Provider(...)` constructor.
 
 - [ ] **Step 6: Route — emit slug, map error to 409**
 
-In `backend/cubebox/api/routes/v1/admin_providers.py`:
+In `backend/cubeplex/api/routes/v1/admin_providers.py`:
 - In `_provider_out`, add `slug=p.slug,` to the `ProviderOut(...)` construction.
 - Import `ProviderSlugConflictError` and `InvalidProviderSlugError` from `provider_service` (add to the existing import block). In the POST `/providers` handler, mirror the existing `ProviderNameConflictError` 409 mapping — the detail is an **object**, not a string:
 
@@ -546,13 +546,13 @@ In `backend/cubebox/api/routes/v1/admin_providers.py`:
 
 - [ ] **Step 7: Run tests to verify they pass**
 
-Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest tests/e2e/test_admin_providers_crud.py -k slug -q && uv run mypy cubebox/`
+Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest tests/e2e/test_admin_providers_crud.py -k slug -q && uv run mypy cubeplex/`
 Expected: PASS + mypy clean.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/provider.py backend/cubebox/repositories/provider.py backend/cubebox/services/provider_service.py backend/cubebox/api/routes/v1/admin_providers.py backend/tests/e2e/test_admin_providers_crud.py
+git add backend/cubeplex/api/schemas/provider.py backend/cubeplex/repositories/provider.py backend/cubeplex/services/provider_service.py backend/cubeplex/api/routes/v1/admin_providers.py backend/tests/e2e/test_admin_providers_crud.py
 git commit -m "feat(provider): derive+validate slug on create, expose slug in ProviderOut"
 ```
 
@@ -561,7 +561,7 @@ git commit -m "feat(provider): derive+validate slug on create, expose slug in Pr
 ## Task 5: Seeder sets slug
 
 **Files:**
-- Modify: `backend/cubebox/seeders/provider_seeder.py`
+- Modify: `backend/cubeplex/seeders/provider_seeder.py`
 
 The seeder creates/updates system providers from config. Set `slug = slugify(name)` on the create branch (and on the update branch if a row predates this change and has no slug — though the migration already backfilled, so update-branch is belt-and-suspenders for fresh DBs seeded before migration; set it when missing).
 
@@ -570,7 +570,7 @@ The seeder creates/updates system providers from config. Set `slug = slugify(nam
 At the top of `provider_seeder.py`:
 
 ```python
-from cubebox.utils.slug import slugify
+from cubeplex.utils.slug import slugify
 ```
 
 - [ ] **Step 2: Set slug on create**
@@ -594,7 +594,7 @@ Expected: PASS (existing seeder tests still green; every seeded provider now has
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/seeders/provider_seeder.py
+git add backend/cubeplex/seeders/provider_seeder.py
 git commit -m "feat(provider): seeder stores slug=slugify(name)"
 ```
 
@@ -607,11 +607,11 @@ This task switches **every** model-ref consumer from name to slug — read path
 any one leaves a half-cutover where refs silently fail.
 
 **Files:**
-- Modify: `backend/cubebox/llm/factory.py` — `_load_db_provider_configs` (key by slug), `_build_merged_config` (key by slug), `_parse_model_ref` (docstring)
-- Modify: `backend/cubebox/services/task_model_resolver.py:30-34` (var rename)
-- Modify: `backend/cubebox/services/provider_service.py:556-562` — `_validate_model_ref` uses slug + `get_by_slug` (write path: saving `default_model`/`fallback_models`/`task_models`)
-- Modify: `backend/cubebox/llm/runtime_writeback.py` — resolve provider by slug; rename `provider_name` → `provider_slug` through the public API
-- Modify: `backend/cubebox/services/conversation_title.py` + `backend/cubebox/streams/run_manager.py` — writeback call sites pass `provider_slug=...`
+- Modify: `backend/cubeplex/llm/factory.py` — `_load_db_provider_configs` (key by slug), `_build_merged_config` (key by slug), `_parse_model_ref` (docstring)
+- Modify: `backend/cubeplex/services/task_model_resolver.py:30-34` (var rename)
+- Modify: `backend/cubeplex/services/provider_service.py:556-562` — `_validate_model_ref` uses slug + `get_by_slug` (write path: saving `default_model`/`fallback_models`/`task_models`)
+- Modify: `backend/cubeplex/llm/runtime_writeback.py` — resolve provider by slug; rename `provider_name` → `provider_slug` through the public API
+- Modify: `backend/cubeplex/services/conversation_title.py` + `backend/cubeplex/streams/run_manager.py` — writeback call sites pass `provider_slug=...`
 - Test: `backend/tests/` (factory resolver test — add to the existing factory test module if present, else create `backend/tests/unit/test_factory_slug_resolve.py`)
 
 - [ ] **Step 1: Write a failing resolver test**
@@ -621,7 +621,7 @@ Create `backend/tests/unit/test_factory_slug_resolve.py` (adapt construction to 
 ```python
 import pytest
 
-from cubebox.llm.factory import LLMFactory
+from cubeplex.llm.factory import LLMFactory
 
 
 def test_parse_model_ref_returns_slug_and_model() -> None:
@@ -676,7 +676,7 @@ In `_build_merged_config`, change the signature param name and the keying:
     def _build_merged_config(
         self, db_configs: dict[str, dict[str, Any]], db_slugs: set[str]
     ) -> LLMConfig:
-        from cubebox.utils.slug import slugify
+        from cubeplex.utils.slug import slugify
 
         config_providers = dict(self.llm_config.providers)
         db_slugs_lower = {s.lower() for s in db_slugs}
@@ -746,26 +746,26 @@ used to be the name), and that value flows into the writeback. Rename the
 parameter through the whole writeback path so it isn't a slug masquerading as a
 name:
 
-- In `backend/cubebox/llm/runtime_writeback.py`: rename `provider_name` →
+- In `backend/cubeplex/llm/runtime_writeback.py`: rename `provider_name` →
   `provider_slug` in the resolve helper (≈line 126), `_do_writeback` (≈line 143),
   and the public `schedule_runtime_status_writeback` (≈line 167); switch the lookup
   `repo.get_by_name(provider_name)` → `repo.get_by_slug(provider_slug)`; update the
   internal pass-throughs (≈lines 152, 200, 208).
 - Update the external call sites that pass `provider_name=...` (the value is
   already the resolver's slug) to `provider_slug=...`:
-  - `backend/cubebox/services/conversation_title.py:170,173`
-  - `backend/cubebox/streams/run_manager.py` (the `schedule_runtime_status_writeback`/`_schedule_writeback` call — grep for `provider_name=` in that file).
+  - `backend/cubeplex/services/conversation_title.py:170,173`
+  - `backend/cubeplex/streams/run_manager.py` (the `schedule_runtime_status_writeback`/`_schedule_writeback` call — grep for `provider_name=` in that file).
   Rename the local variable feeding it to `provider_slug` where it improves clarity (the value comes from the resolver's first return).
 
 - [ ] **Step 6: Run tests**
 
-Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest tests/unit/test_factory_slug_resolve.py tests/ -k "factory or resolver or default_model or task_model" -q && uv run mypy cubebox/`
+Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest tests/unit/test_factory_slug_resolve.py tests/ -k "factory or resolver or default_model or task_model" -q && uv run mypy cubeplex/`
 Expected: PASS + mypy clean. (If pre-existing factory tests reference name-based merged keys, update them to slug — the DB providers' slug == slugify(name) for single-word names, so most fixtures keyed on simple names are unaffected.)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/llm/factory.py backend/cubebox/services/task_model_resolver.py backend/cubebox/services/provider_service.py backend/cubebox/llm/runtime_writeback.py backend/cubebox/services/conversation_title.py backend/cubebox/streams/run_manager.py backend/tests/
+git add backend/cubeplex/llm/factory.py backend/cubeplex/services/task_model_resolver.py backend/cubeplex/services/provider_service.py backend/cubeplex/llm/runtime_writeback.py backend/cubeplex/services/conversation_title.py backend/cubeplex/streams/run_manager.py backend/tests/
 git commit -m "feat(provider): resolve & validate model refs by provider slug everywhere"
 ```
 
@@ -786,7 +786,7 @@ In `frontend/packages/core/src/types/provider.ts`:
   form sends it only in create mode; the backend derives it when omitted). Do
   **not** add slug to `ProviderUpdate` (immutable).
 
-Rebuild core: `cd frontend && pnpm --filter @cubebox/core build`.
+Rebuild core: `cd frontend && pnpm --filter @cubeplex/core build`.
 
 - [ ] **Step 2: Build the ref from slug**
 
@@ -800,7 +800,7 @@ If `useAllModels` has a test, update the expected `ref` to use slug. Otherwise a
 
 - [ ] **Step 4: Verify**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter web exec tsc --noEmit && pnpm --filter web test 2>&1 | tail -5`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter web exec tsc --noEmit && pnpm --filter web test 2>&1 | tail -5`
 Expected: build OK, type-check clean, tests pass.
 
 - [ ] **Step 5: Commit**
@@ -932,12 +932,12 @@ git commit -m "feat(provider): editable slug in create form, show slug on detail
 
 - [ ] **Step 1: Backend**
 
-Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest -k "provider or probe or slug or factory or resolver or seed" -q && uv run mypy cubebox/`
+Run: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest -k "provider or probe or slug or factory or resolver or seed" -q && uv run mypy cubeplex/`
 Expected: green.
 
 - [ ] **Step 2: Frontend**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm -w lint && pnpm -w type-check && pnpm --filter web test && pnpm --filter web build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm -w lint && pnpm -w type-check && pnpm --filter web test && pnpm --filter web build`
 Expected: green (incl. `next build`).
 
 - [ ] **Step 3: Commit any sweep fixups, then open PR**
@@ -956,5 +956,5 @@ PR base = `main` (this is a fresh feature off main, not a stacked slice). Tag `@
 - **Explicit slug:** validated against `^[a-z0-9]+(-[a-z0-9]+)*$` (422) and uniqueness (409, object detail shape) on create (T4).
 - **Existing fixtures (codex r3):** `slug` is required, so direct `Provider(...)` constructors in tests need `slug=` — T2 step 3 enumerates the known files + a grep.
 - **Test coverage (codex r3):** migration data test (T3 step 5, mirrors `test_migration.py`) and a DB-backed name≠slug resolution test that fails-first (T6 step 1b).
-- **Correct paths (codex r3):** `run_manager.py` lives at `backend/cubebox/streams/run_manager.py` (not `agent/`); writeback call sites ≈ lines 1067/1153/1162.
+- **Correct paths (codex r3):** `run_manager.py` lives at `backend/cubeplex/streams/run_manager.py` (not `agent/`); writeback call sites ≈ lines 1067/1153/1162.
 - **Risk:** if any pre-existing factory/resolver test fixtures hard-code name-keyed merged config with multi-word names, T6 calls out updating them.

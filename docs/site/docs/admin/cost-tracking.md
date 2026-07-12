@@ -5,11 +5,11 @@ title: Cost Tracking
 
 # Cost Tracking
 
-CubeBox tracks LLM token usage across your organization so you can monitor spending and identify cost trends. The cost tracking dashboard is available at **Admin > Cost** (`/admin/cost`).
+CubePlex tracks LLM token usage across your organization so you can monitor spending and identify cost trends. The cost tracking dashboard is available at **Admin > Cost** (`/admin/cost`).
 
 ## What is tracked
 
-Every LLM call made through CubeBox records:
+Every LLM call made through CubePlex records:
 
 - **Input tokens** — the number of tokens sent to the model (prompt, system instructions, tool results, etc.).
 - **Output tokens** — the number of tokens the model generated in its response.

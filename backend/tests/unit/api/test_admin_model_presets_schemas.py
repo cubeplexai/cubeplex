@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from cubebox.api.schemas.model_presets import (
+from cubeplex.api.schemas.model_presets import (
     AdminModelPresetsBody,
     WorkspacePresetSummary,
 )
@@ -117,6 +117,6 @@ def test_workspace_summary_shape() -> None:
 
 
 def test_admin_body_is_model_presets_config() -> None:
-    from cubebox.llm.snapshot_schema import ModelPresetsConfig
+    from cubeplex.llm.snapshot_schema import ModelPresetsConfig
 
     assert AdminModelPresetsBody is ModelPresetsConfig

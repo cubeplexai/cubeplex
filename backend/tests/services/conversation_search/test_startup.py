@@ -13,8 +13,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from cubebox.services.conversation_search.embedding import EmbeddingProvider
-from cubebox.services.conversation_search.startup import (
+from cubeplex.services.conversation_search.embedding import EmbeddingProvider
+from cubeplex.services.conversation_search.startup import (
     _verify_dim_alignment,
     start_search_subsystem,
     stop_search_subsystem,
@@ -58,10 +58,10 @@ async def test_verify_dim_alignment_all_match() -> None:
     provider = _build_provider(1024)
     with (
         patch(
-            "cubebox.services.conversation_search.startup.async_session_maker",
+            "cubeplex.services.conversation_search.startup.async_session_maker",
             _mock_session_maker(1024),
         ),
-        patch("cubebox.services.conversation_search.startup.config") as cfg,
+        patch("cubeplex.services.conversation_search.startup.config") as cfg,
     ):
         cfg.get.return_value = 1024
         assert await _verify_dim_alignment(provider) is True
@@ -73,10 +73,10 @@ async def test_verify_dim_alignment_config_differs_from_schema() -> None:
     provider = _build_provider(1024)
     with (
         patch(
-            "cubebox.services.conversation_search.startup.async_session_maker",
+            "cubeplex.services.conversation_search.startup.async_session_maker",
             _mock_session_maker(1024),
         ),
-        patch("cubebox.services.conversation_search.startup.config") as cfg,
+        patch("cubeplex.services.conversation_search.startup.config") as cfg,
     ):
         cfg.get.return_value = 1536  # config disagrees
         assert await _verify_dim_alignment(provider) is False
@@ -88,10 +88,10 @@ async def test_verify_dim_alignment_provider_differs_from_schema() -> None:
     provider = _build_provider(1536)  # provider disagrees
     with (
         patch(
-            "cubebox.services.conversation_search.startup.async_session_maker",
+            "cubeplex.services.conversation_search.startup.async_session_maker",
             _mock_session_maker(1024),
         ),
-        patch("cubebox.services.conversation_search.startup.config") as cfg,
+        patch("cubeplex.services.conversation_search.startup.config") as cfg,
     ):
         cfg.get.return_value = 1024
         assert await _verify_dim_alignment(provider) is False
@@ -104,10 +104,10 @@ async def test_verify_dim_alignment_schema_missing() -> None:
     provider = _build_provider(1024)
     with (
         patch(
-            "cubebox.services.conversation_search.startup.async_session_maker",
+            "cubeplex.services.conversation_search.startup.async_session_maker",
             _mock_session_maker(None),
         ),
-        patch("cubebox.services.conversation_search.startup.config") as cfg,
+        patch("cubeplex.services.conversation_search.startup.config") as cfg,
     ):
         cfg.get.return_value = 1024
         assert await _verify_dim_alignment(provider) is False
@@ -121,7 +121,7 @@ async def test_start_search_subsystem_disabled_leaves_state_none() -> None:
     happy to boot.
     """
     app = FastAPI()
-    with patch("cubebox.services.conversation_search.startup.config") as cfg:
+    with patch("cubeplex.services.conversation_search.startup.config") as cfg:
         cfg.get.side_effect = lambda key, default=None: (
             False if key == "search.enabled" else default
         )

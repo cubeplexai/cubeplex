@@ -5,7 +5,7 @@ title: Model Management
 
 # Model Management
 
-CubeBox connects to LLM providers through API keys you configure at the organization level. Once a provider is set up and its models are enabled, workspace members can select those models in their conversations.
+CubePlex connects to LLM providers through API keys you configure at the organization level. Once a provider is set up and its models are enabled, workspace members can select those models in their conversations.
 
 All model management happens at **Admin > Models** (`/admin/models`).
 
@@ -25,7 +25,7 @@ A provider represents an LLM API endpoint. Each provider has:
 
 ### Add a provider from a preset
 
-CubeBox ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL and capability descriptor so you only need to enter your API key.
+CubePlex ships with presets for common providers (Anthropic, OpenAI, and others). Presets pre-fill the base URL and capability descriptor so you only need to enter your API key.
 
 1. Go to **Admin > Models**.
 2. Click **Add Provider**.
@@ -46,7 +46,7 @@ Any service that exposes an OpenAI-compatible chat completions endpoint can be a
 
 ### Test provider connectivity
 
-After adding a provider, click **Test Connection** to verify that CubeBox can reach the endpoint and authenticate. The test sends a lightweight request and reports success or failure with details.
+After adding a provider, click **Test Connection** to verify that CubePlex can reach the endpoint and authenticate. The test sends a lightweight request and reports success or failure with details.
 
 ## Models
 
@@ -58,7 +58,7 @@ You can configure the following for each model:
 
 | Setting                  | Description                                                                                                                                    |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Reasoning capability** | How CubeBox maps the standard reasoning control (`mode`, `effort`, `summary`) to the provider's wire format.                                   |
+| **Reasoning capability** | How CubePlex maps the standard reasoning control (`mode`, `effort`, `summary`) to the provider's wire format.                                   |
 | **Modalities**           | Input/output capabilities — text, vision, tool use, etc.                                                                                       |
 | **Cost rates**           | Per-token costs — input, output, and (where applicable) cache read / cache write — used for the [Cost Tracking](./cost-tracking.md) dashboard. |
 
@@ -80,11 +80,11 @@ If you want to stop offering a specific model to your team, disable it in the mo
 
 ### Add a self-hosted or proxy endpoint
 
-For models behind a reverse proxy, VPN, or self-hosted inference server, use the custom provider flow. Make sure the base URL is reachable from the CubeBox backend server.
+For models behind a reverse proxy, VPN, or self-hosted inference server, use the custom provider flow. Make sure the base URL is reachable from the CubePlex backend server.
 
 ### Configure reasoning for a custom endpoint
 
-CubeBox stores one standard reasoning control for each conversation:
+CubePlex stores one standard reasoning control for each conversation:
 
 | Field     | Values                                       |
 | --------- | -------------------------------------------- |
@@ -92,7 +92,7 @@ CubeBox stores one standard reasoning control for each conversation:
 | `effort`  | `minimal`, `low`, `medium`, `high`, or `max` |
 | `summary` | `none`, `auto`, `detailed`, or `summarized`  |
 
-Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages already translate that standard shape into each API's expected payload. For a custom or proxy endpoint, add a capability descriptor that tells CubeBox which fields to write:
+Provider presets for official OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages already translate that standard shape into each API's expected payload. For a custom or proxy endpoint, add a capability descriptor that tells CubePlex which fields to write:
 
 ```json
 {

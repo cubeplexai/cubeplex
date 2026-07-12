@@ -7,8 +7,8 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.users import UserManager
-from cubebox.models import User
+from cubeplex.auth.users import UserManager
+from cubeplex.models import User
 
 pytestmark = pytest.mark.e2e
 

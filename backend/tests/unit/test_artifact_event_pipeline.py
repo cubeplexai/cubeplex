@@ -16,9 +16,9 @@ from cubepi import AgentToolResult
 from cubepi.agent.types import ToolExecutionEndEvent
 from cubepi.providers.base import TextContent
 
-from cubebox.agents.schemas import ArtifactEvent
-from cubebox.agents.stream import convert_agent_event_to_sse
-from cubebox.streams.run_manager import _dicts_to_sse_events, cubepi_dict_to_agent_event
+from cubeplex.agents.schemas import ArtifactEvent
+from cubeplex.agents.stream import convert_agent_event_to_sse
+from cubeplex.streams.run_manager import _dicts_to_sse_events, cubepi_dict_to_agent_event
 
 TS = "2026-05-27T00:00:00+00:00"
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { adminInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubebox/core'
+import { adminInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubeplex/core'
 
 import { Label } from '@/components/ui/label'
 import {

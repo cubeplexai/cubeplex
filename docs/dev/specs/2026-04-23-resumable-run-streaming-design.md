@@ -292,8 +292,8 @@ Tradeoffs:
 
 ## Files Likely Affected
 
-- `backend/cubebox/api/routes/v1/conversations.py`
-- `backend/cubebox/agents/stream.py`
+- `backend/cubeplex/api/routes/v1/conversations.py`
+- `backend/cubeplex/agents/stream.py`
 - new backend run manager / Redis stream support module
 - `frontend/packages/core/src/stores/messageStore.ts`
 - `frontend/packages/core/src/api/stream.ts`

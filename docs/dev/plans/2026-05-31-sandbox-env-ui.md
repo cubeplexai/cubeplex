@@ -4,9 +4,9 @@
 
 **Goal:** Add two standalone pages — `/admin/sandbox-env` (org scope) and `/w/[wsId]/sandbox-env` (workspace + user scope) — for viewing, adding, rotating, and deleting sandbox environment variables.
 
-**Architecture:** Shared `EnvTable` / `EnvModal` / `WarningCell` components live under the workspace page's `_components/` directory and are imported by both pages. The workspace page is role-aware: admins see both workspace-scope and user-scope entries; non-admins see only their own user-scope entries. All API calls go through `@cubebox/core`.
+**Architecture:** Shared `EnvTable` / `EnvModal` / `WarningCell` components live under the workspace page's `_components/` directory and are imported by both pages. The workspace page is role-aware: admins see both workspace-scope and user-scope entries; non-admins see only their own user-scope entries. All API calls go through `@cubeplex/core`.
 
-**Tech Stack:** Next.js 15 App Router, React 19, TypeScript strict, `@cubebox/core` API client, `useWorkspaceStore` (Zustand) for role, next-intl for i18n, shadcn/ui primitives, Tailwind CSS.
+**Tech Stack:** Next.js 15 App Router, React 19, TypeScript strict, `@cubeplex/core` API client, `useWorkspaceStore` (Zustand) for role, next-intl for i18n, shadcn/ui primitives, Tailwind CSS.
 
 ---
 
@@ -28,7 +28,7 @@
 
 ---
 
-## Task 1: Core API client (`@cubebox/core`)
+## Task 1: Core API client (`@cubeplex/core`)
 
 **Files:**
 - Create: `frontend/packages/core/src/api/sandboxEnv.ts`
@@ -198,7 +198,7 @@ Expected: no TypeScript errors, `dist/` updated.
 ```bash
 cd frontend
 git add packages/core/src/api/sandboxEnv.ts packages/core/src/api/index.ts
-git commit -m "feat(sandbox-env-ui): add @cubebox/core API client for sandbox env vault"
+git commit -m "feat(sandbox-env-ui): add @cubeplex/core API client for sandbox env vault"
 ```
 
 ---
@@ -413,7 +413,7 @@ git commit -m "feat(sandbox-env-ui): WarningCell component"
 
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import { type CreateEnvIn, type EnvEntryOut } from '@cubebox/core'
+import { type CreateEnvIn, type EnvEntryOut } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -689,7 +689,7 @@ git commit -m "feat(sandbox-env-ui): EnvModal component (add + rotate)"
 // frontend/packages/web/app/(app)/w/[wsId]/sandbox-env/_components/EnvTable.tsx
 'use client'
 
-import { type EnvEntryOut } from '@cubebox/core'
+import { type EnvEntryOut } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { WarningCell } from './WarningCell'
 
@@ -861,7 +861,7 @@ import {
   rotateAdminEnv,
   type CreateEnvIn,
   type EnvEntryOut,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { EnvTable } from '../../(app)/w/[wsId]/sandbox-env/_components/EnvTable'
 import { EnvModal, type ModalMode } from '../../(app)/w/[wsId]/sandbox-env/_components/EnvModal'
 
@@ -987,8 +987,8 @@ import {
   rotateWsEnvWorkspace,
   type CreateEnvIn,
   type EnvEntryOut,
-} from '@cubebox/core'
-import { useWorkspaceStore } from '@cubebox/core'
+} from '@cubeplex/core'
+import { useWorkspaceStore } from '@cubeplex/core'
 import { EnvTable } from './_components/EnvTable'
 import { EnvModal, type ModalMode } from './_components/EnvModal'
 
@@ -1137,7 +1137,7 @@ git commit -m "feat(sandbox-env-ui): workspace sandbox env page (role-aware)"
 
 ```bash
 # Backend (in worktree backend/)
-cat .worktree.env   # note CUBEBOX_API__PORT (e.g. 8050)
+cat .worktree.env   # note CUBEPLEX_API__PORT (e.g. 8050)
 uv run python main.py
 
 # Frontend (in worktree frontend/)

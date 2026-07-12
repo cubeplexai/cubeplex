@@ -5,18 +5,18 @@ title: Event Triggers
 
 # Event Triggers
 
-Event triggers start agent runs when external events occur. You create a trigger, CubeBox gives you a webhook URL and a signing secret, and any service that can send an HMAC-signed HTTP POST can fire it.
+Event triggers start agent runs when external events occur. You create a trigger, CubePlex gives you a webhook URL and a signing secret, and any service that can send an HMAC-signed HTTP POST can fire it.
 
-:::caution The generic webhook uses CubeBox's own signing scheme
-CubeBox does **not** natively accept a third-party provider's signature format (such as GitHub's `X-Hub-Signature-256` or a Stripe `Stripe-Signature`). The inbound request must be signed the way CubeBox expects: an `X-Signature` header over `"{timestamp}." + body`, plus an `X-Timestamp` header (see [Webhook URL and signing](#webhook-url-and-signing)). In practice the sender is **your own backend** or a small relay you control that re-signs the payload. A service whose signature format you can't change (raw GitHub, raw Stripe) cannot fire the trigger directly today.
+:::caution The generic webhook uses CubePlex's own signing scheme
+CubePlex does **not** natively accept a third-party provider's signature format (such as GitHub's `X-Hub-Signature-256` or a Stripe `Stripe-Signature`). The inbound request must be signed the way CubePlex expects: an `X-Signature` header over `"{timestamp}." + body`, plus an `X-Timestamp` header (see [Webhook URL and signing](#webhook-url-and-signing)). In practice the sender is **your own backend** or a small relay you control that re-signs the payload. A service whose signature format you can't change (raw GitHub, raw Stripe) cannot fire the trigger directly today.
 :::
 
 ## How it works
 
-1. You create a trigger in CubeBox and define what should happen when an event arrives.
-2. CubeBox generates a **webhook URL** and an **HMAC signing secret**.
-3. Your sender signs each request with that secret using CubeBox's scheme and POSTs it to the URL.
-4. When a request arrives, CubeBox verifies the signature and timestamp, applies your filter conditions, and starts an agent run with the event payload as context.
+1. You create a trigger in CubePlex and define what should happen when an event arrives.
+2. CubePlex generates a **webhook URL** and an **HMAC signing secret**.
+3. Your sender signs each request with that secret using CubePlex's scheme and POSTs it to the URL.
+4. When a request arrives, CubePlex verifies the signature and timestamp, applies your filter conditions, and starts an agent run with the event payload as context.
 
 ## Creating a trigger
 
@@ -31,7 +31,7 @@ Navigate to your workspace, open **Triggers** from the sidebar, and click **New 
 | **Target conversation** | Where the agent run happens. Same options as [scheduled tasks](./scheduled-tasks.md#conversation-options): fixed conversation or new conversation per event. |
 | **Run identity** | Which user the agent run executes as. This controls the agent's permissions and tool access. |
 
-After saving, CubeBox displays the **webhook URL** and the **signing secret**. Copy both — you will need them when configuring your sender.
+After saving, CubePlex displays the **webhook URL** and the **signing secret**. Copy both — you will need them when configuring your sender.
 
 :::info 📸 Screenshot placeholder
 **Capture:** The trigger detail panel right after creation, showing the generated webhook URL and the (revealed) signing secret with their copy buttons.
@@ -43,10 +43,10 @@ After saving, CubeBox displays the **webhook URL** and the **signing secret**. C
 The webhook URL is workspace- and trigger-scoped:
 
 ```
-POST https://<your-cubebox-host>/api/v1/ws/<workspace_id>/triggers/<trigger_id>/ingest
+POST https://<your-cubeplex-host>/api/v1/ws/<workspace_id>/triggers/<trigger_id>/ingest
 ```
 
-Copy the exact URL CubeBox shows you — it already contains the right workspace and trigger IDs.
+Copy the exact URL CubePlex shows you — it already contains the right workspace and trigger IDs.
 
 ### Required headers
 
@@ -56,7 +56,7 @@ Every request must carry these headers (names are the defaults; a trigger's sour
 |---|---|---|
 | `X-Signature` | Yes | Hex HMAC-SHA256 of the signed message (below), keyed by the signing secret. |
 | `X-Timestamp` | Yes | The Unix epoch **seconds** used in the signature. Must be within **5 minutes** of server time, or the request is rejected. |
-| `X-Event-Id` | No | A stable per-event ID used for deduplication. If your sender retries, send the same value so CubeBox processes the event once. |
+| `X-Event-Id` | No | A stable per-event ID used for deduplication. If your sender retries, send the same value so CubePlex processes the event once. |
 
 ### How to sign
 
@@ -71,7 +71,7 @@ Send `signature` in `X-Signature` and the same `<timestamp>` in `X-Timestamp`.
 
 ### What gets rejected
 
-CubeBox returns an opaque **`404 {"error":"not_found"}`** for *every* rejection — unknown workspace/trigger, missing `X-Signature` or `X-Timestamp`, bad signature, a timestamp outside the 5-minute window, or an oversized body (2 MiB cap). The 404 is deliberate: it does not reveal whether the trigger exists. A rejected request never reaches the [event log](#event-log) because rejection happens before any event row is created. A successful request returns `202 {"status":"accepted","event_id":"..."}`.
+CubePlex returns an opaque **`404 {"error":"not_found"}`** for *every* rejection — unknown workspace/trigger, missing `X-Signature` or `X-Timestamp`, bad signature, a timestamp outside the 5-minute window, or an oversized body (2 MiB cap). The 404 is deliberate: it does not reveal whether the trigger exists. A rejected request never reaches the [event log](#event-log) because rejection happens before any event row is created. A successful request returns `202 {"status":"accepted","event_id":"..."}`.
 
 ## Filtering events
 
@@ -91,11 +91,11 @@ If no filter conditions are set, every valid webhook delivery fires the trigger.
 
 ## Rate limiting and deduplication
 
-CubeBox protects against accidental floods and duplicate deliveries:
+CubePlex protects against accidental floods and duplicate deliveries:
 
 - **Rate limiting** — if a trigger receives events faster than the agent can process them, excess events are queued and processed in order. Sustained excessive volume is throttled.
-- **Deduplication** — if the same event is delivered multiple times (common with webhook retry mechanisms), CubeBox detects the duplicate and processes it only once.
-- **Retry with backoff** — if an agent run fails (e.g., transient model error), CubeBox retries the run with exponential backoff before marking it as failed.
+- **Deduplication** — if the same event is delivered multiple times (common with webhook retry mechanisms), CubePlex detects the duplicate and processes it only once.
+- **Retry with backoff** — if an agent run fails (e.g., transient model error), CubePlex retries the run with exponential backoff before marking it as failed.
 
 ## Event log
 
@@ -132,10 +132,10 @@ Use the event log to verify that your webhook integration is working, debug filt
    > A new GitHub issue was just opened. Read the issue title and body from the event payload. Based on the content, assign appropriate labels (bug, feature, docs, etc.), estimate priority (P0-P3), and post a triage comment on the issue summarizing your assessment and suggested next steps.
 6. Choose **new conversation per event** so each issue gets its own clean context.
 7. Save and copy the webhook URL and signing secret.
-8. Stand up a small **relay** that GitHub can call and that re-signs for CubeBox (GitHub's own signature is not accepted directly — see the caution at the top):
+8. Stand up a small **relay** that GitHub can call and that re-signs for CubePlex (GitHub's own signature is not accepted directly — see the caution at the top):
    - Point a GitHub webhook (**Settings > Webhooks**, content type `application/json`, events: "Issues") at your relay.
-   - In the relay, verify GitHub's `X-Hub-Signature-256` if you wish, then forward the JSON body to the CubeBox webhook URL, signing it with CubeBox's scheme: set `X-Timestamp` to the current epoch seconds and `X-Signature` to the HMAC of `"<timestamp>." + body`.
-9. Now when someone opens an issue, GitHub calls your relay, the relay forwards a properly signed request to CubeBox, and the agent triages the issue.
+   - In the relay, verify GitHub's `X-Hub-Signature-256` if you wish, then forward the JSON body to the CubePlex webhook URL, signing it with CubePlex's scheme: set `X-Timestamp` to the current epoch seconds and `X-Signature` to the HMAC of `"<timestamp>." + body`.
+9. Now when someone opens an issue, GitHub calls your relay, the relay forwards a properly signed request to CubePlex, and the agent triages the issue.
 
 > **No relay yet?** Use the [`curl` recipe](#tips) below to fire the trigger by hand with a sample issue payload and confirm the prompt behaves before wiring up delivery.
 
@@ -148,7 +148,7 @@ Use the event log to verify that your webhook integration is working, debug filt
 3. Set the prompt:
    > A critical alert was triggered. Investigate the alert details from the event payload, check relevant logs and metrics if tools are available, and provide a preliminary root cause analysis with recommended next steps.
 4. Choose a **fixed conversation** so the agent can correlate across multiple alerts.
-5. Configure your monitoring system (or a relay in front of it) to POST the alert payload to the trigger URL, signed with CubeBox's scheme (`X-Timestamp` + `X-Signature` over `"<timestamp>." + body`). Many alerting tools let you set custom headers and a signing secret on outbound webhooks; if yours signs with a fixed scheme you can't change, put a small relay in between.
+5. Configure your monitoring system (or a relay in front of it) to POST the alert payload to the trigger URL, signed with CubePlex's scheme (`X-Timestamp` + `X-Signature` over `"<timestamp>." + body`). Many alerting tools let you set custom headers and a signing secret on outbound webhooks; if yours signs with a fixed scheme you can't change, put a small relay in between.
 
 ## Tips
 
@@ -160,7 +160,7 @@ Use the event log to verify that your webhook integration is working, debug filt
   BODY='{"event_type":"test","action":"opened"}'
   SIG=$(printf '%s.%s' "$TS" "$BODY" \
     | openssl dgst -sha256 -hmac 'your-signing-secret' | sed 's/^.* //')
-  curl -X POST "https://<your-cubebox-host>/api/v1/ws/<workspace_id>/triggers/<trigger_id>/ingest" \
+  curl -X POST "https://<your-cubeplex-host>/api/v1/ws/<workspace_id>/triggers/<trigger_id>/ingest" \
     -H "Content-Type: application/json" \
     -H "X-Timestamp: $TS" \
     -H "X-Signature: $SIG" \

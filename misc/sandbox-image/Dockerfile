@@ -151,7 +151,7 @@ RUN python3 -m venv /opt/venv \
 # downloaded from their official upstreams by stage-fonts.sh into ./fonts/
 # (gitignored; ~54MB). Run that before building. fc-cache so LibreOffice +
 # matplotlib (the skill's overflow checker) resolve them by family name.
-COPY fonts/ /usr/share/fonts/truetype/cubebox/
+COPY fonts/ /usr/share/fonts/truetype/cubeplex/
 RUN fc-cache -f
 
 # Create app directory
@@ -160,7 +160,7 @@ ENV HOME=/workspace
 
 # ---------------------------------------------------------------------------
 # Neko browser-takeover stack (started on demand, see neko/start-browser.sh).
-# Lets a user watch and take over the sandbox browser from the cubebox frontend
+# Lets a user watch and take over the sandbox browser from the cubeplex frontend
 # while the agent drives the same Chromium over CDP.
 # ---------------------------------------------------------------------------
 RUN apt-get update \

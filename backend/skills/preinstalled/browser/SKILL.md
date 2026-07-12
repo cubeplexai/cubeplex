@@ -17,7 +17,7 @@ keywords:
 # Browser control (agent-browser + live takeover)
 
 The sandbox runs a **real, headful Chromium** that the user **watches live** in
-the cubebox browser panel and can **take over** at any time. You drive that same
+the cubeplex browser panel and can **take over** at any time. You drive that same
 browser with the `agent-browser` CLI over CDP. Because the user sees exactly what
 you do, this is also how logins / OAuth / CAPTCHAs get solved: you navigate, and
 when a step needs a human you ask the user to take over in the panel.
@@ -36,7 +36,7 @@ If `connect` fails with "connection refused", the stack isn't up yet — run
 `start-browser.sh` again and wait a few seconds. **Never** start a fresh/headless
 browser — the user would see nothing and the session wouldn't be theirs.
 
-Tell the user they can watch and take over in the cubebox **browser panel**.
+Tell the user they can watch and take over in the cubeplex **browser panel**.
 
 ## CRITICAL: Keep the user's visual tab in sync with the agent's active tab
 

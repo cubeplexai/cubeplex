@@ -12,7 +12,7 @@ import {
   listApiKeys,
   type ApiKeyCreated,
   type ApiKeyListItem,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

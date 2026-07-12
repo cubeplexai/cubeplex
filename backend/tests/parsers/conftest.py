@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from cubebox.parsers import get_parser_registry, reset_parser_registry_for_tests
+from cubeplex.parsers import get_parser_registry, reset_parser_registry_for_tests
 
 
 @pytest.fixture(autouse=True)

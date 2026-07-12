@@ -1,4 +1,4 @@
-"""Pure-function tests for :func:`cubebox.mcp.effective.compute_effective_state`.
+"""Pure-function tests for :func:`cubeplex.mcp.effective.compute_effective_state`.
 
 One test per row of plan §Task 6 Step 1's reason matrix. The pure function
 is the contract for UI / runtime / admin diagnostics — each terminal reason
@@ -7,7 +7,7 @@ must remain distinct so consumers can branch on the string.
 
 from __future__ import annotations
 
-from cubebox.mcp.effective import (
+from cubeplex.mcp.effective import (
     MCPEffectiveInput,
     MCPGrantInput,
     compute_effective_state,

@@ -5,7 +5,7 @@ title: Managing Sandboxes
 
 # Managing Sandboxes
 
-A sandbox is the isolated environment where the agent runs code for a conversation or topic. Each sandbox has its own files and installed packages, and CubeBox keeps it around across container restarts — so the working files from a conversation are still there the next time you open it. The **Sandboxes** tab in your workspace settings is where you see every sandbox that belongs to you in this workspace and take action on one when something goes wrong.
+A sandbox is the isolated environment where the agent runs code for a conversation or topic. Each sandbox has its own files and installed packages, and CubePlex keeps it around across container restarts — so the working files from a conversation are still there the next time you open it. The **Sandboxes** tab in your workspace settings is where you see every sandbox that belongs to you in this workspace and take action on one when something goes wrong.
 
 :::info 📸 Screenshot placeholder
 **Capture:** Workspace settings → Sandboxes tab, showing a list of sandbox rows. Each row has a status badge (Running / Off / Paused / Failed), a scope label (e.g. "Your workspace sandbox", "Topic: release-plan"), last-active time, and Restart + Delete buttons.
@@ -39,10 +39,10 @@ Use Restart when the container is in a bad state — a hung process, a broken sh
 
 ## Delete
 
-**Delete** permanently removes the sandbox. The row is soft-deleted, the container is stopped, and the sandbox will not start again for that conversation or topic. The next time you send a message there, CubeBox provisions a brand-new sandbox with empty storage.
+**Delete** permanently removes the sandbox. The row is soft-deleted, the container is stopped, and the sandbox will not start again for that conversation or topic. The next time you send a message there, CubePlex provisions a brand-new sandbox with empty storage.
 
 :::caution
-Delete cannot be undone. Stored files are left on disk for your operator to reclaim (CubeBox cannot delete the underlying storage directly). If you only want a fresh container while keeping your files, use **Restart** instead.
+Delete cannot be undone. Stored files are left on disk for your operator to reclaim (CubePlex cannot delete the underlying storage directly). If you only want a fresh container while keeping your files, use **Restart** instead.
 :::
 
 ## Sandbox statuses

@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.oauth.dcr."""
+"""Unit tests for cubeplex.mcp.oauth.dcr."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cubebox.mcp.exceptions import DCRError
-from cubebox.mcp.oauth.dcr import (
+from cubeplex.mcp.exceptions import DCRError
+from cubeplex.mcp.oauth.dcr import (
     DEFAULT_GRANT_TYPES,
     DEFAULT_RESPONSE_TYPES,
     DEFAULT_TOKEN_AUTH_METHOD,
@@ -59,7 +59,7 @@ async def test_register_happy_path_parses_response() -> None:
             REGISTRATION_ENDPOINT,
             DCRRequest(
                 redirect_uris=["https://app.example.com/cb"],
-                client_name="cubebox",
+                client_name="cubeplex",
             ),
         )
     assert result.client_id == "cid-abc"
@@ -77,7 +77,7 @@ async def test_register_sends_default_grant_response_and_auth_method() -> None:
             REGISTRATION_ENDPOINT,
             DCRRequest(
                 redirect_uris=["https://app.example.com/cb"],
-                client_name="cubebox",
+                client_name="cubeplex",
             ),
         )
     assert handler.last_method == "POST"
@@ -85,11 +85,11 @@ async def test_register_sends_default_grant_response_and_auth_method() -> None:
     body = handler.last_body
     assert body is not None
     assert body["redirect_uris"] == ["https://app.example.com/cb"]
-    assert body["client_name"] == "cubebox"
+    assert body["client_name"] == "cubeplex"
     assert body["grant_types"] == DEFAULT_GRANT_TYPES
     assert body["response_types"] == DEFAULT_RESPONSE_TYPES
     assert body["token_endpoint_auth_method"] == DEFAULT_TOKEN_AUTH_METHOD
-    # MCP cubebox is a public client using PKCE → default auth method must be "none"
+    # MCP cubeplex is a public client using PKCE → default auth method must be "none"
     assert DEFAULT_TOKEN_AUTH_METHOD == "none"
     assert body["token_endpoint_auth_method"] == "none"
     assert "scope" not in body  # not provided => not sent
@@ -104,7 +104,7 @@ async def test_register_explicit_auth_method_override_flows_through() -> None:
             REGISTRATION_ENDPOINT,
             DCRRequest(
                 redirect_uris=["https://app.example.com/cb"],
-                client_name="cubebox",
+                client_name="cubeplex",
                 token_endpoint_auth_method="client_secret_basic",
             ),
         )
@@ -129,7 +129,7 @@ async def test_register_accepts_200_ok_in_addition_to_201() -> None:
             REGISTRATION_ENDPOINT,
             DCRRequest(
                 redirect_uris=["https://app.example.com/cb"],
-                client_name="cubebox",
+                client_name="cubeplex",
             ),
         )
     assert result.client_id == "cid-200"
@@ -144,7 +144,7 @@ async def test_register_includes_scope_when_provided() -> None:
             REGISTRATION_ENDPOINT,
             DCRRequest(
                 redirect_uris=["https://app.example.com/cb"],
-                client_name="cubebox",
+                client_name="cubeplex",
                 scope="read write",
             ),
         )
@@ -169,7 +169,7 @@ async def test_register_400_with_error_body_raises_dcr_error() -> None:
                 REGISTRATION_ENDPOINT,
                 DCRRequest(
                     redirect_uris=["http://app.example.com/cb"],
-                    client_name="cubebox",
+                    client_name="cubeplex",
                 ),
             )
     err = excinfo.value
@@ -187,7 +187,7 @@ async def test_register_500_without_body_raises_dcr_error() -> None:
                 REGISTRATION_ENDPOINT,
                 DCRRequest(
                     redirect_uris=["https://app.example.com/cb"],
-                    client_name="cubebox",
+                    client_name="cubeplex",
                 ),
             )
     assert excinfo.value.status == 500
@@ -202,6 +202,6 @@ async def test_register_201_missing_client_id_raises_dcr_error() -> None:
                 REGISTRATION_ENDPOINT,
                 DCRRequest(
                     redirect_uris=["https://app.example.com/cb"],
-                    client_name="cubebox",
+                    client_name="cubeplex",
                 ),
             )

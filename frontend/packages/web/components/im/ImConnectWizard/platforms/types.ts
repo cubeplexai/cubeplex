@@ -1,4 +1,4 @@
-import type { ConnectImAccountIn } from '@cubebox/core'
+import type { ConnectImAccountIn } from '@cubeplex/core'
 import type { FC } from 'react'
 
 export type FormState = Record<string, string>

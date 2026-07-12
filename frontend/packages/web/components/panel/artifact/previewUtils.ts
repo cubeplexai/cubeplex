@@ -1,4 +1,4 @@
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 
 export function buildPreviewUrl(
   artifact: Artifact,

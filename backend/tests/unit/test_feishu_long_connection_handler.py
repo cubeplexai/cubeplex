@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.im.feishu.long_connection import build_event_handler
+from cubeplex.im.feishu.long_connection import build_event_handler
 
 pytestmark = pytest.mark.asyncio
 

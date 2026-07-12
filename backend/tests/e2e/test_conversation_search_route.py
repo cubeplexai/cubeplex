@@ -13,10 +13,10 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from cubebox.db.engine import async_session_maker
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.services.conversation_search.embedding import EmbeddingProvider
-from cubebox.services.conversation_search.worker import EmbeddingWorker
+from cubeplex.db.engine import async_session_maker
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.services.conversation_search.embedding import EmbeddingProvider
+from cubeplex.services.conversation_search.worker import EmbeddingWorker
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 
@@ -54,7 +54,7 @@ async def _seed_indexed_conversation(client: TestClient) -> str:
     """Create a conversation via the API, append cubepi messages, run the worker."""
     from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
-    from cubebox.agents.checkpointer import init_checkpointer
+    from cubeplex.agents.checkpointer import init_checkpointer
 
     title_resp = client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations",

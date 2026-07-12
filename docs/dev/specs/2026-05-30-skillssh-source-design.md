@@ -65,22 +65,22 @@ Every file that imports or references the old names must be updated in the same
 commit as the rename, or the app will fail at import time. Grep confirms 25 files:
 
 **Source files:**
-- `cubebox/skills/sources/base.py` — Protocol rename
-- `cubebox/skills/sources/local.py` — class rename
-- `cubebox/skills/sources/remote.py` — class rename
-- `cubebox/skills/sources/registry.py` — class rename + build() logic
-- `cubebox/skills/sources/skills_sh.py` — new file (imports SkillRegistryAdapter)
-- `cubebox/skills/discovery.py` — imports SkillsAdapterManager
-- `cubebox/streams/run_manager.py` — imports SkillsAdapterManager
-- `cubebox/models/skill_source.py` → `skill_registry.py` — model rename
-- `cubebox/models/skill.py` — may reference SkillSource FK target table name
-- `cubebox/models/__init__.py` — export update
-- `cubebox/repositories/skill_source.py` → `skill_registry.py` — class rename
-- `cubebox/api/app.py` — router import
-- `cubebox/api/routes/v1/__init__.py` — router import
-- `cubebox/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py` — full rename
-- `cubebox/api/routes/v1/conversations.py` — may import SkillsAdapterManager
-- `cubebox/api/routes/v1/ws_skills.py` — imports SkillsAdapterManager
+- `cubeplex/skills/sources/base.py` — Protocol rename
+- `cubeplex/skills/sources/local.py` — class rename
+- `cubeplex/skills/sources/remote.py` — class rename
+- `cubeplex/skills/sources/registry.py` — class rename + build() logic
+- `cubeplex/skills/sources/skills_sh.py` — new file (imports SkillRegistryAdapter)
+- `cubeplex/skills/discovery.py` — imports SkillsAdapterManager
+- `cubeplex/streams/run_manager.py` — imports SkillsAdapterManager
+- `cubeplex/models/skill_source.py` → `skill_registry.py` — model rename
+- `cubeplex/models/skill.py` — may reference SkillSource FK target table name
+- `cubeplex/models/__init__.py` — export update
+- `cubeplex/repositories/skill_source.py` → `skill_registry.py` — class rename
+- `cubeplex/api/app.py` — router import
+- `cubeplex/api/routes/v1/__init__.py` — router import
+- `cubeplex/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py` — full rename
+- `cubeplex/api/routes/v1/conversations.py` — may import SkillsAdapterManager
+- `cubeplex/api/routes/v1/ws_skills.py` — imports SkillsAdapterManager
 - `alembic/env.py` — imports model for autogenerate
 
 **Test files:**
@@ -135,7 +135,7 @@ pins installs to the branch that existed at discovery time.
 
 ### New class: `SkillsShAdapter`
 
-File: `backend/cubebox/skills/sources/skills_sh.py`
+File: `backend/cubeplex/skills/sources/skills_sh.py`
 
 ```
 class SkillsShAdapter:
@@ -201,7 +201,7 @@ registry:
 Underscore key avoids dynaconf hyphen-access ambiguity. Access in Python:
 `settings.registry.skills_sh.github_token`.
 
-Override via env: `CUBEBOX_REGISTRY__SKILLS_SH__GITHUB_TOKEN`.
+Override via env: `CUBEPLEX_REGISTRY__SKILLS_SH__GITHUB_TOKEN`.
 
 ### Admin API changes
 
@@ -317,7 +317,7 @@ Follow the same pattern as `admin/skills`: **direct fetch with
 `credentials: 'include'`**, no Next.js proxy routes. The admin API routes
 (`/api/v1/admin/...`) are reachable directly from the browser via the
 existing Next.js rewrite that forwards all `/api/v1/*` requests to the
-backend. CSRF tokens are read from the `cubebox_csrf` cookie (same as
+backend. CSRF tokens are read from the `cubeplex_csrf` cookie (same as
 all other admin pages).
 
 ---
@@ -328,17 +328,17 @@ all other admin pages).
 
 | File | Change |
 |---|---|
-| `cubebox/models/skill_source.py` → `skill_registry.py` | Rename model + class; remove hardcoded `kind="remote"` |
-| `cubebox/repositories/skill_source.py` → `skill_registry.py` | Rename; pass `kind` through `create()` |
-| `cubebox/skills/sources/base.py` | Rename `SkillSource` protocol → `SkillRegistryAdapter` |
-| `cubebox/skills/sources/local.py` | Rename `LocalCatalogSource` → `LocalCatalogAdapter` |
-| `cubebox/skills/sources/remote.py` | Rename `RemoteRegistrySource` → `RemoteRegistryAdapter` |
-| `cubebox/skills/sources/registry.py` | Rename `SkillSourceRegistry` → `SkillsAdapterManager`; add `skills-sh` branch |
-| `cubebox/skills/sources/skills_sh.py` | **New** — `SkillsShAdapter` |
-| `cubebox/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py` | Rename; add `kind` field; optional `base_url`; add DELETE endpoint |
-| `cubebox/api/app.py` | Update router import |
-| `cubebox/db/alembic/versions/<new>.py` | `ALTER TABLE skill_sources RENAME TO skill_registries` |
-| `cubebox/models/__init__.py` | Update export |
+| `cubeplex/models/skill_source.py` → `skill_registry.py` | Rename model + class; remove hardcoded `kind="remote"` |
+| `cubeplex/repositories/skill_source.py` → `skill_registry.py` | Rename; pass `kind` through `create()` |
+| `cubeplex/skills/sources/base.py` | Rename `SkillSource` protocol → `SkillRegistryAdapter` |
+| `cubeplex/skills/sources/local.py` | Rename `LocalCatalogSource` → `LocalCatalogAdapter` |
+| `cubeplex/skills/sources/remote.py` | Rename `RemoteRegistrySource` → `RemoteRegistryAdapter` |
+| `cubeplex/skills/sources/registry.py` | Rename `SkillSourceRegistry` → `SkillsAdapterManager`; add `skills-sh` branch |
+| `cubeplex/skills/sources/skills_sh.py` | **New** — `SkillsShAdapter` |
+| `cubeplex/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py` | Rename; add `kind` field; optional `base_url`; add DELETE endpoint |
+| `cubeplex/api/app.py` | Update router import |
+| `cubeplex/db/alembic/versions/<new>.py` | `ALTER TABLE skill_sources RENAME TO skill_registries` |
+| `cubeplex/models/__init__.py` | Update export |
 | `config.yaml` | Add `registry.skills_sh.github_token` |
 | `tests/unit/test_skills_sh_adapter.py` | **New** — `httpx.MockTransport` tests for search + fetch |
 | `tests/e2e/test_skill_registries_admin.py` | Update existing test imports/names |

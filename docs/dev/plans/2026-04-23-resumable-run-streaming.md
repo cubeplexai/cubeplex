@@ -16,8 +16,8 @@
 
 | File | Responsibility |
 |------|---------------|
-| `backend/cubebox/streams/run_events.py` | Redis-backed active-run metadata and per-run event log primitives |
-| `backend/cubebox/streams/run_manager.py` | Run lifecycle orchestration decoupled from HTTP connection |
+| `backend/cubeplex/streams/run_events.py` | Redis-backed active-run metadata and per-run event log primitives |
+| `backend/cubeplex/streams/run_manager.py` | Run lifecycle orchestration decoupled from HTTP connection |
 | `frontend/packages/core/src/api/runStreams.ts` | Bootstrap and run stream client helpers |
 
 ### Modified Files
@@ -25,9 +25,9 @@
 | File | Changes |
 |------|---------|
 | `backend/pyproject.toml` | Add Redis client dependency if not already present |
-| `backend/cubebox/api/app.py` | Initialize shared Redis resources for stream management |
-| `backend/cubebox/api/routes/v1/conversations.py` | Split send/bootstrap/stream responsibilities; stop tying run lifetime to SSE request |
-| `backend/cubebox/agents/stream.py` | Reuse existing SSE event conversion for persisted run events |
+| `backend/cubeplex/api/app.py` | Initialize shared Redis resources for stream management |
+| `backend/cubeplex/api/routes/v1/conversations.py` | Split send/bootstrap/stream responsibilities; stop tying run lifetime to SSE request |
+| `backend/cubeplex/agents/stream.py` | Reuse existing SSE event conversion for persisted run events |
 | `frontend/packages/core/src/types/events.ts` | Add `event_id` to streamed event type |
 | `frontend/packages/core/src/stores/messageStore.ts` | Extract replay-safe reducer; support replay + live event application |
 | `frontend/packages/web/components/chat/MessageList.tsx` | Drive recovery through bootstrap + run stream |
@@ -38,9 +38,9 @@
 ## Task 1: Backend Foundation — Add Redis-backed active run and event log primitives
 
 **Files:**
-- Add: `backend/cubebox/streams/run_events.py`
+- Add: `backend/cubeplex/streams/run_events.py`
 - Modify: `backend/pyproject.toml`
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Add Redis dependency**
 
@@ -48,7 +48,7 @@ Add the Python Redis client dependency if it is not already in `backend/pyprojec
 
 - [ ] **Step 2: Implement active-run metadata API**
 
-Create `backend/cubebox/streams/run_events.py` with helpers for:
+Create `backend/cubeplex/streams/run_events.py` with helpers for:
 
 - `get_active_run(conversation_id)`
 - `set_active_run(conversation_id, run_id, status, first_event_id=None, last_event_id=None)`
@@ -67,7 +67,7 @@ Requirements:
 
 - [ ] **Step 3: Initialize shared Redis client**
 
-In `backend/cubebox/api/app.py`, initialize a shared Redis client on app startup and store it on `app.state`.
+In `backend/cubeplex/api/app.py`, initialize a shared Redis client on app startup and store it on `app.state`.
 
 Requirements:
 
@@ -79,12 +79,12 @@ Requirements:
 ## Task 2: Backend Runtime — Decouple run execution from the HTTP stream request
 
 **Files:**
-- Add: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Add: `backend/cubeplex/streams/run_manager.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 
 - [ ] **Step 1: Implement run manager**
 
-Create `backend/cubebox/streams/run_manager.py` that:
+Create `backend/cubeplex/streams/run_manager.py` that:
 
 - creates a `run_id`
 - registers active run metadata
@@ -154,9 +154,9 @@ Requirements:
 ## Task 3: Backend Semantics — Preserve consistency and degrade cleanly
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/cubebox/streams/run_events.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_events.py`
 
 - [ ] **Step 1: Define and enforce replay boundary**
 
@@ -342,7 +342,7 @@ Flow:
 ## Task 8: Cleanup — Remove request-owned streaming assumptions
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 - Modify: any now-obsolete frontend stream helpers
 
 - [ ] **Step 1: Remove request-scoped run ownership**

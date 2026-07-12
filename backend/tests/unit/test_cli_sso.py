@@ -1,11 +1,11 @@
-"""Unit tests for ``cubebox admin disable-sso`` / ``list-sso`` CLI commands.
+"""Unit tests for ``cubeplex admin disable-sso`` / ``list-sso`` CLI commands.
 
 The commands wrap their logic in ``asyncio.run`` which means we must invoke
 them from a sync context (otherwise pytest-asyncio's running loop trips
 ``RuntimeError: asyncio.run() cannot be called from a running event loop``).
 Tests are therefore plain ``def`` functions that do their own
 ``asyncio.run`` for setup/verification and stub
-``cubebox.cli.admin.async_session_maker`` with an in-memory aiosqlite
+``cubeplex.cli.admin.async_session_maker`` with an in-memory aiosqlite
 session factory. ``StaticPool`` keeps state visible across the multiple
 ``async with`` blocks (CLI under test, then post-assertion verification).
 """
@@ -22,9 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.cli import admin as admin_cli
-from cubebox.models import Organization
-from cubebox.models.sso_connection import SSOConnection
+from cubeplex.cli import admin as admin_cli
+from cubeplex.models import Organization
+from cubeplex.models.sso_connection import SSOConnection
 
 
 @pytest.fixture

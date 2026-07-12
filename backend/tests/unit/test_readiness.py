@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.llm.readiness import (
+from cubeplex.llm.readiness import (
     capability_fingerprint,
     derive_readiness,
 )

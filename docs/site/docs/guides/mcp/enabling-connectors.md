@@ -53,7 +53,7 @@ For connectors that use static credentials (like Tavily, Exa, or Jina AI):
 3. Paste the API key or token.
 4. Click **Save credential**.
 
-CubeBox encrypts the credential and stores it securely. The connector's tools become available to workspace members immediately.
+CubePlex encrypts the credential and stores it securely. The connector's tools become available to workspace members immediately.
 
 :::tip Where to get API keys
 Each template's setup form includes a link to the service's developer console where you can generate an API key.
@@ -67,9 +67,9 @@ For connectors that use OAuth (like GitHub, Notion, Slack, or Linear):
 2. Choose the credential scope: **User** if you want each person to authorize their own account, or **Workspace** to use a shared service account.
 3. Click **Sign in with &lt;provider&gt;**. A new window opens with the service's consent screen.
 4. Grant the requested permissions.
-5. The window closes and returns you to CubeBox. The credential is now connected.
+5. The window closes and returns you to CubePlex. The credential is now connected.
 
-**What happens behind the scenes:** CubeBox uses PKCE (Proof Key for Code Exchange) for all OAuth flows. For services that support Dynamic Client Registration (DCR) — Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare — no pre-configuration is needed. For services that do not support DCR — GitHub, Slack, Google Workspace — your system administrator must register an OAuth app in the vendor's developer console before the OAuth flow can complete.
+**What happens behind the scenes:** CubePlex uses PKCE (Proof Key for Code Exchange) for all OAuth flows. For services that support Dynamic Client Registration (DCR) — Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare — no pre-configuration is needed. For services that do not support DCR — GitHub, Slack, Google Workspace — your system administrator must register an OAuth app in the vendor's developer console before the OAuth flow can complete.
 
 :::info 📸 Screenshot placeholder
 **Capture:** A connector credential panel showing the "Sign in with &lt;provider&gt;" button and the "Waiting for authorization in the new window…" state.

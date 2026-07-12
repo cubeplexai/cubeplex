@@ -28,8 +28,8 @@ Bring the frontend to feature parity with P1 backend: users can register, log in
 ## User Flows
 
 ### First-time user
-1. Lands on `/` → no `cubebox_auth` cookie → middleware redirects to `/login`.
-2. Clicks "Register" link → `/register` → submits email + password → backend creates user + org + "Personal" workspace + Admin membership, sets `cubebox_auth` cookie, returns new workspace id.
+1. Lands on `/` → no `cubeplex_auth` cookie → middleware redirects to `/login`.
+2. Clicks "Register" link → `/register` → submits email + password → backend creates user + org + "Personal" workspace + Admin membership, sets `cubeplex_auth` cookie, returns new workspace id.
 3. Frontend redirects to `/w/[newWsId]` → welcome screen with input bar.
 4. Types a prompt → `POST /conversations` (scoped to new ws) → redirected to `/w/[wsId]/conversations/[conversationId]`.
 
@@ -46,7 +46,7 @@ Bring the frontend to feature parity with P1 backend: users can register, log in
 1. Top-bar avatar menu → "Sign out" → `POST /auth/logout` with CSRF token → clears local React state → redirect `/login`.
 
 ### Unauthenticated access to protected route
-1. Any `/w/*` or `/workspaces` without valid `cubebox_auth` cookie → middleware 302 to `/login?next=<original_path>`.
+1. Any `/w/*` or `/workspaces` without valid `cubeplex_auth` cookie → middleware 302 to `/login?next=<original_path>`.
 2. After successful login, redirect to `next` if present (validated to be a same-origin path), else first workspace.
 
 ### API 401 mid-session (token expired)
@@ -75,7 +75,7 @@ Bring the frontend to feature parity with P1 backend: users can register, log in
 - `app/(app)/layout.tsx` — authenticated app chrome (top-bar with workspace switcher + avatar). Wraps `/workspaces` and `/w/[wsId]/…`. Reads `wsId` from route params (when present) to drive the switcher.
 
 **Middleware (`middleware.ts` at frontend root):**
-- Inspects `cubebox_auth` cookie presence.
+- Inspects `cubeplex_auth` cookie presence.
 - If absent and path matches `/w/*` or `/workspaces` → 302 `/login?next=<path>`.
 - If present and path is `/login` or `/register` → 302 `/`.
 - Does not parse workspace id, does not check membership.
@@ -88,14 +88,14 @@ Bring the frontend to feature parity with P1 backend: users can register, log in
 - Stores that previously assumed a single global conversation list (`conversationStore`) are scoped implicitly by the workspace id flowing through API calls — the store is cleared on workspace change (wsId prop changes in layout → effect → `store.reset()`).
 
 ### Auth state
-- Source of truth: `cubebox_auth` HTTP-only cookie (server-side).
+- Source of truth: `cubeplex_auth` HTTP-only cookie (server-side).
 - Client-side: an `authStore` (Zustand) caches the logged-in user object (`{id, email}`) loaded via `GET /auth/me` after login or on first protected-page mount. Used for avatar display and logout logic. Reset on 401 or logout.
 
 ### Workspace list
 - `workspaceStore` (Zustand) caches the user's workspace list, refreshed on login and after `POST /workspaces`. Used by the top-bar switcher and the `/workspaces` page.
 
 ### CSRF token
-- `cubebox_csrf` cookie is readable by client JS. API client reads it on every mutating request and puts it in `X-CSRF-Token`.
+- `cubeplex_csrf` cookie is readable by client JS. API client reads it on every mutating request and puts it in `X-CSRF-Token`.
 - First protected request (e.g. `GET /auth/me`) seeds the cookie. We call this explicitly post-login before any mutating request.
 
 ## API Client Architecture
@@ -161,8 +161,8 @@ Form errors use existing shadcn Form components if present; otherwise add the `f
 
 ## Backend Changes Required
 
-1. **`cubebox/auth/users.py::UserManager.on_after_register`** — after user create, open a session and create Organization (name = user email local-part + "'s Org"), Workspace (name = "Personal"), and Admin Membership. Transactionally bind to the same session the register route ran in (inject via manager). If this fails, user creation must roll back so we don't leave a user without a workspace.
-2. **`cubebox/api/routes/v1/auth.py::register`** — response changes from `{id, email}` to `{id, email, default_workspace_id}` so the frontend knows where to send the user after auto-login.
+1. **`cubeplex/auth/users.py::UserManager.on_after_register`** — after user create, open a session and create Organization (name = user email local-part + "'s Org"), Workspace (name = "Personal"), and Admin Membership. Transactionally bind to the same session the register route ran in (inject via manager). If this fails, user creation must roll back so we don't leave a user without a workspace.
+2. **`cubeplex/api/routes/v1/auth.py::register`** — response changes from `{id, email}` to `{id, email, default_workspace_id}` so the frontend knows where to send the user after auto-login.
 3. **Login stays a 204-cookie response.** Frontend calls `GET /workspaces` right after login to pick a destination. No response-shape change to `/auth/login`.
 4. **No new endpoints for organizations.** The P1 "create_workspace accepts client-supplied org_id" gap is unblocked for M1 because the frontend always uses the user's own org_id (read from the workspace list: every workspace carries its org_id, and by the one-user-one-org M1 assumption they all match).
 
@@ -182,7 +182,7 @@ Form errors use existing shadcn Form components if present; otherwise add the `f
 
 - **O1**: Should we remember the last-visited workspace across tab close? We said "no localStorage." But a returning user landing on `/` without it means we always redirect them to "first workspace" which may not be the one they last used. Propose: accept this for M1, document, revisit in P2.
 - **O2**: Register form — require email confirmation? P1 backend has `is_verified=False` by default but doesn't gate `is_active` on it. Propose: skip email verification entirely for M1; rely on `is_active` being true by default. Document that email verification is a P2 concern.
-- **O3**: The welcome page at `/w/[wsId]` currently shows the centered "cubebox AI 智能体系统" greeting plus input bar, which is today's `/`. Do we want a conversation list in a sidebar here, or keep it minimal? Propose: keep minimal for M1 (no sidebar rework), sidebar is a P2 polish item.
+- **O3**: The welcome page at `/w/[wsId]` currently shows the centered "cubeplex AI 智能体系统" greeting plus input bar, which is today's `/`. Do we want a conversation list in a sidebar here, or keep it minimal? Propose: keep minimal for M1 (no sidebar rework), sidebar is a P2 polish item.
 
 ## Implementation Order (for plan)
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import { createApiClient, wsListDingtalkApps, type DingtalkAppInfo } from '@cubebox/core'
+import { createApiClient, wsListDingtalkApps, type DingtalkAppInfo } from '@cubeplex/core'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {

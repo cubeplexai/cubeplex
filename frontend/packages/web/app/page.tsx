@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
-import { AUTH_COOKIE_NAME } from '@cubebox/core'
+import { AUTH_COOKIE_NAME } from '@cubeplex/core'
 
 export default async function RootRedirectPage() {
   const cookieStore = await cookies()
@@ -8,7 +8,7 @@ export default async function RootRedirectPage() {
   if (!authed) redirect('/login')
 
   const cookieHeader = cookieStore.toString()
-  const apiUrl = process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'
+  const apiUrl = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
   const res = await fetch(`${apiUrl}/api/v1/workspaces`, {
     headers: { cookie: cookieHeader },
     cache: 'no-store',

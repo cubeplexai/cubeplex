@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.sso.state."""
+"""Unit tests for cubeplex.sso.state."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 import fakeredis.aioredis
 import pytest
 
-from cubebox.sso.state import (
+from cubeplex.sso.state import (
     SSOStateExpired,
     SSOStateInvalid,
     SSOStatePayload,

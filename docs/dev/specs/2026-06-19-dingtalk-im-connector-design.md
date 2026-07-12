@@ -1,6 +1,6 @@
 # DingTalk IM Connector
 
-Adds DingTalk (钉钉) as the fourth IM platform in cubebox, following the
+Adds DingTalk (钉钉) as the fourth IM platform in cubeplex, following the
 existing Feishu, Slack, and Discord connectors. The existing
 connector-neutral pipeline (inbound transaction, queue worker, identity
 resolution, resume) is fully reused; DingTalk-specific logic lives in a
@@ -55,7 +55,7 @@ DingTalk concepts mapped to `IMThreadLink(account_id, channel_id, scope_key)`:
 
 DingTalk group chats are flat (no threads). Group conversations use
 per-user scope (`"u:{staffId}"`) for isolation — the same user talking
-to the bot in the same group shares one cubebox conversation, but
+to the bot in the same group shares one cubeplex conversation, but
 different users get their own. This matches Feishu's group-chat model.
 
 `sender_ref` is the DingTalk `staffId` (stable within the enterprise).
@@ -68,13 +68,13 @@ DingTalk connector implements both the `IdentityResolver` and
 
 **Auto-match (primary):** On first message from an unlinked user, call
 `GET /topapi/v2/user/get?userid={staffId}` to retrieve the user's
-enterprise email. If the email matches a cubebox user, create an
+enterprise email. If the email matches a cubeplex user, create an
 `IMIdentityLink` automatically.
 
 **Manual link (fallback):** If email lookup fails or no match is found,
 send a rejection card to the user with a link URL. The URL is a JWT
 identity-link token (same mechanism as Slack/Feishu — `im/link.py`).
-The user clicks the link, logs in to cubebox, and the identity binding
+The user clicks the link, logs in to cubeplex, and the identity binding
 completes.
 
 **Rejection:** Unlinked users receive a card with the link prompt. The
@@ -222,7 +222,7 @@ other platforms)
 ### Type Changes
 
 - `PlatformDescriptor.id`: add `'dingtalk'` to the union
-- `@cubebox/core`: add `ConnectDingtalkAccountIn` schema
+- `@cubeplex/core`: add `ConnectDingtalkAccountIn` schema
 
 ### Backend Connect Route
 
@@ -261,7 +261,7 @@ DingTalk OpenAPI v2 endpoints directly — fewer deps, simpler.
 
 **Configuration:** no new environment variables. AppKey and AppSecret
 are stored in the credential vault at connect time. The existing
-`CUBEBOX_FRONTEND_BASE_URL` env var is used for identity-link URL
+`CUBEPLEX_FRONTEND_BASE_URL` env var is used for identity-link URL
 generation (already configured for other IM connectors).
 
 ## File Change Summary
@@ -277,13 +277,13 @@ generation (already configured for other IM connectors).
 | `im/dingtalk/renderer.py` | DingtalkOpDispatcher: interactive card rendering |
 | `im/dingtalk/interactions.py` | Card action callback handling |
 | `frontend/.../platforms/dingtalk.ts` | Platform descriptor |
-| `@cubebox/core` schema | ConnectDingtalkAccountIn |
+| `@cubeplex/core` schema | ConnectDingtalkAccountIn |
 
 ### Modified Files
 
 | File | Change |
 |------|--------|
-| `im/runtime.py` | Add `import cubebox.im.dingtalk` |
+| `im/runtime.py` | Add `import cubeplex.im.dingtalk` |
 | `api/schemas/im_connector.py` | Add ConnectDingtalkAccountIn, extend discriminated union |
 | `services/im_connector.py` | Add `connect_dingtalk()` |
 | `api/routes/v1/ws_im.py` | Dispatch connect by platform for dingtalk |

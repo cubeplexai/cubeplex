@@ -16,7 +16,7 @@ pytestmark = pytest.mark.asyncio
 async def _reset_loop_bound_singletons() -> AsyncIterator[None]:
     """Dispose pooled DB connections and reset objectstore/cache singletons.
 
-    The module-level SQLAlchemy engine (cubebox.db.engine.engine) uses a
+    The module-level SQLAlchemy engine (cubeplex.db.engine.engine) uses a
     connection pool.  Its connections are bound to the asyncio event loop of
     the test that first opened them.  When pytest-asyncio creates a fresh
     event loop for each test function, stale pooled connections cause
@@ -29,9 +29,9 @@ async def _reset_loop_bound_singletons() -> AsyncIterator[None]:
     The objectstore and cache singletons are also reset so that test N+1's
     lifespan does not inherit aioboto3 / redis-pool state from test N.
     """
-    import cubebox.cache as _cache
-    import cubebox.objectstore.client as _oc
-    from cubebox.db.engine import engine
+    import cubeplex.cache as _cache
+    import cubeplex.objectstore.client as _oc
+    from cubeplex.db.engine import engine
 
     _oc._client = None
     _cache.reset_for_tests()

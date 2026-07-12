@@ -9,7 +9,7 @@ import {
   wsSetTemplateState,
   type ApiClient,
   type Workspace,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 interface MCPWorkspacesTabProps {
   templateId: string

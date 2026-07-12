@@ -11,7 +11,7 @@ import {
   type ProviderCreate,
   type ProviderUpdate,
   type VendorPreset,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import { ProviderConfigForm, type CreatePreset } from '../ProviderConfigForm'

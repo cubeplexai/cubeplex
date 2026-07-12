@@ -1,6 +1,6 @@
 'use client'
 
-import type { ApiClient, MCPToolEntry } from '@cubebox/core'
+import type { ApiClient, MCPToolEntry } from '@cubeplex/core'
 import { useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 

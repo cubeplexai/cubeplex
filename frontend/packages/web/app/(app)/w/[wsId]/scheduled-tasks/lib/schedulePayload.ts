@@ -1,7 +1,7 @@
 // Pure, side-effect-free helpers that translate between the visual schedule
 // editor's UI state and the API's schedule fields.
 
-import type { ScheduledTaskCreate, ScheduledTaskOut } from '@cubebox/core'
+import type { ScheduledTaskCreate, ScheduledTaskOut } from '@cubeplex/core'
 
 // ── UI state types ────────────────────────────────────────────────────────────
 

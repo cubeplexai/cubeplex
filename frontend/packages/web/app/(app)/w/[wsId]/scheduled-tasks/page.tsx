@@ -3,7 +3,7 @@
 import { use, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Plus } from 'lucide-react'
-import type { ScheduledTaskOut } from '@cubebox/core'
+import type { ScheduledTaskOut } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { SectionHeader } from '@/components/shared/SectionHeader'
 import { ScheduledTasksList } from './components/ScheduledTasksList'

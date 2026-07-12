@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from cubebox.im.discord.renderer import DiscordOpDispatcher
-from cubebox.im.types import RenderState
+from cubeplex.im.discord.renderer import DiscordOpDispatcher
+from cubeplex.im.types import RenderState
 
 
 @dataclass
@@ -101,7 +101,7 @@ class TestDiscordDispatchPatchResumeNewMessage:
     @pytest.mark.asyncio
     async def test_resolved_pending_resets_card_state(self) -> None:
         """After AskUser is answered, follow-up reply should be a new message."""
-        from cubebox.im.card_model import PendingInput
+        from cubeplex.im.card_model import PendingInput
 
         d, state, conn = _make_dispatcher()
         state.card_id = "msg_1"

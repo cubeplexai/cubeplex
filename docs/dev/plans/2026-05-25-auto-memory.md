@@ -9,28 +9,28 @@
 **Tech Stack:** FastAPI, redis.asyncio (fakeredis in tests), cubepi `OneShotLLM`, SQLModel `MemoryService`/`MemoryRepository`, pytest.
 
 **Key existing APIs (verified):**
-- Enums (`cubebox/models/memory.py`): `MemoryScope.{PERSONAL,WORKSPACE,ORG}`, `MemoryType.{PREFERENCE,PROJECT_FACT,PROCEDURE,CORRECTION,DECISION,ORG_POLICY}`, `MemoryStatus.{ACTIVE,ARCHIVED}`, `MemorySourceType.{CONVERSATION,TOOL_RESULT,ARTIFACT,MANUAL,IMPORT}`.
+- Enums (`cubeplex/models/memory.py`): `MemoryScope.{PERSONAL,WORKSPACE,ORG}`, `MemoryType.{PREFERENCE,PROJECT_FACT,PROCEDURE,CORRECTION,DECISION,ORG_POLICY}`, `MemoryStatus.{ACTIVE,ARCHIVED}`, `MemorySourceType.{CONVERSATION,TOOL_RESULT,ARTIFACT,MANUAL,IMPORT}`.
 - `MemoryService(repo, *, user_id, org_id, workspace_id)` → `create(CreateMemoryInput)`, `update(memory_id, *, content=, type_=, confidence=, status=)`, `archive(memory_id)`. `CreateMemoryInput(scope, type, content, confidence=0.8, source_type=MANUAL, source_conversation_id=None, source_run_id=None, source_artifact_id=None, source_excerpt=None)`.
 - `MemoryRepository(session, *, user_id, org_id, workspace_id).list(*, scope=, status=MemoryStatus.ACTIVE, limit=200)`.
 - `OneShotLLM(provider, model).generate_once(*, system, messages, max_output_tokens) -> str`.
-- `cubebox.agents.checkpointer.init_checkpointer()` → `cp.load(conversation_id)` → `CheckpointData | None` with `.messages`.
+- `cubeplex.agents.checkpointer.init_checkpointer()` → `cp.load(conversation_id)` → `CheckpointData | None` with `.messages`.
 
 ---
 
 ## File Structure
 
-- Modify `backend/cubebox/prompts/memory.py` — add the always-injected authoring block + per-type triggers (Layer 1).
-- Modify `backend/cubebox/middleware/memory.py` — `transform_system_prompt` always injects the static authoring block; pinned block stays conditional (Layer 1).
-- Modify `backend/cubebox/models/memory.py` — add `MemorySourceType.CONSOLIDATION` (Layer 2 attribution).
-- Create `backend/cubebox/services/memory_consolidation.py` — Redis gate/lock helpers + the consolidation pass (Layer 2 core).
-- Modify `backend/cubebox/streams/run_manager.py` — per-run `note_run` + post-run gate → spawn tracked task; track tasks for drain (Layer 2 wiring).
+- Modify `backend/cubeplex/prompts/memory.py` — add the always-injected authoring block + per-type triggers (Layer 1).
+- Modify `backend/cubeplex/middleware/memory.py` — `transform_system_prompt` always injects the static authoring block; pinned block stays conditional (Layer 1).
+- Modify `backend/cubeplex/models/memory.py` — add `MemorySourceType.CONSOLIDATION` (Layer 2 attribution).
+- Create `backend/cubeplex/services/memory_consolidation.py` — Redis gate/lock helpers + the consolidation pass (Layer 2 core).
+- Modify `backend/cubeplex/streams/run_manager.py` — per-run `note_run` + post-run gate → spawn tracked task; track tasks for drain (Layer 2 wiring).
 - Tests: `backend/tests/unit/test_memory_consolidation_gate.py`, `backend/tests/unit/test_memory_consolidation_pass.py`, `backend/tests/unit/test_memory_authoring_prompt.py`, `backend/tests/e2e/test_auto_memory.py`.
 
 ---
 
 ## Task 1: Layer 1 — always-injected authoring block + per-type triggers
 
-**Files:** Modify `backend/cubebox/prompts/memory.py`, `backend/cubebox/middleware/memory.py`; Test `backend/tests/unit/test_memory_authoring_prompt.py`.
+**Files:** Modify `backend/cubeplex/prompts/memory.py`, `backend/cubeplex/middleware/memory.py`; Test `backend/tests/unit/test_memory_authoring_prompt.py`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -39,7 +39,7 @@ Create `backend/tests/unit/test_memory_authoring_prompt.py`:
 ```python
 import pytest
 
-from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
+from cubeplex.prompts.memory import MEMORY_AUTHORING_BLOCK
 
 
 def test_authoring_block_covers_every_type_trigger():
@@ -56,7 +56,7 @@ def test_authoring_block_covers_every_type_trigger():
 
 @pytest.mark.asyncio
 async def test_transform_system_prompt_injects_authoring_without_pinned(monkeypatch):
-    from cubebox.middleware.memory import MemoryMiddleware
+    from cubeplex.middleware.memory import MemoryMiddleware
 
     # repo_factory whose pinned render is empty (no pinned memory).
     class _Repo:
@@ -68,7 +68,7 @@ async def test_transform_system_prompt_injects_authoring_without_pinned(monkeypa
     async def _factory():
         yield _Repo()
 
-    monkeypatch.setattr("cubebox.middleware.memory._render_pinned", lambda repo: _empty())
+    monkeypatch.setattr("cubeplex.middleware.memory._render_pinned", lambda repo: _empty())
 
     async def _empty():
         return ""
@@ -84,7 +84,7 @@ async def test_transform_system_prompt_injects_authoring_without_pinned(monkeypa
 Run: `cd backend && uv run pytest tests/unit/test_memory_authoring_prompt.py -v`
 Expected: FAIL — `MEMORY_AUTHORING_BLOCK` doesn't exist.
 
-- [ ] **Step 3: Add the authoring block** to `backend/cubebox/prompts/memory.py` (append after `MEMORY_PROMPT_HEADER`):
+- [ ] **Step 3: Add the authoring block** to `backend/cubeplex/prompts/memory.py` (append after `MEMORY_PROMPT_HEADER`):
 
 ```python
 MEMORY_AUTHORING_BLOCK: str = """\
@@ -118,7 +118,7 @@ transient task state (use a plan/todo instead). Prefer updating an existing item
 
 - [ ] **Step 4: Always inject it in `transform_system_prompt`**
 
-In `backend/cubebox/middleware/memory.py`, import the block and change
+In `backend/cubeplex/middleware/memory.py`, import the block and change
 `transform_system_prompt` so the authoring block is appended unconditionally,
 and the pinned block stays conditional. Replace the method body:
 
@@ -130,7 +130,7 @@ and the pinned block stays conditional. Replace the method body:
         signal: object = None,
     ) -> str:
         del signal
-        from cubebox.prompts.memory import MEMORY_AUTHORING_BLOCK
+        from cubeplex.prompts.memory import MEMORY_AUTHORING_BLOCK
 
         async with self._repo_factory() as repo:
             pinned_text = await _render_pinned(repo)
@@ -147,13 +147,13 @@ static — no timestamps/counts — so the cache-eligible prefix stays stable.)
 
 - [ ] **Step 5: Run tests + typecheck**
 
-Run: `cd backend && uv run pytest tests/unit/test_memory_authoring_prompt.py -v && uv run mypy cubebox/middleware/memory.py cubebox/prompts/memory.py`
+Run: `cd backend && uv run pytest tests/unit/test_memory_authoring_prompt.py -v && uv run mypy cubeplex/middleware/memory.py cubeplex/prompts/memory.py`
 Expected: 2 passed; mypy Success.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/prompts/memory.py backend/cubebox/middleware/memory.py backend/tests/unit/test_memory_authoring_prompt.py
+git add backend/cubeplex/prompts/memory.py backend/cubeplex/middleware/memory.py backend/tests/unit/test_memory_authoring_prompt.py
 git commit -m "feat(memory): always-inject proactive-save authoring block (Layer 1)"
 ```
 
@@ -161,7 +161,7 @@ git commit -m "feat(memory): always-inject proactive-save authoring block (Layer
 
 ## Task 2: Add `MemorySourceType.CONSOLIDATION`
 
-**Files:** Modify `backend/cubebox/models/memory.py`.
+**Files:** Modify `backend/cubeplex/models/memory.py`.
 
 - [ ] **Step 1: Add the enum value**
 
@@ -183,7 +183,7 @@ memory table, generate it: `uv run alembic revision --autogenerate -m "add conso
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/models/memory.py backend/alembic/versions/ 2>/dev/null
+git add backend/cubeplex/models/memory.py backend/alembic/versions/ 2>/dev/null
 git commit -m "feat(memory): add CONSOLIDATION memory source type"
 ```
 
@@ -191,7 +191,7 @@ git commit -m "feat(memory): add CONSOLIDATION memory source type"
 
 ## Task 3: Layer 2 — Redis gate/lock helpers (per conversation)
 
-**Files:** Create `backend/cubebox/services/memory_consolidation.py`; Test `backend/tests/unit/test_memory_consolidation_gate.py`.
+**Files:** Create `backend/cubeplex/services/memory_consolidation.py`; Test `backend/tests/unit/test_memory_consolidation_gate.py`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -203,7 +203,7 @@ import asyncio
 import fakeredis.aioredis
 import pytest
 
-from cubebox.services import memory_consolidation as mc
+from cubeplex.services import memory_consolidation as mc
 
 
 @pytest.fixture
@@ -266,7 +266,7 @@ Expected: FAIL — module/functions missing.
 
 - [ ] **Step 3: Implement the helpers**
 
-Create `backend/cubebox/services/memory_consolidation.py` (gate/lock section):
+Create `backend/cubeplex/services/memory_consolidation.py` (gate/lock section):
 
 ```python
 """Per-conversation background memory consolidation (Layer 2).
@@ -366,13 +366,13 @@ async def mark_consolidated(
 
 - [ ] **Step 4: Run tests + mypy**
 
-Run: `cd backend && uv run pytest tests/unit/test_memory_consolidation_gate.py -v && uv run mypy cubebox/services/memory_consolidation.py`
+Run: `cd backend && uv run pytest tests/unit/test_memory_consolidation_gate.py -v && uv run mypy cubeplex/services/memory_consolidation.py`
 Expected: 4 passed; mypy Success.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/memory_consolidation.py backend/tests/unit/test_memory_consolidation_gate.py
+git add backend/cubeplex/services/memory_consolidation.py backend/tests/unit/test_memory_consolidation_gate.py
 git commit -m "feat(memory): per-conversation consolidation gate + lock helpers"
 ```
 
@@ -380,7 +380,7 @@ git commit -m "feat(memory): per-conversation consolidation gate + lock helpers"
 
 ## Task 4: Layer 2 — the consolidation pass (ops parse/validate/apply)
 
-**Files:** Modify `backend/cubebox/services/memory_consolidation.py`; Test `backend/tests/unit/test_memory_consolidation_pass.py`.
+**Files:** Modify `backend/cubeplex/services/memory_consolidation.py`; Test `backend/tests/unit/test_memory_consolidation_pass.py`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -391,8 +391,8 @@ import json
 
 import pytest
 
-from cubebox.services import memory_consolidation as mc
-from cubebox.models.memory import MemoryScope, MemorySourceType, MemoryType
+from cubeplex.services import memory_consolidation as mc
+from cubeplex.models.memory import MemoryScope, MemorySourceType, MemoryType
 
 
 class _Item:
@@ -491,8 +491,8 @@ Expected: FAIL — `parse_ops`/`apply_ops` missing.
 - [ ] **Step 3: Implement parse + apply** (append to `memory_consolidation.py`):
 
 ```python
-from cubebox.models.memory import MemoryScope, MemorySourceType, MemoryType
-from cubebox.services.memory import CreateMemoryInput, MemoryService
+from cubeplex.models.memory import MemoryScope, MemorySourceType, MemoryType
+from cubeplex.services.memory import CreateMemoryInput, MemoryService
 
 _VALID_TYPES = {t.value for t in MemoryType}
 
@@ -568,7 +568,7 @@ async def apply_ops(
 
 - [ ] **Step 4: Run tests + mypy**
 
-Run: `cd backend && uv run pytest tests/unit/test_memory_consolidation_pass.py -v && uv run mypy cubebox/services/memory_consolidation.py`
+Run: `cd backend && uv run pytest tests/unit/test_memory_consolidation_pass.py -v && uv run mypy cubeplex/services/memory_consolidation.py`
 Expected: 3 passed; mypy Success.
 
 - [ ] **Step 5: Implement the orchestrator `run_consolidation`** (append; ties gate+lock+history+LLM+ops together):
@@ -610,8 +610,8 @@ async def run_consolidation(
     """Best-effort. Never raises into the caller."""
     from cubepi.providers.base import TextContent, UserMessage
 
-    from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.repositories.memory import MemoryRepository
+    from cubeplex.agents.checkpointer import init_checkpointer
+    from cubeplex.repositories.memory import MemoryRepository
 
     token = await acquire_lock(redis, prefix, conversation_id, ttl_s=LOCK_TTL_S)
     if token is None:
@@ -671,17 +671,17 @@ def _render_history(messages: list[Any]) -> str:
     return "\n".join(l for l in lines if l)
 ```
 
-Need imports at top: `from cubebox.models.memory import MemoryStatus`. Add it to the model import line.
+Need imports at top: `from cubeplex.models.memory import MemoryStatus`. Add it to the model import line.
 
 - [ ] **Step 6: Run all consolidation tests + mypy**
 
-Run: `cd backend && uv run pytest tests/unit/test_memory_consolidation_gate.py tests/unit/test_memory_consolidation_pass.py -v && uv run mypy cubebox/services/memory_consolidation.py`
+Run: `cd backend && uv run pytest tests/unit/test_memory_consolidation_gate.py tests/unit/test_memory_consolidation_pass.py -v && uv run mypy cubeplex/services/memory_consolidation.py`
 Expected: green; mypy Success.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/services/memory_consolidation.py backend/tests/unit/test_memory_consolidation_pass.py
+git add backend/cubeplex/services/memory_consolidation.py backend/tests/unit/test_memory_consolidation_pass.py
 git commit -m "feat(memory): consolidation pass — ops parse/validate/apply + orchestrator"
 ```
 
@@ -689,7 +689,7 @@ git commit -m "feat(memory): consolidation pass — ops parse/validate/apply + o
 
 ## Task 5: Wire Layer 2 into the run lifecycle (gate + tracked background task)
 
-**Files:** Modify `backend/cubebox/streams/run_manager.py`.
+**Files:** Modify `backend/cubeplex/streams/run_manager.py`.
 
 - [ ] **Step 1: Add a tracked task set in `RunManager.__init__`**
 
@@ -710,8 +710,8 @@ Add a method on `RunManager`:
         """Cheap per-run gate; spawn a tracked background consolidation task when
         due. Never raises into the run path."""
         try:
-            from cubebox.config import config as _cfg
-            from cubebox.services import memory_consolidation as mc
+            from cubeplex.config import config as _cfg
+            from cubeplex.services import memory_consolidation as mc
 
             if not _cfg.get("memory.consolidation.enabled", True):
                 return
@@ -724,8 +724,8 @@ Add a method on `RunManager`:
             ):
                 return
 
-            from cubebox.db.engine import async_session_maker
-            from cubebox.llm.factory import LLMFactory
+            from cubeplex.db.engine import async_session_maker
+            from cubeplex.llm.factory import LLMFactory
 
             # Resolve the provider with ORG context (session + org_id +
             # encryption_backend) exactly like the live run path
@@ -745,7 +745,7 @@ Add a method on `RunManager`:
             from cubepi import Model
 
             provider = factory.build_cubepi_provider(provider_config, cache_policy=None)
-            from cubebox.llm.oneshot import OneShotLLM
+            from cubeplex.llm.oneshot import OneShotLLM
 
             one_shot = OneShotLLM(provider, Model(id=model_id, provider=provider_name))
 
@@ -799,13 +799,13 @@ consolidation cancellation is skipped:
 
 - [ ] **Step 5: Typecheck + the gate's own tests still pass**
 
-Run: `cd backend && uv run mypy cubebox/streams/run_manager.py && uv run pytest tests/unit/test_memory_consolidation_gate.py -q`
+Run: `cd backend && uv run mypy cubeplex/streams/run_manager.py && uv run pytest tests/unit/test_memory_consolidation_gate.py -q`
 Expected: mypy Success; gate tests green. (No new unit test here — wiring is covered by the E2E in Task 6; `_maybe_consolidate_memory` is best-effort glue.)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(runs): post-run memory-consolidation gate + tracked background task"
 ```
 
@@ -817,7 +817,7 @@ git commit -m "feat(runs): post-run memory-consolidation gate + tracked backgrou
 
 - [ ] **Step 1: Worktree E2E config + test DB** (if not already): copy `.env` +
 `config.development.local.yaml` from main; migrate the worktree test DB:
-`CUBEBOX_DATABASE__NAME=cubebox_test_feat_auto_memory ENV_FOR_DYNACONF=test uv run alembic upgrade head`.
+`CUBEPLEX_DATABASE__NAME=cubeplex_test_feat_auto_memory ENV_FOR_DYNACONF=test uv run alembic upgrade head`.
 
 - [ ] **Step 2: E2E — Layer 2 produces personal memory**
 
@@ -848,12 +848,12 @@ async def test_consolidation_extracts_personal_memory(member_client) -> None:
     )
 
     # Force a consolidation pass directly (bypass the time/run gate).
-    from cubebox.config import config
-    from cubebox.db.engine import async_session_maker
-    from cubebox.cache import get_redis_client  # or however the app exposes redis
-    from cubebox.llm.factory import LLMFactory
-    from cubebox.llm.oneshot import OneShotLLM
-    from cubebox.services import memory_consolidation as mc
+    from cubeplex.config import config
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.cache import get_redis_client  # or however the app exposes redis
+    from cubeplex.llm.factory import LLMFactory
+    from cubeplex.llm.oneshot import OneShotLLM
+    from cubeplex.services import memory_consolidation as mc
     from cubepi import Model
 
     # (Resolve prefix/user/org/ws the same way the run did; in the test, read them
@@ -878,7 +878,7 @@ Then (real LLM): `uv run pytest tests/e2e/test_auto_memory.py -q`
 
 - [ ] **Step 4: Full sweep**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/auto-memory && make check-ci`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/auto-memory && make check-ci`
 
 - [ ] **Step 5:** `/finishing-a-development-branch` → PR → `/pr-codex-review-loop`.
 

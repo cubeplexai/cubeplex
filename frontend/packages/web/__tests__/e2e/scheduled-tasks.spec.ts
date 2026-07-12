@@ -21,7 +21,7 @@ async function getApiBase(page: Page): Promise<string> {
 async function getCookies(page: Page): Promise<{ cookieHeader: string; csrf: string }> {
   const cookies = await page.context().cookies()
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ')
-  const csrf = cookies.find((c) => c.name.startsWith('cubebox_csrf'))?.value ?? ''
+  const csrf = cookies.find((c) => c.name.startsWith('cubeplex_csrf'))?.value ?? ''
   return { cookieHeader, csrf }
 }
 

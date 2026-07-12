@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.services.sandbox_policy import (
+from cubeplex.services.sandbox_policy import (
     EffectivePolicy,
     SandboxPolicyResolver,
     SandboxPolicyService,

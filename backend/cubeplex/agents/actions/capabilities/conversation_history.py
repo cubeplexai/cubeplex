@@ -1,0 +1,185 @@
+"""Read-only, scope-aware tools for searching and inspecting conversations."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionNotFound, AgentCapability, AgentOperation
+from cubeplex.models import Conversation
+from cubeplex.repositories import ConversationRepository
+from cubeplex.services.conversation_search.embedding import EmbeddingProvider
+from cubeplex.services.conversation_search.history import format_history_turns, format_tool_result
+from cubeplex.services.conversation_search.lexical import LexicalSearchBackend
+from cubeplex.services.conversation_search.service import ConversationSearchService
+from cubeplex.services.history_window import load_history_window
+
+
+@dataclass(frozen=True)
+class ConversationHistoryDeps:
+    provider: EmbeddingProvider | None
+    lexical_backend: LexicalSearchBackend | None
+
+
+class SearchInput(BaseModel):
+    q: str = Field(min_length=1, max_length=255)
+    n: int = Field(default=8, ge=1, le=20)
+
+
+class ReadInput(BaseModel):
+    conversation_id: str
+    n: int = Field(default=5, ge=1, le=20)
+    max_tokens: int = Field(default=4_000, ge=256, le=12_000)
+    before_seq: int | None = Field(default=None, ge=1)
+
+
+class ToolResultInput(BaseModel):
+    conversation_id: str
+    tool_call_id: str
+    max_tokens: int = Field(default=2_000, ge=256, le=12_000)
+
+
+async def _visible_conversation(
+    ctx: ScopeContext, session: AsyncSession, conversation_id: str
+) -> Conversation:
+    repo = ConversationRepository(
+        session, org_id=ctx.org_id, workspace_id=ctx.workspace_id, user_id=ctx.user_id
+    )
+    conversation = await repo.get_by_id(conversation_id)
+    if conversation is None:
+        raise ActionNotFound("conversation not found")
+    return conversation
+
+
+async def _checkpoint_messages_for_read(
+    session: AsyncSession, conversation_id: str, *, n: int, before_seq: int | None
+) -> tuple[list[dict[str, Any]], bool]:
+    """Load enough backwards-paged messages to form ``n`` complete recent turns."""
+    cursor = before_seq
+    messages: list[dict[str, Any]] = []
+    while True:
+        window = await load_history_window(session, conversation_id, before_seq=cursor, limit=200)
+        if not window.messages:
+            return messages, False
+        messages = [*window.messages, *messages]
+        if sum(message.get("role") == "user" for message in messages) > n:
+            return messages, window.has_more
+        if not window.has_more or window.oldest_seq is None:
+            return messages, False
+        cursor = window.oldest_seq
+
+
+async def _find_tool_result(
+    session: AsyncSession, conversation_id: str, *, tool_call_id: str, max_tokens: int
+) -> Any:
+    """Search every authorized history page, stopping as soon as the result is found."""
+    before_seq: int | None = None
+    while True:
+        window = await load_history_window(
+            session, conversation_id, before_seq=before_seq, limit=200
+        )
+        result = format_tool_result(
+            window.messages, tool_call_id=tool_call_id, max_tokens=max_tokens
+        )
+        if result is not None:
+            return result
+        if not window.has_more or window.oldest_seq is None:
+            return None
+        before_seq = window.oldest_seq
+
+
+def build_conversation_history_capability(deps: ConversationHistoryDeps) -> AgentCapability:
+    """Build handlers that close over the app's search dependencies."""
+
+    async def search(ctx: ScopeContext, session: AsyncSession, inp: SearchInput) -> dict[str, Any]:
+        service = ConversationSearchService(
+            session, deps.provider, lexical_backend=deps.lexical_backend
+        )
+        response = await service.search(
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user_id,
+            q=inp.q,
+            limit=inp.n,
+        )
+        results: list[dict[str, Any]] = []
+        for result in response.results:
+            results.append(
+                {
+                    "conversation_id": result.conversation_id,
+                    "title": result.title,
+                    "snippet": result.snippet,
+                    "match_offsets": result.match_offsets,
+                    "matched_message_seq": result.matched_message_seq,
+                    "matched_at": result.matched_at,
+                    "score": result.score,
+                }
+            )
+        return {"results": results}
+
+    async def read(ctx: ScopeContext, session: AsyncSession, inp: ReadInput) -> dict[str, Any]:
+        await _visible_conversation(ctx, session, inp.conversation_id)
+        messages, has_older_messages = await _checkpoint_messages_for_read(
+            session, inp.conversation_id, n=inp.n, before_seq=inp.before_seq
+        )
+        page = format_history_turns(
+            messages,
+            n=inp.n,
+            max_tokens=inp.max_tokens,
+            before_seq=inp.before_seq,
+            has_older_messages=has_older_messages,
+        )
+        return {
+            "turns": page.turns,
+            "has_more": page.has_more,
+            "next_before_seq": page.next_before_seq,
+            "estimated_tokens": page.estimated_tokens,
+            "truncated": page.truncated,
+        }
+
+    async def tool_result(
+        ctx: ScopeContext, session: AsyncSession, inp: ToolResultInput
+    ) -> dict[str, Any]:
+        await _visible_conversation(ctx, session, inp.conversation_id)
+        result = await _find_tool_result(
+            session,
+            inp.conversation_id,
+            tool_call_id=inp.tool_call_id,
+            max_tokens=inp.max_tokens,
+        )
+        if result is None:
+            raise ActionNotFound("tool result not found")
+        return {
+            "tool_call_id": result.tool_call_id,
+            "tool_name": result.tool_name,
+            "content": result.content,
+            "is_error": result.is_error,
+            "estimated_tokens": result.estimated_tokens,
+            "truncated": result.truncated,
+        }
+
+    return AgentCapability(
+        name="conversation_history",
+        description="Search and read conversations you can access, including specific tool results.",
+        operations=[
+            AgentOperation(
+                "search", "Search accessible conversation context.", SearchInput, search
+            ),
+            AgentOperation(
+                "read",
+                "Read formatted conversation turns without tool result bodies.",
+                ReadInput,
+                read,
+            ),
+            AgentOperation(
+                "tool_result",
+                "Read one full tool result from an accessible conversation.",
+                ToolResultInput,
+                tool_result,
+            ),
+        ],
+    )

@@ -8,7 +8,7 @@ normalised so the path is filesystem-safe and the agent gets it verbatim.
 
 from __future__ import annotations
 
-from cubebox.skills.sandbox_paths import safe_skill_name, sandbox_skill_dir
+from cubeplex.skills.sandbox_paths import safe_skill_name, sandbox_skill_dir
 
 
 def test_plain_name_unchanged() -> None:

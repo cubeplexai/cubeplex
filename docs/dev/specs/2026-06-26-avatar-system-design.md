@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-26
 **Status:** Approved design (pre-implementation)
-**Worktree:** `feat/2026-06-26-avatar-system` (ports 8070/3070, DB `cubebox_feat_2026_06_26_avatar_system`)
+**Worktree:** `feat/2026-06-26-avatar-system` (ports 8070/3070, DB `cubeplex_feat_2026_06_26_avatar_system`)
 **Delivery:** single PR.
 
 ---
@@ -173,7 +173,7 @@ the participant serializers so every render site can resolve the chain:
 
 ## Frontend — unified component
 
-New shared component (in `@cubebox/core` or `packages/web` per existing shared-component
+New shared component (in `@cubeplex/core` or `packages/web` per existing shared-component
 convention):
 
 - `<Avatar kind seed name src? style? size />` — runs the resolution chain. `src` (real image)

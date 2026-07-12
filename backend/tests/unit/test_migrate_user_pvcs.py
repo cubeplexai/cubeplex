@@ -7,15 +7,15 @@ skip-already-migrated). No cluster I/O.
 
 from unittest.mock import MagicMock
 
-from cubebox.sandbox.manager import (
+from cubeplex.sandbox.manager import (
     SandboxManager,
     build_legacy_user_pvc_name,
     build_user_pvc_name,
 )
-from cubebox.scripts.dev import migrate_user_pvcs
-from cubebox.scripts.dev.migrate_user_pvcs import build_migration_plan, main_async
+from cubeplex.scripts.dev import migrate_user_pvcs
+from cubeplex.scripts.dev.migrate_user_pvcs import build_migration_plan, main_async
 
-_PREFIX = "cubebox-user"
+_PREFIX = "cubeplex-user"
 
 
 def test_user_with_one_workspace_gets_a_rename_action() -> None:

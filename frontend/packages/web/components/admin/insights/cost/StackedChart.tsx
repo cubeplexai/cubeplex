@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import type { TimeseriesResponse } from '@cubebox/core'
+import type { TimeseriesResponse } from '@cubeplex/core'
 
 interface Props {
   data: TimeseriesResponse

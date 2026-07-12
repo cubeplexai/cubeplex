@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-24
 **Status:** Approved
-**Scope:** Web frontend for cubebox AI agent product
+**Scope:** Web frontend for cubeplex AI agent product
 
 ---
 
@@ -28,7 +28,7 @@ A Perplexity Computer-style agent product frontend. The core experience is a **h
 ## Repository Structure
 
 ```
-cubebox/
+cubeplex/
 ├── frontend/
 │   ├── packages/
 │   │   ├── core/                    # Pure TS, zero framework dependencies
@@ -42,7 +42,7 @@ cubebox/
 │   │   │   │       ├── conversation.ts
 │   │   │   │       ├── message.ts
 │   │   │   │       └── events.ts    # AgentEvent types
-│   │   │   ├── package.json         # name: @cubebox/core
+│   │   │   ├── package.json         # name: @cubeplex/core
 │   │   │   └── tsconfig.json
 │   │   └── web/                     # Next.js App Router
 │   │       ├── app/
@@ -67,7 +67,7 @@ cubebox/
 │   │       │   └── useMessages.ts
 │   │       ├── lib/
 │   │       │   └── theme.tsx        # ThemeStore + ThemeToggle (web-only)
-│   │       ├── package.json         # name: @cubebox/web
+│   │       ├── package.json         # name: @cubeplex/web
 │   │       └── next.config.ts       # API proxy rewrites + env vars
 │   ├── package.json                 # pnpm workspace root
 │   └── pnpm-workspace.yaml
@@ -217,7 +217,7 @@ Shown when no conversation is active. Centered layout:
 ```
 ┌─────────────────────────────────────────────┐
 │  [Sidebar]  │                               │
-│             │         cubebox               │
+│             │         cubeplex               │
 │             │    ┌─────────────────────┐    │
 │             │    │  有什么可以帮你的？    │    │
 │             │    └─────────────────────┘    │
@@ -311,14 +311,14 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
+        destination: `${process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
       },
     ]
   },
 }
 ```
 
-`CUBEBOX_API_URL` defaults to `http://localhost:8000`. In production, set via environment variable.
+`CUBEPLEX_API_URL` defaults to `http://localhost:8000`. In production, set via environment variable.
 
 The web package initializes `core` with `baseUrl = ''` (empty string), so all API calls use the Next.js proxy. Non-web platforms inject their own `baseUrl` directly.
 
@@ -415,7 +415,7 @@ Out of scope (post-MVP):
 `packages/core` contains all business logic. When building the WeChat mini-program:
 
 1. Add `packages/miniapp/` to the workspace
-2. Reference `@cubebox/core` via `workspace:*`
+2. Reference `@cubeplex/core` via `workspace:*`
 3. Implement UI layer using mini-program components
 4. Reuse all stores and API clients — inject mini-program's `baseUrl` and verify Zustand compatibility
 

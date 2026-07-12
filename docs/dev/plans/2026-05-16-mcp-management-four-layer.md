@@ -23,7 +23,7 @@
 - Existing local MCP data can be dropped by migration. The product has no released
   external contract.
 - Keep the credential vault table; grant rows point to vault credential ids.
-- Keep `backend/cubebox/models/mcp.py` as the MCP model module, but replace the model
+- Keep `backend/cubeplex/models/mcp.py` as the MCP model module, but replace the model
   classes inside it with the four final MCP-prefixed nouns.
 
 **Plan granularity:**
@@ -43,9 +43,9 @@ satisfy; they are not boilerplate to be pasted verbatim.
 
 - `backend/alembic/versions/<autogen-hash>_normalize_mcp_four_layer_tables.py`
   (produced by `alembic revision --autogenerate`; do not hard-code the hash)
-- `backend/cubebox/mcp/effective.py`
-- `backend/cubebox/services/mcp_templates.py`
-- `backend/cubebox/services/mcp_installs.py`
+- `backend/cubeplex/mcp/effective.py`
+- `backend/cubeplex/services/mcp_templates.py`
+- `backend/cubeplex/services/mcp_installs.py`
 - `backend/tests/unit/test_mcp_effective_state.py`
 - `backend/tests/unit/test_mcp_effective_service.py`
 - `backend/tests/e2e/test_mcp_four_layer_routes.py`
@@ -53,31 +53,31 @@ satisfy; they are not boilerplate to be pasted verbatim.
 
 **Backend — modify:**
 
-- `backend/cubebox/models/mcp.py` — final four model classes.
-- `backend/cubebox/repositories/mcp.py` — final four repositories.
-- Rename `backend/cubebox/mcp/catalog_seed.py` to
-  `backend/cubebox/mcp/template_seed.py`.
-- Rename `backend/cubebox/seeders/mcp_catalog_seeder.py` to
-  `backend/cubebox/seeders/mcp_template_seeder.py`.
-- Rename `backend/cubebox/cli/seed_mcp_catalog.py` to
-  `backend/cubebox/cli/seed_mcp_templates.py`.
-- `backend/cubebox/mcp/dependencies.py` — new template/install/effective providers.
-- `backend/cubebox/api/schemas/mcp.py` — template/install/state/grant schemas.
-- `backend/cubebox/api/routes/v1/admin_mcp.py` — admin template/install/grant routes
+- `backend/cubeplex/models/mcp.py` — final four model classes.
+- `backend/cubeplex/repositories/mcp.py` — final four repositories.
+- Rename `backend/cubeplex/mcp/catalog_seed.py` to
+  `backend/cubeplex/mcp/template_seed.py`.
+- Rename `backend/cubeplex/seeders/mcp_catalog_seeder.py` to
+  `backend/cubeplex/seeders/mcp_template_seeder.py`.
+- Rename `backend/cubeplex/cli/seed_mcp_catalog.py` to
+  `backend/cubeplex/cli/seed_mcp_templates.py`.
+- `backend/cubeplex/mcp/dependencies.py` — new template/install/effective providers.
+- `backend/cubeplex/api/schemas/mcp.py` — template/install/state/grant schemas.
+- `backend/cubeplex/api/routes/v1/admin_mcp.py` — admin template/install/grant routes
   (and the public `GET /api/v1/mcp/templates` route, mounted unscoped).
-- `backend/cubebox/api/routes/v1/ws_mcp.py` — workspace template/install/state/grant routes.
-- `backend/cubebox/api/routes/v1/mcp_oauth.py` — align start/callback to new grant table
+- `backend/cubeplex/api/routes/v1/ws_mcp.py` — workspace template/install/state/grant routes.
+- `backend/cubeplex/api/routes/v1/mcp_oauth.py` — align start/callback to new grant table
   + new oauth/start paths.
-- `backend/cubebox/api/app.py` — stop mounting old catalog router.
-- `backend/cubebox/mcp/cubepi_discovery.py` — use effective runtime specs.
-- `backend/cubebox/mcp/cubepi_runtime.py` — load only usable effective connectors.
-- `backend/cubebox/streams/run_manager.py` — pass OAuth token manager to runtime.
+- `backend/cubeplex/api/app.py` — stop mounting old catalog router.
+- `backend/cubeplex/mcp/cubepi_discovery.py` — use effective runtime specs.
+- `backend/cubeplex/mcp/cubepi_runtime.py` — load only usable effective connectors.
+- `backend/cubeplex/streams/run_manager.py` — pass OAuth token manager to runtime.
 
 **Backend — delete:**
 
-- `backend/cubebox/api/routes/v1/mcp_catalog.py`
-- `backend/cubebox/repositories/mcp_catalog.py`
-- `backend/cubebox/services/mcp_catalog.py`
+- `backend/cubeplex/api/routes/v1/mcp_catalog.py`
+- `backend/cubeplex/repositories/mcp_catalog.py`
+- `backend/cubeplex/services/mcp_catalog.py`
 
 **Frontend — create or rename:**
 
@@ -109,7 +109,7 @@ satisfy; they are not boilerplate to be pasted verbatim.
 
 - Create: `backend/alembic/versions/<autogen-hash>_normalize_mcp_four_layer_tables.py`
   (via `alembic revision --autogenerate`)
-- Modify: `backend/cubebox/models/mcp.py`
+- Modify: `backend/cubeplex/models/mcp.py`
 - Modify: `backend/tests/unit/test_mcp_models.py`
 
 - [ ] **Step 1: Write model tests for final prefixed table names**
@@ -118,7 +118,7 @@ Append to `backend/tests/unit/test_mcp_models.py`:
 
 ```python
 def test_mcp_four_layer_table_names() -> None:
-    from cubebox.models import (
+    from cubeplex.models import (
         MCPConnectorInstall,
         MCPConnectorTemplate,
         MCPCredentialGrant,
@@ -136,7 +136,7 @@ def test_mcp_four_layer_table_names() -> None:
 
 
 def test_no_auth_install_defaults_to_none_policy() -> None:
-    from cubebox.models import MCPConnectorInstall
+    from cubeplex.models import MCPConnectorInstall
 
     row = MCPConnectorInstall(
         org_id="org-1",
@@ -170,8 +170,8 @@ Expected: FAIL because the four final model classes are not exported.
 
 - [ ] **Step 3: Replace MCP model classes**
 
-Rewrite `backend/cubebox/models/mcp.py` with four SQLModel `table=True` classes.
-Follow existing conventions (`CubeboxBase`, `_PREFIX`, `Field(foreign_key=...)`,
+Rewrite `backend/cubeplex/models/mcp.py` with four SQLModel `table=True` classes.
+Follow existing conventions (`CubeplexBase`, `_PREFIX`, `Field(foreign_key=...)`,
 JSON columns via `sa_column=Column(JSON, ...)`). Do **not** inherit `OrgScopedMixin`
 on any of these — installs/grants have nullable `workspace_id` and grants have
 nullable `user_id`, which `OrgScopedMixin`'s NOT NULL contract forbids. Each model
@@ -272,7 +272,7 @@ Required shape per model:
   it costs nothing and turns a programming bug into a DB error before the
   partial unique index sees it.
 
-Update `backend/cubebox/models/__init__.py` to export the four classes and remove
+Update `backend/cubeplex/models/__init__.py` to export the four classes and remove
 old MCP model exports.
 
 - [ ] **Step 4: Generate the migration via Alembic autogenerate, then patch what autogen can't see**
@@ -341,8 +341,8 @@ Expected: migration succeeds and tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/models/mcp.py \
-        backend/cubebox/models/__init__.py \
+git add backend/cubeplex/models/mcp.py \
+        backend/cubeplex/models/__init__.py \
         backend/alembic/versions/*_normalize_mcp_four_layer_tables.py \
         backend/tests/unit/test_mcp_models.py
 git commit -m "feat(mcp): add four-layer connector schema"
@@ -354,14 +354,14 @@ git commit -m "feat(mcp): add four-layer connector schema"
 
 **Files:**
 
-- Modify: `backend/cubebox/repositories/mcp.py`
-- Create: `backend/cubebox/services/mcp_templates.py`
-- Rename: `backend/cubebox/mcp/catalog_seed.py` to
-  `backend/cubebox/mcp/template_seed.py`
-- Rename: `backend/cubebox/seeders/mcp_catalog_seeder.py` to
-  `backend/cubebox/seeders/mcp_template_seeder.py`
-- Rename: `backend/cubebox/cli/seed_mcp_catalog.py` to
-  `backend/cubebox/cli/seed_mcp_templates.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
+- Create: `backend/cubeplex/services/mcp_templates.py`
+- Rename: `backend/cubeplex/mcp/catalog_seed.py` to
+  `backend/cubeplex/mcp/template_seed.py`
+- Rename: `backend/cubeplex/seeders/mcp_catalog_seeder.py` to
+  `backend/cubeplex/seeders/mcp_template_seeder.py`
+- Rename: `backend/cubeplex/cli/seed_mcp_catalog.py` to
+  `backend/cubeplex/cli/seed_mcp_templates.py`
 - Modify: `backend/tests/unit/test_catalog_seed.py`
 - Modify: `backend/tests/unit/test_mcp_repositories.py`
 
@@ -371,7 +371,7 @@ Append to `backend/tests/unit/test_mcp_repositories.py`:
 
 ```python
 async def test_connector_template_repository_upserts_by_slug(session: AsyncSession) -> None:
-    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+    from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
     repo = MCPConnectorTemplateRepository(session)
     row = await repo.upsert_by_slug(
@@ -392,8 +392,8 @@ async def test_connector_template_repository_upserts_by_slug(session: AsyncSessi
 async def test_credential_grant_repository_scopes_user_grants(
     session: AsyncSession,
 ) -> None:
-    from cubebox.models import MCPCredentialGrant
-    from cubebox.repositories.mcp import MCPCredentialGrantRepository
+    from cubeplex.models import MCPCredentialGrant
+    from cubeplex.repositories.mcp import MCPCredentialGrantRepository
 
     repo = MCPCredentialGrantRepository(session, org_id="org-1")
     await repo.add(
@@ -425,7 +425,7 @@ Expected: FAIL because the final repositories do not exist.
 
 - [ ] **Step 3: Replace repository classes**
 
-Edit `backend/cubebox/repositories/mcp.py` so it exports these concrete methods:
+Edit `backend/cubeplex/repositories/mcp.py` so it exports these concrete methods:
 
 - `MCPConnectorTemplateRepository.get(template_id: str) -> MCPConnectorTemplate | None`
 - `MCPConnectorTemplateRepository.get_by_slug(slug: str) -> MCPConnectorTemplate | None`
@@ -456,7 +456,7 @@ Edit `backend/cubebox/repositories/mcp.py` so it exports these concrete methods:
   workspace_id: str | None, user_id: str | None) -> None`
 
 **Repository scoping note.** The existing `ScopedRepository[T]` (in
-`backend/cubebox/repositories/base.py`) requires `OrgScopedMixin`, which the new MCP
+`backend/cubeplex/repositories/base.py`) requires `OrgScopedMixin`, which the new MCP
 models cannot use (installs/grants have nullable `workspace_id`; templates have no
 `org_id` at all). Introduce a *new* lightweight org-only base instead — every
 non-template repo takes `org_id` in `__init__`, every query filters by `org_id`,
@@ -466,13 +466,13 @@ docstring so future engineers don't try to inherit it.
 
 - [ ] **Step 4: Create template service**
 
-Create `backend/cubebox/services/mcp_templates.py`:
+Create `backend/cubeplex/services/mcp_templates.py`:
 
 ```python
 """Connector template service."""
 
-from cubebox.models import MCPConnectorTemplate
-from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+from cubeplex.models import MCPConnectorTemplate
+from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
 
 class MCPConnectorTemplateService:
@@ -494,13 +494,13 @@ class MCPConnectorTemplateService:
 Run:
 
 ```bash
-git mv backend/cubebox/mcp/catalog_seed.py backend/cubebox/mcp/template_seed.py
-git mv backend/cubebox/seeders/mcp_catalog_seeder.py \
-       backend/cubebox/seeders/mcp_template_seeder.py
-git mv backend/cubebox/cli/seed_mcp_catalog.py backend/cubebox/cli/seed_mcp_templates.py
+git mv backend/cubeplex/mcp/catalog_seed.py backend/cubeplex/mcp/template_seed.py
+git mv backend/cubeplex/seeders/mcp_catalog_seeder.py \
+       backend/cubeplex/seeders/mcp_template_seeder.py
+git mv backend/cubeplex/cli/seed_mcp_catalog.py backend/cubeplex/cli/seed_mcp_templates.py
 ```
 
-In `backend/cubebox/mcp/template_seed.py`, rename `CatalogSeedEntry` to
+In `backend/cubeplex/mcp/template_seed.py`, rename `CatalogSeedEntry` to
 `MCPConnectorTemplateSeedEntry`. Rename fields:
 
 ```python
@@ -510,8 +510,8 @@ cred_metadata -> template_metadata
 tool_citations -> tool_citation_defaults
 ```
 
-Update `backend/cubebox/seeders/mcp_template_seeder.py` and
-`backend/cubebox/cli/seed_mcp_templates.py` to call `MCPConnectorTemplateRepository`.
+Update `backend/cubeplex/seeders/mcp_template_seeder.py` and
+`backend/cubeplex/cli/seed_mcp_templates.py` to call `MCPConnectorTemplateRepository`.
 
 - [ ] **Step 6: Run repository and seed tests**
 
@@ -529,17 +529,17 @@ Expected: all tests pass.
 Run:
 
 ```bash
-git rm backend/cubebox/repositories/mcp_catalog.py backend/cubebox/services/mcp_catalog.py
+git rm backend/cubeplex/repositories/mcp_catalog.py backend/cubeplex/services/mcp_catalog.py
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/repositories/mcp.py \
-        backend/cubebox/services/mcp_templates.py \
-        backend/cubebox/mcp/template_seed.py \
-        backend/cubebox/seeders/mcp_template_seeder.py \
-        backend/cubebox/cli/seed_mcp_templates.py \
+git add backend/cubeplex/repositories/mcp.py \
+        backend/cubeplex/services/mcp_templates.py \
+        backend/cubeplex/mcp/template_seed.py \
+        backend/cubeplex/seeders/mcp_template_seeder.py \
+        backend/cubeplex/cli/seed_mcp_templates.py \
         backend/tests/unit/test_catalog_seed.py \
         backend/tests/unit/test_mcp_repositories.py
 git commit -m "feat(mcp): replace catalog repositories with connector templates"
@@ -551,8 +551,8 @@ git commit -m "feat(mcp): replace catalog repositories with connector templates"
 
 **Files:**
 
-- Create: `backend/cubebox/services/mcp_installs.py`
-- Modify: `backend/cubebox/mcp/dependencies.py`
+- Create: `backend/cubeplex/services/mcp_installs.py`
+- Modify: `backend/cubeplex/mcp/dependencies.py`
 - Modify: `backend/tests/unit/test_mcp_service_invariants.py`
 - Create: `backend/tests/e2e/test_mcp_four_layer_routes.py`
 
@@ -562,7 +562,7 @@ Append to `backend/tests/unit/test_mcp_service_invariants.py`:
 
 ```python
 def test_auth_method_none_resolves_not_required_defaults() -> None:
-    from cubebox.services.mcp_installs import install_defaults_for_auth_method
+    from cubeplex.services.mcp_installs import install_defaults_for_auth_method
 
     defaults = install_defaults_for_auth_method("none", "user")
 
@@ -571,7 +571,7 @@ def test_auth_method_none_resolves_not_required_defaults() -> None:
 
 
 def test_static_auth_uses_requested_policy() -> None:
-    from cubebox.services.mcp_installs import install_defaults_for_auth_method
+    from cubeplex.services.mcp_installs import install_defaults_for_auth_method
 
     defaults = install_defaults_for_auth_method("static", "workspace")
 
@@ -589,11 +589,11 @@ uv run pytest -q tests/unit/test_mcp_service_invariants.py::test_auth_method_non
                  tests/unit/test_mcp_service_invariants.py::test_static_auth_uses_requested_policy
 ```
 
-Expected: FAIL because `cubebox.services.mcp_installs` does not exist.
+Expected: FAIL because `cubeplex.services.mcp_installs` does not exist.
 
 - [ ] **Step 3: Create install service primitives**
 
-Create `backend/cubebox/services/mcp_installs.py`. The module exposes:
+Create `backend/cubeplex/services/mcp_installs.py`. The module exposes:
 
 - A frozen dataclass `MCPInstallDefaults(auth_status: str, credential_policy: str)`.
 - A pure function `install_defaults_for_auth_method(auth_method, requested_policy)
@@ -606,7 +606,7 @@ Create `backend/cubebox/services/mcp_installs.py`. The module exposes:
   - `create_from_template_for_workspace(*, template, workspace_id, auth_method,
     credential_policy)` — writes one install with `install_scope="workspace"`,
     copies `tool_citation_defaults → tool_citations`, hashes the server URL
-    (reuse `cubebox.mcp._constants.server_url_hash`), then upserts a
+    (reuse `cubeplex.mcp._constants.server_url_hash`), then upserts a
     `WorkspaceConnectorState(enabled=True, enablement_source="workspace_manual")`
     in the same transaction (atomically — failure rolls both back).
   - `create_from_template_for_org(*, template, auth_method, credential_policy,
@@ -640,7 +640,7 @@ not just an absence of code.
 
 - [ ] **Step 4: Add dependency providers**
 
-In `backend/cubebox/mcp/dependencies.py`, add the FastAPI dependency providers
+In `backend/cubeplex/mcp/dependencies.py`, add the FastAPI dependency providers
 needed for the workspace and admin route surfaces. The split is necessary
 because admin routes are org-scoped (no `workspace_id` in the path) and use
 `get_admin_request_context` / `require_org_admin`; workspace routes use
@@ -679,8 +679,8 @@ Expected: all tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp_installs.py \
-        backend/cubebox/mcp/dependencies.py \
+git add backend/cubeplex/services/mcp_installs.py \
+        backend/cubeplex/mcp/dependencies.py \
         backend/tests/unit/test_mcp_service_invariants.py
 git commit -m "feat(mcp): add install state and grant services"
 ```
@@ -691,12 +691,12 @@ git commit -m "feat(mcp): add install state and grant services"
 
 **Files:**
 
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/mcp_oauth.py`
-- Modify: `backend/cubebox/api/app.py`
-- Delete: `backend/cubebox/api/routes/v1/mcp_catalog.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/mcp_oauth.py`
+- Modify: `backend/cubeplex/api/app.py`
+- Delete: `backend/cubeplex/api/routes/v1/mcp_catalog.py`
 - Modify: `backend/tests/unit/test_admin_mcp_routes.py`
 - Modify: `backend/tests/unit/test_ws_mcp_routes.py`
 - Modify: `backend/tests/e2e/test_mcp_four_layer_routes.py`
@@ -764,7 +764,7 @@ Expected: FAIL because current routes still expose old MCP paths.
 
 - [ ] **Step 3: Replace MCP schemas**
 
-Rewrite `backend/cubebox/api/schemas/mcp.py` using final nouns. Use
+Rewrite `backend/cubeplex/api/schemas/mcp.py` using final nouns. Use
 `Literal["org","workspace","user","none"]` for credential policies,
 `Literal["oauth","static","none"]` for auth methods. The contracts (one Pydantic
 model per item; subagent decides field order, base class, etc.):
@@ -820,7 +820,7 @@ Request schemas should also exist for:
 
 - [ ] **Step 4: Replace admin routes**
 
-Rewrite `backend/cubebox/api/routes/v1/admin_mcp.py` to expose the admin contract
+Rewrite `backend/cubeplex/api/routes/v1/admin_mcp.py` to expose the admin contract
 from Step 1 (template list, install CRUD, grant POST/DELETE, oauth/start). Each
 handler delegates to `MCPConnectorInstallService` / `MCPConnectorTemplateService`;
 no DB queries inline.
@@ -847,7 +847,7 @@ Remove server/override/catalog handlers from this module.
 
 - [ ] **Step 5: Replace workspace routes**
 
-Rewrite `backend/cubebox/api/routes/v1/ws_mcp.py` to expose the workspace contract
+Rewrite `backend/cubeplex/api/routes/v1/ws_mcp.py` to expose the workspace contract
 from Step 1. Authorization rules from spec §User Roles And Permissions:
 
 - All routes require workspace membership (`require_member`).
@@ -867,13 +867,13 @@ Remove old server/catalog/org-install override handlers from this module.
 
 - [ ] **Step 6: Remove old route module from app**
 
-Edit `backend/cubebox/api/app.py` and remove the import/mount for
-`cubebox.api.routes.v1.mcp_catalog`.
+Edit `backend/cubeplex/api/app.py` and remove the import/mount for
+`cubeplex.api.routes.v1.mcp_catalog`.
 
 Run:
 
 ```bash
-git rm backend/cubebox/api/routes/v1/mcp_catalog.py
+git rm backend/cubeplex/api/routes/v1/mcp_catalog.py
 ```
 
 - [ ] **Step 7: Run route tests**
@@ -890,11 +890,11 @@ Expected: all tests pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/mcp.py \
-        backend/cubebox/api/routes/v1/admin_mcp.py \
-        backend/cubebox/api/routes/v1/ws_mcp.py \
-        backend/cubebox/api/routes/v1/mcp_oauth.py \
-        backend/cubebox/api/app.py \
+git add backend/cubeplex/api/schemas/mcp.py \
+        backend/cubeplex/api/routes/v1/admin_mcp.py \
+        backend/cubeplex/api/routes/v1/ws_mcp.py \
+        backend/cubeplex/api/routes/v1/mcp_oauth.py \
+        backend/cubeplex/api/app.py \
         backend/tests/unit/test_admin_mcp_routes.py \
         backend/tests/unit/test_ws_mcp_routes.py
 git commit -m "feat(mcp): replace catalog routes with four-layer API"
@@ -906,10 +906,10 @@ git commit -m "feat(mcp): replace catalog routes with four-layer API"
 
 **Files:**
 
-- Create: `backend/cubebox/mcp/effective.py`
-- Modify: `backend/cubebox/mcp/cubepi_discovery.py`
-- Modify: `backend/cubebox/mcp/cubepi_runtime.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Create: `backend/cubeplex/mcp/effective.py`
+- Modify: `backend/cubeplex/mcp/cubepi_discovery.py`
+- Modify: `backend/cubeplex/mcp/cubepi_runtime.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Create: `backend/tests/unit/test_mcp_effective_state.py`
 - Create: `backend/tests/unit/test_mcp_effective_service.py`
 - Modify: `backend/tests/unit/test_mcp_cubepi_runtime.py`
@@ -945,7 +945,7 @@ grant is missing — runtime/UI consumers branch on this string.
 
 - [ ] **Step 2: Implement pure effective-state model**
 
-Create `backend/cubebox/mcp/effective.py`. The module exports:
+Create `backend/cubeplex/mcp/effective.py`. The module exports:
 
 - `CredentialPolicy = Literal["org","workspace","user","none"]`.
 - `MCPEffectiveReason` — a `Literal` covering every spec reason
@@ -1013,7 +1013,7 @@ authorized.
 
 - [ ] **Step 3: Add DB-backed effective service**
 
-Extend `backend/cubebox/mcp/effective.py` with `MCPEffectiveConnectorService`. This
+Extend `backend/cubeplex/mcp/effective.py` with `MCPEffectiveConnectorService`. This
 is the **only** place in the codebase that joins template + install + workspace state
 + grant to decide runtime usability. Two public methods:
 
@@ -1060,7 +1060,7 @@ Performance: one round-trip per layer (templates, installs, states, grants) usin
 
 - [ ] **Step 4: Wire credential resolution in the runtime loader**
 
-`backend/cubebox/mcp/cubepi_runtime.py::load_workspace_mcp_tools_for_cubepi` should
+`backend/cubeplex/mcp/cubepi_runtime.py::load_workspace_mcp_tools_for_cubepi` should
 take `effective_service: MCPEffectiveConnectorService` and a non-optional
 `token_manager: OAuthTokenManager`. For each `MCPRuntimeConnectorSpec` from
 `list_runtime_specs(...)`, resolve the connection credential by `auth_method`:
@@ -1069,8 +1069,8 @@ take `effective_service: MCPEffectiveConnectorService` and a non-optional
   user_id)`; the token manager handles refresh + persistence already.
 - `static` → fetch the vault row by `spec.credential_id` via `CredentialService`,
   decrypt, inject into the configured header template.
-- `none` → mint a short-lived cubebox identity token via the existing
-  `cubebox.mcp.user_token` helper (the same one `mcp_oauth` already uses for
+- `none` → mint a short-lived cubeplex identity token via the existing
+  `cubeplex.mcp.user_token` helper (the same one `mcp_oauth` already uses for
   identity flow); do **not** look for a grant.
 
 Discovery/refresh failures should not crash the loader — log + skip + continue,
@@ -1078,11 +1078,11 @@ matching the current behavior.
 
 - [ ] **Step 5: Wire run manager**
 
-In `backend/cubebox/streams/run_manager.py`, inside the per-run MCP tools block:
+In `backend/cubeplex/streams/run_manager.py`, inside the per-run MCP tools block:
 
 - Build `MCPEffectiveConnectorService` for the current `(org_id, workspace_id, user_id)`.
 - Build `OAuthTokenManager` via the existing
-  `cubebox.mcp.dependencies._build_token_manager_for_org` helper (confirmed to
+  `cubeplex.mcp.dependencies._build_token_manager_for_org` helper (confirmed to
   exist; if private, expose a thin wrapper rather than reaching into the
   underscore name).
 - Pass both into `load_workspace_mcp_tools_for_cubepi`.
@@ -1105,10 +1105,10 @@ Expected: all tests pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/mcp/effective.py \
-        backend/cubebox/mcp/cubepi_discovery.py \
-        backend/cubebox/mcp/cubepi_runtime.py \
-        backend/cubebox/streams/run_manager.py \
+git add backend/cubeplex/mcp/effective.py \
+        backend/cubeplex/mcp/cubepi_discovery.py \
+        backend/cubeplex/mcp/cubepi_runtime.py \
+        backend/cubeplex/streams/run_manager.py \
         backend/tests/unit/test_mcp_effective_state.py \
         backend/tests/unit/test_mcp_effective_service.py \
         backend/tests/unit/test_mcp_cubepi_runtime.py
@@ -1398,8 +1398,8 @@ Run:
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core test -- mcp.test.ts
-pnpm --filter @cubebox/core type-check
+pnpm --filter @cubeplex/core test -- mcp.test.ts
+pnpm --filter @cubeplex/core type-check
 ```
 
 Expected: both commands pass.
@@ -1488,7 +1488,7 @@ In the same edit, **remove every key whose path starts with `mcpCatalog.*` or
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/web i18n:check  # or whatever the parity script is named
+pnpm --filter @cubeplex/web i18n:check  # or whatever the parity script is named
 ```
 
 to confirm no orphan keys remain.
@@ -1520,8 +1520,8 @@ Run:
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/web type-check
-pnpm --filter @cubebox/web test:e2e -- mcp/ws-mcp.spec.ts mcp/admin-mcp.spec.ts
+pnpm --filter @cubeplex/web type-check
+pnpm --filter @cubeplex/web test:e2e -- mcp/ws-mcp.spec.ts mcp/admin-mcp.spec.ts
 ```
 
 Expected: typecheck passes and both MCP E2E specs pass.
@@ -1555,7 +1555,7 @@ Run:
 
 ```bash
 rg -n "Catalog|catalog|Override|override|mcp_catalog|workspace_mcp_overrides" \
-  backend/cubebox frontend/packages/core frontend/packages/web \
+  backend/cubeplex frontend/packages/core frontend/packages/web \
   -g '!**/.venv/**' -g '!**/node_modules/**'
 ```
 
@@ -1579,9 +1579,9 @@ Run:
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core type-check
-pnpm --filter @cubebox/web type-check
-pnpm --filter @cubebox/web test:e2e -- mcp/ws-mcp.spec.ts mcp/admin-mcp.spec.ts
+pnpm --filter @cubeplex/core type-check
+pnpm --filter @cubeplex/web type-check
+pnpm --filter @cubeplex/web test:e2e -- mcp/ws-mcp.spec.ts mcp/admin-mcp.spec.ts
 ```
 
 Expected: all commands pass.
@@ -1617,6 +1617,6 @@ git status --short
 If files changed during cleanup:
 
 ```bash
-git add backend/cubebox frontend/packages
+git add backend/cubeplex frontend/packages
 git commit -m "chore(mcp): remove old catalog and override surfaces"
 ```

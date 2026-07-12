@@ -2,7 +2,7 @@
 
 import { Pause, Pencil, Play, Trash2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import type { ScheduledTaskOut } from '@cubebox/core'
+import type { ScheduledTaskOut } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DetailPanel } from '@/components/shared/DetailPanel'

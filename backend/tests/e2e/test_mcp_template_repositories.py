@@ -19,8 +19,8 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import MCPConnector, MCPConnectorTemplate, Organization, User, Workspace
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import MCPConnector, MCPConnectorTemplate, Organization, User, Workspace
 
 pytestmark = pytest.mark.e2e
 
@@ -129,7 +129,7 @@ async def test_visibility_partition(
     db_maker: async_sessionmaker[AsyncSession],
 ) -> None:
     """list_visible_for_org and list_visible_for_workspace honour scope rules."""
-    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+    from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
     async with db_maker() as session:
         org_a = await _seed_org(session, "vis-a")
@@ -187,7 +187,7 @@ async def test_settings_upsert_and_disabled_ids(
     db_maker: async_sessionmaker[AsyncSession],
 ) -> None:
     """MCPTemplateSettingsRepository upserts idempotently; disabled_template_ids correct."""
-    from cubebox.repositories.mcp import MCPTemplateSettingsRepository
+    from cubeplex.repositories.mcp import MCPTemplateSettingsRepository
 
     async with db_maker() as session:
         org = await _seed_org(session, "settings")
@@ -228,7 +228,7 @@ async def test_lazy_connector_create_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_or_create_for_template is idempotent and the IntegrityError race branch is hit."""
-    from cubebox.repositories.mcp import MCPConnectorRepository
+    from cubeplex.repositories.mcp import MCPConnectorRepository
 
     async with db_maker() as session:
         org = await _seed_org(session, "lazy")
@@ -286,7 +286,7 @@ async def test_promote_to_org(
     db_maker: async_sessionmaker[AsyncSession],
 ) -> None:
     """promote_to_org transitions scope=workspace to scope=org, clears workspace_id."""
-    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+    from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
     async with db_maker() as session:
         org = await _seed_org(session, "promote")
@@ -328,7 +328,7 @@ async def test_create_scoped_toctou_raises_conflict(
     the INSERT fails because a concurrent writer already committed the same slug.
     The session must remain usable after the error.
     """
-    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+    from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
     async with db_maker() as session:
         org = await _seed_org(session, "toctou")

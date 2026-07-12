@@ -10,7 +10,7 @@ import {
   useSkillsStore,
   type SkillCandidateOut,
   type SkillPreviewResponse,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'

@@ -67,7 +67,7 @@ skip. Supermemory's prompt (from hermes-agent) explicitly states:
 > worth remembering. … When in doubt, store less."
 
 This single line changes the default decision from "save if unsure" to "skip if
-unsure." The cubebox prompt has no equivalent.
+unsure." The cubeplex prompt has no equivalent.
 
 ### P3: No existing memory in reflection seed
 
@@ -132,7 +132,7 @@ a closely related item already exists. If one does, call memory_update
 instead, or skip if the existing item already covers it.
 ```
 
-**Scope:** `cubebox/prompts/reflection_system.py` only.
+**Scope:** `cubeplex/prompts/reflection_system.py` only.
 
 ### C3: Inject top personal memory items into reflection seed
 
@@ -183,9 +183,9 @@ tier's snapshot budget.
 
 | File | Change |
 |---|---|
-| `cubebox/prompts/reflection_system.py` | C2: rewrite prompt |
-| `cubebox/services/reflection_runner.py` | C1+C3: add `existing_memory_items` to `ReflectionTurn`; update `_build_seed_prompt` |
-| `cubebox/streams/run_manager.py` | C1: extract tool summaries; C3: load and pass memory items |
+| `cubeplex/prompts/reflection_system.py` | C2: rewrite prompt |
+| `cubeplex/services/reflection_runner.py` | C1+C3: add `existing_memory_items` to `ReflectionTurn`; update `_build_seed_prompt` |
+| `cubeplex/streams/run_manager.py` | C1: extract tool summaries; C3: load and pass memory items |
 
 No new tables, no migrations, no API changes.
 

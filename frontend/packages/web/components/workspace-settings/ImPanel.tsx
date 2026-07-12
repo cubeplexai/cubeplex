@@ -12,7 +12,7 @@ import {
   wsEnableImAccount,
   wsListImAccounts,
   type ImAccount,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { MessagesSquare, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'

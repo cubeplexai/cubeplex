@@ -1,8 +1,8 @@
 import httpx
 import pytest
 
-from cubebox.skills.sources.base import TrustTier, decode_candidate_id
-from cubebox.skills.sources.remote import RemoteRegistryAdapter
+from cubeplex.skills.sources.base import TrustTier, decode_candidate_id
+from cubeplex.skills.sources.remote import RemoteRegistryAdapter
 
 
 def _registry_app() -> httpx.MockTransport:

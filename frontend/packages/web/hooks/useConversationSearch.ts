@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createApiClient, searchConversations, type SearchResult } from '@cubebox/core'
+import { createApiClient, searchConversations, type SearchResult } from '@cubeplex/core'
 
 export interface SearchState {
   loading: boolean

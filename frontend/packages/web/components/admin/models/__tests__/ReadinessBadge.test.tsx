@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { describe, expect, it } from 'vitest'
-import type { Readiness } from '@cubebox/core'
+import type { Readiness } from '@cubeplex/core'
 import en from '../../../../messages/en.json'
 import { ReadinessBadge } from '../ReadinessBadge'
 

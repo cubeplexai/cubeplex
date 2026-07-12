@@ -8,13 +8,13 @@ from typing import Any
 
 from cubepi.middleware.todo import TodoListMiddleware
 
-from cubebox.middleware.artifacts import ArtifactMiddleware
-from cubebox.middleware.attachments import AttachmentHintMiddleware
-from cubebox.middleware.citation import CitationMiddleware
-from cubebox.middleware.memory import MemoryMiddleware
-from cubebox.middleware.sandbox import SandboxMiddleware
-from cubebox.middleware.skills import SkillsMiddleware
-from cubebox.middleware.timestamps import TimestampMiddleware
+from cubeplex.middleware.artifacts import ArtifactMiddleware
+from cubeplex.middleware.attachments import AttachmentHintMiddleware
+from cubeplex.middleware.citation import CitationMiddleware
+from cubeplex.middleware.memory import MemoryMiddleware
+from cubeplex.middleware.sandbox import SandboxMiddleware
+from cubeplex.middleware.skills import SkillsMiddleware
+from cubeplex.middleware.timestamps import TimestampMiddleware
 
 
 def _assert_requires_keyword_ctx(method: Callable[..., Any]) -> None:

@@ -41,17 +41,17 @@ New section in `config.yaml`:
 objectstore:
   provider: "oss"        # "oss" or "s3"
   endpoint: "https://oss-cn-zhangjiakou.aliyuncs.com"
-  bucket: "cubebox-dev"
+  bucket: "cubeplex-dev"
   region: "cn-zhangjiakou"
-  access_key: ""         # via CUBEBOX_OBJECTSTORE__ACCESS_KEY
-  access_secret: ""      # via CUBEBOX_OBJECTSTORE__ACCESS_SECRET
+  access_key: ""         # via CUBEPLEX_OBJECTSTORE__ACCESS_KEY
+  access_secret: ""      # via CUBEPLEX_OBJECTSTORE__ACCESS_SECRET
 ```
 
 OSS uses S3 protocol but requires `path` addressing style. The client adapts based on `provider`.
 
 ## Backend Changes
 
-### New Module: `cubebox/objectstore/`
+### New Module: `cubeplex/objectstore/`
 
 `client.py` — async S3/OSS client wrapper:
 
@@ -83,7 +83,7 @@ Table `artifact_versions`:
 
 Index on `artifact_id` for fast version listing.
 
-### Modified: `cubebox/middleware/artifacts.py`
+### Modified: `cubeplex/middleware/artifacts.py`
 
 After validating path exists in sandbox:
 
@@ -94,7 +94,7 @@ After validating path exists in sandbox:
 5. Proceed with DB create/update as before
 6. Create `ArtifactVersion` record
 
-### Modified: `cubebox/api/routes/v1/artifacts.py`
+### Modified: `cubeplex/api/routes/v1/artifacts.py`
 
 **Preview endpoint** — fetch from object storage instead of sandbox:
 - Resolve key: `artifacts/{conv_id}/{art_id}/v{version}/{file_path}`
@@ -107,7 +107,7 @@ After validating path exists in sandbox:
 - Returns list of `{version, name, description, created_at}` ordered by version desc
 - Used by the version popover in the frontend
 
-### Modified: `cubebox/repositories/artifact.py`
+### Modified: `cubeplex/repositories/artifact.py`
 
 - Add `ArtifactVersionRepository` with `create()` and `list_by_artifact()` methods
 - Existing `ArtifactRepository.update()` continues to bump version on the `artifacts` table

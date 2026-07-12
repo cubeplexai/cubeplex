@@ -1,5 +1,5 @@
 import { useTranslations } from 'next-intl'
-import type { Readiness } from '@cubebox/core'
+import type { Readiness } from '@cubeplex/core'
 
 const MAP = {
   ready: { dot: 'bg-success-solid', key: 'ready' },

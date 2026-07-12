@@ -13,7 +13,7 @@
 
 ### 1.1 现状
 
-- 前后端**零** admin 代码（无 `/admin` 路由 / 无 `Admin*` 组件 / 无 `cubebox/api/routes/admin*`）
+- 前后端**零** admin 代码（无 `/admin` 路由 / 无 `Admin*` 组件 / 无 `cubeplex/api/routes/admin*`）
 - 模型 / MCP 服务器 / Skills 加载路径 / 沙盒配置全部走 `config.yaml`，无 UI 入口
 - Frontend 现有结构：
   - `app/(app)/layout.tsx` 挂 `AppTopBar`（无 sidebar）
@@ -39,7 +39,7 @@
 - Workspace 设置页 —— M4 在 workspace 首页内嵌设置面板（不走 admin URL）
 - Admin 操作的 audit log —— M1-E5（auditSink）
 - OrgSwitcher 真实实现 —— v1 单 org，仅占位静态 label
-- 真实 `cubebox-ee` admin 插件 —— 等首个 EE 功能立项时
+- 真实 `cubeplex-ee` admin 插件 —— 等首个 EE 功能立项时
 - I18n —— 沿主 app 现有"中英文混杂"现状；admin 文案中文为主
 - 移动端适配 —— admin 是 desktop-first 工具
 
@@ -62,7 +62,7 @@
 | D11 | 5 CE 原生 tab v1 全 "Coming Soon"，只占路由不实现功能 | 全部不建路由 / 实现 1-2 个 | "Coming Soon" 让用户看到完整菜单；每项 placeholder 含一行说明指向对应 backlog 模块 |
 | D12 | 角色 gate v1 = "current org 任一 workspace 是 ADMIN" | 独立 org admin role / 第一个 workspace admin / org owner | v1 无 org-level role；"任一 workspace admin" 是合理近似；未来 org-level role 上线时仅改 `require_org_admin` 实现 |
 | D13 | 子 nav v1 扁平列表；CE / 扩展用横线分隔，多了再分 section | 一开始就按 M0 的 section 分（identity/integrations/settings/custom） | v1 总共 5-7 项，扁平更清晰；M0 的 `AdminNavItem.section` 字段保留但 v1 渲染时不分组 |
-| D14 | Plugin tab 渲染走 `<iframe src={iframe_url}>`；CSP `frame-src 'self'` | inline iframe 无 CSP / 直接 fetch HTML 嵌入 | M0 D9 已定 iframe + pip wheel package_data 模型；同源安全靠 CSP 限定；v1 cubebox-ee 未真建仓时 manifest 返空，无 iframe 实际加载 |
+| D14 | Plugin tab 渲染走 `<iframe src={iframe_url}>`；CSP `frame-src 'self'` | inline iframe 无 CSP / 直接 fetch HTML 嵌入 | M0 D9 已定 iframe + pip wheel package_data 模型；同源安全靠 CSP 限定；v1 cubeplex-ee 未真建仓时 manifest 返空，无 iframe 实际加载 |
 | D15 | shadcn 组件补：`tabs` + `popover`（`npx shadcn-ui@latest add tabs popover`） | 自实现 / 用其它库 | 与现有 `components/ui/*` 风格一致；现成可用 |
 | D16 | "回应用"链接用 `window.close()`（仅在 `window.opener != null` 时）+ fallback 跳 `/` | 永远跳 `/` | 用户从主 app 新 tab 打开 admin，关 tab 自然回；不在 opener 上下文（手动开 admin）则 fallback 跳首页 |
 
@@ -238,7 +238,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
 ```tsx
 <header className="flex items-center gap-4 border-b px-4 py-3">
-  <CubeboxLogo />
+  <CubeplexLogo />
   <h1 className="text-sm font-medium">管理后台</h1>
   <Separator orientation="vertical" />
   {/* v1: 静态 label；多 org 时换成 <OrgSwitcher /> */}
@@ -344,7 +344,7 @@ CSP 在 next.config 中加 `frame-src 'self'`；插件 iframe URL 是 `/api/v1/a
 
 ### 6.1 后端 `require_org_admin` dependency
 
-**`backend/cubebox/auth/dependencies.py`**（新增）：
+**`backend/cubeplex/auth/dependencies.py`**（新增）：
 
 ```python
 async def require_org_admin(
@@ -369,7 +369,7 @@ async def require_org_admin(
 
 ### 6.2 后端端点 `GET /api/v1/admin/me`
 
-**`backend/cubebox/api/routes/v1/admin.py`**（新增）：
+**`backend/cubeplex/api/routes/v1/admin.py`**（新增）：
 
 ```python
 @router.get("/me", response_model=AdminMeResponse)
@@ -424,7 +424,7 @@ export function useAdminAccess() {
 新建 admin router：
 
 ```python
-# backend/cubebox/api/routes/v1/admin.py
+# backend/cubeplex/api/routes/v1/admin.py
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 # /me 不挂（要返 is_admin: false 而非 403）
@@ -506,15 +506,15 @@ v1 单 org，所有 admin 操作隐式作用于用户所在的唯一 org。多 o
 
 ### 9.3 Backend 新增
 
-- `backend/cubebox/api/routes/v1/admin.py`（`/me` + 挂 `require_org_admin` 的 protected sub-router）
-- `backend/cubebox/api/schemas/admin.py`（`AdminMeResponse` 等 pydantic）
+- `backend/cubeplex/api/routes/v1/admin.py`（`/me` + 挂 `require_org_admin` 的 protected sub-router）
+- `backend/cubeplex/api/schemas/admin.py`（`AdminMeResponse` 等 pydantic）
 
 ### 9.4 Backend 修改
 
-- `backend/cubebox/auth/dependencies.py` —— 新增 `require_org_admin`
-- `backend/cubebox/repositories/membership.py` —— 新增 `user_has_role_in_org(user_id, org_id, role)` 方法
-- `backend/cubebox/api/routes/v1/workspaces.py` —— `GET /api/v1/workspaces` 响应加 `last_activity_at` 字段
-- `backend/cubebox/api/app.py` —— 挂载新 admin router
+- `backend/cubeplex/auth/dependencies.py` —— 新增 `require_org_admin`
+- `backend/cubeplex/repositories/membership.py` —— 新增 `user_has_role_in_org(user_id, org_id, role)` 方法
+- `backend/cubeplex/api/routes/v1/workspaces.py` —— `GET /api/v1/workspaces` 响应加 `last_activity_at` 字段
+- `backend/cubeplex/api/app.py` —— 挂载新 admin router
 
 ### 9.5 测试
 
@@ -557,7 +557,7 @@ v1 单 org，所有 admin 操作隐式作用于用户所在的唯一 org。多 o
 | `/admin` 新 tab 的"回应用"在用户手动开 admin（无 opener）时 `window.close()` 失败 | 实现里检查 `window.opener` 决定 close vs `location.href = '/'` |
 | Sidebar 提升后 `/workspaces` 现有页面布局可能与新 sidebar 冲突（如自带 padding） | Stage 3 验证时手测 `/workspaces`；如有视觉问题随手调 |
 | `last_activity_at` 字段计算成本高（每个 workspace 扫 conversations） | 直接在 `Workspace` 表加列，每次 conversation message 写入时 trigger 更新；或 v1 简化为"该 workspace 任一 conversation 的 max(updated_at)"用 SQL aggregate（一次性查 N workspaces ≤ 100ms） |
-| Plugin iframe 跨域 / CSP 配错让插件页加载不出 | v1 cubebox-ee 未真建仓时 manifest 返空，iframe 无实际加载；真有插件时手测 |
+| Plugin iframe 跨域 / CSP 配错让插件页加载不出 | v1 cubeplex-ee 未真建仓时 manifest 返空，iframe 无实际加载；真有插件时手测 |
 | 5 个 "Coming Soon" tab 给用户错觉以为 v1 能用 | 每个 page 文案明确 "本版本不可用" + 指向 backlog 模块编号；不放任何看似可点击的伪 UI |
 | Admin 路由 cookie session 跨 tab 不生效 | fastapi-users JWT cookie 默认 `SameSite=Lax`，新同源 tab 自动带 cookie；手测验证 |
 

@@ -374,10 +374,10 @@ All interaction issues from the audit, resolved by the new architecture or expli
 
 ### Backend
 
-- `backend/cubebox/services/mcp_catalog.py` — invert override logic in `list_for_member`
-- `backend/cubebox/services/mcp.py` — add credential_source to workspace settings response
-- `backend/cubebox/api/routes/v1/ws_mcp.py` — credential_source in list response
-- `backend/cubebox/api/routes/v1/admin_mcp.py` — no behavior change, override semantics flip
+- `backend/cubeplex/services/mcp_catalog.py` — invert override logic in `list_for_member`
+- `backend/cubeplex/services/mcp.py` — add credential_source to workspace settings response
+- `backend/cubeplex/api/routes/v1/ws_mcp.py` — credential_source in list response
+- `backend/cubeplex/api/routes/v1/admin_mcp.py` — no behavior change, override semantics flip
 
 ### Tests
 

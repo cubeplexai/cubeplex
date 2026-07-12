@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { Upload } from 'lucide-react'
-import { useAttachmentStore, createApiClient } from '@cubebox/core'
+import { useAttachmentStore, createApiClient } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'

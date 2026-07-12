@@ -3,10 +3,10 @@
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
-from cubebox.api.schemas.im_connector import ImRuntimeStatus
-from cubebox.models.im_connector import IMConnectorAccount
-from cubebox.repositories.im_connector import _RuntimeAgg
-from cubebox.services.im_connector import compute_runtime
+from cubeplex.api.schemas.im_connector import ImRuntimeStatus
+from cubeplex.models.im_connector import IMConnectorAccount
+from cubeplex.repositories.im_connector import _RuntimeAgg
+from cubeplex.services.im_connector import compute_runtime
 
 
 def _mk_account(**kw: object) -> IMConnectorAccount:

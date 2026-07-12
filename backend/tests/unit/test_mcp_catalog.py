@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cubebox.services.mcp_catalog import (
+from cubeplex.services.mcp_catalog import (
     build_admin_catalog_rows,
     build_workspace_catalog_rows,
 )

@@ -20,10 +20,10 @@ sonner toast (new) / shadcn Sheet (new).
 
 **Execution rules (apply to every stage):**
 
-- Worktree: `/home/chris/cubebox/.worktrees/feat/ui-redesign` — run
+- Worktree: `/home/chris/cubeplex/.worktrees/feat/ui-redesign` — run
   `cat .worktree.env` first. Frontend dev: `pnpm dev` from `frontend/`
   (port 3001). Backend: port 8001.
-- All frontend commands run from `frontend/` with pnpm. `@cubebox/core`
+- All frontend commands run from `frontend/` with pnpm. `@cubeplex/core`
   must build before web sees type changes.
 - **Exact command forms** (script names verified against package.json —
   do not improvise):
@@ -58,19 +58,19 @@ sonner toast (new) / shadcn Sheet (new).
 **Files:** none
 
 - [ ] **Step 1:** `cat .worktree.env` — confirm ports 8001/3001, DB
-      `cubebox_feat_ui_redesign`.
+      `cubeplex_feat_ui_redesign`.
 - [ ] **Step 2:** Start both servers if not running:
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/ui-redesign
+cd /home/chris/cubeplex/.worktrees/feat/ui-redesign
 set -a && source .worktree.env && set +a
-(cd backend && nohup uv run python main.py > /tmp/cubebox-ui-backend.log 2>&1 &)
-(cd frontend && nohup pnpm dev > /tmp/cubebox-ui-frontend.log 2>&1 &)
+(cd backend && nohup uv run python main.py > /tmp/cubeplex-ui-backend.log 2>&1 &)
+(cd frontend && nohup pnpm dev > /tmp/cubeplex-ui-frontend.log 2>&1 &)
 sleep 12 && curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3001/
 ```
 
 Expected: `307` (or `200`). Test account exists from brainstorming:
-`design@cubebox.dev` / `Design-Review-2026`.
+`design@cubeplex.dev` / `Design-Review-2026`.
 
 ### Task 0.2: Screenshot capture script
 
@@ -97,7 +97,7 @@ const outDir = `${root}.superpowers/screens/${stage}/`
 const stateFile = `${root}.superpowers/screens/.auth-state.json`
 mkdirSync(outDir, { recursive: true })
 
-const EMAIL = 'screens@cubebox.dev'
+const EMAIL = 'screens@cubeplex.dev'
 const PASSWORD = 'Screens-Harness-2026'
 
 const browser = await chromium.launch()
@@ -183,7 +183,7 @@ import { ThemeProvider } from 'next-themes'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'cubebox',
+  title: 'cubeplex',
   description: 'AI Agent System',
   icons: { icon: '/icon.svg' },
 }
@@ -829,7 +829,7 @@ import { X, Copy, Check, Plug, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
-import { useMcpToolRegistryStore } from '@cubebox/core'
+import { useMcpToolRegistryStore } from '@cubeplex/core'
 
 interface ToolHeaderSource {
   kind: 'tool'
@@ -1125,7 +1125,7 @@ selected state in files this task touches → `bg-raised` + 2px
 `before:bg-primary` indicator.
 
 - [ ] **Step 1:** Apply file-by-file; after each, eyeball in the running
-      app with a real conversation (`design@cubebox.dev` workspace has
+      app with a real conversation (`design@cubeplex.dev` workspace has
       one; send new messages as needed).
 - [ ] **Step 2:** `pnpm --filter web test` (RunErrorBubble + any
       snapshot updates).
@@ -1186,7 +1186,7 @@ grep -rn "How can I help you\|有什么可以帮你的" frontend/packages/web --
 **Files:**
 - Modify: `frontend/packages/web/app/(app)/w/[wsId]/page.tsx` (the
   empty-state home lives at lines ~104-110: Box logo block + h1
-  "cubebox" + subtitle. Do NOT grep for "AI Agent System" — that string
+  "cubeplex" + subtitle. Do NOT grep for "AI Agent System" — that string
   only exists in layout.tsx metadata, not in the page JSX). Update
   `__tests__/components/WorkspaceHomePage.test.tsx` alongside.
 - Create: `frontend/packages/web/components/chat/PromptCards.tsx`
@@ -1203,7 +1203,7 @@ grep -rn "How can I help you\|有什么可以帮你的" frontend/packages/web --
       focus-visible:ring-ring`; icon row `font-mono text-info-fg`; title
       `text-sm font-medium`; description `text-xs text-faint`.
 - [ ] **Step 1b:** Input filling — RESOLVED (no fork): there is no draft
-      setter in `@cubebox/core` (conversationStore's `draft` is a
+      setter in `@cubeplex/core` (conversationStore's `draft` is a
       creation flag) and InputBar's `content` is internal `useState`
       that must not be hoisted (Task 4.3 forbids restructuring). Bridge
       with a tiny module-level store:

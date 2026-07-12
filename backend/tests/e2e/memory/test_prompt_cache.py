@@ -6,7 +6,7 @@ and >= 85% by turn N. The byte-stability invariants are covered by
 tests/unit/test_memory_cache_stability.py and run on every commit.
 
 Endpoint capability is declared explicitly via
-``CUBEBOX_E2E_LLM_CACHE_CAPABLE=true``. When set, a turn-2 cache_read of 0
+``CUBEPLEX_E2E_LLM_CACHE_CAPABLE=true``. When set, a turn-2 cache_read of 0
 is treated as a regression and FAILS. When unset (the default), it is
 treated as endpoint not honoring cache_control and SKIPS — appropriate
 for proxies that accept the markers but do not pass them through (e.g.
@@ -70,7 +70,7 @@ async def test_cache_hit_rate_meets_bar(
         second = await send_message_and_collect_usage(client, ws_id, conv_id, PRIMER_USER_TEXT)
     except AgentRunError as exc:
         pytest.skip(f"Turn 2 agent run failed: {exc}")
-    cache_capable = os.environ.get("CUBEBOX_E2E_LLM_CACHE_CAPABLE", "false").lower() == "true"
+    cache_capable = os.environ.get("CUBEPLEX_E2E_LLM_CACHE_CAPABLE", "false").lower() == "true"
     if second["cache_read_tokens"] == 0:
         message = (
             f"Endpoint reported zero cache_read on turn 2: warmup "
@@ -80,13 +80,13 @@ async def test_cache_hit_rate_meets_bar(
         if cache_capable:
             pytest.fail(
                 f"{message} Endpoint declared cache-capable via "
-                f"CUBEBOX_E2E_LLM_CACHE_CAPABLE=true; this is a real "
+                f"CUBEPLEX_E2E_LLM_CACHE_CAPABLE=true; this is a real "
                 f"regression. Common causes: cache_control markers not "
                 f"applied, dynamic content invalidating the stable prefix. "
                 f"See backend/docs/prompt-cache-discipline.md."
             )
         pytest.skip(
-            f"{message} CUBEBOX_E2E_LLM_CACHE_CAPABLE not set; treating as "
+            f"{message} CUBEPLEX_E2E_LLM_CACHE_CAPABLE not set; treating as "
             f"endpoint not honoring cache_control. Set the env to 'true' on "
             f"a known-cache-capable endpoint (e.g. Anthropic official) to "
             f"convert this branch into a hard failure."

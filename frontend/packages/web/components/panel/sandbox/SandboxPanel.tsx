@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { FolderOpen, Globe, Loader2, TerminalSquare, RefreshCw, X } from 'lucide-react'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 import { useSWRConfig } from 'swr'
 
 import { BrowserView } from '@/components/panel/BrowserView'

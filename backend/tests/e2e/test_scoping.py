@@ -4,7 +4,7 @@ import secrets
 
 import pytest
 
-from cubebox.api.middleware.rate_limit import limiter
+from cubeplex.api.middleware.rate_limit import limiter
 from tests.e2e.conftest import _auth_cookie_name
 from tests.e2e.helpers import csrf_cookie_name as _csrf_cookie_name
 
@@ -28,12 +28,12 @@ async def _seed_csrf(client) -> str:
     """Ensure the CSRF cookie is set on the client and return its value.
 
     After login, a safe GET to `/api/v1/auth/me` is enough to guarantee the
-    `cubebox_csrf` cookie lands in the client jar. The value is then used
+    `cubeplex_csrf` cookie lands in the client jar. The value is then used
     in the `X-CSRF-Token` header on subsequent mutating requests.
     """
     await client.get("/api/v1/auth/me")
     csrf = client.cookies.get(_csrf_cookie_name())
-    assert csrf, "cubebox_csrf cookie not set after GET /api/v1/auth/me"
+    assert csrf, "cubeplex_csrf cookie not set after GET /api/v1/auth/me"
     return csrf
 
 

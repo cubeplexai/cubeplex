@@ -45,7 +45,7 @@ def upgrade() -> None:
 
     # 4. Backfill AgentConfig for workspaces that don't have one
     # AgentConfig._PREFIX = "agt"; model_id has no default so provide empty string.
-    from cubebox.models.public_id import generate_public_id
+    from cubeplex.models.public_id import generate_public_id
     from sqlalchemy import text
 
     conn = op.get_bind()

@@ -51,7 +51,7 @@ Distributing pushes a template to workspaces that have not yet made a decision a
 3. The dialog shows two checkboxes (both on by default):
    - **Enable for existing workspaces that have not yet decided** — inserts an enabled state into workspaces that have no state row for this template. Workspaces that have already explicitly enabled or disabled the template are not touched.
    - **Auto-enable for future workspaces** — new workspaces that join the org will automatically have this template enabled.
-4. Confirm. CubeBox performs the fan-out immediately.
+4. Confirm. CubePlex performs the fan-out immediately.
 
 :::info 📸 Screenshot placeholder
 **Capture:** The Distribute dialog for a template, showing both checkboxes checked (default state) and the count of workspaces that will be affected.
@@ -104,25 +104,25 @@ For a service not in the built-in catalog (for example, an internal tool), regis
 The template now appears in the catalog with source **Org**. Workspaces can enable it immediately; you do not need to distribute it first, though you can.
 
 :::info
-CubeBox discovers the template's tools automatically the first time a workspace enables it — you do not list tools manually.
+CubePlex discovers the template's tools automatically the first time a workspace enables it — you do not list tools manually.
 :::
 
 ## Authentication
 
 ### OAuth connectors
 
-Most OAuth connectors support **Dynamic Client Registration (DCR)** — Notion, Linear, Atlassian, Asana, Sentry, Intercom, and Cloudflare. For these, no setup is required: CubeBox registers its own OAuth client with the service automatically when the first credential is created.
+Most OAuth connectors support **Dynamic Client Registration (DCR)** — Notion, Linear, Atlassian, Asana, Sentry, Intercom, and Cloudflare. For these, no setup is required: CubePlex registers its own OAuth client with the service automatically when the first credential is created.
 
 A few OAuth connectors do **not** support DCR — **GitHub, Slack, and Google Workspace**. These require a pre-registered OAuth app:
 
-1. An operator registers an OAuth app in the vendor's developer console, using redirect URI `${CUBEBOX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`.
-2. The app's client ID and secret are placed in environment variables (`CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_ID` / `…__CLIENT_SECRET`) and loaded by the catalog seeder.
+1. An operator registers an OAuth app in the vendor's developer console, using redirect URI `${CUBEPLEX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`.
+2. The app's client ID and secret are placed in environment variables (`CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_ID` / `…__CLIENT_SECRET`) and loaded by the catalog seeder.
 
 This is a deploy-time step, not something you enter in the admin UI. Until those credentials are loaded, the connector's OAuth flow cannot complete. See the operator runbook in `backend/docs/mcp_catalog_oauth.md` for details.
 
 ### API key / bearer token connectors
 
-For connectors that authenticate with a static API token or bearer token (for example, the search connectors Tavily, Exa, and Jina AI), the credential is provisioned when creating an org-level credential for the template. CubeBox encrypts it into the credential vault.
+For connectors that authenticate with a static API token or bearer token (for example, the search connectors Tavily, Exa, and Jina AI), the credential is provisioned when creating an org-level credential for the template. CubePlex encrypts it into the credential vault.
 
 ### Mixed auth on one template
 
@@ -130,7 +130,7 @@ A template can carry both OAuth and static credentials at the same time — for 
 
 ## Tool discovery and caching
 
-When a workspace first enables a template (creating the connector row), CubeBox connects to the MCP server, lists its tools, and stores the tool list on the connector row. Agent runs use this cached list — they do not re-contact the server on every message, which keeps chat startup fast even with many connectors active. Actually calling a tool always goes to the live server.
+When a workspace first enables a template (creating the connector row), CubePlex connects to the MCP server, lists its tools, and stores the tool list on the connector row. Agent runs use this cached list — they do not re-contact the server on every message, which keeps chat startup fast even with many connectors active. Actually calling a tool always goes to the live server.
 
 The cache refreshes automatically in the background when it is older than 24 hours (config key `mcp.tools_cache_ttl_hours`; set `0` to disable background refresh). If a server changed its tools and you do not want to wait, use **Retry discovery** on the template's detail page to refresh immediately.
 

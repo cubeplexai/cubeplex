@@ -14,7 +14,7 @@
 - 时间列 tz-aware；DB→API 用 `utc_isoformat()`。（本计划无新时间列）
 - Scope-isolated：新接口走 workspace 路由 `/api/v1/ws/{ws}/conversations/{conv}/artifacts/...`，无 admin 对应。
 - 依赖：`uv add`（后端）、`pnpm add`（前端）；本计划不新增依赖。
-- 前端用 pnpm；`@cubebox/core` 改动需 build 后 web 才能看到（本计划不改 core）。
+- 前端用 pnpm；`@cubeplex/core` 改动需 build 后 web 才能看到（本计划不改 core）。
 - 文档随代码：本特性不改 user-facing 文档页（artifact 预览是既有行为的多图扩展，无新 route/enum/option 暴露给用户配置）；prompt 文案改动属内部。
 - 图片扩展名集合 `IMAGE_EXTENSIONS = {png,jpg,jpeg,gif,webp,svg,bmp}`（小写，无点）。
 - 临时脚本放 `backend/scripts/dev/`；spec/plan 已在 `docs/dev/`。
@@ -26,7 +26,7 @@
 ## File Structure
 
 **后端：**
-- Modify: `backend/cubebox/api/routes/v1/artifacts.py` — 新增 `GET /{artifact_id}/files` 路由 + `IMAGE_EXTENSIONS` 常量 + 响应模型。
+- Modify: `backend/cubeplex/api/routes/v1/artifacts.py` — 新增 `GET /{artifact_id}/files` 路由 + `IMAGE_EXTENSIONS` 常量 + 响应模型。
 - Test: `backend/tests/e2e/test_artifact_files.py`（新建）— `/files` 契约 + RBAC + 过滤/排序。
 
 **前端：**
@@ -39,14 +39,14 @@
 - Test: `frontend/packages/web/__tests__/e2e/artifact-multi-image.spec.ts`（新建，Playwright）。
 
 **Prompt：**
-- Modify: `backend/cubebox/prompts/artifacts.py` — `image` 条目加多图引导。
+- Modify: `backend/cubeplex/prompts/artifacts.py` — `image` 条目加多图引导。
 
 ---
 
 ### Task 1: 后端 — `/files` 接口
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/artifacts.py`
+- Modify: `backend/cubeplex/api/routes/v1/artifacts.py`
 - Test: `backend/tests/e2e/test_artifact_files.py`
 
 **Interfaces:**
@@ -69,8 +69,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.objectstore import get_objectstore_client
+from cubeplex.db.engine import _build_database_url
+from cubeplex.objectstore import get_objectstore_client
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.asyncio
@@ -191,11 +191,11 @@ Expected: FAIL — 404（路由不存在）或 405。
 
 先确认 `ObjectStoreClient` 有无 `delete_object`：
 
-Run: `cd backend && grep -n "def delete_object\|def delete" cubebox/objectstore/client.py`
+Run: `cd backend && grep -n "def delete_object\|def delete" cubeplex/objectstore/client.py`
 - 若有 → 上面 cleanup 直接可用。
 - 若无 → 把测试 cleanup 改为：`keys = await store.list_objects(_PREFIX); for k in keys: ... ` 仍需一个删除方法。若完全没有删除方法，cleanup 用 `upload_file` 覆盖空字节不可行（list 仍返回）。此时最稳妥：在 `ObjectStoreClient` 加一个 `delete_object(key)` 方法（aioboto3 `delete_object(Bucket, Key)`），并在本任务一并实现 + 提交（它是个合理的通用缺失方法，cleanup 需要）。**先 grep 确认再决定。**
 
-在 `backend/cubebox/api/routes/v1/artifacts.py` 顶部 import 区下方（`router = APIRouter(...)` 之前）加常量：
+在 `backend/cubeplex/api/routes/v1/artifacts.py` 顶部 import 区下方（`router = APIRouter(...)` 之前）加常量：
 
 ```python
 IMAGE_EXTENSIONS = frozenset({"png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"})
@@ -269,14 +269,14 @@ Expected: 4 passed。
 
 - [ ] **Step 5: mypy + 提交**
 
-Run: `cd backend && uv run mypy cubebox/api/routes/v1/artifacts.py 2>&1 | tail -5`
+Run: `cd backend && uv run mypy cubeplex/api/routes/v1/artifacts.py 2>&1 | tail -5`
 Expected: no errors.
 
 ```bash
 cd backend
-git add tests/e2e/test_artifact_files.py cubebox/api/routes/v1/artifacts.py
+git add tests/e2e/test_artifact_files.py cubeplex/api/routes/v1/artifacts.py
 # 若加了 delete_object:
-# git add cubebox/objectstore/client.py
+# git add cubeplex/objectstore/client.py
 git commit -m "feat(artifacts): add GET /files endpoint for multi-image preview"
 ```
 
@@ -367,7 +367,7 @@ git commit -m "feat(artifact): add hasImageExt helper for image path detection"
 - Create: `frontend/packages/web/components/panel/artifact/ImageCarousel.tsx`
 
 **Interfaces:**
-- Consumes: `ImageViewer`（`@/components/shared/previews`，props `{ url, alt }`）；`buildPreviewUrl(artifact, filePath, version, workspaceId)`（Task 既有）；`Artifact`（`@cubebox/core`）。
+- Consumes: `ImageViewer`（`@/components/shared/previews`，props `{ url, alt }`）；`buildPreviewUrl(artifact, filePath, version, workspaceId)`（Task 既有）；`Artifact`（`@cubeplex/core`）。
 - Produces: `ImageCarousel` 组件，props `{ artifact: Artifact; imageFiles: string[]; version: number | null; workspaceId: string }`。
 
 - [ ] **Step 1: 创建组件**
@@ -379,7 +379,7 @@ git commit -m "feat(artifact): add hasImageExt helper for image path detection"
 
 import { useState, useCallback } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import { buildPreviewUrl } from './previewUtils'
 import { ImageViewer } from '@/components/shared/previews'
 
@@ -492,7 +492,7 @@ git commit -m "feat(artifact): add ImageCarousel for multi-image preview"
 'use client'
 
 import { useState, useEffect } from 'react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import { buildPreviewUrl, hasImageExt } from './previewUtils'
 import { ImageViewer } from '@/components/shared/previews'
 import { PreviewLoading } from './PreviewLoading'
@@ -601,7 +601,7 @@ git commit -m "feat(artifact): ImagePreview renders carousel for multi-image dir
 - Modify: `frontend/packages/web/components/artifacts/ArtifactLibraryCard.tsx`
 
 **Interfaces:**
-- Consumes: `hasImageExt`、`buildPreviewUrl`（Task 2 既有）；`Artifact`（`@cubebox/core`）。
+- Consumes: `hasImageExt`、`buildPreviewUrl`（Task 2 既有）；`Artifact`（`@cubeplex/core`）。
 - Produces: `useArtifactCover(artifact, workspaceId)` → `{ coverUrl: string | null; count: number; loading: boolean }`。
 
 - [ ] **Step 1: 创建 hook**
@@ -612,7 +612,7 @@ git commit -m "feat(artifact): ImagePreview renders carousel for multi-image dir
 'use client'
 
 import { useState, useEffect } from 'react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import { buildPreviewUrl, hasImageExt } from './previewUtils'
 
 interface FilesResponse {
@@ -753,11 +753,11 @@ git commit -m "feat(artifacts): library card shows first-image cover + count bad
 ### Task 6: Prompt 引导
 
 **Files:**
-- Modify: `backend/cubebox/prompts/artifacts.py`
+- Modify: `backend/cubeplex/prompts/artifacts.py`
 
 - [ ] **Step 1: 改 `image` 条目**
 
-在 `backend/cubebox/prompts/artifacts.py` 的 `ARTIFACT_PROMPT` 中，把：
+在 `backend/cubeplex/prompts/artifacts.py` 的 `ARTIFACT_PROMPT` 中，把：
 
 ```
 - "image" — PNG, SVG, JPG images (e.g. matplotlib output)
@@ -783,7 +783,7 @@ Expected: PASS（或无相关测试）。
 
 ```bash
 cd backend
-git add cubebox/prompts/artifacts.py
+git add cubeplex/prompts/artifacts.py
 git commit -m "feat(artifact): guide agents on multi-image artifact authoring"
 ```
 
@@ -806,7 +806,7 @@ git commit -m "feat(artifact): guide agents on multi-image artifact authoring"
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 
 const mockUrl = (file: string) => `/preview/${file}`
 vi.mock('../../../components/panel/artifact/previewUtils', () => ({
@@ -919,7 +919,7 @@ git commit -m "test(artifact): cover ImageCarousel navigation state machine"
 Run: `cd backend && uv run pytest tests/e2e/test_artifact_files.py tests/e2e/test_ws_artifacts.py -v 2>&1 | tee tmp/artifact-sweep.log | tail -15`
 Expected: all pass.
 
-Run: `cd backend && uv run mypy cubebox/api/routes/v1/artifacts.py cubebox/prompts/artifacts.py 2>&1 | tail -5`
+Run: `cd backend && uv run mypy cubeplex/api/routes/v1/artifacts.py cubeplex/prompts/artifacts.py 2>&1 | tail -5`
 Expected: no errors.
 
 - [ ] **Step 2: 手动验收清单**
@@ -934,7 +934,7 @@ Expected: no errors.
 - [ ] **Step 3: 推送 + PR review 循环**
 
 ```bash
-cd /home/chris/cubebox
+cd /home/chris/cubeplex
 git push -u origin <branch>
 ```
 按 `pr-codex-review-loop` skill 走 push → poll → fix → reply 循环。

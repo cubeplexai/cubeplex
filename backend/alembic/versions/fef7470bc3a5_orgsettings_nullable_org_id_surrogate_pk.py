@@ -22,7 +22,7 @@ import sqlalchemy as sa
 import sqlmodel  # noqa: F401  (referenced by sqlmodel.sql.sqltypes.AutoString)
 from alembic import op
 
-from cubebox.models.public_id import PREFIX_ORG_SETTING, generate_public_id
+from cubeplex.models.public_id import PREFIX_ORG_SETTING, generate_public_id
 
 
 # revision identifiers, used by Alembic.

@@ -16,12 +16,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.models.im_connector import (
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMWebhookReceipt,
 )
-from cubebox.repositories.im_connector import collect_runtime_aggregates
+from cubeplex.repositories.im_connector import collect_runtime_aggregates
 from tests.e2e.conftest import _build_database_url
 from tests.e2e.im_fixtures import im_cleanup, im_seed_org_ws_user, im_seed_stub_credential
 

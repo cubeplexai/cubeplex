@@ -8,7 +8,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.services.conversation_search.text_extract import extract_searchable_text
+from cubeplex.services.conversation_search.text_extract import extract_searchable_text
 
 
 def test_user_message_text() -> None:

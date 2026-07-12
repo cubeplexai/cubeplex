@@ -1,0 +1,4444 @@
+"""Background run orchestration decoupled from HTTP connections."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from typing import Any
+
+from cubepi.providers.base import ReasoningControl
+from cubepi.providers.fallback import FallbackBoundModel
+from fastapi import FastAPI
+from loguru import logger
+from redis.asyncio import Redis
+from uuid_utils import uuid7
+
+from cubeplex.agents.schemas import AgentEvent, DoneEvent, ErrorEvent, FailoverEvent, StatusEvent
+from cubeplex.errors import ErrorCode, classify_exception, english_fallback
+from cubeplex.streams.run_events import (
+    RunMeta,
+    append_run_event,
+    clear_active_run,
+    clear_conversation_last_error,
+    create_run,
+    expire_run_data,
+    get_active_run,
+    get_run_meta,
+    is_stale_meta,
+    mark_run_stale,
+    set_conversation_last_error,
+    update_run_meta,
+)
+from cubeplex.utils.time import utc_isoformat
+
+
+@dataclass(slots=True)
+class RunContext:
+    """Scoped context required to execute a run."""
+
+    user_id: str
+    org_id: str
+    workspace_id: str
+    conversation_id: str
+    trigger: str = "interactive"
+    topic_id: str | None = None
+    is_group_chat: bool = False
+    sender_display_name: str | None = None
+    sandbox_mode: str | None = None
+    topic_creator_user_id: str | None = None
+    # The conversation creator — owns the underlying PVC for standalone
+    # group chats, so non-creator participants don't accidentally drive a
+    # row keyed under the wrong user_id.
+    conversation_creator_user_id: str | None = None
+
+
+class CubepiAgentRunError(RuntimeError):
+    """Raised when cubepi returns a terminal assistant error without raising."""
+
+
+def _cubepi_agent_error_message(agent: Any) -> str | None:
+    state = getattr(agent, "state", None)
+    error_message = getattr(state, "error_message", None)
+    if isinstance(error_message, str) and error_message.strip():
+        return error_message
+    return None
+
+
+def _raise_if_cubepi_agent_failed(agent: Any) -> None:
+    error_message = _cubepi_agent_error_message(agent)
+    if error_message is not None:
+        raise CubepiAgentRunError(error_message)
+
+
+def _message_for_run_exception(
+    exc: BaseException,
+    code: ErrorCode,
+    params: dict[str, Any],
+) -> str:
+    if isinstance(exc, CubepiAgentRunError):
+        return str(exc)
+    return english_fallback(code, params)
+
+
+def _ns_to_agent_id(ns: tuple[Any, ...]) -> str | None:
+    if not ns:
+        return None
+    return ":".join(str(part) for part in ns)
+
+
+def _make_failover_publisher(
+    run_id: str,
+    publish: Callable[[str, dict[str, Any]], Awaitable[None]],
+) -> Callable[[Any, Any, BaseException | str], Awaitable[None]]:
+    """Build an on_failover callback that publishes a model_failover SSE event.
+
+    The publish callable receives (run_id, data_payload) — the data dict
+    that will populate FailoverEvent.data. FailoverEvent.type itself is
+    fixed; the caller wraps `data` into the event.
+    """
+
+    async def _on_failover(failed: Any, next_bound: Any, error: BaseException | str) -> None:
+        await publish(
+            run_id,
+            {
+                "failed_ref": f"{failed.spec.provider_id}/{failed.spec.id}",
+                "next_ref": (
+                    f"{next_bound.spec.provider_id}/{next_bound.spec.id}"
+                    if next_bound is not None
+                    else None
+                ),
+                "reason": str(error)[:256],
+            },
+        )
+
+    return _on_failover
+
+
+def _subagent_model_for(this_run_model: Any) -> Any:
+    """Strip ``on_failover`` so subagent failovers don't emit ``model_failover``
+    SSE events misattributed to the main agent (Fix-6).
+
+    Subagent failovers still occur transparently at the chain level — only the
+    SSE notification is suppressed. ``FallbackBoundModel`` is a frozen
+    dataclass; use :func:`dataclasses.replace`. Plain ``BoundModel`` has no
+    ``on_failover`` field, so pass through unchanged.
+    """
+    if isinstance(this_run_model, FallbackBoundModel):
+        return replace(this_run_model, on_failover=None)
+    return this_run_model
+
+
+def _subagent_shared_tools(tools: list[Any]) -> list[Any]:
+    """Tools shared into subagents. show_widget is top-level only (v1).
+
+    Annotated ``list[Any]`` to match this module's convention (it builds tools
+    via lazy imports inside functions and does not import ``AgentTool`` at module
+    level). The helper only reads ``t.name``.
+    """
+    return [t for t in tools if t.name != "show_widget"]
+
+
+def _backfill_tool_call_delta_identity(
+    evt_dict: dict[str, Any],
+    delta_context: dict[tuple[str | None, int], dict[str, Any]],
+) -> dict[str, Any]:
+    if evt_dict.get("type") != "tool_call_delta":
+        return evt_dict
+
+    data = evt_dict.get("data")
+    if not isinstance(data, dict):
+        return evt_dict
+
+    index = data.get("index")
+    if not isinstance(index, int):
+        return evt_dict
+
+    key = (evt_dict.get("agent_id"), index)
+    cached = delta_context.get(key, {})
+    normalized_data = dict(data)
+
+    if normalized_data.get("tool_call_id") is None and cached.get("tool_call_id") is not None:
+        normalized_data["tool_call_id"] = cached["tool_call_id"]
+    if normalized_data.get("name") is None and cached.get("name") is not None:
+        normalized_data["name"] = cached["name"]
+
+    delta_context[key] = {
+        "tool_call_id": normalized_data.get("tool_call_id"),
+        "name": normalized_data.get("name"),
+    }
+    return {**evt_dict, "data": normalized_data}
+
+
+def _dicts_to_sse_events(
+    event_dicts: list[dict[str, Any]],
+    delta_context: dict[tuple[str | None, int], dict[str, Any]] | None = None,
+) -> list[AgentEvent]:
+    from cubeplex.agents.schemas import (
+        ArtifactEvent,
+        CitationEvent,
+        ReasoningEvent,
+        TextDeltaEvent,
+        ToolCallDeltaEvent,
+        ToolCallEvent,
+        ToolResultEvent,
+        UsageEvent,
+    )
+
+    events: list[AgentEvent] = []
+    for evt_dict in event_dicts:
+        if delta_context is not None:
+            evt_dict = _backfill_tool_call_delta_identity(evt_dict, delta_context)
+        evt_type = evt_dict.get("type")
+        if evt_type == "reasoning":
+            events.append(
+                ReasoningEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "tool_call":
+            events.append(
+                ToolCallEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "tool_result":
+            events.append(
+                ToolResultEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "text_delta":
+            events.append(
+                TextDeltaEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "tool_call_delta":
+            events.append(
+                ToolCallDeltaEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "artifact":
+            events.append(
+                ArtifactEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "citation":
+            events.append(
+                CitationEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+        elif evt_type == "usage":
+            events.append(
+                UsageEvent(
+                    timestamp=evt_dict["timestamp"],
+                    data=evt_dict["data"],
+                    agent_id=evt_dict.get("agent_id"),
+                    agent_name=evt_dict.get("agent_name"),
+                )
+            )
+    return events
+
+
+async def _drain_cubepi_sse_queue(
+    queue: asyncio.Queue[dict[str, Any] | None],
+    publish: Any,
+) -> None:
+    """Drain SSE dicts from a queue and forward them as typed AgentEvents.
+
+    Each event is published with a fresh ``datetime.now(UTC)`` timestamp so the
+    SSE consumer sees the time the event was actually streamed, not a fixed
+    value computed once at run start.  Exits when it pops a sentinel ``None``.
+    """
+    while True:
+        d = await queue.get()
+        if d is None:
+            return
+        sse_event = cubepi_dict_to_agent_event(d, datetime.now(UTC).isoformat())
+        if sse_event is None:
+            continue
+        await publish(sse_event, None)
+
+
+async def _drain_subagent_citation_queue(
+    queue: asyncio.Queue[tuple[str, Any, Any] | None],
+    publish: Any,
+) -> None:
+    """Drain (kind, agent_id, payload) tuples and publish typed AgentEvents.
+
+    Counterpart to :func:`_drain_cubepi_sse_queue` for the shared queue that
+    subagent and citation middleware push onto:
+
+    - ``("subagent", agent_id, sse_dict)`` — already-translated cubepi SSE
+      dict produced by ``convert_agent_event_to_sse``. We retranslate via
+      :func:`cubepi_dict_to_agent_event` and stamp the originating subagent
+      ``agent_id`` so the frontend's per-agent stream buckets work.
+    - ``("citation", agent_id, citation_payload)`` — wrapped into a
+      :class:`CitationEvent`.
+
+    Unknown kinds and unmappable subagent dicts are silently dropped.
+    Exits on the ``None`` sentinel.
+
+    Background: when the langgraph dispatch branch was removed in M6.6,
+    the only consumer of this queue went with it; subagent live events
+    accumulated and were discarded at run end. This drainer restores live
+    delivery so the frontend doesn't have to wait for a page reload to
+    see what a subagent did.
+    """
+    while True:
+        item = await queue.get()
+        if item is None:
+            return
+        try:
+            kind, agent_id, payload = item
+        except (TypeError, ValueError):
+            logger.warning("subagent/citation queue produced malformed item: {!r}", item)
+            continue
+
+        timestamp = datetime.now(UTC).isoformat()
+        sse_event: AgentEvent | None = None
+        if kind == "subagent":
+            sse_event = cubepi_dict_to_agent_event(payload, timestamp)
+            if sse_event is not None and agent_id is not None:
+                sse_event.agent_id = agent_id
+        elif kind == "citation":
+            from cubeplex.agents.schemas import CitationEvent
+
+            sse_event = CitationEvent(timestamp=timestamp, data=payload, agent_id=agent_id)
+        else:
+            continue
+
+        if sse_event is None:
+            continue
+        await publish(sse_event, agent_id)
+
+
+def cubepi_dict_to_agent_event(d: dict[str, Any], timestamp: str) -> AgentEvent | None:
+    """Translate a single SSE dict produced by ``convert_agent_event_to_sse``
+    into a typed cubeplex ``AgentEvent``.
+
+    Returns ``None`` for dicts that should be silently dropped at this layer
+    (done — the caller emits done with usage data; unknown types).
+    """
+    from cubeplex.agents.schemas import (
+        ArtifactEvent,
+        AskUserRequestEvent,
+        AskUserResolvedEvent,
+        ErrorEvent,
+        InjectedMessageEvent,
+        ReasoningEvent,
+        SandboxConfirmRequestEvent,
+        SandboxConfirmResolvedEvent,
+        TextDeltaEvent,
+        ToolCallDeltaEvent,
+        ToolCallEvent,
+        ToolResultEvent,
+        UsageEvent,
+    )
+
+    t = d.get("type")
+    if t == "injected_message":
+        injected_data: dict[str, Any] = {
+            "content": d.get("content", ""),
+            "steer_id": d.get("steer_id", ""),
+        }
+        if d.get("sender_user_id") and d.get("sender_display_name"):
+            injected_data["sender_user_id"] = d["sender_user_id"]
+            injected_data["sender_display_name"] = d["sender_display_name"]
+        return InjectedMessageEvent(timestamp=timestamp, data=injected_data)
+    if t == "text_delta":
+        return TextDeltaEvent(
+            timestamp=timestamp,
+            data={"content": d.get("delta", ""), "usage": {}},
+        )
+    if t == "reasoning":
+        return ReasoningEvent(
+            timestamp=timestamp,
+            data={"content": d.get("delta", "")},
+        )
+    if t == "tool_call_delta":
+        return ToolCallDeltaEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("id"),
+                "name": d.get("name"),
+                "args_delta": d.get("delta", ""),
+                "index": d.get("index"),
+            },
+        )
+    if t == "tool_call":
+        return ToolCallEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("id", ""),
+                "name": d.get("name", ""),
+                "arguments": d.get("arguments", ""),
+            },
+        )
+    if t == "tool_result":
+        # ``convert_agent_event_to_sse`` extracts a string from cubepi's
+        # ``AgentToolResult`` before the dict reaches this translator; the
+        # ``str()`` here is defensive against unexpected producers and is
+        # a no-op for the expected string case. ``details`` carries
+        # middleware-attached payloads such as ``subagent_events`` so the
+        # live SSE shape matches the post-reload one.
+        return ToolResultEvent(
+            timestamp=timestamp,
+            data={
+                "tool_call_id": d.get("tool_call_id", ""),
+                "name": d.get("name", ""),
+                "content": str(d.get("result", "")),
+                "is_error": d.get("is_error", False),
+                "details": d.get("details"),
+            },
+        )
+    if t == "artifact":
+        return ArtifactEvent(
+            timestamp=timestamp,
+            data={
+                "action": d.get("action", "created"),
+                "artifact": d.get("artifact", {}),
+            },
+        )
+    if t == "sandbox_confirm_request":
+        args = d.get("args") or {}
+        details = d.get("details") or {}
+        return SandboxConfirmRequestEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "tool_call_id": d.get("tool_call_id", ""),
+                "command": args.get("command", ""),
+                "matched_pattern": details.get("matched_pattern"),
+                "timeout_seconds": d.get("timeout_seconds"),
+            },
+        )
+    if t == "sandbox_confirm_resolved":
+        return SandboxConfirmResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "decision": d.get("decision"),
+                "cancelled": d.get("cancelled", False),
+                "timed_out": d.get("timed_out", False),
+                "reason": d.get("reason"),
+            },
+        )
+    if t == "ask_user_request":
+        return AskUserRequestEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "questions": d.get("questions", []),
+                "timeout_seconds": d.get("timeout_seconds"),
+            },
+        )
+    if t == "ask_user_resolved":
+        return AskUserResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": d.get("question_id", ""),
+                "answers": d.get("answers"),
+                "cancelled": d.get("cancelled", False),
+                "timed_out": d.get("timed_out", False),
+            },
+        )
+    if t == "usage":
+        return UsageEvent(
+            timestamp=timestamp,
+            data={
+                "input_tokens": d.get("input_tokens", 0),
+                "output_tokens": d.get("output_tokens", 0),
+                "cache_read_tokens": d.get("cache_read_tokens", 0),
+                "cache_write_tokens": d.get("cache_write_tokens", 0),
+            },
+        )
+    if t == "error":
+        err_msg = d.get("error") or "unknown agent error"
+        return ErrorEvent(
+            timestamp=timestamp,
+            data={
+                "error_code": "run_error",
+                "message": err_msg,
+                "details": err_msg,
+            },
+        )
+    return None
+
+
+async def _hydrate_attachments_into_sandbox(
+    *,
+    org_id: str,
+    workspace_id: str,
+    conversation_id: str,
+    attachment_ids: list[str],
+    sandbox: Any,
+) -> None:
+    """Materialize attachment objects from ObjectStore onto the sandbox FS.
+
+    AttachmentService stamps every row with a promised path
+    (``/workspace/uploads/<conv>/<atch>/<filename>``) and the system prompt
+    tells the LLM to ``file_read`` that path — but the bytes live in
+    ObjectStore until something stages them in. This function is the
+    something. Idempotent (the hydrator checks for an existing file first).
+    Failures are logged and swallowed: the agent will see "file not found"
+    and surface it to the user, which is better than aborting the run.
+    """
+    if not attachment_ids or sandbox is None:
+        return
+
+    from cubeplex.agents.hydrator import AttachmentHydrator
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.objectstore import get_objectstore_client
+    from cubeplex.repositories import AttachmentRepository
+
+    try:
+        async with async_session_maker() as session:
+            repo = AttachmentRepository(
+                session,
+                org_id=org_id,
+                workspace_id=workspace_id,
+            )
+            hydrator = AttachmentHydrator(
+                repo=repo,
+                sandbox=sandbox,
+                objectstore=get_objectstore_client(),
+            )
+            await hydrator.hydrate(
+                conversation_id=conversation_id,
+                file_ids=attachment_ids,
+            )
+    except Exception as exc:  # noqa: BLE001 — non-fatal by design
+        logger.warning("Failed to hydrate attachments into sandbox: {}", exc)
+
+
+async def _build_attachment_content_blocks(
+    *,
+    org_id: str,
+    workspace_id: str,
+    conversation_id: str,
+    attachment_ids: list[str],
+    sandbox_available: bool = True,
+) -> list[dict[str, Any]]:
+    """Return file_attachment content blocks for the given file_ids.
+
+    Reads metadata via a short-lived session. Rows are expected to exist
+    (validated at the API layer); missing rows are silently skipped here
+    since hydration would have already failed for them.
+
+    When ``sandbox_available`` is False, document/other attachments are
+    dropped: their hint tells the model to ``file_read`` a sandbox path,
+    but ``file_read`` is only registered when SandboxMiddleware loads, and
+    hydration could not have placed bytes there either. Image attachments
+    are kept because ``view_images`` reads bytes from ObjectStore directly
+    and is registered regardless of sandbox availability.
+    """
+    if not attachment_ids:
+        return []
+
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories import AttachmentRepository
+
+    async with async_session_maker() as session:
+        repo = AttachmentRepository(
+            session,
+            org_id=org_id,
+            workspace_id=workspace_id,
+        )
+        blocks: list[dict[str, Any]] = []
+        for fid in attachment_ids:
+            row = await repo.get_in_conversation(
+                conversation_id=conversation_id,
+                attachment_id=fid,
+            )
+            if row is None:
+                continue
+            if not sandbox_available and row.kind != "image":
+                logger.warning(
+                    "Skipping non-image attachment {} ({}) — sandbox unavailable, "
+                    "file_read tool is not registered",
+                    row.id,
+                    row.kind,
+                )
+                continue
+            blocks.append(
+                {
+                    "type": "file_attachment",
+                    "file_id": row.id,
+                    "kind": row.kind,
+                    "filename": row.filename,
+                    "sandbox_path": row.sandbox_path,
+                    "size_bytes": row.size_bytes,
+                    "width": row.width,
+                    "height": row.height,
+                }
+            )
+        return blocks
+
+
+async def _repair_dangling_tool_calls(conversation_id: str) -> None:
+    """Backfill synthetic tool_results for tool_calls a cancel left unanswered.
+
+    Mirrors cubepi's own cancel cleanup as a fallback. Loads the checkpointed
+    thread, finds tool_calls in the last assistant message that have no
+    ToolResultMessage, and appends a synthetic error result for each so the
+    next provider call sees a structurally valid history.
+    """
+    from cubepi.providers.base import (
+        AssistantMessage,
+        TextContent,
+        ToolCall,
+        ToolResultMessage,
+    )
+
+    from cubeplex.agents.checkpointer import shared_checkpointer
+
+    async with shared_checkpointer() as cp:
+        data = await cp.load(conversation_id)
+        if data is None or not data.messages:
+            return
+
+        last_idx = -1
+        for i in range(len(data.messages) - 1, -1, -1):
+            if isinstance(data.messages[i], AssistantMessage):
+                last_idx = i
+                break
+        if last_idx == -1:
+            return
+        last_assistant = data.messages[last_idx]
+        assert isinstance(last_assistant, AssistantMessage)
+
+        # Only this turn's results count as answered — tool_call ids are not
+        # globally unique, so scanning all history could treat a reused id
+        # from an earlier turn as answered and skip the needed backfill.
+        answered = {
+            m.tool_call_id
+            for m in data.messages[last_idx + 1 :]
+            if isinstance(m, ToolResultMessage)
+        }
+        synthetic: list[Any] = [
+            ToolResultMessage(
+                tool_call_id=block.id,
+                tool_name=block.name,
+                content=[TextContent(text="[Tool execution cancelled by user]")],
+                is_error=True,
+                timestamp=datetime.now(UTC).timestamp(),
+            )
+            for block in last_assistant.content
+            if isinstance(block, ToolCall) and block.id not in answered
+        ]
+        if synthetic:
+            await cp.append(conversation_id, synthetic)
+
+
+async def _emit_synthetic_resolved(
+    publish_stream_event: Any,
+    pending: Any,
+    answered_question_id: str,
+) -> None:
+    """Emit a typed *_resolved event for a pending that was cleared by
+    the dangling-cleanup branch (org policy changed between pause and
+    respond, so middleware short-circuited the resumed tool call).
+
+    Uses the SAME typed events + publish_stream_event(event, agent_key)
+    signature the live HITL resolve path uses — so the frontend sees an
+    identical event shape and the same applyStreamEvent branch fires.
+
+    See spec §6 "Dangling pending cleanup".
+    """
+    from cubeplex.agents.schemas import (
+        AskUserResolvedEvent,
+        SandboxConfirmResolvedEvent,
+    )
+
+    event: AgentEvent
+    timestamp = datetime.now(UTC).isoformat()
+    kind = pending.payload.kind  # "approve" | "ask" | "confirm"
+    if kind == "approve":
+        event = SandboxConfirmResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": answered_question_id,
+                "tool_call_id": pending.payload.tool_call_id,
+                "decision": "policy_overridden",
+                "cancelled": False,
+                "timed_out": False,
+                "reason": "org sandbox policy changed during pause",
+            },
+        )
+    elif kind == "ask":
+        # AskUserResolvedEvent.data is {question_id, answers, cancelled,
+        # timed_out} — no 'outcome' field. Encode policy-override as
+        # cancelled=True + reason='policy_overridden' so the existing
+        # frontend applyStreamEvent ask_user_resolved branch fires and
+        # the card is removed.
+        event = AskUserResolvedEvent(
+            timestamp=timestamp,
+            data={
+                "question_id": answered_question_id,
+                "answers": None,
+                "cancelled": True,
+                "timed_out": False,
+                "reason": "policy_overridden",
+            },
+        )
+    else:
+        # ConfirmRequest (kind='confirm') is unused by cubeplex today. If a
+        # future caller introduces it, fail loud rather than silently leave
+        # the frontend with a stuck card.
+        raise ValueError(f"unhandled HITL kind in dangling cleanup: {kind!r}")
+
+    await publish_stream_event(event, None)  # second arg = agent_key
+
+
+class _AutoDetachListener:
+    """Schedules ``agent.detach()`` exactly once on ``HitlRequestEvent``.
+
+    Exposes ``.detached`` so the terminal block in ``_run_cubepi_path`` can
+    read whether this turn entered HITL — distinguishing a real new pending
+    request from a stale pending leftover from a prior session.
+    """
+
+    def __init__(self, agent: Any) -> None:
+        self._agent = agent
+        self.detached: bool = False
+
+    def __call__(self, evt: Any, _signal: Any = None) -> None:
+        from cubepi.agent.types import HitlRequestEvent
+
+        if self.detached:
+            return
+        if isinstance(evt, HitlRequestEvent):
+            self.detached = True
+            asyncio.create_task(self._agent.detach())
+
+
+def _build_auto_detach_listener(agent: Any) -> _AutoDetachListener:
+    return _AutoDetachListener(agent)
+
+
+class ResumeNoPending(LookupError):
+    """No DB pending exists for this conversation."""
+
+
+class ResumeStaleAnswer(Exception):
+    """The submitted answer's question_id doesn't match the pending."""
+
+
+class ResumeInFlight(Exception):
+    """Another resume / cancel is already in flight for this run."""
+
+
+class ResumeConflict(Exception):
+    """The conversation has moved on; the active run_id has changed."""
+
+
+def _build_cancel_answer(payload: Any, reason: str) -> dict[str, Any]:
+    """Synthesise an answer payload for ``cancel_paused_run`` to feed
+    through cubepi's respond path.
+
+    The shape matches what cubepi's ask_user / confirm tools format
+    into the synthetic tool_result body. The ``_cancelled`` and
+    ``_reason`` markers are unambiguous signals to the model that the
+    user did not actually answer — typical models react with "OK, I'll
+    skip / let me know if my question was off". For the per-question
+    keys we still fill a placeholder so the JSON shape isn't surprising
+    if the model checks individual fields.
+    """
+    kind = getattr(payload, "kind", None)
+    if kind == "ask":
+        questions = list(getattr(payload, "questions", []) or [])
+        answer: dict[str, Any] = {
+            getattr(q, "key", str(i)): "[user cancelled this question]"
+            for i, q in enumerate(questions)
+        }
+        answer["_cancelled"] = True
+        answer["_reason"] = reason
+        return answer
+    if kind == "confirm":
+        # confirm has a binary decision; a cancel ≈ explicit deny, plus
+        # marker fields so the model can distinguish "user clicked deny"
+        # from "user clicked cancel" if it matters.
+        return {"approved": False, "_cancelled": True, "_reason": reason}
+    return {"_cancelled": True, "_reason": reason}
+
+
+def _extract_tool_summaries(
+    messages: list[Any], *, from_idx: int | None = None
+) -> list[dict[str, str]]:
+    """Build compact tool-call summaries from a turn's message list.
+
+    Collects ToolResultMessages that appear after the run's UserMessage,
+    paired with their corresponding ToolCall arguments. Capped at 10 entries;
+    args and error text truncated to 150 chars each.
+
+    from_idx: index of the original user message for this run. When provided,
+    all tool calls after that index are captured, including those that precede
+    mid-run steer UserMessages. Falls back to last-UserMessage scan when None.
+    """
+    from cubepi.providers.base import (
+        AssistantMessage,
+        TextContent,
+        ToolCall,
+        ToolResultMessage,
+        UserMessage,
+    )
+
+    _ARGS_LIMIT = 150
+    _RESULT_LIMIT = 150
+    _MAX_SUMMARIES = 10
+
+    if from_idx is not None:
+        start = from_idx
+    else:
+        start = -1
+        for i, msg in enumerate(messages):
+            if isinstance(msg, UserMessage):
+                start = i
+    if start == -1:
+        return []
+
+    tool_args: dict[str, str] = {}
+    for msg in messages[start + 1 :]:
+        if isinstance(msg, AssistantMessage):
+            for part in msg.content:
+                if isinstance(part, ToolCall):
+                    args_str = ", ".join(f"{k}={repr(v)}" for k, v in part.arguments.items())
+                    tool_args[part.id] = args_str[:_ARGS_LIMIT]
+
+    summaries: list[dict[str, str]] = []
+    for msg in messages[start + 1 :]:
+        if not isinstance(msg, ToolResultMessage):
+            continue
+        if len(summaries) >= _MAX_SUMMARIES:
+            break
+        result_text = "".join(c.text for c in msg.content if isinstance(c, TextContent))
+        if msg.is_error:
+            outcome = f"error: {result_text[:_RESULT_LIMIT]}"
+        else:
+            outcome = "ok"
+        summaries.append(
+            {
+                "name": msg.tool_name,
+                "args_summary": tool_args.get(msg.tool_call_id, ""),
+                "outcome": outcome,
+            }
+        )
+    return summaries
+
+
+class RunManager:
+    """Owns background run execution and Redis persistence."""
+
+    def __init__(
+        self,
+        *,
+        app: FastAPI,
+        redis: Redis,
+        key_prefix: str,
+        run_event_ttl_seconds: int,
+        run_stream_max_events: int = 1000000,
+    ) -> None:
+        self._app = app
+        self._redis = redis
+        self._key_prefix = key_prefix
+        self._run_event_ttl_seconds = run_event_ttl_seconds
+        self._run_stream_max_events = run_stream_max_events
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._agents: dict[str, Any] = {}
+        self._hitl_channels: dict[str, Any] = {}
+        self._consolidation_tasks: set[asyncio.Task[None]] = set()
+        self._reflection_tasks: set[asyncio.Task[None]] = set()
+        self._ack_waiters: dict[str, list[asyncio.Future[bool]]] = {}
+        self._control_channel = f"{key_prefix}:control"
+        self._ack_channel = f"{key_prefix}:control:ack"
+        self._control_stopping = False
+        self._control_tasks: list[asyncio.Task[None]] = []
+        self._tasks_empty: asyncio.Event = asyncio.Event()
+        self._tasks_empty.set()
+
+    def _on_task_done(self, run_id: str) -> None:
+        """Done-callback that removes the run task and signals drain when empty."""
+        self._tasks.pop(run_id, None)
+        if not self._tasks:
+            self._tasks_empty.set()
+
+    async def start_run(
+        self,
+        *,
+        conversation_id: str,
+        content: str,
+        attachments: list[str] | None = None,
+        ctx: RunContext,
+        run_id: str | None = None,
+        model_key: str | None = None,
+        reasoning: ReasoningControl | None = None,
+        cancel_pending_hitl: bool = False,
+        llm_snapshot: Any | None = None,
+    ) -> str:
+        """Create and start a new background run.
+
+        ``run_id`` is generated unless the caller supplies one. The scheduled-
+        task poller pre-generates it and stamps the occurrence row so the
+        completion hook can find the row by ``run_id`` even if ``_execute_run``
+        finishes faster than the poller's post-dispatch UPDATE.
+        """
+        if run_id is None:
+            run_id = str(uuid7())
+        started_at = utc_isoformat(datetime.now(UTC))
+
+        # DB is the authoritative source for "is this conversation paused
+        # on a pending HITL". Check BEFORE create_run so a TTL-expired
+        # Redis lock can't let a new turn slip past — the Redis active-run
+        # key normally blocks via paused_hitl status, but if a long pause
+        # exceeds run_event_ttl_seconds the key disappears and create_run
+        # below would otherwise succeed for a brand-new run_id, racing
+        # the in-flight resume path and orphaning the pending answer.
+        from cubeplex.agents.checkpointer import shared_checkpointer
+
+        async with shared_checkpointer() as _cp:
+            _db_pending = await _cp.load_pending(conversation_id)
+        if _db_pending is not None:
+            if not cancel_pending_hitl:
+                _pending_req = _db_pending[0]
+                raise RuntimeError(
+                    f"Conversation {conversation_id} has a pending HITL request "
+                    f"(question_id={_pending_req.question_id}); "
+                    f"answer or cancel before starting a new turn"
+                )
+            _pending_req, _old_run_id = _db_pending
+            await self._force_cancel_hitl(conversation_id, _old_run_id)
+
+        async def _try_create_run() -> RunMeta | None:
+            return await create_run(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                status="running",
+                started_at=started_at,
+                user_message=content,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )
+
+        created_run = await _try_create_run()
+        if created_run is None:
+            existing = await get_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+            )
+            # An "active" run can be a phantom left behind by a crashed
+            # process: status="running" but nothing has appended an event for
+            # threshold_seconds (server killed mid-stream, OOM, etc). Mirror
+            # the user-facing /conversations route's behavior: detect it via
+            # is_stale_meta, finalize it, retry once. Without this the IM
+            # worker loops forever on "already has an active run". HITL stays
+            # untouched — paused_hitl is a real state, not a leak.
+            if existing and existing.status == "running":
+                from cubeplex.config import config as _cfg
+
+                threshold = int(_cfg.get("lifecycle.stale_run_threshold_seconds", 120))
+                if is_stale_meta(existing, threshold_seconds=threshold):
+                    await mark_run_stale(
+                        self._redis,
+                        prefix=self._key_prefix,
+                        run_id=existing.run_id,
+                        conversation_id=conversation_id,
+                    )
+                    created_run = await _try_create_run()
+            if created_run is None:
+                existing = await get_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                )
+                if existing and existing.status in ("running", "paused_hitl"):
+                    raise RuntimeError(f"Conversation {conversation_id} already has an active run")
+                raise RuntimeError(f"Conversation {conversation_id} could not claim an active run")
+
+        # Clear the per-conversation last-error pointer so subsequent reloads
+        # after a successful new run don't keep showing the previous failure.
+        with suppress(Exception):
+            await clear_conversation_last_error(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+            )
+
+        task = asyncio.create_task(
+            self._execute_run(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                content=content,
+                attachments=list(attachments or []),
+                ctx=ctx,
+                model_key=model_key,
+                reasoning=reasoning or ReasoningControl(),
+                llm_snapshot=llm_snapshot,
+            ),
+            name=f"run:{run_id}",
+        )
+        self._tasks_empty.clear()
+        self._tasks[run_id] = task
+        task.add_done_callback(lambda _: self._on_task_done(run_id))
+        return run_id
+
+    async def cancel_all(self) -> None:
+        """Cancel every in-flight run task. Forced shutdown path."""
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with suppress(asyncio.CancelledError):
+                await task
+
+    async def cancel_run(self, run_id: str) -> bool:
+        """Cancel a single in-flight run and wait for cleanup to finish.
+
+        Awaiting the task keeps the caller blocked until ``_execute_run``'s
+        finally block has cleared the Redis active-run key. Without this, a
+        client that clicks Stop and immediately re-sends would race against
+        cleanup and get a 409 from ``start_run``.
+        """
+        task = self._tasks.get(run_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+        return True
+
+    async def steer_run(self, run_id: str, content: str) -> bool:
+        """Inject a steering message into a live run's agent.
+
+        Returns False when the run has no live agent in this process (already
+        finished, or running in a different worker — the same single-process
+        limitation as cancel_run). The agent's loop drains the message at its
+        next safe point; we do not block on delivery.
+        """
+        agent = self._agents.get(run_id)
+        if agent is None:
+            return False
+
+        from cubepi.providers.base import TextContent, UserMessage
+
+        agent.steer(UserMessage(content=[TextContent(text=content)]))
+        return True
+
+    async def _publish_control(
+        self,
+        run_id: str,
+        type_: str,
+        content: str | None = None,
+        steer_id: str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        import json
+
+        payload: dict[str, Any] = {"run_id": run_id, "type": type_}
+        if content is not None:
+            payload["content"] = content
+        if steer_id is not None:
+            payload["steer_id"] = steer_id
+        if extra:
+            payload.update(extra)
+        await self._redis.publish(self._control_channel, json.dumps(payload))
+
+    async def _publish_ack(self, run_id: str) -> None:
+        import json
+
+        await self._redis.publish(self._ack_channel, json.dumps({"run_id": run_id}))
+
+    async def dispatch_steer(
+        self,
+        run_id: str,
+        content: str,
+        steer_id: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        agent = self._agents.get(run_id)
+        if agent is not None:
+            from cubepi.providers.base import TextContent, UserMessage
+
+            msg_metadata: dict[str, Any] = {"steer_id": steer_id}
+            if metadata:
+                msg_metadata.update(metadata)
+            agent.steer(
+                UserMessage(
+                    content=[TextContent(text=content)],
+                    metadata=msg_metadata,
+                )
+            )
+            return "steered"
+        extra: dict[str, Any] | None = None
+        if metadata:
+            extra = {"metadata": metadata}
+        await self._publish_control(run_id, "steer", content, steer_id=steer_id, extra=extra)
+        return "published"
+
+    async def resume_run_with_answer(
+        self,
+        *,
+        conversation_id: str,
+        run_id: str,
+        question_id: str,
+        answer: Any,
+        ctx: RunContext,
+    ) -> str:
+        """Resume a paused HITL conversation. Reuses the original run_id;
+        events stream into the same Redis stream key. See spec §5.
+
+        Returns the run_id (echoed back so the route response carries it).
+        """
+        from cubeplex.agents.checkpointer import shared_checkpointer
+        from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
+
+        # 1. Authoritative: DB pending. load_pending_request shape unchanged
+        #    per cubepi v3 prereq — returns HitlRequest | None.
+        async with shared_checkpointer() as cp:
+            pending = await cp.load_pending_request(conversation_id)
+        if pending is None:
+            raise ResumeNoPending(f"no pending for {conversation_id}")
+        if pending.question_id != question_id:
+            raise ResumeStaleAnswer(f"answer for {question_id}; pending is {pending.question_id}")
+        started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
+
+        # 2. Single-flight claim — pass started_at so the long-pause rebuild
+        #    branch in claim_resume's Lua can repopulate the meta hash.
+        claim = await claim_resume(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=conversation_id,
+            expected_run_id=run_id,
+            started_at=started_at_iso,
+            ttl_seconds=self._run_event_ttl_seconds,
+        )
+        if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
+            raise ResumeInFlight("another resume/cancel is in flight")
+        if claim.outcome == ClaimResumeOutcome.CONFLICT:
+            raise ResumeConflict("conversation has moved on")
+        assert claim.claim_token is not None  # OK outcome guarantees a token
+
+        # 3. Spawn the respond task. Reuse the original run_id.
+        task = asyncio.create_task(
+            self._execute_respond_run(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                question_id=question_id,
+                answer=answer,
+                claim_token=claim.claim_token,
+                ctx=ctx,
+            ),
+            name=f"respond:{run_id}",
+        )
+        self._tasks_empty.clear()
+        self._tasks[run_id] = task
+        task.add_done_callback(lambda _: self._on_task_done(run_id))
+        return run_id
+
+    async def cancel_paused_run(
+        self,
+        *,
+        conversation_id: str,
+        run_id: str,
+        reason: str = "cancelled by user",
+        ctx: RunContext,
+    ) -> str:
+        """Cancel a conversation parked in ``paused_hitl``.
+
+        Earlier revisions called ``agent.abort_pending`` which wrote a
+        synthetic deny tool_result AND a terminal "Conversation aborted"
+        assistant message, finalising the run as ``cancelled``. The
+        terminal write left a cold dead-end: the user clicked Cancel
+        and the conversation just stopped. The new flow synthesises a
+        cancel-flavoured *answer* and feeds it through the normal
+        respond path — cubepi's ask_user / confirm tool writes a
+        tool_result containing the cancel marker, then the agent loop
+        runs and the model gets to respond (typically: "OK, was the
+        question off-base? What did you have in mind?"). Run finalises
+        as ``completed`` via the normal respond path.
+        """
+        from cubeplex.agents.checkpointer import shared_checkpointer
+        from cubeplex.streams.hitl_resume import ClaimResumeOutcome, claim_resume
+
+        # 1. DB pending recovers started_at — needed for claim_resume's
+        #    rebuild branch (long-pause case where Redis meta has aged out).
+        async with shared_checkpointer() as cp:
+            pending = await cp.load_pending_request(conversation_id)
+        if pending is None:
+            raise ResumeNoPending(f"no pending for {conversation_id}")
+        started_at_iso = datetime.fromtimestamp(pending.created_at, UTC).isoformat()
+
+        # 2. Single-flight CAS — only one cancel/resume may own the slot.
+        claim = await claim_resume(
+            self._redis,
+            prefix=self._key_prefix,
+            conversation_id=conversation_id,
+            expected_run_id=run_id,
+            started_at=started_at_iso,
+            ttl_seconds=self._run_event_ttl_seconds,
+        )
+        if claim.outcome == ClaimResumeOutcome.ALREADY_RUNNING:
+            raise ResumeInFlight("cancel raced another resume/cancel in flight")
+        if claim.outcome == ClaimResumeOutcome.CONFLICT:
+            raise ResumeConflict("conversation has moved on")
+        assert claim.claim_token is not None  # OK outcome guarantees a token
+
+        # 3. Synthesise a cancel-flavoured answer. cubepi's ask_user /
+        #    confirm tool stringifies whatever we pass as the answer
+        #    into the tool_result body, so the model sees the marker
+        #    keys and can respond contextually.
+        cancel_answer = _build_cancel_answer(pending.payload, reason)
+
+        # 4. Spawn the respond task — reuses the existing resume pipeline
+        #    that handles the agent loop, terminal CAS write, and Redis
+        #    cleanup. Same shape as ``resume_run_with_answer``.
+        task = asyncio.create_task(
+            self._execute_respond_run(
+                run_id=run_id,
+                conversation_id=conversation_id,
+                question_id=pending.question_id,
+                answer=cancel_answer,
+                claim_token=claim.claim_token,
+                ctx=ctx,
+            ),
+            name=f"cancel_respond:{run_id}",
+        )
+        self._tasks_empty.clear()
+        self._tasks[run_id] = task
+        task.add_done_callback(lambda _: self._on_task_done(run_id))
+        return run_id
+
+    async def _force_cancel_hitl(
+        self,
+        conversation_id: str,
+        old_run_id: str | None,
+    ) -> None:
+        """Silently cancel a paused HITL so a new run can start.
+
+        Clears the DB pending request, backfills synthetic tool_results for
+        the dangling tool_use, and tears down the Redis active-run lock.
+        Emits a terminal DoneEvent so any live OutboundRunTailer exits
+        cleanly instead of polling until TTL expiry.
+        """
+        from cubeplex.agents.checkpointer import shared_checkpointer
+
+        async with shared_checkpointer() as cp:
+            await cp.save_pending_request(conversation_id, None)
+
+        await _repair_dangling_tool_calls(conversation_id)
+
+        if old_run_id is not None:
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=old_run_id,
+                status="cancelled",
+            )
+            await self._append_event(
+                old_run_id,
+                conversation_id,
+                DoneEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data={},
+                ),
+            )
+            await clear_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+                run_id=old_run_id,
+            )
+            await expire_run_data(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=old_run_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )
+        logger.info(
+            "[RunManager] force-cancelled paused HITL for conversation {} (old run {})",
+            conversation_id,
+            old_run_id,
+        )
+
+    async def dispatch_cancel_steer(self, run_id: str, steer_id: str) -> str:
+        agent = self._agents.get(run_id)
+        if agent is not None:
+            removed = agent.cancel_steer(steer_id)
+            return "cancelled" if removed else "not_found"
+        await self._publish_control(run_id, "cancel_steer", steer_id=steer_id)
+        return "published"
+
+    async def dispatch_cancel(self, run_id: str, ack_timeout: float = 3.0) -> str:
+        if run_id in self._tasks:
+            await self.cancel_run(run_id)
+            return "cancelled"
+
+        fut: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
+        self._ack_waiters.setdefault(run_id, []).append(fut)
+        try:
+            await self._publish_control(run_id, "cancel")
+            await asyncio.wait_for(fut, timeout=ack_timeout)
+            return "cancelled"
+        except TimeoutError:
+            return "published"
+        finally:
+            waiters = self._ack_waiters.get(run_id)
+            if waiters and fut in waiters:
+                waiters.remove(fut)
+                if not waiters:
+                    self._ack_waiters.pop(run_id, None)
+
+    async def _handle_control(self, data: dict[str, Any]) -> None:
+        run_id = data.get("run_id")
+        type_ = data.get("type")
+        if not isinstance(run_id, str):
+            return
+        if type_ == "cancel":
+            if run_id in self._tasks:
+                await self.cancel_run(run_id)
+                await self._publish_ack(run_id)
+        elif type_ == "steer":
+            agent = self._agents.get(run_id)
+            if agent is not None:
+                from cubepi.providers.base import TextContent, UserMessage
+
+                msg_metadata: dict[str, Any] = {"steer_id": data.get("steer_id") or ""}
+                extra_metadata = data.get("metadata")
+                if isinstance(extra_metadata, dict):
+                    msg_metadata.update(extra_metadata)
+                agent.steer(
+                    UserMessage(
+                        content=[TextContent(text=data.get("content") or "")],
+                        metadata=msg_metadata,
+                    )
+                )
+        elif type_ == "cancel_steer":
+            agent = self._agents.get(run_id)
+            if agent is not None:
+                agent.cancel_steer(data.get("steer_id") or "")
+
+    async def _handle_ack(self, data: dict[str, Any]) -> None:
+        run_id = data.get("run_id")
+        if not isinstance(run_id, str):
+            return
+        for fut in self._ack_waiters.get(run_id, []):
+            if not fut.done():
+                fut.set_result(True)
+
+    async def _subscribe_loop(self, channel: str, handler: Any, ready: asyncio.Event) -> None:
+        import json
+
+        backoff = 0.5
+        while not self._control_stopping:
+            pubsub = self._redis.pubsub()
+            try:
+                await pubsub.subscribe(channel)
+                ready.set()
+                backoff = 0.5
+                async for msg in pubsub.listen():
+                    if self._control_stopping:
+                        break
+                    if msg.get("type") != "message":
+                        continue
+                    try:
+                        await handler(json.loads(msg["data"]))
+                    except Exception:
+                        logger.opt(exception=True).warning("control handler error on {}", channel)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "control listener {} dropped; reconnecting", channel
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)
+            finally:
+                with suppress(Exception):
+                    await pubsub.aclose()  # type: ignore[no-untyped-call]
+
+    async def start_control_listeners(self, ready_timeout: float = 5.0) -> None:
+        self._control_stopping = False
+        ctrl_ready = asyncio.Event()
+        ack_ready = asyncio.Event()
+        self._control_tasks = [
+            asyncio.create_task(
+                self._subscribe_loop(self._control_channel, self._handle_control, ctrl_ready),
+                name="run-control-listener",
+            ),
+            asyncio.create_task(
+                self._subscribe_loop(self._ack_channel, self._handle_ack, ack_ready),
+                name="run-control-ack-listener",
+            ),
+        ]
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(ctrl_ready.wait(), ack_ready.wait()), timeout=ready_timeout
+            )
+        except TimeoutError:
+            # Don't fail startup: single-instance deployments don't need pub/sub
+            # at all (control runs via the local fast-path), and a transient Redis
+            # blip shouldn't block boot. But don't fail *silently* either — the
+            # listeners keep retrying in the background (_subscribe_loop), so a
+            # persistent failure here (e.g. Redis ACL/connectivity) means
+            # cross-instance cancel/steer is degraded until they connect.
+            logger.warning(
+                "Run-control pub/sub listeners not subscribed within {}s; "
+                "cross-instance cancel/steer degraded until they connect "
+                "(listeners keep retrying in the background)",
+                ready_timeout,
+            )
+
+    async def stop_control_listeners(self) -> None:
+        self._control_stopping = True
+        for t in self._control_tasks:
+            t.cancel()
+        for t in self._control_tasks:
+            with suppress(asyncio.CancelledError):
+                await t
+        self._control_tasks = []
+
+    async def drain(self, timeout_seconds: float) -> None:
+        """Wait for in-flight runs to finish, then return.
+
+        On timeout, cancels residual tasks via ``cancel_all`` (which lets
+        the per-task cancel path mark status=cancelled and write an
+        ``error`` event before the lock is released).
+
+        Logs a status line on entry when there's anything to wait for, plus
+        a progress line every 30 seconds while waiting.
+        """
+        # Best-effort: stop background consolidation and reflection tasks first,
+        # regardless of whether any run tasks remain (drain returns early below
+        # when _tasks is empty).
+        for t in list(self._consolidation_tasks) + list(self._reflection_tasks):
+            t.cancel()
+        for t in list(self._consolidation_tasks) + list(self._reflection_tasks):
+            with suppress(asyncio.CancelledError, asyncio.TimeoutError):
+                await asyncio.wait_for(t, timeout=2.0)
+
+        if self._tasks_empty.is_set():
+            return
+
+        logger.info(
+            "Draining {} in-flight run(s) (timeout {}s)",
+            len(self._tasks),
+            timeout_seconds,
+        )
+        progress_task = asyncio.create_task(self._log_drain_progress())
+        try:
+            await asyncio.wait_for(self._tasks_empty.wait(), timeout=timeout_seconds)
+        except TimeoutError:
+            logger.warning(
+                "Drain timeout after {}s, cancelling {} residual run(s)",
+                timeout_seconds,
+                len(self._tasks),
+            )
+            await self.cancel_all()
+        finally:
+            progress_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await progress_task
+
+    async def _log_drain_progress(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(30)
+                if self._tasks:
+                    logger.info("Still draining: {} run(s) remaining", len(self._tasks))
+        except asyncio.CancelledError:
+            return
+
+    async def _append_event(self, run_id: str, conversation_id: str, event: AgentEvent) -> str:
+        payload = event.model_dump()
+        return await append_run_event(
+            self._redis,
+            prefix=self._key_prefix,
+            run_id=run_id,
+            conversation_id=conversation_id,
+            payload=payload,
+            ttl_seconds=self._run_event_ttl_seconds,
+            maxlen=self._run_stream_max_events,
+        )
+
+    async def _append_error(
+        self,
+        run_id: str,
+        conversation_id: str,
+        message: str | None = None,
+        details: str | None = None,
+        *,
+        exc: BaseException | None = None,
+        error_code: ErrorCode | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> None:
+        """Publish a classified ErrorEvent on the run's SSE stream.
+
+        Callers can pass:
+          - ``exc``: classify the exception and emit code/params/details.
+          - ``error_code`` + ``params``: emit a known code with explicit params
+            (used by paths that already know what went wrong).
+          - Legacy positional ``message`` / ``details``: emit an
+            ``internal_error`` event with the literal message (cancel path).
+        """
+
+        if exc is not None:
+            code, classified_params = classify_exception(exc, **(params or {}))
+            final_params = classified_params
+            final_message = message or english_fallback(code, final_params)
+            final_details = details or str(exc)
+        elif error_code is not None:
+            code = error_code
+            final_params = params or {}
+            final_message = message or english_fallback(code, final_params)
+            final_details = details or final_message
+        else:
+            code = ErrorCode.internal_error
+            final_params = params or {}
+            final_message = message or english_fallback(code, final_params)
+            final_details = details or final_message
+
+        error_event = ErrorEvent(
+            timestamp=datetime.now(UTC).isoformat(),
+            data={
+                "error_code": code.value,
+                "params": final_params,
+                "message": final_message,
+                "details": final_details,
+            },
+        )
+        await self._append_event(run_id, conversation_id, error_event)
+
+    async def _run_cubepi_path(
+        self,
+        *,
+        ctx: RunContext,
+        run_id: str,
+        conversation_id: str,
+        content: str,
+        attachments: list[str],
+        effective_system_prompt: str,
+        publish_stream_event: Any,
+        flush_citation_buffer: Any,
+        citation_buffers: dict[str | None, str],
+        sandbox: Any | None = None,
+        skill_catalog: Any | None = None,
+        catalog_session: Any | None = None,
+        trigger: str = "interactive",
+        extra_ref_holder: dict[str, Any] | None = None,
+        model_key: str | None = None,
+        reasoning: ReasoningControl | None = None,
+    ) -> str:
+        """Execute a single user turn through the cubepi runtime.
+
+        Builds a cubepi.Provider + cubepi.Agent, subscribes an event listener, then
+        awaits agent.prompt(). Each AgentEvent is translated into a cubeplex AgentEvent
+        schema object and forwarded to ``publish_stream_event``; the rest of
+        _execute_run (DoneEvent, update_run_meta, etc.) consumes the resulting
+        turn_usage and citation buffers.
+
+        Tools wired (M2.5):
+          - no-DI builtin tools (calculator, datetime)
+          - view_images (per-request DI: org_id, workspace_id, objectstore, capabilities)
+          - memory CRUD tools (service factory per-request)
+          - load_skill (catalog + workspace/org)
+          - MCP tools (workspace-enabled HTTP MCP servers)
+        """
+        from cubeplex.agents.checkpointer import shared_checkpointer
+        from cubeplex.agents.stream import StreamConverter
+        from cubeplex.middleware.citations.counter import citation_counter_var
+
+        # extra_ref late-binding: compaction, skills, and todo all need access
+        # to agent._extra, which is only available after the agent is built.
+        # The holder is passed in from _execute_run so the outer except block
+        # can read model/provider/context_window when we raise from here.
+        if extra_ref_holder is None:
+            extra_ref_holder = {}
+        extra_ref_holder.setdefault("extra", None)
+
+        # Bridge the synchronous cubepi listener to the async world via a queue.
+        # agent.prompt() is async and invokes synchronous listeners on each
+        # AgentEvent as they arrive.  Previously we buffered translated dicts
+        # and flushed them after prompt() returned, which made long responses
+        # appear as a single batch dump.  Instead, push each translated dict
+        # onto an asyncio.Queue and have a parallel drain task forward them
+        # through publish_stream_event in real time.  The sentinel ``None``
+        # signals the drainer to exit so we can finish citation flushing.
+        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async with shared_checkpointer() as cp:
+            # Seed the citation counter past any 【N-M】 markers already
+            # persisted in this conversation's tool-result history so
+            # cross-turn ids don't collide in the frontend store (which is
+            # keyed by citation_id alone). No-op on the first turn.
+            try:
+                _hist = await cp.load(conversation_id)
+            except Exception as _seed_exc:
+                logger.warning("Citation seed: failed to load history: {}", _seed_exc)
+                _hist = None
+            if _hist is not None and _hist.messages:
+                _counter = citation_counter_var.get()
+                if _counter is not None:
+                    await _counter.seed_from_messages(_hist.messages)
+
+            with suppress(Exception):
+                await self._append_event(
+                    run_id,
+                    conversation_id,
+                    StatusEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data={"phase": "loading_tools"},
+                    ),
+                )
+            # all_tools is part of the factory contract for future callers
+            # (e.g. T8/T10) but the prompt path doesn't need it directly —
+            # the agent already has the tools bound at construction time.
+            agent, _all_tools, sandbox_hitl_channel = await self._build_agent_for_conversation(
+                ctx=ctx,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                cp=cp,
+                sandbox=sandbox,
+                skill_catalog=skill_catalog,
+                catalog_session=catalog_session,
+                effective_system_prompt=effective_system_prompt,
+                extra_ref_holder=extra_ref_holder,
+                sse_queue=sse_queue,
+                publish_stream_event=publish_stream_event,
+                trigger=trigger,
+                model_key=model_key,
+                reasoning=reasoning or ReasoningControl(),
+            )
+            # Hand the history already loaded for the citation seed to the
+            # agent (mirrors prompt()'s own restore: messages + extra).
+            # prompt() skips its checkpointer load when messages are already
+            # present, so each send reads the full thread once, not twice.
+            # In-place extra mutation keeps the dict identity that the
+            # extra_ref closures below capture.
+            if _hist is not None and _hist.messages:
+                agent._state.messages = list(_hist.messages)
+                agent._extra.clear()
+                agent._extra.update(_hist.extra)
+
+            # Late-bind extra_ref to the live agent._extra dict so compaction /
+            # skills / todo middleware can read and write persistent state.
+            # The factory already populated the closure via extra_ref_holder;
+            # this is the post-build assignment those closures resolve to.
+            extra_ref_holder["extra"] = agent._extra
+
+            from cubepi.agent.types import MessageEndEvent as _MsgEndEvent
+            from cubepi.providers.base import UserMessage as _UserMsg
+
+            _user_msg_seen = 0
+            auto_detach = _build_auto_detach_listener(agent)
+            # One per-run StreamConverter so progressive `deferred_tool_call`
+            # unwrap can stitch deltas across events; without persistent state
+            # we couldn't peel the wrapper JSON as it streams.
+            stream_converter = StreamConverter()
+
+            def _on_event(evt: Any, _signal: Any = None) -> None:
+                # Runs on the same event loop as _run_cubepi_path, so
+                # put_nowait is safe.  If we ever invoke the agent from a
+                # background thread, swap to loop.call_soon_threadsafe.
+                # auto_detach must run FIRST so HitlRequestEvent triggers
+                # detach before the SSE conversion below; T6 reads
+                # `auto_detach.detached` in the terminal block.
+                auto_detach(evt, _signal)
+                nonlocal _user_msg_seen
+                if isinstance(evt, _MsgEndEvent) and isinstance(evt.message, _UserMsg):
+                    _user_msg_seen += 1
+                    if _user_msg_seen == 1:
+                        return  # seed prompt — already shown optimistically
+                for d in stream_converter.convert_agent_event(evt):
+                    sse_queue.put_nowait(d)
+
+            agent.subscribe(_on_event)
+            self._agents[run_id] = agent
+            if sandbox_hitl_channel is not None:
+                self._hitl_channels[run_id] = sandbox_hitl_channel
+            drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
+
+            # Compute relevance-memory snapshot before the agent loop starts
+            # and bake it into the UserMessage metadata so MemoryMiddleware
+            # can prepend the rendered snapshot text during transform_context.
+            # Baking the snapshot at append-time (rather than re-deriving it
+            # on replay) is what keeps the historical prefix byte-stable for
+            # prompt caching — see backend/docs/prompt-cache-discipline.md.
+            import time as _time
+
+            from cubepi.providers.base import TextContent as _TextContent
+            from cubepi.providers.base import UserMessage as _UserMessage
+
+            from cubeplex.middleware.memory import compute_relevance_snapshot as _compute_snap
+
+            _user_msg_metadata: dict[str, Any] = {}
+            if not ctx.is_group_chat:
+                try:
+                    _mem_repo_factory = extra_ref_holder["mem_repo_factory"]
+                    async with _mem_repo_factory() as _snap_repo:
+                        _snapshot = await _compute_snap(_snap_repo)
+                    if _snapshot is not None:
+                        _user_msg_metadata["memory_snapshot"] = _snapshot
+                except Exception as _snap_exc:
+                    logger.warning("Failed to compute relevance snapshot: {}", _snap_exc)
+
+            # Build attachment metadata blocks and inject into user message so
+            # AttachmentHintMiddleware can render the [Attachments] hint.
+            if attachments:
+                await _hydrate_attachments_into_sandbox(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    conversation_id=conversation_id,
+                    attachment_ids=attachments,
+                    sandbox=sandbox,
+                )
+
+                try:
+                    _att_blocks = await _build_attachment_content_blocks(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        conversation_id=conversation_id,
+                        attachment_ids=attachments,
+                        sandbox_available=sandbox is not None,
+                    )
+                    if _att_blocks:
+                        _user_msg_metadata["attachments"] = _att_blocks
+                except Exception as _att_exc:
+                    logger.warning("Failed to build attachment blocks for cubepi run: {}", _att_exc)
+
+            # Stamp on every message (1:1 included) so a later 1:1→group
+            # conversion attributes past messages; UI gates display on group.
+            if ctx.sender_display_name:
+                _user_msg_metadata["sender_user_id"] = ctx.user_id
+                _user_msg_metadata["sender_display_name"] = ctx.sender_display_name
+
+            _user_msg = _UserMessage(
+                content=[_TextContent(text=content)],
+                timestamp=_time.time(),
+                metadata=_user_msg_metadata,
+            )
+
+            await self._bump_topic_activity(ctx)
+            # Attach the process-level Tracer to this run via cubepi's
+            # best-effort scope: it swallows every tracing fault (attach,
+            # detach, flush) so tracing can never break the run, and is a
+            # no-op when tracing is disabled (tracer is None).
+            from cubepi.tracing import trace, tracing_context
+
+            from cubeplex.llm.runtime_writeback import (
+                schedule_runtime_status_writeback as _schedule_writeback,
+            )
+
+            tracer = getattr(self._app.state, "tracer", None)
+            # Provider/model identity were resolved inside the factory; the
+            # writeback below uses them so the per-run liveness flips still
+            # target the same provider+model the agent actually called.
+            provider_name: str = extra_ref_holder["provider_name"]
+            model_id: str = extra_ref_holder["model_id"]
+            # Stamp the run's identity onto the trace spans (recorder writes
+            # these as cubepi.metadata.* on the invoke_agent span). Skip None
+            # and stringify so OTel attribute typing is always satisfied.
+            _trace_meta = {
+                k: str(v)
+                for k, v in (
+                    ("conversation_id", conversation_id),
+                    ("user_id", ctx.user_id),
+                    ("org_id", ctx.org_id),
+                    ("workspace_id", ctx.workspace_id),
+                )
+                if v is not None
+            }
+            final_status: str = "completed"
+            with suppress(Exception):
+                await self._append_event(
+                    run_id,
+                    conversation_id,
+                    StatusEvent(
+                        timestamp=datetime.now(UTC).isoformat(),
+                        data={"phase": "starting"},
+                    ),
+                )
+            try:
+                with tracing_context(metadata=_trace_meta):
+                    # flush="background": span export must not gate the
+                    # turn's DoneEvent (it added seconds to the tail against
+                    # a slow OTLP collector); lifespan's tracer.shutdown()
+                    # settles pending flushes.
+                    async with trace(tracer, agent, flush="background"):
+                        # Pass cubeplex's run_id so cubepi stamps it onto
+                        # cubepi_messages.run_id (instead of generating its own).
+                        # Aligns the cubepi message ledger with cubeplex's redis
+                        # run-meta, SSE streams, and billing_llm_events.
+                        await agent.prompt(_user_msg, run_id=run_id)
+                        _raise_if_cubepi_agent_failed(agent)
+            except BaseException as _run_exc:
+                # Out-of-band, best-effort: a 401/403 flips provider liveness to
+                # "fail"; a model_not_found flips this model to "unavailable".
+                # Never blocks or alters the live request — we re-raise as-is.
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=_run_exc,
+                )
+                raise
+            else:
+                # Success clears a stale liveness "fail" via a guarded UPDATE.
+                _schedule_writeback(
+                    org_id=ctx.org_id,
+                    provider_slug=provider_name,
+                    model_id=model_id,
+                    exc=None,
+                )
+
+                # --- Out-of-band reflection trigger ---
+                # Spawn a detached task that runs a small reflection agent
+                # to decide whether memory_save / memory_update calls are
+                # warranted for this turn. Fire-and-forget — never blocks
+                # or raises into the main run path. Provider / factory /
+                # memory_service_factory are stashed by the agent factory
+                # via extra_ref_holder (T7); reuse them rather than
+                # re-resolving.
+                def _last_assistant_text(messages: list[Any]) -> str | None:
+                    from cubepi.providers.base import AssistantMessage, TextContent
+
+                    for msg in reversed(messages):
+                        if isinstance(msg, AssistantMessage):
+                            parts: list[str] = []
+                            for c in msg.content:
+                                if isinstance(c, TextContent):
+                                    parts.append(c.text)
+                            return "\n".join(parts).strip() or None
+                    return None
+
+                def _stringify_user_msg(msg: Any) -> str:
+                    if isinstance(msg, str):
+                        return msg
+                    from cubepi.providers.base import TextContent
+
+                    content = getattr(msg, "content", None)
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        parts_s = [c.text for c in content if isinstance(c, TextContent)]
+                        return "\n".join(parts_s).strip()
+                    return ""
+
+                try:
+                    from cubeplex.db.engine import (
+                        async_session_maker as _ue_session_maker,
+                    )
+                    from cubeplex.repositories.user_event import UserEventRepository
+                    from cubeplex.services.reflection_runner import (
+                        ReflectionInput,
+                        ReflectionRunner,
+                        ReflectionTurn,
+                    )
+                    from cubeplex.services.user_event import UserEventService
+                    from cubeplex.tools.builtin.memory import create_memory_tools
+
+                    _bus = getattr(self._app.state, "user_event_bus", None)
+                    _memory_service_factory = extra_ref_holder.get("memory_service_factory")
+                    _provider_ref = extra_ref_holder.get("provider")
+                    _snap_ref = extra_ref_holder.get("llm_snapshot")
+                    if (
+                        _memory_service_factory is None
+                        or _provider_ref is None
+                        or _snap_ref is None
+                    ):
+                        logger.debug(
+                            "skipping reflection for run_id={}: memory tools not available",
+                            run_id,
+                        )
+                    elif _bus is not None:
+
+                        def _make_reflection_agent(_inp: ReflectionInput) -> Any:
+                            from cubepi import Agent
+
+                            from cubeplex.llm.config import ModelCost
+                            from cubeplex.middleware.cost import (
+                                CostMiddleware as _ReflCostMw,
+                            )
+                            from cubeplex.prompts.reflection_system import (
+                                REFLECTION_SYSTEM_PROMPT,
+                            )
+
+                            _mem_tools = create_memory_tools(
+                                service_factory=_memory_service_factory,
+                                conversation_id=_inp.conversation_id,
+                                run_id=_inp.run_id,
+                            )
+
+                            def _refl_price_lookup(
+                                provider_name_: str, model_id_: str
+                            ) -> ModelCost | None:
+                                assert _snap_ref is not None  # narrowed above
+                                pcfg = _snap_ref.providers.get(provider_name_)
+                                if pcfg is None:
+                                    return None
+                                for m in pcfg.models:
+                                    if m.id == model_id_:
+                                        cost: ModelCost | None = m.cost
+                                        return cost
+                                return None
+
+                            _refl_mw: list[Any] = [
+                                _ReflCostMw(
+                                    org_id=ctx.org_id,
+                                    workspace_id=ctx.workspace_id,
+                                    user_id=ctx.user_id,
+                                    conversation_id=_inp.conversation_id,
+                                    price_lookup=_refl_price_lookup,
+                                )
+                            ]
+
+                            return Agent(
+                                model=_provider_ref.model(model_id),
+                                system_prompt=REFLECTION_SYSTEM_PROMPT,
+                                tools=_mem_tools,
+                                middleware=_refl_mw,
+                            )
+
+                        async def _run_reflection(
+                            agent_ref: Any = agent,
+                            user_msg_ref: Any = _user_msg,
+                            bus: Any = _bus,
+                            agent_factory: Any = _make_reflection_agent,
+                        ) -> None:
+                            try:
+                                await asyncio.wait_for(agent_ref.wait_for_idle(), timeout=10.0)
+                            except (TimeoutError, Exception):
+                                logger.warning(
+                                    "reflection: agent not idle within 10s, skipping run_id={}",
+                                    run_id,
+                                )
+                                return
+                            last_assistant = _last_assistant_text(agent_ref.state.messages)
+                            if not last_assistant:
+                                return
+                            user_msg_text = _stringify_user_msg(user_msg_ref)
+                            # Load the user's active personal memory so the reflection agent
+                            # knows what's already stored before deciding what to save.
+                            _existing_items: list[tuple[str, str, str]] = []
+                            try:
+                                from cubeplex.models.memory import MemoryScope, MemoryStatus
+                                from cubeplex.repositories.memory import MemoryRepository
+
+                                async with _ue_session_maker() as _mem_session:
+                                    _mem_repo = MemoryRepository(
+                                        _mem_session,
+                                        user_id=ctx.user_id,
+                                        org_id=ctx.org_id,
+                                        workspace_id=ctx.workspace_id,
+                                    )
+                                    _personal = await _mem_repo.list(
+                                        scope=MemoryScope.PERSONAL,
+                                        status=MemoryStatus.ACTIVE,
+                                        order_by_recent=True,
+                                        limit=40,
+                                    )
+                                _existing_items = [
+                                    (m.id, m.type.value, m.content) for m in _personal
+                                ]
+                            except Exception:
+                                logger.opt(exception=True).warning(
+                                    "reflection: failed to load existing memory for run_id={}",
+                                    run_id,
+                                )
+
+                            # Locate the original user message by identity so
+                            # tool summaries include calls before mid-run steers.
+                            _user_start: int | None = None
+                            for _mi, _mm in enumerate(agent_ref.state.messages):
+                                if _mm is user_msg_ref:
+                                    _user_start = _mi
+                                    break
+
+                            inp = ReflectionInput(
+                                conversation_id=conversation_id,
+                                run_id=run_id,
+                                user_id=ctx.user_id,
+                                workspace_id=ctx.workspace_id,
+                                turn=ReflectionTurn(
+                                    user_message=user_msg_text,
+                                    assistant_message=last_assistant,
+                                    tool_summaries=_extract_tool_summaries(
+                                        agent_ref.state.messages,
+                                        from_idx=_user_start,
+                                    ),
+                                ),
+                                existing_memory_items=_existing_items,
+                            )
+                            async with _ue_session_maker() as _session:
+                                _repo = UserEventRepository(_session)
+                                _svc = UserEventService(repo=_repo, bus=bus)
+                                _runner = ReflectionRunner(
+                                    user_event_service=_svc,
+                                    agent_factory=agent_factory,
+                                )
+                                await _runner.reflect(inp)
+
+                        _refl_task = asyncio.create_task(
+                            _run_reflection(), name=f"reflection:{run_id}"
+                        )
+                        self._reflection_tasks.add(_refl_task)
+                        _refl_task.add_done_callback(self._reflection_tasks.discard)
+                except Exception:
+                    logger.opt(exception=True).warning(
+                        "failed to schedule reflection for run_id={}", run_id
+                    )
+
+                # T6: classify the terminal state. Three success outcomes:
+                #   - no DB pending → completed
+                #   - DB pending but no HitlRequestEvent this turn → stale
+                #     leftover; clear it and treat as completed
+                #   - DB pending and HitlRequestEvent fired → genuine new
+                #     pause (auto-detach hook already detached the agent)
+                from cubeplex.streams.hitl_resume import classify_terminal_status
+
+                final_pending = await agent.load_pending_hitl_request()
+                classification = classify_terminal_status(
+                    final_pending=final_pending,
+                    answered_question_id=None,  # prompt path
+                    saw_hitl_request_event=auto_detach.detached,
+                )
+                if classification.clear_pending:
+                    await cp.save_pending_request(conversation_id, None)
+                final_status = classification.status
+            finally:
+                # Stop accepting steers for this run before tearing down.
+                self._agents.pop(run_id, None)
+                self._hitl_channels.pop(run_id, None)
+                # Signal drainer and wait for it to flush remaining events so
+                # all SSE dicts are published before citation buffers flush.
+                await sse_queue.put(None)
+                await drainer
+
+        for agent_key in list(citation_buffers):
+            await flush_citation_buffer(agent_key, agent_key)
+        return final_status
+
+    async def _run_cubepi_respond_path(
+        self,
+        *,
+        ctx: RunContext,
+        run_id: str,
+        conversation_id: str,
+        question_id: str,
+        answer: Any,
+        claim_token: str,
+        effective_system_prompt: str,
+        publish_stream_event: Any,
+        flush_citation_buffer: Any,
+        citation_buffers: dict[str | None, str],
+        sandbox: Any | None = None,
+        skill_catalog: Any | None = None,
+        catalog_session: Any | None = None,
+        extra_ref_holder: dict[str, Any] | None = None,
+    ) -> str:
+        """Resume a paused HITL conversation by delivering ``answer`` to a
+        cubepi agent via ``agent.respond``.
+
+        Mirrors :meth:`_run_cubepi_path` but:
+
+        * calls :meth:`cubepi.Agent.respond` instead of ``agent.prompt`` — no
+          new user message, no memory snapshot, no attachments;
+        * reuses the existing ``run_id`` so events stream into the same Redis
+          key the SSE consumer is still tailing;
+        * classifies the terminal state with ``answered_question_id`` set so
+          a stale dangling pending matching the answer we just delivered is
+          treated as ``completed`` rather than ``paused_hitl``;
+        * writes the terminal status via
+          :func:`finalize_run_meta_if_claim_matches` so we only clobber the
+          meta row while our claim still owns it.
+        """
+        from cubeplex.agents.checkpointer import shared_checkpointer
+        from cubeplex.agents.stream import StreamConverter
+        from cubeplex.middleware.citations.counter import citation_counter_var
+        from cubeplex.streams.hitl_resume import (
+            classify_terminal_status,
+            finalize_run_meta_if_claim_matches,
+        )
+
+        # Late-binding holder for middleware closures (provider_name,
+        # model_id, mem_repo_factory, extra). Passed in from
+        # _execute_respond_run so the outer except block can read
+        # model/provider/context_window when we raise from here.
+        if extra_ref_holder is None:
+            extra_ref_holder = {}
+        extra_ref_holder.setdefault("extra", None)
+
+        sse_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async with shared_checkpointer() as cp:
+            # Seed the citation counter past markers already persisted in
+            # this conversation. The respond turn appends new tool results,
+            # so without seeding we'd collide with citations the original
+            # prompt turn already emitted.
+            try:
+                _hist = await cp.load(conversation_id)
+            except Exception as _seed_exc:
+                logger.warning("Citation seed (respond): failed to load history: {}", _seed_exc)
+                _hist = None
+            if _hist is not None and _hist.messages:
+                _counter = citation_counter_var.get()
+                if _counter is not None:
+                    await _counter.seed_from_messages(_hist.messages)
+
+            agent, _all_tools, sandbox_hitl_channel = await self._build_agent_for_conversation(
+                ctx=ctx,
+                conversation_id=conversation_id,
+                run_id=run_id,
+                cp=cp,
+                sandbox=sandbox,
+                skill_catalog=skill_catalog,
+                catalog_session=catalog_session,
+                effective_system_prompt=effective_system_prompt,
+                extra_ref_holder=extra_ref_holder,
+                sse_queue=sse_queue,
+                publish_stream_event=publish_stream_event,
+            )
+            extra_ref_holder["extra"] = agent._extra
+
+            auto_detach = _build_auto_detach_listener(agent)
+            # One per-run StreamConverter — see comment on the prompt path
+            # variant above; the deferred-call unwrap needs persistent state
+            # across deltas inside a single run.
+            stream_converter = StreamConverter()
+
+            def _on_event(evt: Any, _signal: Any = None) -> None:
+                # auto_detach runs first so a follow-up HitlRequestEvent
+                # detaches the agent before SSE conversion; T6 reads
+                # `auto_detach.detached` in the terminal block below.
+                auto_detach(evt, _signal)
+                for d in stream_converter.convert_agent_event(evt):
+                    sse_queue.put_nowait(d)
+
+            agent.subscribe(_on_event)
+            self._agents[run_id] = agent
+            if sandbox_hitl_channel is not None:
+                self._hitl_channels[run_id] = sandbox_hitl_channel
+            drainer = asyncio.create_task(_drain_cubepi_sse_queue(sse_queue, publish_stream_event))
+
+            from cubepi.tracing import trace, tracing_context
+
+            from cubeplex.llm.runtime_writeback import (
+                schedule_runtime_status_writeback as _schedule_writeback,
+            )
+
+            tracer = getattr(self._app.state, "tracer", None)
+            provider_name: str = extra_ref_holder["provider_name"]
+            model_id: str = extra_ref_holder["model_id"]
+            # turn_kind=respond distinguishes resume spans from the original
+            # prompt span when grouped by conversation_id in the trace store.
+            _trace_meta = {
+                k: str(v)
+                for k, v in (
+                    ("run_id", run_id),
+                    ("conversation_id", conversation_id),
+                    ("user_id", ctx.user_id),
+                    ("org_id", ctx.org_id),
+                    ("workspace_id", ctx.workspace_id),
+                    ("turn_kind", "respond"),
+                )
+                if v is not None
+            }
+            # Default to "errored" so an exception path (provider failure,
+            # tool body raising, DB error mid-respond, etc.) doesn't write
+            # "completed" via the CAS-guarded finalize. The DB pending row
+            # is intentionally NOT cleared on exception — the user retries;
+            # status=errored leaves the meta in a state claim_resume rejects
+            # cleanly (we'd need a separate recovery path to retry), which
+            # matches the existing crash story.
+            final_status: str = "errored"
+            try:
+                try:
+                    with tracing_context(metadata=_trace_meta):
+                        async with trace(tracer, agent, flush="background"):
+                            await agent.respond(question_id=question_id, answer=answer)
+                            _raise_if_cubepi_agent_failed(agent)
+                except BaseException as _run_exc:
+                    _schedule_writeback(
+                        org_id=ctx.org_id,
+                        provider_slug=provider_name,
+                        model_id=model_id,
+                        exc=_run_exc,
+                    )
+                    raise
+                else:
+                    _schedule_writeback(
+                        org_id=ctx.org_id,
+                        provider_slug=provider_name,
+                        model_id=model_id,
+                        exc=None,
+                    )
+                    final_pending = await agent.load_pending_hitl_request()
+                    classification = classify_terminal_status(
+                        final_pending=final_pending,
+                        answered_question_id=question_id,
+                        saw_hitl_request_event=auto_detach.detached,
+                    )
+                    if classification.clear_pending:
+                        await cp.save_pending_request(conversation_id, None)
+                        # T12: emit a synthetic *_resolved so the frontend
+                        # can drop the stale "pending" UI.
+                        await _emit_synthetic_resolved(
+                            publish_stream_event, final_pending, question_id
+                        )
+                    final_status = classification.status
+            finally:
+                # CAS guard: only write the terminal status if our claim
+                # token still owns the meta row. A racing flow that took
+                # over the slot wins the row; our finalize is a no-op.
+                await finalize_run_meta_if_claim_matches(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    claim_token=claim_token,
+                    status=final_status,
+                )
+                self._agents.pop(run_id, None)
+                self._hitl_channels.pop(run_id, None)
+                await sse_queue.put(None)
+                await drainer
+
+        for agent_key in list(citation_buffers):
+            await flush_citation_buffer(agent_key, agent_key)
+        return final_status
+
+    async def _build_agent_for_conversation(
+        self,
+        *,
+        ctx: RunContext,
+        conversation_id: str,
+        run_id: str,
+        cp: Any,
+        sandbox: Any | None,
+        skill_catalog: Any | None,
+        catalog_session: Any | None,
+        effective_system_prompt: str,
+        extra_ref_holder: dict[str, Any],
+        sse_queue: asyncio.Queue[dict[str, Any] | None],
+        publish_stream_event: Any,
+        trigger: str = "interactive",
+        model_key: str | None = None,
+        reasoning: ReasoningControl | None = None,
+    ) -> tuple[Any, list[Any], Any]:
+        """Build provider + middleware + tools + channel + agent for a conversation.
+
+        Shared by the prompt path (:meth:`_run_cubepi_path`), the future respond
+        path (T8), and the cancel-paused-run path (T10). Returns
+        ``(agent, all_tools, sandbox_hitl_channel)``.
+
+        The HITL channel is a :class:`cubepi.hitl.CheckpointedChannel` wired
+        with ``run_id`` so every pause writes ``pending_request`` and
+        ``pending_run_id`` to the cubepi_threads row in a single atomic
+        statement — which is what lets a different worker pick up the answer
+        and resume without losing the request identity.
+
+        ``cp`` (the checkpointer) is owned by the CALLER so the same
+        checkpointer instance drives both the channel and the agent. Pass
+        ``sandbox=None`` / ``skill_catalog=None`` / ``catalog_session=None``
+        when building from a context that has none (e.g. the cancel path
+        opens the agent only to drive a final SSE emission).
+
+        ``extra_ref_holder`` is the late-binding dict that middleware closures
+        read at request time. The caller MUST populate
+        ``extra_ref_holder["extra"] = agent._extra`` after this factory
+        returns, before the first prompt invocation.
+        """
+        from collections.abc import AsyncIterator as _AsyncIterator
+        from contextlib import asynccontextmanager as _asynccontextmanager
+
+        from cubeplex.agents.graph import create_cubeplex_agent
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.llm.builder import build_chain_model
+        from cubeplex.llm.cache_markers import CubeplexCacheMarkerPolicy
+        from cubeplex.llm.resolver import resolve_model_preset
+        from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
+
+        # Reuse the snapshot the caller (e.g. _execute_run pre-resolving
+        # context_window for the DoneEvent) already loaded into
+        # extra_ref_holder, instead of issuing another _load_providers
+        # cascade per send_message. Falls back to a fresh load when the
+        # caller didn't seed it (e.g. cancel-paused-run path).
+        _cached_snap = extra_ref_holder.get("llm_snapshot")
+        snap: LLMSnapshot
+        if isinstance(_cached_snap, LLMSnapshot):
+            snap = _cached_snap
+        else:
+            async with async_session_maker() as llm_session:
+                snap = await load_llm_snapshot(
+                    llm_session, ctx.org_id, self._app.state.encryption_backend
+                )
+                await llm_session.commit()
+
+        preset = resolve_model_preset(snap, model_key)
+
+        async def _publish_failover_dict(rid: str, data_payload: dict[str, Any]) -> None:
+            event = FailoverEvent(
+                timestamp=datetime.now(UTC).isoformat(),
+                data=data_payload,
+            )
+            await publish_stream_event(event, None)  # None agent_key = main agent
+
+        on_failover_cb = _make_failover_publisher(run_id, _publish_failover_dict)
+
+        # chain_model is a BoundModel (single leg) or FallbackBoundModel (chain >1).
+        this_run_model = build_chain_model(
+            snap,
+            preset,
+            cache_policy_factory=lambda slug: (
+                CubeplexCacheMarkerPolicy()
+                if snap.providers[slug].api == "anthropic-messages"
+                else None
+            ),
+            on_failover=on_failover_cb,
+        )
+
+        # Extract downstream-required vars from the bound model so middleware,
+        # subagent setup, and cost attribution continue working unchanged.
+        provider_name = this_run_model.spec.provider_id
+        model_id = this_run_model.spec.id
+        provider = this_run_model.provider
+        provider_config = snap.providers[provider_name]
+        _model_config = next(m for m in provider_config.models if m.id == model_id)
+
+        # --- Compose tool list ---
+        # Tool registration order is deliberately stable — changes invalidate
+        # the prompt cache prefix. The intended order is:
+        #   sandbox(execute/write_file/edit_file/file_read)
+        #   → save_artifact
+        #   → write_todos
+        #   → subagent
+        #   → calculator/datetime
+        #   → memory_*
+        #   → load_skill
+        #   → find_skills
+        #   → view_images
+        #   → generate_image  (sandbox-gated)
+        #   → mcp_tools
+        #
+        # Middleware that contributes tools writes to _sandbox_tools,
+        # _artifact_tools, _todo_tools, _subagent_tools rather than all_tools.
+        # All other tools accumulate in _builtin_tools.  At the end we merge
+        # them in the correct order.
+
+        from cubeplex.tools.registry import list_builtin_tools
+
+        _sandbox_tools: list[Any] = []
+        _artifact_tools: list[Any] = []
+        _todo_tools: list[Any] = []
+        _subagent_tools: list[Any] = []
+        _builtin_tools: list[Any] = list(list_builtin_tools())
+
+        # Memory tools — service factory opened per tool call.
+        # Placed before view_images and load_skill to keep the cache-prefix
+        # tool order: calculator → datetime → memory_save → memory_search
+        # → memory_update → load_skill → view_images → mcp_tools
+        _memory_service_factory: Any = None
+        try:
+            from cubeplex.db.engine import async_session_maker as _mem_session_maker
+            from cubeplex.repositories.memory import MemoryRepository as _MemoryRepository
+            from cubeplex.services.memory import MemoryService as _MemoryService
+            from cubeplex.tools.builtin.memory import create_memory_tools
+
+            @_asynccontextmanager
+            async def _memory_service_factory() -> _AsyncIterator[_MemoryService]:
+                async with _mem_session_maker() as _session:
+                    _repo = _MemoryRepository(
+                        _session,
+                        user_id=ctx.user_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+                    yield _MemoryService(
+                        _repo,
+                        user_id=ctx.user_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                    )
+
+            _builtin_tools.extend(
+                create_memory_tools(
+                    service_factory=_memory_service_factory,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
+            )
+        except Exception as _exc:
+            logger.warning("memory tools unavailable for cubepi run: {}", _exc)
+
+        # load_skill — requires a non-None catalog (may be absent if DB is down)
+        if skill_catalog is not None:
+            try:
+                from cubeplex.tools.builtin.load_skill import create_load_skill_tool
+
+                _builtin_tools.append(
+                    create_load_skill_tool(
+                        catalog=skill_catalog,
+                        workspace_id=ctx.workspace_id,
+                        org_id=ctx.org_id,
+                    )
+                )
+            except Exception as _exc:
+                logger.warning("load_skill unavailable for cubepi run: {}", _exc)
+
+        # view_images — per-request DI: objectstore + LLM capabilities.
+        # Must come after memory tools and load_skill to preserve the
+        # cache-prefix tool order.
+        try:
+            from cubeplex.llm.capabilities import LLMCapabilities
+            from cubeplex.llm.config import LLMConfig
+            from cubeplex.objectstore import get_objectstore_client
+            from cubeplex.tools.builtin.view_images import make_view_images_tool
+
+            # LLMCapabilities reads providers + default/fallback refs off LLMConfig.
+            # Build a thin adapter from the snapshot so view_images sees the
+            # input modalities the full model chain (primary + fallbacks) supports.
+            _fallback_refs: list[str] = []
+            if isinstance(this_run_model, FallbackBoundModel):
+                _fallback_refs = [
+                    f"{bm.spec.provider_id}/{bm.spec.id}" for bm in this_run_model.chain[1:]
+                ]
+            _caps_cfg = LLMConfig.model_validate(
+                {
+                    "default_model": f"{provider_name}/{model_id}",
+                    "fallback_models": _fallback_refs,
+                    "providers": {slug: cfg.model_dump() for slug, cfg in snap.providers.items()},
+                }
+            )
+            _builtin_tools.append(
+                make_view_images_tool(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    objectstore=get_objectstore_client(),
+                    capabilities=LLMCapabilities(_caps_cfg),
+                )
+            )
+        except Exception as _exc:
+            logger.warning("view_images unavailable for cubepi run: {}", _exc)
+
+        # show_widget — UI-only tool; no DI. Fixed position in the builtin tool
+        # order to keep the prompt-cache prefix stable.
+        try:
+            from cubeplex.tools.builtin.show_widget import make_show_widget_tool
+
+            _builtin_tools.append(make_show_widget_tool())
+        except Exception as _exc:
+            logger.warning("show_widget unavailable for cubepi run: {}", _exc)
+
+        # create_scheduled_task — per-run DI: org/workspace/user/conversation.
+        # Detect IM origin via IMThreadLink on the current conversation so
+        # "remind me every morning" inside an IM thread defaults to posting
+        # back to that IM channel. Always registered (no trigger gate): IM
+        # users expect the same scheduling powers as the web, and a schedule
+        # that fires must be able to reschedule or cancel itself. The same
+        # always-on policy is mirrored on the `scheduled_tasks` capability via
+        # `always_mutable=True`.
+        try:
+            from cubeplex.tools.builtin.create_scheduled_task import (
+                make_create_scheduled_task_tool,
+            )
+
+            _builtin_tools.append(
+                make_create_scheduled_task_tool(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    conversation_id=conversation_id,
+                )
+            )
+        except Exception as _exc:
+            logger.warning("create_scheduled_task unavailable for cubepi run: {}", _exc)
+
+        # create_trigger — still gated to interactive. Triggers expose a
+        # public webhook URL with a secret; a prompt-injected scheduled fire
+        # or IM ingest must NOT be able to mint one.
+        if trigger == "interactive":
+            try:
+                from cubeplex.tools.builtin.create_trigger import make_create_trigger_tool
+
+                _builtin_tools.append(
+                    make_create_trigger_tool(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        user_id=ctx.user_id,
+                        conversation_id=conversation_id,
+                        encryption_backend=self._app.state.encryption_backend,
+                    )
+                )
+            except Exception as _exc:
+                logger.warning("create_trigger unavailable for cubepi run: {}", _exc)
+
+        # generate_image — sandbox-gated; enabled only when image_generation config is active.
+        if sandbox is not None:
+            try:
+                from cubepi.providers.images import OpenAIImagesProvider
+
+                from cubeplex.llm.config import get_image_generation_config
+                from cubeplex.llm.images import build_image_capability
+                from cubeplex.tools.builtin.generate_image import make_generate_image_tool
+
+                _img_cfg = get_image_generation_config()
+                if not _img_cfg.enabled or not _img_cfg.api_key:
+                    logger.info(
+                        "generate_image unavailable: image_generation not enabled or api_key absent"
+                    )
+                else:
+                    _capability, _default_base = build_image_capability(_img_cfg.api)
+                    # _img_cfg.base_url wins when set, so per-env overrides
+                    # keep working. The capability map's _default_base is
+                    # only used when the user did not set base_url.
+                    _images_provider = OpenAIImagesProvider(
+                        provider_id=_img_cfg.api.removesuffix("-images"),
+                        api_key=_img_cfg.api_key,
+                        base_url=_img_cfg.base_url or _default_base,
+                        capability=_capability,
+                    )
+                    _images_model = _images_provider.model(_img_cfg.model)
+                    _builtin_tools.append(
+                        make_generate_image_tool(
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            conversation_id=conversation_id,
+                            sandbox=sandbox,
+                            images_provider=_images_provider,
+                            images_model=_images_model,
+                        )
+                    )
+            except Exception as _exc:
+                logger.warning("generate_image unavailable for cubepi run: {}", _exc)
+
+        # MCP tools — per-workspace enabled HTTP MCP connectors. Reads from
+        # ``mcp_connectors`` / ``mcp_workspace_connector_states`` /
+        # ``mcp_credential_grants`` via :class:`MCPEffectiveConnectorService`.
+        mcp_citation_configs: dict[str, Any] = {}
+        _deferred_groups: list[Any] = []
+
+        try:
+            from cubeplex.credentials.dependencies import build_credential_service
+            from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
+            from cubeplex.mcp.disclosure import (
+                build_deferred_groups,
+                disclosure_active,
+                load_disclosure_settings,
+            )
+            from cubeplex.mcp.effective import MCPEffectiveConnectorService
+            from cubeplex.mcp.oauth.metadata import OAuthMetadataDiscovery
+            from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
+            from cubeplex.repositories.credential import CredentialRepository
+            from cubeplex.repositories.mcp import (
+                MCPConnectorRepository,
+                MCPConnectorTemplateRepository,
+                MCPCredentialGrantRepository,
+                MCPTemplateSettingsRepository,
+                MCPWorkspaceConnectorStateRepository,
+            )
+
+            _http_client = getattr(self._app.state, "_mcp_oauth_http_client", None)
+            if _http_client is None:
+                import httpx as _httpx
+
+                _http_client = _httpx.AsyncClient(timeout=30.0)
+                self._app.state._mcp_oauth_http_client = _http_client
+            _metadata = getattr(self._app.state, "_mcp_oauth_metadata_discovery", None)
+            if _metadata is None:
+                _metadata = OAuthMetadataDiscovery(_http_client)
+                self._app.state._mcp_oauth_metadata_discovery = _metadata
+
+            async with async_session_maker() as effective_session:
+                effective_cred_service = build_credential_service(
+                    effective_session,
+                    self._app.state.encryption_backend,
+                    org_id=ctx.org_id,
+                    actor_user_id=ctx.user_id,
+                )
+                _token_manager = OAuthTokenManager(
+                    http_client=_http_client,
+                    redis=self._redis,
+                    encryption_backend=self._app.state.encryption_backend,
+                    credential_repo=CredentialRepository(effective_session, org_id=ctx.org_id),
+                    metadata=_metadata,
+                )
+                _grant_repo = MCPCredentialGrantRepository(effective_session, org_id=ctx.org_id)
+                _effective_service = MCPEffectiveConnectorService(
+                    template_repo=MCPConnectorTemplateRepository(effective_session),
+                    settings_repo=MCPTemplateSettingsRepository(
+                        effective_session, org_id=ctx.org_id
+                    ),
+                    install_repo=MCPConnectorRepository(effective_session, org_id=ctx.org_id),
+                    state_repo=MCPWorkspaceConnectorStateRepository(
+                        effective_session, org_id=ctx.org_id
+                    ),
+                    grant_repo=_grant_repo,
+                    org_id=ctx.org_id,
+                    token_manager=_token_manager,
+                )
+
+                _disclosure_settings = load_disclosure_settings()
+                _mcp_specs = await _effective_service.list_runtime_specs(
+                    ctx.workspace_id,
+                    ctx.user_id,
+                )
+
+                # Detached TTL re-discovery for stale tools_cache entries so
+                # the cache-first loader below never serves a permanently
+                # stale schema. Fire-and-forget; never blocks the send.
+                from cubeplex.mcp.cubepi_runtime import schedule_tools_cache_refresh
+
+                schedule_tools_cache_refresh(
+                    specs=_mcp_specs,
+                    actor_user_id=ctx.user_id,
+                    encryption_backend=self._app.state.encryption_backend,
+                    http_client=_http_client,
+                    metadata_discovery=_metadata,
+                    redis=self._redis,
+                    signer=self._app.state.mcp_user_token_signer,
+                )
+
+                import json as _json
+
+                _total_tool_tokens = sum(len(_json.dumps(s.tools_cache)) // 4 for s in _mcp_specs)
+                _mcp_ctx_window = int(_model_config.context_window or 0)
+
+                if disclosure_active(
+                    _disclosure_settings,
+                    server_count=len(_mcp_specs),
+                    total_tool_tokens=_total_tool_tokens,
+                    context_window=_mcp_ctx_window,
+                ):
+                    _deferred_groups, _deferred_citations = build_deferred_groups(
+                        specs=_mcp_specs,
+                        all_specs=_mcp_specs,
+                        loader_kwargs={
+                            "workspace_id": ctx.workspace_id,
+                            "org_id": ctx.org_id,
+                            "user_id": ctx.user_id,
+                            "encryption_backend": self._app.state.encryption_backend,
+                            "http_client": _http_client,
+                            "metadata_discovery": _metadata,
+                            "redis": self._redis,
+                            "signer": self._app.state.mcp_user_token_signer,
+                        },
+                    )
+                    mcp_citation_configs = _deferred_citations
+                    logger.info(
+                        "MCP progressive disclosure: {} servers deferred ({} tools)",
+                        len(_deferred_groups),
+                        sum(len(g.tool_names) for g in _deferred_groups),
+                    )
+                else:
+                    (
+                        _new_tools,
+                        _new_citations,
+                    ) = await _load_tools_for_specs(
+                        specs=_mcp_specs,
+                        all_specs=_mcp_specs,
+                        workspace_id=ctx.workspace_id,
+                        org_id=ctx.org_id,
+                        user_id=ctx.user_id,
+                        cred_service=effective_cred_service,
+                        signer=self._app.state.mcp_user_token_signer,
+                        token_manager=_token_manager,
+                        grant_repo=_grant_repo,
+                    )
+                    _builtin_tools.extend(_new_tools)
+                    mcp_citation_configs.update(_new_citations)
+        except Exception as _exc:
+            logger.warning("MCP tools unavailable for cubepi run: {}", _exc)
+
+        # Platform action tools (scheduled_tasks, skills, etc.) — via the
+        # capability registry. Automated runs get read-only tools (mutation gate).
+        # Initialized to [] so a setup failure leaves SubagentMiddleware able
+        # to build (just without action tools).
+        _action_flat_tools: list[Any] = []
+        try:
+            from cubeplex.agents.actions.capabilities.conversation_history import (
+                ConversationHistoryDeps,
+            )
+            from cubeplex.agents.actions.capabilities.skills import SkillDeps
+            from cubeplex.agents.actions.registry import (
+                tools_for_run as _action_tools_for_run,
+            )
+            from cubeplex.repositories.membership import MembershipRepository
+            from cubeplex.repositories.organization import OrganizationRepository
+            from cubeplex.skills.sources.registry import SkillsAdapterManager
+
+            async with async_session_maker() as _action_session:
+                _role = await MembershipRepository(_action_session).get_role(
+                    user_id=ctx.user_id,
+                    workspace_id=ctx.workspace_id,
+                )
+
+            if _role is not None:
+                from collections.abc import (
+                    AsyncIterator as _ActionsAsyncIterator,
+                )
+                from contextlib import (
+                    asynccontextmanager as _actions_acm,
+                )
+
+                from cubeplex.agents.actions.context import (
+                    ScopeContext as _ScopeContext,
+                )
+
+                @_actions_acm
+                async def _action_ctx_factory() -> _ActionsAsyncIterator[tuple[_ScopeContext, Any]]:
+                    async with async_session_maker() as _sess:
+                        yield (
+                            _ScopeContext(
+                                org_id=ctx.org_id,
+                                workspace_id=ctx.workspace_id,
+                                user_id=ctx.user_id,
+                                role=_role,
+                                conversation_id=conversation_id,
+                            ),
+                            _sess,
+                        )
+
+                # Construct SkillDeps only when the skill catalog session is
+                # available. Mirrors today's guard: if the catalog DB is
+                # unreachable, the skills capability is silently skipped
+                # (same as load_skill). The inner try isolates skill-deps
+                # setup failures so the rest of the action tools
+                # (e.g. scheduled_tasks) still register.
+                _skill_deps: SkillDeps | None = None
+                if skill_catalog is not None and catalog_session is not None:
+                    try:
+                        _org = await OrganizationRepository(catalog_session).get(ctx.org_id)
+                        if _org is not None:
+                            _registry = await SkillsAdapterManager.build(
+                                session=catalog_session,
+                                catalog=skill_catalog,
+                                org_id=ctx.org_id,
+                                org_slug=_org.slug,
+                                workspace_id=ctx.workspace_id,
+                            )
+                            _skill_deps = SkillDeps(
+                                catalog=skill_catalog,
+                                catalog_session=catalog_session,
+                                registry=_registry,
+                                org_id=ctx.org_id,
+                                org_slug=_org.slug,
+                                workspace_id=ctx.workspace_id,
+                            )
+                    except Exception as _skill_exc:  # noqa: BLE001
+                        logger.warning(
+                            "skills capability unavailable for cubepi run: {}",
+                            _skill_exc,
+                        )
+
+                _history_lexical_backend = getattr(self._app.state, "lexical_backend", None)
+                _history_deps = (
+                    ConversationHistoryDeps(
+                        provider=getattr(self._app.state, "embedding_provider", None),
+                        lexical_backend=_history_lexical_backend,
+                    )
+                    if _history_lexical_backend is not None
+                    else None
+                )
+                _action_toolset = _action_tools_for_run(
+                    _action_ctx_factory,
+                    allow_mutations=(trigger == "interactive"),
+                    skill_deps=_skill_deps,
+                    history_deps=_history_deps,
+                )
+                _deferred_groups.extend(_action_toolset.groups)
+                # Subagents (built below) need the per-op tools eagerly —
+                # SubagentMiddleware takes shared_tools, not deferred groups,
+                # and the catalog round-trip would dominate a child run.
+                _action_flat_tools.extend(_action_toolset.flat_tools)
+        except Exception as _exc:
+            logger.warning(
+                "platform action tools unavailable for cubepi run: {}",
+                _exc,
+            )
+
+        # --- Build the 11 cubepi middleware (M3.f) ---
+        # The caller owns ``extra_ref_holder`` and populates ``["extra"]`` from
+        # ``agent._extra`` after this factory returns; this closure reads the
+        # holder at request time, well after the agent build.
+        def _extra_ref() -> dict[str, Any]:
+            ref: dict[str, Any] | None = extra_ref_holder["extra"]
+            if ref is None:
+                return {}
+            return ref
+
+        cubepi_middleware: list[Any] = []
+
+        # 1. AttachmentHintMiddleware — no deps
+        try:
+            from cubeplex.middleware.attachments import AttachmentHintMiddleware
+
+            cubepi_middleware.append(AttachmentHintMiddleware())
+        except Exception as _exc:
+            logger.warning("AttachmentHintMiddleware unavailable: {}", _exc)
+
+        # 2. ArtifactMiddleware — needs sandbox
+        if sandbox is not None:
+            try:
+                from cubeplex.middleware.artifacts import ArtifactMiddleware
+
+                artifact_mw = ArtifactMiddleware(
+                    sandbox=sandbox,
+                    conversation_id=conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                )
+                cubepi_middleware.append(artifact_mw)
+                # Middleware tools (save_artifact) collected for ordered merge below
+                _artifact_tools.extend(artifact_mw.tools)
+            except Exception as _exc:
+                logger.warning("ArtifactMiddleware unavailable: {}", _exc)
+
+        # 3. CitationMiddleware — needs citation_configs (empty dict = pass-through)
+        try:
+            from cubeplex.middleware.citation import CitationMiddleware
+            from cubeplex.middleware.citations.counter import citation_event_queue
+
+            cubepi_middleware.append(
+                CitationMiddleware(
+                    citation_configs=mcp_citation_configs,
+                    event_queue=citation_event_queue.get(None),
+                )
+            )
+        except Exception as _exc:
+            logger.warning("CitationMiddleware unavailable: {}", _exc)
+
+        # 4. MemoryMiddleware — needs repo_factory.
+        # The factory is defined unconditionally (outside the try) so the
+        # caller can reuse it for the per-turn relevance-snapshot pass even
+        # if the MemoryMiddleware build below fails. It is also stashed on
+        # ``extra_ref_holder`` for the caller to pick up after the factory
+        # returns — the agent doesn't expose it.
+        from collections.abc import AsyncIterator as _AsyncIterator2
+        from contextlib import asynccontextmanager as _asynccontextmanager2
+
+        from cubeplex.db.engine import async_session_maker as _mem2_session_maker
+        from cubeplex.repositories.memory import MemoryRepository as _MemRepo2
+
+        @_asynccontextmanager2
+        async def _mem_repo_factory() -> _AsyncIterator2[_MemRepo2]:
+            async with _mem2_session_maker() as _s:
+                yield _MemRepo2(
+                    _s,
+                    user_id=ctx.user_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                )
+
+        try:
+            from cubeplex.middleware.memory import MemoryMiddleware
+
+            cubepi_middleware.append(
+                MemoryMiddleware(repo_factory=_mem_repo_factory, extra_ref=_extra_ref)
+            )
+        except Exception as _exc:
+            logger.warning("MemoryMiddleware unavailable: {}", _exc)
+
+        # 5. CompactionMiddleware — cubepi built-in; state persists in ctx.extra.
+        try:
+            from cubepi.middleware.compaction import CompactionMiddleware
+
+            from cubeplex.config import config as _comp_cfg
+
+            if _comp_cfg.get("compaction.enabled", False):
+                _summary_provider = _comp_cfg.get("compaction.summary_provider")
+                _summary_model_id = _comp_cfg.get("compaction.summary_model")
+                # Reuse the snapshot loaded above so admin-managed providers
+                # in the model registry are visible without a second DB read.
+                from cubeplex.llm.builder import build_provider as _build_provider
+
+                _summary_provider_inst = _build_provider(snap, _summary_provider, cache_policy=None)
+                _summary_bound_model = _summary_provider_inst.model(_summary_model_id)
+                _fallback_window = int(_comp_cfg.get("compaction.fallback_context_window", 128000))
+                _model_window = int(_model_config.context_window or 0)
+                _model_max_out = int(_model_config.max_tokens or 0)
+                # Reserve max_tokens for the response so the threshold caps INPUT only.
+                # Without this, ratio*window could exceed (window - max_tokens) on
+                # high-output models (e.g. MiniMax ctx=204800 / max_tokens=131072).
+                _usable_window = max(0, _model_window - _model_max_out) if _model_window else 0
+                _ctx_window: int = _usable_window or _fallback_window
+                _ratio = float(_comp_cfg.get("compaction.threshold_ratio", 0.7))
+                # cubepi 0.x+ replaced ``keep_recent_messages`` (a message
+                # count) with ``keep_tail_tokens`` (a token budget). The new
+                # default 8 000 tokens ≈ the old 8 messages for short text,
+                # but adapts when recent turns contain large tool outputs.
+                # ``max_summary_tokens`` now accepts None → cubepi computes
+                # a dynamic budget (clamp(content*0.15, 1024, 4096)). We
+                # pass through the configured value if set, otherwise None
+                # so long conversations get more headroom than the old 1024.
+                _max_summary_cfg = _comp_cfg.get("compaction.max_summary_tokens")
+                _max_summary_tokens = (
+                    int(_max_summary_cfg) if _max_summary_cfg is not None else None
+                )
+                cubepi_middleware.append(
+                    CompactionMiddleware(
+                        summary_model=_summary_bound_model,
+                        max_tokens_before_compact=int(_ctx_window * _ratio),
+                        keep_tail_tokens=int(_comp_cfg.get("compaction.keep_tail_tokens", 8_000)),
+                        max_summary_tokens=_max_summary_tokens,
+                        min_compact_messages=int(
+                            _comp_cfg.get("compaction.min_compact_messages", 4)
+                        ),
+                    )
+                )
+                logger.info(
+                    "CompactionMiddleware enabled (threshold={} tokens, "
+                    "model_window={}, model_max_out={}, fallback={})",
+                    int(_ctx_window * _ratio),
+                    _model_window,
+                    _model_max_out,
+                    _fallback_window,
+                )
+        except Exception as _exc:
+            logger.warning("CompactionMiddleware not loaded: {}", _exc)
+
+        # 6a. HITL channel — always built. The channel is what gives the agent
+        # ask_user / sandbox-confirm capability AND the cross-process pause
+        # state (pending_request + pending_run_id written atomically via
+        # ``cp``). cancel_paused_run also needs the channel: ``agent
+        # .abort_pending`` short-circuits with HitlError when no channel is
+        # bound, which would skip the final ``save_pending_request(None)``
+        # and leave the DB pending row behind. Building it unconditionally
+        # keeps every code path that touches HITL on the same Channel.
+        from cubepi.hitl import CheckpointedChannel, ask_user_tool
+
+        sandbox_hitl_channel: Any = CheckpointedChannel(
+            checkpointer=cp,
+            thread_id=conversation_id,
+            run_id=run_id,
+            default_timeout=None,
+        )
+        _builtin_tools.append(ask_user_tool(sandbox_hitl_channel))
+
+        # 6b. SandboxMiddleware — needs sandbox. Shares the channel built above
+        # so the confirm-gate writes to the same pending row the agent sees.
+        if sandbox is not None:
+            try:
+                from cubeplex.middleware.sandbox import SandboxMiddleware
+                from cubeplex.sandbox.manager import get_sandbox_manager
+
+                # Resolve the org's command_rules via the manager so DB access
+                # stays behind the manager and the middleware only sees its
+                # slice of policy.
+                #
+                # Fail-CLOSED on resolution failure: if we can't read the org's
+                # rules (DB transient, malformed persisted policy, …) we MUST
+                # NOT pass an empty list — empty means allow-all, which would
+                # silently bypass any deny/confirm rules the admin configured.
+                # Install a single deny-all rule instead so every execute call
+                # blocks with the standard "blocked by org policy" message
+                # until the next request resolves cleanly.
+                _command_rules: list[dict[str, Any]]
+                try:
+                    _command_rules = await get_sandbox_manager().resolve_command_rules(ctx.org_id)
+                except Exception as _exc:
+                    logger.error(
+                        "Failed to resolve sandbox command_rules for org {}; "
+                        "failing CLOSED with deny-all until next request "
+                        "resolves: {}",
+                        ctx.org_id,
+                        _exc,
+                    )
+                    _command_rules = [
+                        {"action": "deny", "pattern": "*"},
+                    ]
+
+                sandbox_mw = SandboxMiddleware(
+                    sandbox=sandbox,
+                    conversation_id=conversation_id,
+                    workspace_id=ctx.workspace_id,
+                    command_rules=_command_rules,
+                    channel=sandbox_hitl_channel,
+                )
+                cubepi_middleware.append(sandbox_mw)
+                # Middleware tools (execute, write_file, edit_file, file_read) collected for
+                # ordered merge below
+                _sandbox_tools.extend(sandbox_mw.tools)
+            except Exception as _exc:
+                logger.warning("SandboxMiddleware unavailable: {}", _exc)
+
+        # 7. SkillsMiddleware — needs extra_ref
+        try:
+            from cubeplex.middleware.skills import SkillsMiddleware
+
+            cubepi_middleware.append(SkillsMiddleware(extra_ref=_extra_ref))
+        except Exception as _exc:
+            logger.warning("SkillsMiddleware unavailable: {}", _exc)
+
+        # 8. SubagentMiddleware — cubepi built-in; cubeplex only maps events to SSE.
+        try:
+            from cubepi.middleware.subagents import SubagentMiddleware
+
+            from cubeplex.streams.subagent_events import (
+                forward_subagent_event,
+                map_subagent_event,
+            )
+
+            # Cost middleware (if present) is passed as inherited_middleware
+            # for subagent attribution.
+            _cost_mw_for_inherit: list[Any] = []
+            try:
+                from cubeplex.middleware.cost import CostMiddleware as _CostMwPi
+
+                _cost_mw_for_inherit = [
+                    _CostMwPi(
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        user_id=ctx.user_id,
+                        conversation_id=conversation_id,
+                        subagent_depth=1,
+                    )
+                ]
+            except Exception:
+                pass
+
+            subagent_model = _subagent_model_for(this_run_model)
+
+            subagent_mw = SubagentMiddleware(
+                subagents={},
+                default_model=subagent_model,
+                # Pass all tools (sandbox + artifact + builtin + per-op action)
+                # collected so far as shared tools for subagent spawning, minus
+                # show_widget (top-level only in v1). Action tools live in the
+                # main agent's deferred groups; subagents get them eagerly
+                # because catalog round-trips would dominate a child run.
+                shared_tools=_subagent_shared_tools(
+                    _sandbox_tools + _artifact_tools + _builtin_tools + _action_flat_tools
+                ),
+                inherited_middleware=_cost_mw_for_inherit,
+                excluded_tool_names={"subagent", "load_skill"},
+                event_mapper=map_subagent_event,
+                event_handler=forward_subagent_event,
+                tracer=getattr(self._app.state, "tracer", None),
+            )
+            cubepi_middleware.append(subagent_mw)
+            _subagent_tools.extend(subagent_mw.tools)
+        except Exception as _exc:
+            logger.warning("SubagentMiddleware unavailable: {}", _exc)
+
+        # 9. CostMiddleware — needs org/workspace/user/conversation IDs
+        try:
+            from cubeplex.llm.config import ModelCost
+            from cubeplex.middleware.cost import CostMiddleware
+
+            # Resolve ModelCost for any (provider, model_id) the agent reports.
+            # The snapshot holds the merged system + per-org provider config so
+            # this lookup honors per-org overrides.
+            def _price_lookup(provider: str, model_id: str) -> ModelCost | None:
+                pcfg = snap.providers.get(provider)
+                if pcfg is None:
+                    return None
+                for m in pcfg.models:
+                    if m.id == model_id:
+                        return m.cost
+                return None
+
+            cubepi_middleware.append(
+                CostMiddleware(
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                    conversation_id=conversation_id,
+                    price_lookup=_price_lookup,
+                )
+            )
+        except Exception as _exc:
+            logger.warning("CostMiddleware unavailable: {}", _exc)
+
+        # 10. TimestampMiddleware — no deps
+        try:
+            from cubeplex.middleware.timestamps import TimestampMiddleware
+
+            cubepi_middleware.append(TimestampMiddleware())
+        except Exception as _exc:
+            logger.warning("TimestampMiddleware unavailable: {}", _exc)
+
+        # 11. TodoListMiddleware — needs extra_ref
+        try:
+            from cubepi.middleware.todo import TodoListMiddleware
+
+            todo_mw = TodoListMiddleware(extra_ref=_extra_ref)
+            cubepi_middleware.append(todo_mw)
+            _todo_tools.extend(todo_mw.tools)
+        except Exception as _exc:
+            logger.warning("TodoListMiddleware unavailable: {}", _exc)
+
+        # --- Final tool merge ---
+        # Stable composition order — changes invalidate the prompt cache prefix:
+        #   sandbox tools → artifact tools → todo tools → subagent tools
+        #   → builtin tools (calculator/datetime/view_images/memory/load_skill/mcp)
+        all_tools: list[Any] = (
+            _sandbox_tools + _artifact_tools + _todo_tools + _subagent_tools + _builtin_tools
+        )
+
+        logger.info(
+            "cubepi middleware stack: {} layers, {} total tools",
+            len(cubepi_middleware),
+            len(all_tools),
+        )
+        # cubepi.Agent.__init__ auto-appends each middleware's own `.tools`
+        # to the caller-provided list (cubepi/agent/agent.py:165-169). cubeplex
+        # also extracts middleware-contributed tools into the matching
+        # `_sandbox_tools` / `_artifact_tools` / `_todo_tools` /
+        # `_subagent_tools` lists so they sit at a specific position relative
+        # to the builtins for cache-prefix stability. Without this strip,
+        # those tools land on the wire twice and shape-compatible providers
+        # reject the request with "Tool names must be unique."
+        # (deepseek-anthropic-shape). Drop them from the caller list so the
+        # only copy reaching the wire is the one cubepi appends from the
+        # middleware itself — order becomes "all_tools (sans middleware
+        # contributions) then middleware tools in middleware order".
+        _mw_tool_names: set[str] = set()
+        for _mw in cubepi_middleware:
+            for _t in getattr(_mw, "tools", []) or []:
+                _mw_tool_names.add(getattr(_t, "name", repr(_t)))
+        if _mw_tool_names:
+            all_tools = [
+                _t for _t in all_tools if getattr(_t, "name", repr(_t)) not in _mw_tool_names
+            ]
+
+        agent = create_cubeplex_agent(
+            # Pre-built chain model so a FallbackBoundModel (chain len > 1)
+            # drives the agent end-to-end — the factory no longer has a
+            # legacy fallback that would collapse the chain to chain[0].
+            bound_model=this_run_model,
+            system_prompt=effective_system_prompt,
+            tools=all_tools,
+            checkpointer=cp,
+            thread_id=conversation_id,
+            middleware=cubepi_middleware,
+            reasoning=reasoning or ReasoningControl(),
+            channel=sandbox_hitl_channel,
+            deferred_tool_groups=_deferred_groups or None,
+        )
+
+        # Stash provider_name / model_id / memory-repo factory on the bridge
+        # dict so the caller doesn't have to re-resolve them (a second
+        # snapshot load + preset resolve would double the DB load). The
+        # caller's runtime-status writeback and per-turn relevance-snapshot
+        # pass both read from here.
+        extra_ref_holder["provider_name"] = provider_name
+        extra_ref_holder["model_id"] = model_id
+        extra_ref_holder["mem_repo_factory"] = _mem_repo_factory
+        # Reflection trigger in _run_cubepi_path needs these to build its
+        # own short-lived agent for end-of-turn memory self-review.
+        extra_ref_holder["memory_service_factory"] = _memory_service_factory
+        extra_ref_holder["provider"] = provider
+        extra_ref_holder["llm_snapshot"] = snap
+        extra_ref_holder["model_context_window"] = int(_model_config.context_window or 0)
+
+        return agent, all_tools, sandbox_hitl_channel
+
+    async def _maybe_consolidate_memory(
+        self,
+        *,
+        conversation_id: str,
+        ctx: RunContext,
+        cached_snapshot: Any | None = None,
+    ) -> None:
+        """Cheap per-run gate; spawn a tracked background consolidation task when
+        due. Never raises into the run path.
+
+        ``cached_snapshot`` lets the caller pass the LLMSnapshot it already
+        loaded for the same run (Fix-8) so we avoid reissuing
+        _load_providers + credential lookups just to pick the compaction model.
+        """
+        try:
+            from cubeplex.config import config as _cfg
+            from cubeplex.services import memory_consolidation as mc
+
+            if not _cfg.get("memory.consolidation.enabled", True):
+                return
+            await mc.note_run(self._redis, self._key_prefix, conversation_id)
+            min_hours = float(_cfg.get("memory.consolidation.min_hours", mc.DEFAULT_MIN_HOURS))
+            min_runs = int(_cfg.get("memory.consolidation.min_runs", mc.DEFAULT_MIN_RUNS))
+            if not await mc.should_consolidate(
+                self._redis,
+                self._key_prefix,
+                conversation_id,
+                min_hours=min_hours,
+                min_runs=min_runs,
+            ):
+                return
+
+            from cubeplex.db.engine import async_session_maker
+            from cubeplex.llm.builder import build_chain_model
+            from cubeplex.llm.resolver import resolve_task_preset
+            from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
+
+            if isinstance(cached_snapshot, LLMSnapshot):
+                snap = cached_snapshot
+            else:
+                async with async_session_maker() as _llm_session:
+                    snap = await load_llm_snapshot(
+                        _llm_session, ctx.org_id, self._app.state.encryption_backend
+                    )
+                    await _llm_session.commit()
+
+            preset = resolve_task_preset(snap, "compaction")
+            bound_model = build_chain_model(snap, preset)
+            # Tracer is optional — pass None to run_consolidation when tracing
+            # is disabled, otherwise the background LLM call is wrapped in
+            # tracer.oneshot() so it shows up in `cubepi trace ls` filterable
+            # by conversation_id / user_id / oneshot_operation.
+            tracer = getattr(self._app.state, "tracer", None)
+
+            task = asyncio.create_task(
+                mc.run_consolidation(
+                    redis=self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    user_id=ctx.user_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    model=bound_model,
+                    tracer=tracer,
+                    session_maker=async_session_maker,
+                    min_hours=min_hours,
+                    min_runs=min_runs,
+                ),
+                name=f"memcons:{conversation_id}",
+            )
+            self._consolidation_tasks.add(task)
+            task.add_done_callback(self._consolidation_tasks.discard)
+        except Exception:
+            logger.opt(exception=True).warning("memory consolidation gate failed")
+
+    async def _bump_topic_activity(self, ctx: RunContext) -> None:
+        """Bump ``Topic.last_activity_at`` so the sidebar reflects new traffic.
+
+        Drives sidebar ordering and applies to any topic — solo or group.
+        Uses a fresh session so it never bleeds into a caller's transaction.
+        Best-effort: any failure (DB hiccup, timeout) is swallowed with a
+        warning. The 5-second timeout prevents the bump from hanging the
+        run's finally path if the connection pool is exhausted.
+        """
+        topic_id = ctx.topic_id
+        if topic_id is None:
+            return
+
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories.topic import TopicRepository
+
+        bump_session = async_session_maker()
+
+        async def _do_bump() -> None:
+            bump_repo = TopicRepository(
+                bump_session,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+            )
+            await bump_repo.bump_activity(topic_id)
+            await bump_session.commit()
+
+        try:
+            await asyncio.wait_for(_do_bump(), timeout=5.0)
+        except (TimeoutError, asyncio.CancelledError) as exc:
+            # Forcibly invalidate the connection so a mid-COMMIT timeout
+            # doesn't leak a half-committed connection back to the pool.
+            try:
+                await bump_session.invalidate()
+            except Exception:
+                pass
+            logger.warning("Topic activity bump timed out / cancelled: {}", exc)
+        except Exception as exc:
+            logger.warning("Failed to bump topic activity: {}", exc)
+        finally:
+            try:
+                await bump_session.close()
+            except Exception:
+                pass
+
+    @staticmethod
+    def _resolve_sandbox_target(ctx: RunContext) -> tuple[str, str, str]:
+        """Resolve ``(scope_type, scope_id, owner_user_id)`` for sandbox lookup.
+
+        Gated on ``sandbox_mode``, NOT participant count: a solo topic
+        with ``sandbox_mode='dedicated'`` must still resolve to the
+        topic-keyed sandbox, otherwise the sandbox flips identity the
+        instant a second participant joins and earlier files are
+        stranded in the creator's personal sandbox.
+
+        The third element is the user id that owns the underlying PVC
+        + acts as the audit subject on ``user_sandboxes.user_id`` — for
+        shared sandboxes (conversation/topic/creator-mode) this is the
+        creator, NOT the requesting actor, so a non-creator participant's
+        ops do not land in their own personal PVC.
+        """
+        if ctx.topic_id is None:
+            if ctx.is_group_chat:
+                # Standalone group chat: shared sandbox owned by the
+                # conversation creator (not the message sender). Fall back
+                # to ctx.user_id if the creator id wasn't plumbed through
+                # so legacy callers keep working.
+                owner = ctx.conversation_creator_user_id or ctx.user_id
+                return "conversation", ctx.conversation_id, owner
+            return "user", ctx.user_id, ctx.user_id
+        # Default an unspecified mode to "creator" so upgraded-from-1:1
+        # topics (sandbox_mode left null at upgrade time) still share one
+        # sandbox across participants. The matching default lives in
+        # ws_sandbox._resolve_sandbox_scope so panel and run agree.
+        effective_mode = ctx.sandbox_mode or "creator"
+        topic_owner = ctx.topic_creator_user_id or ctx.user_id
+        if effective_mode == "dedicated":
+            return "topic", ctx.topic_id, topic_owner
+        # creator-mode (and the implicit default): topic creator's user scope.
+        return "user", topic_owner, topic_owner
+
+    async def _execute_run(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        content: str,
+        attachments: list[str],
+        ctx: RunContext,
+        model_key: str | None = None,
+        reasoning: ReasoningControl | None = None,
+        llm_snapshot: Any | None = None,
+    ) -> None:
+        from cubeplex.api.routes.v1.conversations import (
+            _enqueue_search_index,
+            _update_conversation_timestamp,
+        )
+        from cubeplex.middleware.citations.counter import (
+            CitationCounter,
+            citation_counter_var,
+            citation_event_queue,
+        )
+        from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
+        from cubeplex.streams.subagent_events import subagent_event_queue
+
+        sandbox = None
+        sandbox_manager = None
+        sandbox_create_task: asyncio.Task[Any] | None = None
+        stream_task: asyncio.Task[None] | None = None
+        usage_task: asyncio.Task[Any] | None = None
+        catalog_session_ctx: Any | None = None
+        catalog_session: Any | None = None
+        skill_catalog: Any | None = None
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        cv_token = subagent_event_queue.set(event_q)
+
+        citation_counter = CitationCounter(start=1)
+        cc_token = citation_counter_var.set(citation_counter)
+        ce_token = citation_event_queue.set(event_q)
+
+        citation_buffers: dict[str | None, str] = {}
+        turn_usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+        }
+        last_context_tokens: int = 0
+        # Re-enqueue the search index in `finally` on cancel/exception when
+        # cubepi may have written partial history before the failure. The
+        # enqueue is idempotent (replace_for_conversation), so the flag is
+        # only to skip a redundant enqueue on the happy path.
+        search_index_enqueued = False
+
+        async def emit_status(phase: str, detail: str | None = None) -> None:
+            data: dict[str, str] = {"phase": phase}
+            if detail:
+                data["detail"] = detail
+            await self._append_event(
+                run_id,
+                conversation_id,
+                StatusEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data=data,
+                ),
+            )
+
+        async def publish_event(event: AgentEvent) -> None:
+            await self._append_event(run_id, conversation_id, event)
+
+        async def flush_citation_buffer(
+            agent_key: str | None,
+            fallback_agent_id: str | None,
+        ) -> None:
+            buf = citation_buffers.get(agent_key, "")
+            if not buf:
+                return
+            from cubeplex.agents.schemas import TextDeltaEvent
+
+            citation_buffers[agent_key] = ""
+            await publish_event(
+                TextDeltaEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data={
+                        "content": buf,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                    },
+                    agent_id=fallback_agent_id,
+                )
+            )
+
+        async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            if sse_event.type == "text_delta":
+                buffered = citation_buffers.get(agent_key, "") + str(
+                    sse_event.data.get("content", "")
+                )
+                citation_buffers[agent_key] = ""
+                last_open = buffered.rfind("【")
+                if last_open != -1 and "】" not in buffered[last_open:]:
+                    citation_buffers[agent_key] = buffered[last_open:]
+                    buffered = buffered[:last_open]
+                if buffered:
+                    sse_event.data["content"] = buffered
+                    await publish_event(sse_event)
+                return
+
+            await flush_citation_buffer(agent_key, sse_event.agent_id)
+            if sse_event.type == "usage":
+                for key in turn_usage:
+                    turn_usage[key] += sse_event.data.get(key, 0)
+                nonlocal last_context_tokens
+                last_context_tokens = max(
+                    last_context_tokens, sse_event.data.get("input_tokens", 0)
+                )
+            await publish_event(sse_event)
+
+        # Drainer for the shared subagent/citation queue (see
+        # _drain_subagent_citation_queue). Without this, subagent and
+        # citation middleware push events that never reach the SSE
+        # consumer, breaking live subagent rendering and live citations.
+        # Typed `| None` so the success path can null it after the pre-Done
+        # drain (see the DoneEvent block below) and the safety net in
+        # `finally` skips when it already ran.
+        event_q_drainer: asyncio.Task[None] | None = asyncio.create_task(
+            _drain_subagent_citation_queue(event_q, publish_stream_event),
+            name=f"event_q_drainer:{run_id}",
+        )
+
+        # First sign of life on the stream: the frontend renders these
+        # phases in the assistant placeholder instead of dead air while
+        # snapshots / tools / MCP are prepared below.
+        with suppress(Exception):
+            await emit_status("preparing")
+
+        # Outer-scope default so `finally` can branch on terminal status.
+        # The success path inside `try` overwrites this with the real
+        # status returned by `_run_cubepi_path`; on exception the default
+        # "errored" applies, which keeps the existing teardown semantics.
+        final_status: str = "errored"
+
+        # Declared here so the except block can read model/provider/context_window
+        # even when the exception is raised inside _run_cubepi_path (a separate
+        # call frame — locals().get() would never see it).
+        extra_ref_holder: dict[str, Any] = {}
+
+        try:
+            # Open a long-lived session for the SkillCatalogService — used by
+            # both SkillsMiddleware (read prompts) and LazySandbox (push files
+            # to sandbox on first use). Same session is fine: skill reads are
+            # idempotent and no writes happen here.
+            try:
+                from pathlib import Path
+
+                from cubeplex.config import config as _cfg
+                from cubeplex.db.engine import async_session_maker
+                from cubeplex.skills.cache import SkillCache
+                from cubeplex.skills.service import SkillCatalogService
+
+                catalog_session_ctx = async_session_maker()
+                catalog_session = await catalog_session_ctx.__aenter__()
+                skill_catalog = SkillCatalogService(
+                    session=catalog_session,
+                    cache=SkillCache(
+                        cache_root=Path(_cfg.get("skills.cache_root", "skills_cache"))
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("Skill catalog unavailable for run: {}", exc)
+
+            sandbox_factory = getattr(self._app.state, "sandbox_factory", None)
+            if sandbox_factory:
+                sandbox = sandbox_factory()
+            else:
+                from cubeplex.config import config
+
+                sandbox_enabled = config.get("sandbox.enabled", False)
+                if sandbox_enabled:
+                    try:
+                        from cubeplex.db.engine import async_session_maker as _sb_session_maker
+                        from cubeplex.sandbox.lazy import LazySandbox
+                        from cubeplex.sandbox.manager import get_sandbox_manager
+                        from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+
+                        sandbox_manager = get_sandbox_manager()
+                        (
+                            sandbox_scope_type,
+                            sandbox_scope_id,
+                            sandbox_owner_user_id,
+                        ) = self._resolve_sandbox_target(ctx)
+                        sandbox = LazySandbox(
+                            manager=sandbox_manager,
+                            scope_type=sandbox_scope_type,
+                            scope_id=sandbox_scope_id,
+                            user_id=sandbox_owner_user_id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            workdir=config.get("sandbox.workdir", "/workspace"),
+                            catalog=skill_catalog,
+                            event_service=UserSandboxSyncEventService(_sb_session_maker),
+                        )
+                    except Exception as exc:
+                        logger.warning("Sandbox unavailable, continuing without: {}", exc)
+                        await emit_status("sandbox_failed", detail=str(exc))
+
+            # Resolve effective model + context_window for the DoneEvent. The
+            # actual cubepi.Provider construction happens inside _run_cubepi_path.
+            # Stash the snapshot in extra_ref_holder so the subsequent
+            # _build_agent_for_conversation call reuses it instead of loading
+            # the same providers/credentials again (Fix-8). The route already
+            # loaded a snapshot for preset validation — reuse it when passed
+            # in, skipping a second _load_providers + credential-decrypt pass.
+            from cubeplex.db.engine import async_session_maker
+            from cubeplex.llm.resolver import parse_model_ref, resolve_model_preset
+            from cubeplex.llm.snapshot import LLMSnapshot, load_llm_snapshot
+
+            context_window: int = 0
+            try:
+                if isinstance(llm_snapshot, LLMSnapshot):
+                    ctx_snap = llm_snapshot
+                else:
+                    async with async_session_maker() as ctx_session:
+                        ctx_snap = await load_llm_snapshot(
+                            ctx_session, ctx.org_id, self._app.state.encryption_backend
+                        )
+                        await ctx_session.commit()
+                extra_ref_holder["llm_snapshot"] = ctx_snap
+                _ctx_preset = resolve_model_preset(ctx_snap, None)
+                _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
+                _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
+                context_window = int(_model_cfg.context_window or 0)
+            except Exception as exc:
+                logger.debug("Could not resolve context_window for DoneEvent: {}", exc)
+
+            from sqlmodel import select as sqlmodel_select
+
+            from cubeplex.models.agent_config import AgentConfig
+            from cubeplex.prompts.system import BASE_SYSTEM_PROMPT
+
+            effective_system_prompt = BASE_SYSTEM_PROMPT
+            try:
+                if catalog_session is not None:
+                    result = await catalog_session.execute(
+                        sqlmodel_select(AgentConfig).where(
+                            AgentConfig.org_id == ctx.org_id,
+                            AgentConfig.workspace_id == ctx.workspace_id,
+                        )
+                    )
+                    agent_cfg = result.scalar_one_or_none()
+                else:
+                    async with async_session_maker() as _cfg_session:
+                        result = await _cfg_session.execute(
+                            sqlmodel_select(AgentConfig).where(
+                                AgentConfig.org_id == ctx.org_id,
+                                AgentConfig.workspace_id == ctx.workspace_id,
+                            )
+                        )
+                        agent_cfg = result.scalar_one_or_none()
+                if agent_cfg and agent_cfg.system_prompt:
+                    effective_system_prompt = BASE_SYSTEM_PROMPT + "\n\n" + agent_cfg.system_prompt
+            except Exception as exc:
+                logger.warning("Failed to load AgentConfig, using base prompt: {}", exc)
+
+            # Inject the available-skills list so the model knows what it can
+            # load via load_skill. Without this the load_skill tool exists but
+            # the agent never learns which skills are available, so it never
+            # uses them. Appended as a stable suffix (same enabled set across
+            # turns) to preserve the prompt-cache prefix.
+            try:
+                if skill_catalog is not None:
+                    _enabled_skills = await skill_catalog.list_enabled_for_workspace(
+                        ctx.workspace_id, org_id=ctx.org_id
+                    )
+                    if _enabled_skills:
+                        from cubeplex.prompts.skills import SKILLS_PROMPT_TEMPLATE
+
+                        _skills_list = "\n".join(
+                            f"- `{s.name}` — {s.description}"
+                            for s in sorted(_enabled_skills, key=lambda s: s.name)
+                        )
+                        effective_system_prompt += "\n\n" + SKILLS_PROMPT_TEMPLATE.format(
+                            skills_list=_skills_list
+                        )
+            except Exception as exc:
+                logger.warning("Failed to inject available-skills list: {}", exc)
+
+            # show_widget guidelines — appended unconditionally at a fixed spot
+            # so the cache prefix stays deterministic (the tool is always
+            # registered). See backend/docs/prompt-cache-discipline.md.
+            from cubeplex.prompts.widget import WIDGET_GUIDELINES
+
+            effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
+
+            final_status = await self._run_cubepi_path(
+                ctx=ctx,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                content=content,
+                attachments=attachments,
+                effective_system_prompt=effective_system_prompt,
+                publish_stream_event=publish_stream_event,
+                flush_citation_buffer=flush_citation_buffer,
+                citation_buffers=citation_buffers,
+                sandbox=sandbox,
+                skill_catalog=skill_catalog,
+                catalog_session=catalog_session,
+                trigger=ctx.trigger,
+                extra_ref_holder=extra_ref_holder,
+                model_key=model_key,
+                reasoning=reasoning or ReasoningControl(),
+            )
+            # Kick the session-usage aggregate NOW so it overlaps the queue
+            # drain below — both must finish before DoneEvent, so running
+            # them concurrently trims the last-token→done tail. The three
+            # bookkeeping writes (timestamp / topic bump / search-index
+            # enqueue) moved AFTER DoneEvent: nothing the frontend needs on
+            # `done` depends on them.
+            from cubeplex.services.usage import SessionUsage, get_session_usage
+
+            async def _query_session_usage() -> SessionUsage:
+                from cubeplex.db.engine import async_session_maker
+
+                async with async_session_maker() as billing_session:
+                    return await get_session_usage(billing_session, conversation_id)
+
+            usage_task = asyncio.create_task(_query_session_usage(), name=f"session_usage:{run_id}")
+            # Drain the subagent/citation queue BEFORE DoneEvent: SSE
+            # consumers (and the frontend) close on `done`, so any event
+            # still sitting in the drainer after the final tool call would
+            # be dropped — leaving last-turn 【N-M】 markers without hover
+            # data and last-turn subagent text missing until the
+            # conversation is reloaded. Bounded wait_for so a stuck
+            # consumer can't block run teardown forever (mirrors the
+            # safety pattern in the `finally` block).
+            if event_q_drainer is not None:
+                with suppress(Exception):
+                    event_q.put_nowait(None)
+                try:
+                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
+                except (TimeoutError, Exception):
+                    if not event_q_drainer.done():
+                        event_q_drainer.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await event_q_drainer
+                event_q_drainer = None
+            # --- Aggregate session-level token totals (kicked pre-drain) ---
+            session_usage: SessionUsage = {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cache_read_tokens": 0,
+                "total_cache_write_tokens": 0,
+            }
+            try:
+                session_usage = await usage_task
+            except Exception:
+                logger.warning("Failed to query session usage for done event")
+
+            # paused_hitl is a terminal-but-not-done state from the
+            # frontend's perspective: the run task is over (worker
+            # released), but the conversation is still waiting on the
+            # user's HITL answer. Stamp data.paused so the frontend's
+            # done handler preserves pendingAsk / pendingConfirmMap
+            # instead of wiping them via finalizeCompletedStream.
+            done_data: dict[str, Any] = {
+                "usage": {
+                    "turn": dict(turn_usage),
+                    "session": session_usage,
+                    "context_window": context_window,
+                    "context_tokens": last_context_tokens,
+                }
+            }
+            if final_status == "paused_hitl":
+                done_data["paused"] = True
+
+            await self._append_event(
+                run_id,
+                conversation_id,
+                DoneEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data=done_data,
+                ),
+            )
+            # Mark the run terminal AFTER appending DoneEvent so the SSE consumer
+            # cannot observe active_run=None with no more events (which would cause
+            # it to exit before the DoneEvent is in the Redis stream). T6 classifies
+            # the success terminal state: "completed" or "paused_hitl"; the latter
+            # means the agent detached on a new pending HITL request.
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status=final_status,
+            )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
+            # Post-done bookkeeping: the stream is closed, so failures here
+            # must not surface as SSE error events — log and move on. The
+            # search-index enqueue still runs after cubepi finished writing
+            # history (that happened inside agent.prompt()); `done` never
+            # depended on it.
+            try:
+                await _update_conversation_timestamp(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                )
+                await self._bump_topic_activity(ctx)
+            except Exception:
+                logger.opt(exception=True).warning("post-done activity bookkeeping failed")
+            try:
+                await _enqueue_search_index(
+                    conversation_id,
+                    org_id=ctx.org_id,
+                    workspace_id=ctx.workspace_id,
+                    user_id=ctx.user_id,
+                )
+                search_index_enqueued = True
+            except Exception:
+                logger.opt(exception=True).warning("post-done search-index enqueue failed")
+            await self._maybe_consolidate_memory(
+                conversation_id=conversation_id,
+                ctx=ctx,
+                cached_snapshot=extra_ref_holder.get("llm_snapshot"),
+            )
+        except asyncio.CancelledError:
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status="cancelled",
+            )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
+            # Defense in depth: cubepi backfills tool_results for tool_calls
+            # left dangling by a cancel, but if that cleanup was itself cut
+            # short the persisted thread would still have orphan tool_calls
+            # and every later turn would 400. Repair here too — idempotent, so
+            # it's a no-op when cubepi already handled it.
+            with suppress(Exception):
+                await _repair_dangling_tool_calls(conversation_id)
+            with suppress(Exception):
+                await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
+            raise
+        except Exception as exc:
+            logger.opt(exception=True).error("Run {} failed: {}", run_id, exc)
+            # Model/provider/context_window are fallbacks for non-cubepi
+            # exceptions. Cubepi typed errors already carry tokens_in etc.
+            _classify_params: dict[str, Any] = {
+                "model": extra_ref_holder.get("model_id"),
+                "provider": extra_ref_holder.get("provider_name"),
+                "context_window": extra_ref_holder.get("model_context_window") or None,
+            }
+            _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
+            _err_code, _err_params = classify_exception(exc, **_classify_params)
+            _err_message = _message_for_run_exception(exc, _err_code, _err_params)
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status="failed",
+                error_code=_err_code.value,
+                error_params=json.dumps(_err_params, ensure_ascii=False),
+                error_message=_err_message,
+            )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="failed")
+            with suppress(Exception):
+                await set_conversation_last_error(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    error_code=_err_code.value,
+                    error_params=json.dumps(_err_params, ensure_ascii=False),
+                    error_message=_err_message,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )
+            with suppress(Exception):
+                await self._append_error(
+                    run_id,
+                    conversation_id,
+                    message=_err_message,
+                    details=str(exc),
+                    exc=exc,
+                    params=_classify_params,
+                )
+        finally:
+            # If we got here via cancel/exception, the success path's
+            # enqueue was skipped. Cubepi may still have written partial
+            # history (user message + any completed assistant/tool turns)
+            # before the failure, so enqueue best-effort here. The job is
+            # idempotent; the worker re-chunks whatever history exists.
+            if not search_index_enqueued:
+                with suppress(Exception):
+                    await _enqueue_search_index(
+                        conversation_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        user_id=ctx.user_id,
+                    )
+
+            if stream_task is not None and not stream_task.done():
+                stream_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stream_task
+
+            # Error/cancel paths can bail between kicking the usage query
+            # and awaiting it — reap it so the task doesn't leak.
+            if usage_task is not None and not usage_task.done():
+                usage_task.cancel()
+                with suppress(asyncio.CancelledError, Exception):
+                    await usage_task
+
+            # Safety net for error/cancel paths that bypassed the
+            # pre-DoneEvent drain — shut the drainer down so the task
+            # doesn't leak. The success path nulls `event_q_drainer` after
+            # its own drain, so this block is a no-op then.
+            if event_q_drainer is not None:
+                with suppress(Exception):
+                    event_q.put_nowait(None)
+                try:
+                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
+                except (TimeoutError, Exception):
+                    if not event_q_drainer.done():
+                        event_q_drainer.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await event_q_drainer
+
+            if sandbox_create_task is not None and not sandbox_create_task.done():
+                sandbox_create_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sandbox_create_task
+
+            try:
+                subagent_event_queue.reset(cv_token)
+            except ValueError:
+                subagent_event_queue.set(None)
+            try:
+                citation_counter_var.reset(cc_token)
+            except ValueError:
+                citation_counter_var.set(None)
+            try:
+                citation_event_queue.reset(ce_token)
+            except ValueError:
+                citation_event_queue.set(None)
+
+            self._agents.pop(run_id, None)
+            # Release the turn lock BEFORE the sandbox/session teardown below:
+            # `done` has already been emitted, and holding the active-run key
+            # through a (remote) sandbox release gave the next send a 409
+            # window. Sandbox release is only an activity-timestamp update —
+            # a new run re-acquiring the same scope sandbox is unaffected.
+            #
+            # paused_hitl: keep the Redis active-run key as the lock that
+            # blocks `start_run` from spawning a brand-new turn while the
+            # user still owes an answer. Clearing it here would let a
+            # racing send pass create_run() and skip the DB-pending guard
+            # in start_run (the guard only fires when create_run failed),
+            # orphaning the paused turn. The respond / cancel paths clear
+            # the lock when they terminate.
+            if final_status != "paused_hitl":
+                await clear_active_run(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                )
+                await expire_run_data(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )
+
+            if sandbox:
+                from cubeplex.sandbox.lazy import LazySandbox
+
+                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
+                    with suppress(Exception):
+                        await sandbox._manager.release(
+                            sandbox.id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        )
+                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
+                    with suppress(Exception):
+                        await sandbox_manager.release(
+                            sandbox.id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        )
+
+            if catalog_session_ctx is not None:
+                with suppress(Exception):
+                    await catalog_session_ctx.__aexit__(None, None, None)
+
+    async def _execute_respond_run(
+        self,
+        *,
+        run_id: str,
+        conversation_id: str,
+        question_id: str,
+        answer: Any,
+        claim_token: str,
+        ctx: RunContext,
+    ) -> None:
+        """Spawn-wrapper around :meth:`_run_cubepi_respond_path`.
+
+        Mirrors :meth:`_execute_run` for the resume path. Reuses the
+        original ``run_id`` (events stream into the same Redis key the SSE
+        consumer is still tailing), so this:
+
+        * does NOT call :func:`update_run_meta` on terminal — the respond
+          path's CAS-guarded :func:`finalize_run_meta_if_claim_matches`
+          already wrote the terminal status. A naive ``update_run_meta``
+          here would defeat the CAS;
+        * still emits ``DoneEvent`` so the SSE consumer can close cleanly;
+        * still clears the active-run pointer + expires run data in
+          ``finally`` — exactly like the prompt path. ``claim_resume``
+          handles the case where the active pointer is gone but the meta
+          row still exists (paused_hitl status).
+
+        The leading setup (citation counter, subagent/citation drainer,
+        sandbox + skill catalog resolution, AgentConfig system-prompt
+        merge, available-skills suffix, widget guidelines suffix) is
+        identical to ``_execute_run``'s — keeping it byte-stable preserves
+        the prompt cache prefix across pause/resume.
+        """
+        from cubeplex.api.routes.v1.conversations import (
+            _enqueue_search_index,
+            _update_conversation_timestamp,
+        )
+        from cubeplex.middleware.citations.counter import (
+            CitationCounter,
+            citation_counter_var,
+            citation_event_queue,
+        )
+        from cubeplex.schedules.completion_hook import record_scheduled_run_terminal_state
+        from cubeplex.streams.subagent_events import subagent_event_queue
+
+        sandbox = None
+        sandbox_manager = None
+        sandbox_create_task: asyncio.Task[Any] | None = None
+        stream_task: asyncio.Task[None] | None = None
+        catalog_session_ctx: Any | None = None
+        catalog_session: Any | None = None
+        skill_catalog: Any | None = None
+        event_q: asyncio.Queue[tuple[str, Any, Any] | None] = asyncio.Queue()
+        cv_token = subagent_event_queue.set(event_q)
+
+        citation_counter = CitationCounter(start=1)
+        cc_token = citation_counter_var.set(citation_counter)
+        ce_token = citation_event_queue.set(event_q)
+
+        citation_buffers: dict[str | None, str] = {}
+        turn_usage: dict[str, int] = {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+        }
+        last_context_tokens: int = 0
+        # Re-enqueue the search index in `finally` on cancel/exception when
+        # cubepi may have written partial history before the failure. The
+        # enqueue is idempotent (replace_for_conversation), so the flag is
+        # only to skip a redundant enqueue on the happy path.
+        search_index_enqueued = False
+
+        async def emit_status(phase: str, detail: str | None = None) -> None:
+            data: dict[str, str] = {"phase": phase}
+            if detail:
+                data["detail"] = detail
+            await self._append_event(
+                run_id,
+                conversation_id,
+                StatusEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data=data,
+                ),
+            )
+
+        async def publish_event(event: AgentEvent) -> None:
+            await self._append_event(run_id, conversation_id, event)
+
+        async def flush_citation_buffer(
+            agent_key: str | None,
+            fallback_agent_id: str | None,
+        ) -> None:
+            buf = citation_buffers.get(agent_key, "")
+            if not buf:
+                return
+            from cubeplex.agents.schemas import TextDeltaEvent
+
+            citation_buffers[agent_key] = ""
+            await publish_event(
+                TextDeltaEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data={
+                        "content": buf,
+                        "usage": {"input_tokens": 0, "output_tokens": 0},
+                    },
+                    agent_id=fallback_agent_id,
+                )
+            )
+
+        async def publish_stream_event(sse_event: AgentEvent, agent_key: str | None) -> None:
+            if sse_event.type == "text_delta":
+                buffered = citation_buffers.get(agent_key, "") + str(
+                    sse_event.data.get("content", "")
+                )
+                citation_buffers[agent_key] = ""
+                last_open = buffered.rfind("【")
+                if last_open != -1 and "】" not in buffered[last_open:]:
+                    citation_buffers[agent_key] = buffered[last_open:]
+                    buffered = buffered[:last_open]
+                if buffered:
+                    sse_event.data["content"] = buffered
+                    await publish_event(sse_event)
+                return
+
+            await flush_citation_buffer(agent_key, sse_event.agent_id)
+            if sse_event.type == "usage":
+                for key in turn_usage:
+                    turn_usage[key] += sse_event.data.get(key, 0)
+                nonlocal last_context_tokens
+                last_context_tokens = max(
+                    last_context_tokens, sse_event.data.get("input_tokens", 0)
+                )
+            await publish_event(sse_event)
+
+        event_q_drainer: asyncio.Task[None] | None = asyncio.create_task(
+            _drain_subagent_citation_queue(event_q, publish_stream_event),
+            name=f"event_q_drainer_respond:{run_id}",
+        )
+
+        # Declared here so the except block can read model/provider/context_window
+        # even when the exception is raised inside _run_cubepi_respond_path (a
+        # separate call frame — locals().get() would never see it).
+        extra_ref_holder: dict[str, Any] = {}
+
+        try:
+            try:
+                from pathlib import Path
+
+                from cubeplex.config import config as _cfg
+                from cubeplex.db.engine import async_session_maker
+                from cubeplex.skills.cache import SkillCache
+                from cubeplex.skills.service import SkillCatalogService
+
+                catalog_session_ctx = async_session_maker()
+                catalog_session = await catalog_session_ctx.__aenter__()
+                skill_catalog = SkillCatalogService(
+                    session=catalog_session,
+                    cache=SkillCache(
+                        cache_root=Path(_cfg.get("skills.cache_root", "skills_cache"))
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("Skill catalog unavailable for respond run: {}", exc)
+
+            sandbox_factory = getattr(self._app.state, "sandbox_factory", None)
+            if sandbox_factory:
+                sandbox = sandbox_factory()
+            else:
+                from cubeplex.config import config
+
+                sandbox_enabled = config.get("sandbox.enabled", False)
+                if sandbox_enabled:
+                    try:
+                        from cubeplex.db.engine import async_session_maker as _sb_session_maker
+                        from cubeplex.sandbox.lazy import LazySandbox
+                        from cubeplex.sandbox.manager import get_sandbox_manager
+                        from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+
+                        sandbox_manager = get_sandbox_manager()
+                        (
+                            sandbox_scope_type,
+                            sandbox_scope_id,
+                            sandbox_owner_user_id,
+                        ) = self._resolve_sandbox_target(ctx)
+                        sandbox = LazySandbox(
+                            manager=sandbox_manager,
+                            scope_type=sandbox_scope_type,
+                            scope_id=sandbox_scope_id,
+                            user_id=sandbox_owner_user_id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                            workdir=config.get("sandbox.workdir", "/workspace"),
+                            catalog=skill_catalog,
+                            event_service=UserSandboxSyncEventService(_sb_session_maker),
+                        )
+                    except Exception as exc:
+                        logger.warning("Sandbox unavailable, continuing without: {}", exc)
+                        await emit_status("sandbox_failed", detail=str(exc))
+
+            # Stash snapshot in extra_ref_holder so _build_agent_for_conversation
+            # reuses it via _run_cubepi_respond_path (Fix-8).
+            from cubeplex.db.engine import async_session_maker
+            from cubeplex.llm.resolver import parse_model_ref, resolve_model_preset
+            from cubeplex.llm.snapshot import load_llm_snapshot
+
+            context_window: int = 0
+            try:
+                async with async_session_maker() as ctx_session:
+                    ctx_snap = await load_llm_snapshot(
+                        ctx_session, ctx.org_id, self._app.state.encryption_backend
+                    )
+                    await ctx_session.commit()
+                extra_ref_holder["llm_snapshot"] = ctx_snap
+                _ctx_preset = resolve_model_preset(ctx_snap, None)
+                _slug, _mid = parse_model_ref(_ctx_preset.chain[0])
+                _model_cfg = next(m for m in ctx_snap.providers[_slug].models if m.id == _mid)
+                context_window = int(_model_cfg.context_window or 0)
+            except Exception as exc:
+                logger.debug("Could not resolve context_window for respond DoneEvent: {}", exc)
+
+            from sqlmodel import select as sqlmodel_select
+
+            from cubeplex.models.agent_config import AgentConfig
+            from cubeplex.prompts.system import BASE_SYSTEM_PROMPT
+
+            effective_system_prompt = BASE_SYSTEM_PROMPT
+            try:
+                if catalog_session is not None:
+                    result = await catalog_session.execute(
+                        sqlmodel_select(AgentConfig).where(
+                            AgentConfig.org_id == ctx.org_id,
+                            AgentConfig.workspace_id == ctx.workspace_id,
+                        )
+                    )
+                    agent_cfg = result.scalar_one_or_none()
+                else:
+                    async with async_session_maker() as _cfg_session:
+                        result = await _cfg_session.execute(
+                            sqlmodel_select(AgentConfig).where(
+                                AgentConfig.org_id == ctx.org_id,
+                                AgentConfig.workspace_id == ctx.workspace_id,
+                            )
+                        )
+                        agent_cfg = result.scalar_one_or_none()
+                if agent_cfg and agent_cfg.system_prompt:
+                    effective_system_prompt = BASE_SYSTEM_PROMPT + "\n\n" + agent_cfg.system_prompt
+            except Exception as exc:
+                logger.warning("Failed to load AgentConfig (respond), using base prompt: {}", exc)
+
+            try:
+                if skill_catalog is not None:
+                    _enabled_skills = await skill_catalog.list_enabled_for_workspace(
+                        ctx.workspace_id, org_id=ctx.org_id
+                    )
+                    if _enabled_skills:
+                        from cubeplex.prompts.skills import SKILLS_PROMPT_TEMPLATE
+
+                        _skills_list = "\n".join(
+                            f"- `{s.name}` — {s.description}"
+                            for s in sorted(_enabled_skills, key=lambda s: s.name)
+                        )
+                        effective_system_prompt += "\n\n" + SKILLS_PROMPT_TEMPLATE.format(
+                            skills_list=_skills_list
+                        )
+            except Exception as exc:
+                logger.warning("Failed to inject available-skills list (respond): {}", exc)
+
+            from cubeplex.prompts.widget import WIDGET_GUIDELINES
+
+            effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
+
+            await self._run_cubepi_respond_path(
+                ctx=ctx,
+                run_id=run_id,
+                conversation_id=conversation_id,
+                question_id=question_id,
+                answer=answer,
+                claim_token=claim_token,
+                effective_system_prompt=effective_system_prompt,
+                publish_stream_event=publish_stream_event,
+                flush_citation_buffer=flush_citation_buffer,
+                citation_buffers=citation_buffers,
+                sandbox=sandbox,
+                skill_catalog=skill_catalog,
+                catalog_session=catalog_session,
+                extra_ref_holder=extra_ref_holder,
+            )
+            await _update_conversation_timestamp(
+                conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+            )
+            await self._bump_topic_activity(ctx)
+            # Indexing is enqueued AFTER the resumed run finishes writing
+            # history to the checkpointer — see _enqueue_search_index
+            # docstring. The finally block re-enqueues on cancel/exception
+            # paths where cubepi may have written partial history before
+            # the failure.
+            await _enqueue_search_index(
+                conversation_id,
+                org_id=ctx.org_id,
+                workspace_id=ctx.workspace_id,
+                user_id=ctx.user_id,
+            )
+            search_index_enqueued = True
+
+            # Drain shared subagent/citation queue BEFORE DoneEvent — same
+            # rationale as _execute_run.
+            if event_q_drainer is not None:
+                with suppress(Exception):
+                    event_q.put_nowait(None)
+                try:
+                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
+                except (TimeoutError, Exception):
+                    if not event_q_drainer.done():
+                        event_q_drainer.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await event_q_drainer
+                event_q_drainer = None
+
+            from cubeplex.services.usage import SessionUsage, get_session_usage
+
+            session_usage: SessionUsage = {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cache_read_tokens": 0,
+                "total_cache_write_tokens": 0,
+            }
+            try:
+                from cubeplex.db.engine import async_session_maker
+
+                async with async_session_maker() as billing_session:
+                    session_usage = await get_session_usage(billing_session, conversation_id)
+            except Exception:
+                logger.warning("Failed to query session usage for respond done event")
+
+            # Read the actual terminal status BEFORE emitting DoneEvent so
+            # we can stamp data.paused=true on chained-HITL flows (respond
+            # answers one question and the agent immediately emits a new
+            # pending one). Without this flag, the frontend treats `done`
+            # as completed and wipes pendingAsk / pendingConfirmMap, so the
+            # follow-up HITL card disappears until a reload. See spec §6.
+            #
+            # _run_cubepi_respond_path's CAS-guarded finalize already wrote
+            # the terminal status; read it back rather than re-compute.
+            final_meta = await get_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+            )
+            final_status = final_meta.status if final_meta is not None else "completed"
+
+            done_data: dict[str, Any] = {
+                "usage": {
+                    "turn": dict(turn_usage),
+                    "session": session_usage,
+                    "context_window": context_window,
+                    "context_tokens": last_context_tokens,
+                }
+            }
+            if final_status == "paused_hitl":
+                done_data["paused"] = True
+
+            await self._append_event(
+                run_id,
+                conversation_id,
+                DoneEvent(
+                    timestamp=datetime.now(UTC).isoformat(),
+                    data=done_data,
+                ),
+            )
+            # NOTE: no update_run_meta here — _run_cubepi_respond_path
+            # already wrote the terminal status via
+            # finalize_run_meta_if_claim_matches (CAS-guarded). A naive
+            # update_run_meta would race with whatever flow stole the slot
+            # while we were running.
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status=final_status)
+            await self._maybe_consolidate_memory(
+                conversation_id=conversation_id,
+                ctx=ctx,
+                cached_snapshot=extra_ref_holder.get("llm_snapshot"),
+            )
+        except asyncio.CancelledError:
+            # Mirror prompt-path cancel handling. We bypass the CAS guard
+            # on cancel because cancel is itself the takeover signal — the
+            # cancel route already set the meta state appropriately.
+            await update_run_meta(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                status="cancelled",
+            )
+            await record_scheduled_run_terminal_state(run_id=run_id, run_status="cancelled")
+            with suppress(Exception):
+                await _repair_dangling_tool_calls(conversation_id)
+            with suppress(Exception):
+                await self._append_error(run_id, conversation_id, "Run cancelled", "Run cancelled")
+            raise
+        except Exception as exc:
+            logger.opt(exception=True).error("Respond run {} failed: {}", run_id, exc)
+            # Don't clear DB pending — leaving it allows the user to retry
+            # the answer. Don't finalize meta status here either: if the body
+            # finally block already ran, it CAS-wrote whatever status
+            # applies; if we crashed before that, the stale-run sweeper
+            # picks the row up. But do persist the error fields so the
+            # run list and replay can show the reason.
+            # Model/provider/context_window are fallbacks for non-cubepi
+            # exceptions. Cubepi typed errors already carry tokens_in etc.
+            _classify_params: dict[str, Any] = {
+                "model": extra_ref_holder.get("model_id"),
+                "provider": extra_ref_holder.get("provider_name"),
+                "context_window": extra_ref_holder.get("model_context_window") or None,
+            }
+            _classify_params = {k: v for k, v in _classify_params.items() if v is not None}
+            _err_code, _err_params = classify_exception(exc, **_classify_params)
+            _err_message = _message_for_run_exception(exc, _err_code, _err_params)
+            with suppress(Exception):
+                await update_run_meta(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    run_id=run_id,
+                    error_code=_err_code.value,
+                    error_params=json.dumps(_err_params, ensure_ascii=False),
+                    error_message=_err_message,
+                )
+            with suppress(Exception):
+                await set_conversation_last_error(
+                    self._redis,
+                    prefix=self._key_prefix,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    error_code=_err_code.value,
+                    error_params=json.dumps(_err_params, ensure_ascii=False),
+                    error_message=_err_message,
+                    ttl_seconds=self._run_event_ttl_seconds,
+                )
+            with suppress(Exception):
+                await self._append_error(
+                    run_id,
+                    conversation_id,
+                    message=_err_message,
+                    details=str(exc),
+                    exc=exc,
+                    params=_classify_params,
+                )
+        finally:
+            # Mirror the prompt-path safety net: cancel/exception bypassed
+            # the success-path enqueue, but cubepi may have written partial
+            # history before the failure. Idempotent enqueue.
+            if not search_index_enqueued:
+                with suppress(Exception):
+                    await _enqueue_search_index(
+                        conversation_id,
+                        org_id=ctx.org_id,
+                        workspace_id=ctx.workspace_id,
+                        user_id=ctx.user_id,
+                    )
+
+            if stream_task is not None and not stream_task.done():
+                stream_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await stream_task
+
+            if event_q_drainer is not None:
+                with suppress(Exception):
+                    event_q.put_nowait(None)
+                try:
+                    await asyncio.wait_for(event_q_drainer, timeout=5.0)
+                except (TimeoutError, Exception):
+                    if not event_q_drainer.done():
+                        event_q_drainer.cancel()
+                        with suppress(asyncio.CancelledError, Exception):
+                            await event_q_drainer
+
+            if sandbox_create_task is not None and not sandbox_create_task.done():
+                sandbox_create_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sandbox_create_task
+
+            try:
+                subagent_event_queue.reset(cv_token)
+            except ValueError:
+                subagent_event_queue.set(None)
+            try:
+                citation_counter_var.reset(cc_token)
+            except ValueError:
+                citation_counter_var.set(None)
+            try:
+                citation_event_queue.reset(ce_token)
+            except ValueError:
+                citation_event_queue.set(None)
+
+            if sandbox:
+                from cubeplex.sandbox.lazy import LazySandbox
+
+                if isinstance(sandbox, LazySandbox) and sandbox.initialized:
+                    with suppress(Exception):
+                        await sandbox._manager.release(
+                            sandbox.id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        )
+                elif sandbox_manager and not isinstance(sandbox, LazySandbox):
+                    with suppress(Exception):
+                        await sandbox_manager.release(
+                            sandbox.id,
+                            org_id=ctx.org_id,
+                            workspace_id=ctx.workspace_id,
+                        )
+
+            if catalog_session_ctx is not None:
+                with suppress(Exception):
+                    await catalog_session_ctx.__aexit__(None, None, None)
+
+            self._agents.pop(run_id, None)
+            # Clear the active-run pointer — claim_resume handles the case
+            # where pointer is gone but meta is paused_hitl (it re-stamps
+            # the pointer atomically). On "completed" the pointer must be
+            # gone so the next start_run can allocate a fresh run.
+            await clear_active_run(
+                self._redis,
+                prefix=self._key_prefix,
+                conversation_id=conversation_id,
+                run_id=run_id,
+            )
+            await expire_run_data(
+                self._redis,
+                prefix=self._key_prefix,
+                run_id=run_id,
+                ttl_seconds=self._run_event_ttl_seconds,
+            )

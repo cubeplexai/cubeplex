@@ -1,4 +1,4 @@
-"""Integration test: cubebox uses cubepi.PostgresCheckpointer against
+"""Integration test: cubeplex uses cubepi.PostgresCheckpointer against
 the alembic-created schema in the test database.
 
 Requires alembic upgrade head to have run on the test DB. Fresh dev
@@ -14,8 +14,8 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.agents.checkpointer import _build_dsn, init_checkpointer
-from cubebox.streams.run_manager import _repair_dangling_tool_calls
+from cubeplex.agents.checkpointer import _build_dsn, init_checkpointer
+from cubeplex.streams.run_manager import _repair_dangling_tool_calls
 
 
 async def _delete_thread(thread_id: str) -> None:
@@ -69,7 +69,7 @@ async def test_repair_dangling_tool_calls_backfills_and_is_idempotent() -> None:
 
 @pytest.mark.asyncio
 async def test_cubepi_checkpointer_round_trip_against_real_schema() -> None:
-    """Connecting cubepi.PostgresCheckpointer to the cubebox dev DB
+    """Connecting cubepi.PostgresCheckpointer to the cubeplex dev DB
     must succeed (schema version check passes) and round-trip messages."""
     async with init_checkpointer() as cp:
         msg = UserMessage(

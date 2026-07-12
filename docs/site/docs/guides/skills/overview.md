@@ -20,7 +20,7 @@ You do not need to memorize skill names. The agent matches your intent to instal
 
 Skills come from three places:
 
-- **Built-in (preinstalled)** — Ship with CubeBox and are available by default. Your org admin can disable specific built-in skills if they are not needed.
+- **Built-in (preinstalled)** — Ship with CubePlex and are available by default. Your org admin can disable specific built-in skills if they are not needed.
 - **Uploaded** — Published by your org admin (or by you at the workspace level). These are custom skills tailored to your team's workflows.
 - **Remote registries** — External skill sources (such as [skills.sh](https://skills.sh)) that your admin has connected. You can search these registries and install skills from them directly.
 
@@ -34,7 +34,7 @@ Skills from remote registries carry a trust indicator so you know what you are i
 | **Community** | Published by community contributors; not formally vetted. |
 | **Untrusted** | No review has been performed. Inspect the skill content before installing. |
 
-Built-in and uploaded skills are inherently trusted because they come from CubeBox or your own organization.
+Built-in and uploaded skills are inherently trusted because they come from CubePlex or your own organization.
 
 ## Installation scopes
 

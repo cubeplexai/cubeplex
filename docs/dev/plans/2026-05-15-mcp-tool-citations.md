@@ -13,7 +13,7 @@
 **Conventions:**
 
 - Backend commands run from `backend/`. Use `uv run pytest -q tests/...` for individual files, `make check` only before opening a PR.
-- Frontend commands run from `frontend/`. Use `pnpm --filter @cubebox/web …`.
+- Frontend commands run from `frontend/`. Use `pnpm --filter @cubeplex/web …`.
 - Commits keep one logical change per task. Plan tasks correspond ~1:1 to commits unless noted.
 
 ---
@@ -29,17 +29,17 @@
 
 **Backend — modified files:**
 
-- `backend/cubebox/models/mcp.py` — add `tool_citations` column on `MCPCatalogConnector` and `MCPServer`
-- `backend/cubebox/middleware/citations/config.py` — add `content_type` to `CitationConfig`
-- `backend/cubebox/mcp/catalog_seed.py` — `CatalogSeedEntry.tool_citations` field + seed for webtools
-- `backend/cubebox/repositories/mcp_catalog.py` — `upsert_by_slug` accepts `tool_citations`
-- `backend/cubebox/services/mcp_catalog.py` — install copies `catalog.tool_citations` onto new `MCPServer` row
-- `backend/cubebox/mcp/cubepi_admin_refresh.py` — strip orphan keys after discovery rewrite
-- `backend/cubebox/mcp/cubepi_discovery.py` — `CubepiMCPServerSpec.tool_citations` field; populate
-- `backend/cubebox/mcp/cubepi_runtime.py` — namespacing + return citation_configs
-- `backend/cubebox/streams/run_manager.py` — wire citation_configs into `CitationMiddleware`
-- `backend/cubebox/api/routes/v1/ws_mcp.py` — GET/PATCH server tool-citations
-- `backend/cubebox/api/routes/v1/mcp_catalog.py` — GET catalog tool-citations
+- `backend/cubeplex/models/mcp.py` — add `tool_citations` column on `MCPCatalogConnector` and `MCPServer`
+- `backend/cubeplex/middleware/citations/config.py` — add `content_type` to `CitationConfig`
+- `backend/cubeplex/mcp/catalog_seed.py` — `CatalogSeedEntry.tool_citations` field + seed for webtools
+- `backend/cubeplex/repositories/mcp_catalog.py` — `upsert_by_slug` accepts `tool_citations`
+- `backend/cubeplex/services/mcp_catalog.py` — install copies `catalog.tool_citations` onto new `MCPServer` row
+- `backend/cubeplex/mcp/cubepi_admin_refresh.py` — strip orphan keys after discovery rewrite
+- `backend/cubeplex/mcp/cubepi_discovery.py` — `CubepiMCPServerSpec.tool_citations` field; populate
+- `backend/cubeplex/mcp/cubepi_runtime.py` — namespacing + return citation_configs
+- `backend/cubeplex/streams/run_manager.py` — wire citation_configs into `CitationMiddleware`
+- `backend/cubeplex/api/routes/v1/ws_mcp.py` — GET/PATCH server tool-citations
+- `backend/cubeplex/api/routes/v1/mcp_catalog.py` — GET catalog tool-citations
 - `backend/tests/unit/test_catalog_seed.py` — extend for the new field
 
 **Frontend — new files:**
@@ -64,13 +64,13 @@
 **Files:**
 
 - Create: `backend/alembic/versions/<ts>_add_tool_citations_to_mcp_tables.py`
-- Modify: `backend/cubebox/models/mcp.py` (add columns on two models)
-- Modify: `backend/cubebox/middleware/citations/config.py:34` (add `content_type` field)
+- Modify: `backend/cubeplex/models/mcp.py` (add columns on two models)
+- Modify: `backend/cubeplex/middleware/citations/config.py:34` (add `content_type` field)
 - Test: `backend/tests/unit/test_citation.py` (extend with content_type round-trip)
 
 - [ ] **Step 1: Add `content_type` field to `CitationConfig`**
 
-Edit `backend/cubebox/middleware/citations/config.py` — add the field above `source_type`:
+Edit `backend/cubeplex/middleware/citations/config.py` — add the field above `source_type`:
 
 ```python
 from typing import Any, Literal
@@ -103,14 +103,14 @@ Append to `backend/tests/unit/test_citation.py`:
 
 ```python
 def test_citation_config_content_type_defaults_to_json() -> None:
-    from cubebox.middleware.citations.config import CitationConfig
+    from cubeplex.middleware.citations.config import CitationConfig
 
     cfg = CitationConfig(source_type="web", content_field="results", mapping={"snippet": "snippet"})
     assert cfg.content_type == "json"
 
 
 def test_citation_config_content_type_text_round_trip() -> None:
-    from cubebox.middleware.citations.config import CitationConfig
+    from cubeplex.middleware.citations.config import CitationConfig
 
     raw = {
         "content_type": "text",
@@ -127,7 +127,7 @@ def test_citation_config_rejects_unknown_content_type() -> None:
     import pytest
     from pydantic import ValidationError
 
-    from cubebox.middleware.citations.config import CitationConfig
+    from cubeplex.middleware.citations.config import CitationConfig
 
     with pytest.raises(ValidationError):
         CitationConfig(content_type="binary", source_type="web", content_field=None, mapping={})  # type: ignore[arg-type]
@@ -141,7 +141,7 @@ Expected: 3 passed.
 
 - [ ] **Step 4: Add `tool_citations` column to both MCP models**
 
-Edit `backend/cubebox/models/mcp.py` — inside `MCPCatalogConnector`, just before `status: str = ...`:
+Edit `backend/cubeplex/models/mcp.py` — inside `MCPCatalogConnector`, just before `status: str = ...`:
 
 ```python
     tool_citations: dict[str, dict[str, Any]] = Field(
@@ -185,8 +185,8 @@ Expected: all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/middleware/citations/config.py \
-        backend/cubebox/models/mcp.py \
+git add backend/cubeplex/middleware/citations/config.py \
+        backend/cubeplex/models/mcp.py \
         backend/alembic/versions/*add_tool_citations* \
         backend/tests/unit/test_citation.py
 git commit -m "feat(mcp): add tool_citations columns + CitationConfig.content_type"
@@ -198,8 +198,8 @@ git commit -m "feat(mcp): add tool_citations columns + CitationConfig.content_ty
 
 **Files:**
 
-- Modify: `backend/cubebox/mcp/catalog_seed.py` — add field on dataclass; pass through in `seed_catalog`
-- Modify: `backend/cubebox/repositories/mcp_catalog.py:45-114` — accept `tool_citations`
+- Modify: `backend/cubeplex/mcp/catalog_seed.py` — add field on dataclass; pass through in `seed_catalog`
+- Modify: `backend/cubeplex/repositories/mcp_catalog.py:45-114` — accept `tool_citations`
 - Modify: `backend/tests/unit/test_catalog_seed.py` — add roundtrip assertion
 
 - [ ] **Step 1: Add the failing test**
@@ -217,7 +217,7 @@ async def test_seed_persists_tool_citations(
         CatalogSeedEntry(
             slug="webtools-test",
             name="WebTools Test",
-            provider="Cubebox",
+            provider="Cubeplex",
             description="test entry",
             server_url="http://example.com/mcp",
             transport="streamable_http",
@@ -261,7 +261,7 @@ Expected: FAIL with `TypeError: __init__() got an unexpected keyword argument 't
 
 - [ ] **Step 3: Extend `CatalogSeedEntry`**
 
-Edit `backend/cubebox/mcp/catalog_seed.py:42` (the dataclass) — add the field after `cred_metadata`:
+Edit `backend/cubeplex/mcp/catalog_seed.py:42` (the dataclass) — add the field after `cred_metadata`:
 
 ```python
 @dataclass(frozen=True)
@@ -288,7 +288,7 @@ class CatalogSeedEntry:
 
 - [ ] **Step 4: Extend `MCPCatalogConnectorRepository.upsert_by_slug`**
 
-Edit `backend/cubebox/repositories/mcp_catalog.py:45` — add the parameter and propagate in both the insert and update branches. The final signature and body:
+Edit `backend/cubeplex/repositories/mcp_catalog.py:45` — add the parameter and propagate in both the insert and update branches. The final signature and body:
 
 ```python
     async def upsert_by_slug(
@@ -324,7 +324,7 @@ existing.tool_citations = tool_citations or {}
 
 - [ ] **Step 5: Pass the field through `seed_catalog`**
 
-Edit `backend/cubebox/mcp/catalog_seed.py` — find the `await repo.upsert_by_slug(...)` call inside `seed_catalog()` and add `tool_citations=dict(entry.tool_citations),` to the kwargs (after `cred_metadata=dict(entry.cred_metadata),`).
+Edit `backend/cubeplex/mcp/catalog_seed.py` — find the `await repo.upsert_by_slug(...)` call inside `seed_catalog()` and add `tool_citations=dict(entry.tool_citations),` to the kwargs (after `cred_metadata=dict(entry.cred_metadata),`).
 
 - [ ] **Step 6: Re-run the test**
 
@@ -341,8 +341,8 @@ Expected: all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/mcp/catalog_seed.py \
-        backend/cubebox/repositories/mcp_catalog.py \
+git add backend/cubeplex/mcp/catalog_seed.py \
+        backend/cubeplex/repositories/mcp_catalog.py \
         backend/tests/unit/test_catalog_seed.py
 git commit -m "feat(mcp): plumb tool_citations through CatalogSeedEntry + repo upsert"
 ```
@@ -353,7 +353,7 @@ git commit -m "feat(mcp): plumb tool_citations through CatalogSeedEntry + repo u
 
 **Files:**
 
-- Modify: `backend/cubebox/mcp/catalog_seed.py` — the existing `webtools` `CatalogSeedEntry` (added in a prior PR)
+- Modify: `backend/cubeplex/mcp/catalog_seed.py` — the existing `webtools` `CatalogSeedEntry` (added in a prior PR)
 - Modify: `backend/tests/unit/test_catalog_seed.py`
 
 - [ ] **Step 1: Add the failing assertion**
@@ -389,7 +389,7 @@ Expected: FAIL with `KeyError: 'web_search'`.
 
 - [ ] **Step 3: Fill in the webtools entry's `tool_citations`**
 
-Edit the existing `CatalogSeedEntry(slug="webtools", ...)` in `backend/cubebox/mcp/catalog_seed.py` — replace `cred_metadata={},` (the last field) with:
+Edit the existing `CatalogSeedEntry(slug="webtools", ...)` in `backend/cubeplex/mcp/catalog_seed.py` — replace `cred_metadata={},` (the last field) with:
 
 ```python
         cred_metadata={},
@@ -427,7 +427,7 @@ Add another guard test to `backend/tests/unit/test_catalog_seed.py`:
 ```python
 def test_all_seed_tool_citations_are_valid_citation_configs() -> None:
     """Every tool_citations entry across CATALOG must be a valid CitationConfig."""
-    from cubebox.middleware.citations.config import CitationConfig
+    from cubeplex.middleware.citations.config import CitationConfig
 
     for entry in CATALOG:
         for tool_name, raw in entry.tool_citations.items():
@@ -444,7 +444,7 @@ Expected: all pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/mcp/catalog_seed.py backend/tests/unit/test_catalog_seed.py
+git add backend/cubeplex/mcp/catalog_seed.py backend/tests/unit/test_catalog_seed.py
 git commit -m "feat(mcp): seed webtools catalog with web_search/web_fetch citations"
 ```
 
@@ -454,7 +454,7 @@ git commit -m "feat(mcp): seed webtools catalog with web_search/web_fetch citati
 
 **Files:**
 
-- Modify: `backend/cubebox/services/mcp_catalog.py:399` and `:448` (the two `MCPServer(...)` constructors inside install paths)
+- Modify: `backend/cubeplex/services/mcp_catalog.py:399` and `:448` (the two `MCPServer(...)` constructors inside install paths)
 - Test: `backend/tests/unit/test_mcp_service_invariants.py` (extend) or new file `backend/tests/unit/test_install_tool_citations.py`
 
 - [ ] **Step 1: Add the failing test**
@@ -475,7 +475,7 @@ import pytest
 async def test_install_for_org_copies_tool_citations(
     seeded_workspace: Any,  # provides ctx, session, install service
 ) -> None:
-    from cubebox.models import MCPCatalogConnector
+    from cubeplex.models import MCPCatalogConnector
 
     ctx = seeded_workspace.ctx
     session = seeded_workspace.session
@@ -524,7 +524,7 @@ Expected: FAIL (either `AssertionError: ... != ...` or `AttributeError: ... no a
 
 - [ ] **Step 3: Copy `connector.tool_citations` into both `MCPServer(...)` constructors**
 
-In `backend/cubebox/services/mcp_catalog.py`, find both `MCPServer(` literals (around lines 399 and 448) and add this kwarg before `created_by_user_id`:
+In `backend/cubeplex/services/mcp_catalog.py`, find both `MCPServer(` literals (around lines 399 and 448) and add this kwarg before `created_by_user_id`:
 
 ```python
                 tool_citations=dict(connector.tool_citations or {}),
@@ -545,7 +545,7 @@ Expected: all pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp_catalog.py \
+git add backend/cubeplex/services/mcp_catalog.py \
         backend/tests/unit/test_install_tool_citations.py
 git commit -m "feat(mcp): copy catalog tool_citations into new MCPServer rows on install"
 ```
@@ -556,7 +556,7 @@ git commit -m "feat(mcp): copy catalog tool_citations into new MCPServer rows on
 
 **Files:**
 
-- Modify: `backend/cubebox/mcp/cubepi_admin_refresh.py`
+- Modify: `backend/cubeplex/mcp/cubepi_admin_refresh.py`
 - Modify: `backend/tests/unit/test_cubepi_admin_refresh.py`
 
 - [ ] **Step 1: Add the failing test**
@@ -568,7 +568,7 @@ async def test_refresh_strips_orphan_citation_keys(
     session: AsyncSession,
 ) -> None:
     """After refresh, tool_citations keys whose tools vanished are removed."""
-    from cubebox.mcp.cubepi_admin_refresh import refresh_server_tools
+    from cubeplex.mcp.cubepi_admin_refresh import refresh_server_tools
 
     server = MCPServer(
         org_id="org-x",
@@ -621,7 +621,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement orphan cleanup in `refresh_server_tools`**
 
-In `backend/cubebox/mcp/cubepi_admin_refresh.py`, after the refreshed `tools_cache` is computed and before the repo update:
+In `backend/cubeplex/mcp/cubepi_admin_refresh.py`, after the refreshed `tools_cache` is computed and before the repo update:
 
 ```python
 # Strip orphan citation mapping keys whose tool no longer exists in tools_cache.
@@ -640,7 +640,7 @@ server.tool_citations = existing_citations
 If `refresh_server_tools` reads `discover_tools_metadata` directly, expose a `discover` kwarg with a default of `discover_tools_metadata` so the test can inject a fake. Example signature change at the top of the function:
 
 ```python
-from cubebox.mcp.cubepi_admin_discovery import discover_tools_metadata as _default_discover
+from cubeplex.mcp.cubepi_admin_discovery import discover_tools_metadata as _default_discover
 
 async def refresh_server_tools(
     *,
@@ -668,7 +668,7 @@ Expected: all pass (any pre-existing test that constructs an MCPServer without `
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/mcp/cubepi_admin_refresh.py \
+git add backend/cubeplex/mcp/cubepi_admin_refresh.py \
         backend/tests/unit/test_cubepi_admin_refresh.py
 git commit -m "feat(mcp): strip orphan citation keys on admin tools refresh"
 ```
@@ -679,8 +679,8 @@ git commit -m "feat(mcp): strip orphan citation keys on admin tools refresh"
 
 **Files:**
 
-- Modify: `backend/cubebox/mcp/cubepi_discovery.py:30-40` (dataclass) and `:110` (spec construction)
-- Modify: `backend/cubebox/mcp/cubepi_runtime.py` — rewrite return signature + behavior
+- Modify: `backend/cubeplex/mcp/cubepi_discovery.py:30-40` (dataclass) and `:110` (spec construction)
+- Modify: `backend/cubeplex/mcp/cubepi_runtime.py` — rewrite return signature + behavior
 - Create: `backend/tests/unit/mcp/test_namespace_and_citations.py`
 
 - [ ] **Step 1: Add the failing unit test**
@@ -718,9 +718,9 @@ def _fake_tool(name: str) -> AgentTool[_StubParams]:
 
 @pytest.mark.asyncio
 async def test_loader_namespaces_tool_names_and_returns_citation_configs() -> None:
-    from cubebox.middleware.citations.config import CitationConfig
-    from cubebox.mcp.cubepi_discovery import CubepiMCPServerSpec
-    from cubebox.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
+    from cubeplex.middleware.citations.config import CitationConfig
+    from cubeplex.mcp.cubepi_discovery import CubepiMCPServerSpec
+    from cubeplex.mcp.cubepi_runtime import load_workspace_mcp_tools_for_cubepi
 
     specs = [
         CubepiMCPServerSpec(
@@ -747,10 +747,10 @@ async def test_loader_namespaces_tool_names_and_returns_citation_configs() -> No
     ]
 
     with patch(
-        "cubebox.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
+        "cubeplex.mcp.cubepi_runtime.discover_workspace_mcp_servers_for_cubepi",
         new=AsyncMock(return_value=specs),
     ), patch(
-        "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+        "cubeplex.mcp.cubepi_runtime.load_mcp_tools_http",
         new=AsyncMock(side_effect=[
             [_fake_tool("web_search"), _fake_tool("web_fetch")],
             [_fake_tool("web_search")],  # same bare name, different server
@@ -781,7 +781,7 @@ Expected: FAIL — `CubepiMCPServerSpec.__init__()` doesn't accept `tool_citatio
 
 - [ ] **Step 3: Extend `CubepiMCPServerSpec`**
 
-Edit `backend/cubebox/mcp/cubepi_discovery.py:28` — add the field:
+Edit `backend/cubeplex/mcp/cubepi_discovery.py:28` — add the field:
 
 ```python
 @dataclass
@@ -797,7 +797,7 @@ class CubepiMCPServerSpec:
 
 - [ ] **Step 4: Populate `tool_citations` when building specs**
 
-In `backend/cubebox/mcp/cubepi_discovery.py:110-117`, change the `specs.append(CubepiMCPServerSpec(...))` block to include the new field:
+In `backend/cubeplex/mcp/cubepi_discovery.py:110-117`, change the `specs.append(CubepiMCPServerSpec(...))` block to include the new field:
 
 ```python
         specs.append(
@@ -813,7 +813,7 @@ In `backend/cubebox/mcp/cubepi_discovery.py:110-117`, change the `specs.append(C
 
 - [ ] **Step 5: Rewrite `load_workspace_mcp_tools_for_cubepi`**
 
-Replace `backend/cubebox/mcp/cubepi_runtime.py` body with:
+Replace `backend/cubeplex/mcp/cubepi_runtime.py` body with:
 
 ```python
 """MCP tool loading for the cubepi runtime (M2.4)."""
@@ -828,10 +828,10 @@ from cubepi.mcp import load_mcp_tools_http
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp.cubepi_discovery import discover_workspace_mcp_servers_for_cubepi
-from cubebox.mcp.user_token import MCPUserTokenSigner
-from cubebox.middleware.citations.config import CitationConfig
-from cubebox.services.credential import CredentialService
+from cubeplex.mcp.cubepi_discovery import discover_workspace_mcp_servers_for_cubepi
+from cubeplex.mcp.user_token import MCPUserTokenSigner
+from cubeplex.middleware.citations.config import CitationConfig
+from cubeplex.services.credential import CredentialService
 
 logger = logging.getLogger(__name__)
 
@@ -919,8 +919,8 @@ Expected: all pass. (Any caller that destructures the loader's return as a list 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/mcp/cubepi_discovery.py \
-        backend/cubebox/mcp/cubepi_runtime.py \
+git add backend/cubeplex/mcp/cubepi_discovery.py \
+        backend/cubeplex/mcp/cubepi_runtime.py \
         backend/tests/unit/mcp/test_namespace_and_citations.py
 git commit -m "feat(mcp): namespace tool names and emit citation_configs from per-run loader"
 ```
@@ -931,7 +931,7 @@ git commit -m "feat(mcp): namespace tool names and emit citation_configs from pe
 
 **Files:**
 
-- Modify: `backend/cubebox/streams/run_manager.py:640-720` (two adjacent code blocks)
+- Modify: `backend/cubeplex/streams/run_manager.py:640-720` (two adjacent code blocks)
 - Test: extend `backend/tests/unit/mcp/test_namespace_and_citations.py` with a focused integration test
 
 - [ ] **Step 1: Add the integration-style test**
@@ -944,8 +944,8 @@ async def test_run_manager_threads_citation_configs_to_middleware(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The MCP loader's citation_configs reach CitationMiddleware ctor."""
-    from cubebox.middleware.citation import CitationMiddleware
-    from cubebox.middleware.citations.config import CitationConfig
+    from cubeplex.middleware.citation import CitationMiddleware
+    from cubeplex.middleware.citations.config import CitationConfig
 
     captured: dict[str, Any] = {}
     real_init = CitationMiddleware.__init__
@@ -964,7 +964,7 @@ async def test_run_manager_threads_citation_configs_to_middleware(
         return [], {"webtools__web_search": fake_cfg}
 
     monkeypatch.setattr(
-        "cubebox.mcp.cubepi_runtime.load_workspace_mcp_tools_for_cubepi", fake_loader
+        "cubeplex.mcp.cubepi_runtime.load_workspace_mcp_tools_for_cubepi", fake_loader
     )
 
     # Drive a single run setup. Reuse whatever harness existing run_manager tests
@@ -986,7 +986,7 @@ Expected: FAIL (loader returns a tuple, current `mcp_tools = await load_workspac
 
 - [ ] **Step 3: Update the loader call site at `:640-660`**
 
-Edit `backend/cubebox/streams/run_manager.py:650-660` — replace:
+Edit `backend/cubeplex/streams/run_manager.py:650-660` — replace:
 
 ```python
                 mcp_tools = await load_workspace_mcp_tools_for_cubepi(
@@ -1017,7 +1017,7 @@ with:
 Initialize `mcp_citation_configs` earlier in the function, just before the `try:` that wraps the loader call, so the citation block below can read it on the exception path too:
 
 ```python
-        from cubebox.middleware.citations.config import CitationConfig  # local import OK
+        from cubeplex.middleware.citations.config import CitationConfig  # local import OK
 
         mcp_citation_configs: dict[str, CitationConfig] = {}
         try:
@@ -1028,13 +1028,13 @@ And in the `except Exception as _exc:` of that block, leave `mcp_citation_config
 
 - [ ] **Step 4: Update the citation middleware site at `:712-720`**
 
-Edit `backend/cubebox/streams/run_manager.py:712-722` — replace `citation_configs={}` with `citation_configs=mcp_citation_configs`:
+Edit `backend/cubeplex/streams/run_manager.py:712-722` — replace `citation_configs={}` with `citation_configs=mcp_citation_configs`:
 
 ```python
         # 3. CitationMiddleware — needs citation_configs (empty dict = pass-through)
         try:
-            from cubebox.middleware.citation import CitationMiddleware
-            from cubebox.middleware.citations.counter import citation_event_queue
+            from cubeplex.middleware.citation import CitationMiddleware
+            from cubeplex.middleware.citations.counter import citation_event_queue
 
             cubepi_middleware.append(
                 CitationMiddleware(
@@ -1056,7 +1056,7 @@ Expected: PASS (all tests in this file).
 
 ```bash
 cd backend
-uv run mypy cubebox/streams/run_manager.py cubebox/mcp/cubepi_runtime.py
+uv run mypy cubeplex/streams/run_manager.py cubeplex/mcp/cubepi_runtime.py
 uv run pytest -q tests/unit/mcp/ tests/unit/test_citation.py
 ```
 
@@ -1065,7 +1065,7 @@ Expected: no mypy errors; all unit tests pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py \
+git add backend/cubeplex/streams/run_manager.py \
         backend/tests/unit/mcp/test_namespace_and_citations.py
 git commit -m "feat(streams): wire MCP citation_configs into CitationMiddleware"
 ```
@@ -1076,8 +1076,8 @@ git commit -m "feat(streams): wire MCP citation_configs into CitationMiddleware"
 
 **Files:**
 
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py` (extend with two endpoints)
-- Modify: `backend/cubebox/services/mcp.py` (small wrapper if needed for service-layer access; otherwise inline)
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py` (extend with two endpoints)
+- Modify: `backend/cubeplex/services/mcp.py` (small wrapper if needed for service-layer access; otherwise inline)
 - Create: `backend/tests/unit/test_tool_citations_routes.py`
 
 - [ ] **Step 1: Add the failing test**
@@ -1203,10 +1203,10 @@ Expected: FAIL (404 — routes don't exist yet).
 
 - [ ] **Step 3: Add pydantic schemas in `ws_mcp.py`**
 
-Edit `backend/cubebox/api/routes/v1/ws_mcp.py` — near the existing route models, add:
+Edit `backend/cubeplex/api/routes/v1/ws_mcp.py` — near the existing route models, add:
 
 ```python
-from cubebox.middleware.citations.config import CitationConfig
+from cubeplex.middleware.citations.config import CitationConfig
 
 
 class ToolCitationsResponse(BaseModel):
@@ -1224,7 +1224,7 @@ class ToolCitationsPatch(BaseModel):
 
 - [ ] **Step 4: Add GET endpoint**
 
-Append to `backend/cubebox/api/routes/v1/ws_mcp.py`:
+Append to `backend/cubeplex/api/routes/v1/ws_mcp.py`:
 
 ```python
 @router.get("/servers/{server_id}/tool-citations")
@@ -1320,7 +1320,7 @@ Adjust import at the top of the file if not already present:
 ```python
 from pydantic import BaseModel, ValidationError
 from fastapi import HTTPException
-from cubebox.auth.dependencies import require_admin, require_member
+from cubeplex.auth.dependencies import require_admin, require_member
 ```
 
 - [ ] **Step 6: Re-run the tests**
@@ -1338,7 +1338,7 @@ Expected: all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_mcp.py \
+git add backend/cubeplex/api/routes/v1/ws_mcp.py \
         backend/tests/unit/test_tool_citations_routes.py
 git commit -m "feat(api): GET/PATCH /ws/{ws}/mcp/servers/{id}/tool-citations"
 ```
@@ -1349,7 +1349,7 @@ git commit -m "feat(api): GET/PATCH /ws/{ws}/mcp/servers/{id}/tool-citations"
 
 **Files:**
 
-- Modify: `backend/cubebox/api/routes/v1/mcp_catalog.py` (add one endpoint to `catalog_member_router`)
+- Modify: `backend/cubeplex/api/routes/v1/mcp_catalog.py` (add one endpoint to `catalog_member_router`)
 - Modify: `backend/tests/unit/test_tool_citations_routes.py` (add test)
 
 - [ ] **Step 1: Add the failing test**
@@ -1391,7 +1391,7 @@ Expected: FAIL — 404 (route missing).
 
 - [ ] **Step 3: Add the endpoint**
 
-In `backend/cubebox/api/routes/v1/mcp_catalog.py`, append to `catalog_member_router`:
+In `backend/cubeplex/api/routes/v1/mcp_catalog.py`, append to `catalog_member_router`:
 
 ```python
 class CatalogToolCitationsResponse(BaseModel):
@@ -1426,7 +1426,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/mcp_catalog.py \
+git add backend/cubeplex/api/routes/v1/mcp_catalog.py \
         backend/tests/unit/test_tool_citations_routes.py
 git commit -m "feat(api): GET /ws/{ws}/mcp/catalog/{slug}/tool-citations"
 ```
@@ -1510,7 +1510,7 @@ async def test_admin_refresh_strips_orphan_citations(
 
 Replace each placeholder body with concrete code. Each test must:
 
-1. Use a real DB connection (the worktree's `cubebox_feat_mcp_tool_citations` DB; `pytest-asyncio` + the existing E2E session fixture handles this).
+1. Use a real DB connection (the worktree's `cubeplex_feat_mcp_tool_citations` DB; `pytest-asyncio` + the existing E2E session fixture handles this).
 2. Hit the FastAPI test client end-to-end (no monkey-patches inside `cubepi_runtime`).
 3. Use the fake MCP server fixture for any tool-call behavior, so the agent's MCP call path is exercised.
 
@@ -1587,7 +1587,7 @@ describe('McpClient.tool_citations', () => {
 
 - [ ] **Step 2: Add the failing test run**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- mcp`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- mcp`
 
 Expected: FAIL — types don't exist, methods don't exist.
 
@@ -1664,8 +1664,8 @@ async getCatalogToolCitations(slug: string): Promise<CatalogToolCitationsRespons
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/core test -- mcp
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/core test -- mcp
 ```
 
 Expected: all pass.
@@ -1766,7 +1766,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { MCPCitationFieldRow } from './MCPCitationFieldRow'
-import type { CitationConfigJSON } from '@cubebox/core'
+import type { CitationConfigJSON } from '@cubeplex/core'
 
 interface Props {
   toolName: string
@@ -1916,7 +1916,7 @@ import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Button } from '@/components/ui/button'
 import { MCPCitationEditor } from './MCPCitationEditor'
-import type { CitationConfigJSON, ToolCitationsResponse } from '@cubebox/core'
+import type { CitationConfigJSON, ToolCitationsResponse } from '@cubeplex/core'
 import { useMcpClient } from '@/hooks/useMcpClient'   // or however mcp client hooks are exposed
 
 interface Props {
@@ -2031,7 +2031,7 @@ In the editor's header (right next to "Reset to catalog default"), conditionally
 The tab passes peer state down to the editor. In `MCPCitationMappingTab.tsx`, hold this state:
 
 ```tsx
-import { useMcpStore } from '@cubebox/core'  // or wherever the workspace MCP store hook lives
+import { useMcpStore } from '@cubeplex/core'  // or wherever the workspace MCP store hook lives
 ...
 const allServers = useMcpStore((s) => s.serversForWorkspace(workspaceId))
 const peerMappings = useMemo(() => {
@@ -2093,7 +2093,7 @@ Inside the header `<div className="flex gap-2">`:
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/web type-check
+pnpm --filter @cubeplex/web type-check
 ```
 
 Expected: no type errors.
@@ -2211,9 +2211,9 @@ Render `{display}` in the chip body; if `serverHint`, show it on the tooltip lin
 - [ ] **Step 5: Type-check + smoke test the dev server**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web type-check
+cd frontend && pnpm --filter @cubeplex/web type-check
 # In another shell, with the worktree's API up on its allocated port:
-pnpm --filter @cubebox/web dev
+pnpm --filter @cubeplex/web dev
 ```
 
 Open `http://localhost:$PORT/w/<wsId>/settings/mcp/<serverId>` (the port from `.worktree.env`). Confirm:
@@ -2286,8 +2286,8 @@ test('citation mapping editor: install → load defaults → edit → save → p
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/web exec playwright install --with-deps chromium  # first time only
-pnpm --filter @cubebox/web test:e2e -- citation-mapping
+pnpm --filter @cubeplex/web exec playwright install --with-deps chromium  # first time only
+pnpm --filter @cubeplex/web test:e2e -- citation-mapping
 ```
 
 Expected: pass.
@@ -2319,10 +2319,10 @@ Expected: clean.
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web type-check
-pnpm --filter @cubebox/web lint
-pnpm --filter @cubebox/web test:e2e
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web type-check
+pnpm --filter @cubeplex/web lint
+pnpm --filter @cubeplex/web test:e2e
 ```
 
 Expected: all green.
@@ -2331,7 +2331,7 @@ Expected: all green.
 
 ```bash
 cd backend
-uv run python -m cubebox.cli seed-mcp-catalog
+uv run python -m cubeplex.cli seed-mcp-catalog
 ```
 
 Expected: `webtools` connector upsert succeeds with non-empty `tool_citations`.
@@ -2353,7 +2353,7 @@ Refs design: `docs/superpowers/specs/2026-05-14-mcp-tool-citations-design.md`
 
 ## Test plan
 - [ ] `cd backend && make check` clean
-- [ ] `cd frontend && pnpm --filter @cubebox/web test:e2e` green
+- [ ] `cd frontend && pnpm --filter @cubeplex/web test:e2e` green
 - [ ] Manual smoke: install webtools from catalog, run a web_search prompt, see citation in panel
 EOF
 )"

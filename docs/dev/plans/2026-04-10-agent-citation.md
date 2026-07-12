@@ -18,12 +18,12 @@
 
 | File | Responsibility |
 |------|----------------|
-| `cubebox/middleware/citations/__init__.py` | Export `CitationMiddleware`, `CitationCounter`, `citation_counter_var`, `citation_event_queue` |
-| `cubebox/middleware/citations/config.py` | `CitationConfig` Pydantic model parsed from config.yaml per-tool citation blocks |
-| `cubebox/middleware/citations/counter.py` | `CitationCounter` (async lock + incrementing int) and two ContextVars |
-| `cubebox/middleware/citations/chunker.py` | `chunk_text()` pure function: paragraph → sentence → fixed-char splitting |
-| `cubebox/middleware/citations/middleware.py` | `CitationMiddleware` class with `awrap_tool_call` and `awrap_model_call` |
-| `cubebox/prompts/citations.py` | `CITATION_PROMPT` constant |
+| `cubeplex/middleware/citations/__init__.py` | Export `CitationMiddleware`, `CitationCounter`, `citation_counter_var`, `citation_event_queue` |
+| `cubeplex/middleware/citations/config.py` | `CitationConfig` Pydantic model parsed from config.yaml per-tool citation blocks |
+| `cubeplex/middleware/citations/counter.py` | `CitationCounter` (async lock + incrementing int) and two ContextVars |
+| `cubeplex/middleware/citations/chunker.py` | `chunk_text()` pure function: paragraph → sentence → fixed-char splitting |
+| `cubeplex/middleware/citations/middleware.py` | `CitationMiddleware` class with `awrap_tool_call` and `awrap_model_call` |
+| `cubeplex/prompts/citations.py` | `CITATION_PROMPT` constant |
 | `tests/unit/test_chunker.py` | Unit tests for `chunk_text()` |
 | `tests/unit/test_citation_config.py` | Unit tests for `CitationConfig` parsing and metadata extraction |
 | `tests/unit/test_citation_counter.py` | Unit tests for `CitationCounter` |
@@ -33,10 +33,10 @@
 
 | File | Change |
 |------|--------|
-| `cubebox/agents/schemas.py` | Add `CitationEvent` class |
-| `cubebox/agents/stream.py:152-170` | Use `original_content` from `additional_kwargs` for `tool_result` SSE |
-| `cubebox/agents/graph.py:23-88` | Add `CitationMiddleware` to middleware stack, accept `citation_configs` param |
-| `cubebox/api/routes/v1/conversations.py:238-452` | Init counter ContextVar, handle `"citation"` queue items, add stream buffering |
+| `cubeplex/agents/schemas.py` | Add `CitationEvent` class |
+| `cubeplex/agents/stream.py:152-170` | Use `original_content` from `additional_kwargs` for `tool_result` SSE |
+| `cubeplex/agents/graph.py:23-88` | Add `CitationMiddleware` to middleware stack, accept `citation_configs` param |
+| `cubeplex/api/routes/v1/conversations.py:238-452` | Init counter ContextVar, handle `"citation"` queue items, add stream buffering |
 | `config.yaml:124-127` | Add example citation config under `mcp.servers` |
 
 ---
@@ -44,8 +44,8 @@
 ### Task 1: Text Chunker
 
 **Files:**
-- Create: `cubebox/middleware/citations/__init__.py`
-- Create: `cubebox/middleware/citations/chunker.py`
+- Create: `cubeplex/middleware/citations/__init__.py`
+- Create: `cubeplex/middleware/citations/chunker.py`
 - Test: `tests/unit/test_chunker.py`
 
 - [ ] **Step 1: Write failing tests for chunk_text()**
@@ -54,7 +54,7 @@
 # tests/unit/test_chunker.py
 import pytest
 
-from cubebox.middleware.citations.chunker import chunk_text
+from cubeplex.middleware.citations.chunker import chunk_text
 
 
 class TestChunkText:
@@ -150,17 +150,17 @@ class TestChunkText:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/unit/test_chunker.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.middleware.citations'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.middleware.citations'`
 
 - [ ] **Step 3: Create package init and implement chunk_text()**
 
 ```python
-# cubebox/middleware/citations/__init__.py
+# cubeplex/middleware/citations/__init__.py
 """Citation middleware for inline reference tracking."""
 ```
 
 ```python
-# cubebox/middleware/citations/chunker.py
+# cubeplex/middleware/citations/chunker.py
 """Text chunking for citation references.
 
 Splits text into 200-300 character chunks using a three-level fallback:
@@ -271,7 +271,7 @@ Expected: All PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/middleware/citations/__init__.py cubebox/middleware/citations/chunker.py tests/unit/test_chunker.py
+git add cubeplex/middleware/citations/__init__.py cubeplex/middleware/citations/chunker.py tests/unit/test_chunker.py
 git commit -m "feat(citations): add text chunker with paragraph/sentence/fixed splitting"
 ```
 
@@ -280,7 +280,7 @@ git commit -m "feat(citations): add text chunker with paragraph/sentence/fixed s
 ### Task 2: CitationConfig Model
 
 **Files:**
-- Create: `cubebox/middleware/citations/config.py`
+- Create: `cubeplex/middleware/citations/config.py`
 - Test: `tests/unit/test_citation_config.py`
 
 - [ ] **Step 1: Write failing tests for CitationConfig**
@@ -289,7 +289,7 @@ git commit -m "feat(citations): add text chunker with paragraph/sentence/fixed s
 # tests/unit/test_citation_config.py
 import pytest
 
-from cubebox.middleware.citations.config import CitationConfig, load_citation_configs
+from cubeplex.middleware.citations.config import CitationConfig, load_citation_configs
 
 
 class TestCitationConfig:
@@ -413,7 +413,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement CitationConfig**
 
 ```python
-# cubebox/middleware/citations/config.py
+# cubeplex/middleware/citations/config.py
 """Citation configuration model.
 
 Parses per-tool citation config from config.yaml and provides
@@ -521,7 +521,7 @@ Expected: All PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/middleware/citations/config.py tests/unit/test_citation_config.py
+git add cubeplex/middleware/citations/config.py tests/unit/test_citation_config.py
 git commit -m "feat(citations): add CitationConfig model with metadata extraction"
 ```
 
@@ -530,7 +530,7 @@ git commit -m "feat(citations): add CitationConfig model with metadata extractio
 ### Task 3: CitationCounter and ContextVars
 
 **Files:**
-- Create: `cubebox/middleware/citations/counter.py`
+- Create: `cubeplex/middleware/citations/counter.py`
 - Test: `tests/unit/test_citation_counter.py`
 
 - [ ] **Step 1: Write failing tests for CitationCounter**
@@ -541,7 +541,7 @@ import asyncio
 
 import pytest
 
-from cubebox.middleware.citations.counter import (
+from cubeplex.middleware.citations.counter import (
     CitationCounter,
     citation_counter_var,
     citation_event_queue,
@@ -610,7 +610,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement CitationCounter**
 
 ```python
-# cubebox/middleware/citations/counter.py
+# cubeplex/middleware/citations/counter.py
 """Session-level citation ID counter with ContextVar sharing.
 
 The counter is created per-request in the SSE event generator and shared
@@ -662,7 +662,7 @@ Expected: All PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/middleware/citations/counter.py tests/unit/test_citation_counter.py
+git add cubeplex/middleware/citations/counter.py tests/unit/test_citation_counter.py
 git commit -m "feat(citations): add CitationCounter with ContextVar sharing"
 ```
 
@@ -671,7 +671,7 @@ git commit -m "feat(citations): add CitationCounter with ContextVar sharing"
 ### Task 4: CitationEvent Schema
 
 **Files:**
-- Modify: `cubebox/agents/schemas.py:105-116`
+- Modify: `cubeplex/agents/schemas.py:105-116`
 
 - [ ] **Step 1: Add CitationEvent to schemas.py**
 
@@ -697,13 +697,13 @@ class CitationEvent(AgentEvent):
 
 - [ ] **Step 2: Run type check**
 
-Run: `uv run mypy cubebox/agents/schemas.py`
+Run: `uv run mypy cubeplex/agents/schemas.py`
 Expected: Success
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/agents/schemas.py
+git add cubeplex/agents/schemas.py
 git commit -m "feat(citations): add CitationEvent SSE schema"
 ```
 
@@ -712,12 +712,12 @@ git commit -m "feat(citations): add CitationEvent SSE schema"
 ### Task 5: Citation Prompt
 
 **Files:**
-- Create: `cubebox/prompts/citations.py`
+- Create: `cubeplex/prompts/citations.py`
 
 - [ ] **Step 1: Create the citation prompt module**
 
 ```python
-# cubebox/prompts/citations.py
+# cubeplex/prompts/citations.py
 """System prompt for citation behavior."""
 
 CITATION_PROMPT = """## Citation Rules
@@ -739,13 +739,13 @@ When your response uses information from tool results that contain citation mark
 
 - [ ] **Step 2: Run lint and type check**
 
-Run: `uv run ruff check cubebox/prompts/citations.py && uv run mypy cubebox/prompts/citations.py`
+Run: `uv run ruff check cubeplex/prompts/citations.py && uv run mypy cubeplex/prompts/citations.py`
 Expected: Success
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/prompts/citations.py
+git add cubeplex/prompts/citations.py
 git commit -m "feat(citations): add citation system prompt"
 ```
 
@@ -754,8 +754,8 @@ git commit -m "feat(citations): add citation system prompt"
 ### Task 6: CitationMiddleware
 
 **Files:**
-- Create: `cubebox/middleware/citations/middleware.py`
-- Modify: `cubebox/middleware/citations/__init__.py`
+- Create: `cubeplex/middleware/citations/middleware.py`
+- Modify: `cubeplex/middleware/citations/__init__.py`
 - Test: `tests/unit/test_citation_middleware.py`
 
 - [ ] **Step 1: Write failing tests for CitationMiddleware**
@@ -772,13 +772,13 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolC
 from langchain.tools import ToolRuntime
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
-from cubebox.middleware.citations.config import CitationConfig
-from cubebox.middleware.citations.counter import (
+from cubeplex.middleware.citations.config import CitationConfig
+from cubeplex.middleware.citations.counter import (
     CitationCounter,
     citation_counter_var,
     citation_event_queue,
 )
-from cubebox.middleware.citations.middleware import CitationMiddleware
+from cubeplex.middleware.citations.middleware import CitationMiddleware
 
 
 def _make_tool_call_request(
@@ -998,7 +998,7 @@ Expected: FAIL — `ModuleNotFoundError`
 - [ ] **Step 3: Implement CitationMiddleware**
 
 ```python
-# cubebox/middleware/citations/middleware.py
+# cubeplex/middleware/citations/middleware.py
 """CitationMiddleware — chunks tool results and assigns citation IDs."""
 
 import json
@@ -1016,11 +1016,11 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from loguru import logger
 
-from cubebox.middleware._utils import append_to_system_message
-from cubebox.middleware.citations.chunker import chunk_text
-from cubebox.middleware.citations.config import CitationConfig
-from cubebox.middleware.citations.counter import citation_counter_var, citation_event_queue
-from cubebox.prompts.citations import CITATION_PROMPT
+from cubeplex.middleware._utils import append_to_system_message
+from cubeplex.middleware.citations.chunker import chunk_text
+from cubeplex.middleware.citations.config import CitationConfig
+from cubeplex.middleware.citations.counter import citation_counter_var, citation_event_queue
+from cubeplex.prompts.citations import CITATION_PROMPT
 
 
 class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
@@ -1124,16 +1124,16 @@ class CitationMiddleware(AgentMiddleware[Any, Any, Any]):
 - [ ] **Step 4: Update __init__.py exports**
 
 ```python
-# cubebox/middleware/citations/__init__.py
+# cubeplex/middleware/citations/__init__.py
 """Citation middleware for inline reference tracking."""
 
-from cubebox.middleware.citations.config import CitationConfig, load_citation_configs
-from cubebox.middleware.citations.counter import (
+from cubeplex.middleware.citations.config import CitationConfig, load_citation_configs
+from cubeplex.middleware.citations.counter import (
     CitationCounter,
     citation_counter_var,
     citation_event_queue,
 )
-from cubebox.middleware.citations.middleware import CitationMiddleware
+from cubeplex.middleware.citations.middleware import CitationMiddleware
 
 __all__ = [
     "CitationConfig",
@@ -1152,13 +1152,13 @@ Expected: All PASS
 
 - [ ] **Step 6: Run full type check**
 
-Run: `uv run mypy cubebox/middleware/citations/`
+Run: `uv run mypy cubeplex/middleware/citations/`
 Expected: Success
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/middleware/citations/ tests/unit/test_citation_middleware.py
+git add cubeplex/middleware/citations/ tests/unit/test_citation_middleware.py
 git commit -m "feat(citations): add CitationMiddleware with tool interception and prompt injection"
 ```
 
@@ -1167,11 +1167,11 @@ git commit -m "feat(citations): add CitationMiddleware with tool interception an
 ### Task 7: Preserve Original Content in stream.py
 
 **Files:**
-- Modify: `cubebox/agents/stream.py:152-170`
+- Modify: `cubeplex/agents/stream.py:152-170`
 
 - [ ] **Step 1: Modify _extract_tool_events to use original_content**
 
-In `cubebox/agents/stream.py`, in the `_extract_tool_events` function, after extracting `content` and `additional_kwargs` from the message (around line 130), the tool_result event should prefer `original_content` from `additional_kwargs`.
+In `cubeplex/agents/stream.py`, in the `_extract_tool_events` function, after extracting `content` and `additional_kwargs` from the message (around line 130), the tool_result event should prefer `original_content` from `additional_kwargs`.
 
 Find the block that builds the `tool_result` data dict (lines 166-171):
 
@@ -1204,13 +1204,13 @@ Expected: All existing tests still PASS
 
 - [ ] **Step 3: Run type check**
 
-Run: `uv run mypy cubebox/agents/stream.py`
+Run: `uv run mypy cubeplex/agents/stream.py`
 Expected: Success
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/agents/stream.py
+git add cubeplex/agents/stream.py
 git commit -m "feat(citations): use original_content for tool_result SSE display"
 ```
 
@@ -1219,25 +1219,25 @@ git commit -m "feat(citations): use original_content for tool_result SSE display
 ### Task 8: Wire CitationMiddleware into Agent Graph
 
 **Files:**
-- Modify: `cubebox/agents/graph.py`
+- Modify: `cubeplex/agents/graph.py`
 
 - [ ] **Step 1: Add citation_configs parameter and middleware registration**
 
-In `cubebox/agents/graph.py`, add the import and parameter:
+In `cubeplex/agents/graph.py`, add the import and parameter:
 
 Add import at top (after line 12):
 
 ```python
-from cubebox.middleware.citations import CitationMiddleware, load_citation_configs
+from cubeplex.middleware.citations import CitationMiddleware, load_citation_configs
 ```
 
 Add import for `CitationConfig` at top:
 
 ```python
-from cubebox.middleware.citations import CitationConfig, CitationMiddleware
+from cubeplex.middleware.citations import CitationConfig, CitationMiddleware
 ```
 
-Add `citation_configs` parameter to `create_cubebox_agent` signature (after `checkpointer` param, line 31):
+Add `citation_configs` parameter to `create_cubeplex_agent` signature (after `checkpointer` param, line 31):
 
 ```python
     citation_configs: dict[str, CitationConfig] | None = None,
@@ -1259,13 +1259,13 @@ Expected: All existing tests still PASS
 
 - [ ] **Step 3: Run type check**
 
-Run: `uv run mypy cubebox/agents/graph.py`
+Run: `uv run mypy cubeplex/agents/graph.py`
 Expected: Success
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/agents/graph.py
+git add cubeplex/agents/graph.py
 git commit -m "feat(citations): wire CitationMiddleware into agent graph factory"
 ```
 
@@ -1274,7 +1274,7 @@ git commit -m "feat(citations): wire CitationMiddleware into agent graph factory
 ### Task 9: SSE Event Generator — Counter Init, Citation Events, Stream Buffering
 
 **Files:**
-- Modify: `cubebox/api/routes/v1/conversations.py`
+- Modify: `cubeplex/api/routes/v1/conversations.py`
 
 This is the largest integration task. Three changes in the `event_generator`:
 
@@ -1289,7 +1289,7 @@ In `conversations.py`, inside `event_generator()`, after the line that sets `sub
 Add citation counter and queue setup:
 
 ```python
-        from cubebox.middleware.citations.counter import (
+        from cubeplex.middleware.citations.counter import (
             CitationCounter,
             citation_counter_var,
             citation_event_queue,
@@ -1336,7 +1336,7 @@ In the event loop (around line 404), after the `elif kind == "subagent":` block,
 
 ```python
                 elif kind == "citation":
-                    from cubebox.agents.schemas import CitationEvent
+                    from cubeplex.agents.schemas import CitationEvent
 
                     citation_data = item[2]
                     agent_id = item[1]  # None for main agent
@@ -1393,7 +1393,7 @@ Replace with:
                             else:
                                 # Flush buffer before non-text events
                                 if _citation_buffer:
-                                    from cubebox.agents.schemas import TextDeltaEvent
+                                    from cubeplex.agents.schemas import TextDeltaEvent
                                     flush_event = TextDeltaEvent(
                                         timestamp=datetime.now(UTC).isoformat(),
                                         data={"content": _citation_buffer, "usage": {"input_tokens": 0, "output_tokens": 0}},
@@ -1409,7 +1409,7 @@ After the `while True` loop ends (before the `except` block), flush any remainin
 ```python
             # Flush remaining citation buffer
             if _citation_buffer:
-                from cubebox.agents.schemas import TextDeltaEvent
+                from cubeplex.agents.schemas import TextDeltaEvent
 
                 flush_event = TextDeltaEvent(
                     timestamp=datetime.now(UTC).isoformat(),
@@ -1433,21 +1433,21 @@ In the `finally` block (after `subagent_event_queue.reset`), add cleanup:
                 citation_event_queue.set(None)
 ```
 
-- [ ] **Step 5: Load citation configs and pass to create_cubebox_agent**
+- [ ] **Step 5: Load citation configs and pass to create_cubeplex_agent**
 
-In the `event_generator`, where `create_cubebox_agent` is called (around line 318), load citation configs from MCP server config and pass them:
+In the `event_generator`, where `create_cubeplex_agent` is called (around line 318), load citation configs from MCP server config and pass them:
 
-Before the `create_cubebox_agent` call, add:
+Before the `create_cubeplex_agent` call, add:
 
 ```python
             # Load citation configs from MCP tool definitions
-            from cubebox.middleware.citations import load_citation_configs
+            from cubeplex.middleware.citations import load_citation_configs
 
-            from cubebox.middleware.citations import CitationConfig
+            from cubeplex.middleware.citations import CitationConfig
 
             all_citation_configs: dict[str, CitationConfig] = {}
             try:
-                from cubebox.config import config as app_config
+                from cubeplex.config import config as app_config
 
                 mcp_servers = app_config.get("mcp.servers", {})
                 for _server_name, server_cfg in (mcp_servers or {}).items():
@@ -1458,10 +1458,10 @@ Before the `create_cubebox_agent` call, add:
                 logger.debug("Failed to load citation configs: {}", e)
 ```
 
-Then pass to `create_cubebox_agent`:
+Then pass to `create_cubeplex_agent`:
 
 ```python
-            agent = create_cubebox_agent(
+            agent = create_cubeplex_agent(
                 llm=llm,
                 tools=tools,
                 sandbox=sandbox,
@@ -1474,13 +1474,13 @@ Then pass to `create_cubebox_agent`:
 
 - [ ] **Step 6: Run lint and type check**
 
-Run: `uv run ruff check cubebox/api/routes/v1/conversations.py && uv run mypy cubebox/api/routes/v1/conversations.py`
+Run: `uv run ruff check cubeplex/api/routes/v1/conversations.py && uv run mypy cubeplex/api/routes/v1/conversations.py`
 Expected: Success (may need minor fixes)
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/conversations.py
+git add cubeplex/api/routes/v1/conversations.py
 git commit -m "feat(citations): integrate counter init, citation events, and stream buffering into SSE generator"
 ```
 

@@ -10,9 +10,9 @@ import type {
   SubagentSummary,
   TodoItem,
   TurnUsage,
-} from '@cubebox/core'
-import type { AgentStream } from '@cubebox/core'
-import { useArtifactStore } from '@cubebox/core'
+} from '@cubeplex/core'
+import type { AgentStream } from '@cubeplex/core'
+import { useArtifactStore } from '@cubeplex/core'
 import { Bot, ChevronDown, ChevronRight, Brain, AlertCircle } from 'lucide-react'
 import { ArtifactCard } from './ArtifactCard'
 import { ImageGenerationCard } from './ImageGenerationCard'

@@ -257,8 +257,8 @@ async def test_test_connection_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pre-save /providers/test returns a composed ProbeResult (no DB write)."""
-    from cubebox.services import provider_probe
-    from cubebox.services.provider_probe import ProbeResult, ProbeStep
+    from cubeplex.services import provider_probe
+    from cubeplex.services.provider_probe import ProbeResult, ProbeStep
 
     async def _fake_liveness(**_: object) -> ProbeStep:
         return ProbeStep(name="liveness", status="pass", latency_ms=12, detail="ok")

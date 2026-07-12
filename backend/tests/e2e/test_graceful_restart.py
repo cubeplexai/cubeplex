@@ -12,17 +12,17 @@ import pytest
 import pytest_asyncio
 from redis.asyncio import Redis
 
-from cubebox.api.middleware.drain import DrainMiddleware
-from cubebox.config import config as _cubebox_config
-from cubebox.lifecycle.drain import DrainState
-from cubebox.streams.run_events import (
+from cubeplex.api.middleware.drain import DrainMiddleware
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.lifecycle.drain import DrainState
+from cubeplex.streams.run_events import (
     append_run_event,
     create_run,
     get_run_meta,
     is_stale_meta,
     mark_run_stale,
 )
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 from tests.e2e.conftest import DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
@@ -31,7 +31,7 @@ pytestmark = pytest.mark.e2e
 @pytest_asyncio.fixture
 async def redis_client() -> Redis:
     client = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=True,
     )
     yield client
@@ -289,7 +289,7 @@ async def test_health_ready_503_when_draining(
 def test_is_stale_meta_detects_stale_running() -> None:
     from datetime import UTC, datetime, timedelta
 
-    from cubebox.streams.run_events import RunMeta
+    from cubeplex.streams.run_events import RunMeta
 
     now = datetime.now(UTC)
     fresh = RunMeta(
@@ -334,7 +334,7 @@ def test_is_stale_meta_detects_stale_running() -> None:
 async def test_mark_run_stale_clears_active_and_sets_status(redis_client: Redis) -> None:
     from datetime import UTC, datetime
 
-    from cubebox.streams.run_events import (
+    from cubeplex.streams.run_events import (
         create_run,
         get_active_run,
         get_run_meta,
@@ -366,7 +366,7 @@ async def test_mark_run_stale_clears_active_and_sets_status(redis_client: Redis)
 async def test_mark_run_stale_is_idempotent(redis_client: Redis) -> None:
     from datetime import UTC, datetime
 
-    from cubebox.streams.run_events import create_run, get_run_meta
+    from cubeplex.streams.run_events import create_run, get_run_meta
 
     prefix = "test_stale_idem"
     run_id = "r-stale-2"
@@ -394,7 +394,7 @@ async def test_update_run_meta_status_cas_preserves_stale(redis_client: Redis) -
     """If a worker tries to flip status from stale → completed, the CAS must reject it."""
     from datetime import UTC, datetime
 
-    from cubebox.streams.run_events import create_run, update_run_meta
+    from cubeplex.streams.run_events import create_run, update_run_meta
 
     prefix = "test_cas_stale"
     run_id = "r-cas-1"
@@ -430,7 +430,7 @@ async def test_create_run_succeeds_after_stale_recovery(redis_client: Redis) -> 
     import uuid
     from datetime import UTC, datetime, timedelta
 
-    from cubebox.streams.run_events import (
+    from cubeplex.streams.run_events import (
         create_run,
         get_active_run,
         get_run_meta,
@@ -507,7 +507,7 @@ async def test_update_run_meta_status_cas_allows_running_transition(
     """Normal running → completed transition must still happen."""
     from datetime import UTC, datetime
 
-    from cubebox.streams.run_events import create_run, update_run_meta
+    from cubeplex.streams.run_events import create_run, update_run_meta
 
     prefix = "test_cas_running"
     run_id = "r-cas-2"
@@ -533,7 +533,7 @@ async def test_bootstrap_clears_stale_run_and_sets_last_run_status(
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
-    from cubebox.streams.run_events import _active_run_key, create_run
+    from cubeplex.streams.run_events import _active_run_key, create_run
 
     create_resp = await memory_client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "stale-test"}
@@ -580,7 +580,7 @@ async def test_stream_subscribe_emits_stale_error_for_dead_run(
 ) -> None:
     from datetime import UTC, datetime, timedelta
 
-    from cubebox.streams.run_events import create_run
+    from cubeplex.streams.run_events import create_run
 
     create_resp = await memory_client.post(
         f"/api/v1/ws/{DEFAULT_WS_ID}/conversations", params={"title": "stale-stream"}

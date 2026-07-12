@@ -4,13 +4,13 @@
 
 **Goal:** Show a sent-but-not-yet-injected steer message as a dimmed "pending" chip above the input box, then commit it inline into the transcript at the real injection point (so reload doesn't move it), with best-effort cancel.
 
-**Architecture:** A client-minted `steer_id` is the join key across the whole flow (carried in `UserMessage.metadata`). cubepi gains queue-removal for cancel. cubebox forwards a new `injected_message` SSE event when cubepi actually injects the steer, threaded through *both* backend translation layers. The frontend store holds pending steers outside the transcript, commits the current streaming bubble + the steer message on the SSE signal, and exposes cancel.
+**Architecture:** A client-minted `steer_id` is the join key across the whole flow (carried in `UserMessage.metadata`). cubepi gains queue-removal for cancel. cubeplex forwards a new `injected_message` SSE event when cubepi actually injects the steer, threaded through *both* backend translation layers. The frontend store holds pending steers outside the transcript, commits the current streaming bubble + the steer message on the SSE signal, and exposes cancel.
 
 **Tech Stack:** Python (FastAPI, pydantic, pytest, redis pub/sub), cubepi agent runtime, TypeScript (Zustand, vitest), Next.js/React, Playwright.
 
 **Spec:** `docs/dev/specs/2026-05-25-steer-message-display-design.md`
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/steer-message-display` (ports 8059/3059 — see `.worktree.env`). cubepi lives at `/home/chris/cubepi` (separate repo; commit there separately).
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/steer-message-display` (ports 8059/3059 — see `.worktree.env`). cubepi lives at `/home/chris/cubepi` (separate repo; commit there separately).
 
 ---
 
@@ -20,10 +20,10 @@
 |---|---|---|
 | cubepi | `cubepi/agent/agent.py` | `_MessageQueue.remove(steer_id)`, `Agent.cancel_steer(steer_id)` |
 | cubepi test | `tests/agent/test_agent.py` | queue removal + cancel_steer unit tests |
-| backend | `cubebox/agents/schemas.py` | `InjectedMessageEvent` typed event |
-| backend | `cubebox/agents/stream.py` | translate injected `UserMessage` MessageEnd → wire dict |
-| backend | `cubebox/streams/run_manager.py` | `cubepi_dict_to_agent_event` branch, `_on_event` seed-skip, `steer_id` threading, `dispatch_cancel_steer`, control type |
-| backend | `cubebox/api/routes/v1/conversations.py` | `steer_id` on steer request, `POST /steer/cancel` route |
+| backend | `cubeplex/agents/schemas.py` | `InjectedMessageEvent` typed event |
+| backend | `cubeplex/agents/stream.py` | translate injected `UserMessage` MessageEnd → wire dict |
+| backend | `cubeplex/streams/run_manager.py` | `cubepi_dict_to_agent_event` branch, `_on_event` seed-skip, `steer_id` threading, `dispatch_cancel_steer`, control type |
+| backend | `cubeplex/api/routes/v1/conversations.py` | `steer_id` on steer request, `POST /steer/cancel` route |
 | core | `src/types/events.ts` | `InjectedMessageEvent` + union member |
 | core | `src/api/stream.ts` | `steerRun(..., steerId)`, `cancelSteer(...)` |
 | core | `src/stores/messageStore.ts` | `pendingSteers`, `steer`/`cancelSteer`, `buildTurnMessages`, `commitTurnAndInject`, cleanup |
@@ -35,7 +35,7 @@
 
 ## Phase 1 — cubepi (upstream): cancel support
 
-> Commit these in the cubepi repo (`/home/chris/cubepi`), not cubebox.
+> Commit these in the cubepi repo (`/home/chris/cubepi`), not cubeplex.
 
 ### Task 1: Queue removal + `Agent.cancel_steer`
 
@@ -156,18 +156,18 @@ git commit -m "feat(agent): cancel a not-yet-drained steering message by steer_i
 
 ---
 
-## Phase 2 — cubebox backend
+## Phase 2 — cubeplex backend
 
 ### Task 2: `InjectedMessageEvent` schema + stream.py converter
 
 **Files:**
-- Modify: `backend/cubebox/agents/schemas.py` (after `UsageEvent` ~line 158)
-- Modify: `backend/cubebox/agents/stream.py` (`convert_agent_event_to_sse` ~line 136)
+- Modify: `backend/cubeplex/agents/schemas.py` (after `UsageEvent` ~line 158)
+- Modify: `backend/cubeplex/agents/stream.py` (`convert_agent_event_to_sse` ~line 136)
 - Test: add cases to the existing `backend/tests/unit/test_stream.py`
 
 - [ ] **Step 1: Add the schema**
 
-In `cubebox/agents/schemas.py`, after `UsageEvent`:
+In `cubeplex/agents/schemas.py`, after `UsageEvent`:
 
 ```python
 class InjectedMessageEvent(AgentEvent):
@@ -186,7 +186,7 @@ class InjectedMessageEvent(AgentEvent):
 # backend/tests/unit/test_stream.py — add these cases
 from cubepi.agent.types import MessageEndEvent
 from cubepi.providers.base import TextContent, UserMessage
-from cubebox.agents.stream import convert_agent_event_to_sse
+from cubeplex.agents.stream import convert_agent_event_to_sse
 
 
 def test_injected_user_message_becomes_injected_message_dict():
@@ -204,7 +204,7 @@ def test_injected_user_message_without_steer_id_is_dropped():
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/steer-message-display/backend && uv run pytest tests/unit/test_stream.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/steer-message-display/backend && uv run pytest tests/unit/test_stream.py -v`
 Expected: FAIL (returns `[]`, not the injected_message dict)
 
 - [ ] **Step 4: Implement the converter branch**
@@ -231,22 +231,22 @@ Expected: PASS (2 tests)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/schemas.py backend/cubebox/agents/stream.py backend/tests/unit/test_stream.py
+git add backend/cubeplex/agents/schemas.py backend/cubeplex/agents/stream.py backend/tests/unit/test_stream.py
 git commit -m "feat(agents): translate injected steer UserMessage into injected_message SSE dict"
 ```
 
 ### Task 3: `cubepi_dict_to_agent_event` branch + `_on_event` seed-skip
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (`cubepi_dict_to_agent_event` ~line 243; `_on_event` ~line 1340)
+- Modify: `backend/cubeplex/streams/run_manager.py` (`cubepi_dict_to_agent_event` ~line 243; `_on_event` ~line 1340)
 - Test: `backend/tests/unit/test_run_manager_translate.py` (create if absent)
 
 - [ ] **Step 1: Write the failing translator test**
 
 ```python
 # backend/tests/unit/test_run_manager_translate.py
-from cubebox.streams.run_manager import cubepi_dict_to_agent_event
-from cubebox.agents.schemas import InjectedMessageEvent
+from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
+from cubeplex.agents.schemas import InjectedMessageEvent
 
 
 def test_injected_message_dict_becomes_typed_event():
@@ -304,21 +304,21 @@ In `_run_cubepi_path`, just before the `_on_event` definition (~line 1340), add 
 
 - [ ] **Step 6: Verify backend still imports/lints**
 
-Run: `cd .../backend && uv run mypy cubebox/streams/run_manager.py && uv run ruff check cubebox/streams/run_manager.py`
+Run: `cd .../backend && uv run mypy cubeplex/streams/run_manager.py && uv run ruff check cubeplex/streams/run_manager.py`
 Expected: no errors
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_manager_translate.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_manager_translate.py
 git commit -m "feat(streams): forward injected_message through translator; skip seed user message"
 ```
 
 ### Task 4: `steer_id` threading + cancel endpoint + control plane
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` (`SteerMessageRequest` ~line 270; steer route ~line 829; add cancel route)
-- Modify: `backend/cubebox/streams/run_manager.py` (`dispatch_steer`, `_publish_control`, `_handle_control`, add `dispatch_cancel_steer`)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` (`SteerMessageRequest` ~line 270; steer route ~line 829; add cancel route)
+- Modify: `backend/cubeplex/streams/run_manager.py` (`dispatch_steer`, `_publish_control`, `_handle_control`, add `dispatch_cancel_steer`)
 - Test: extend the existing `backend/tests/unit/test_run_manager_steer.py`
 
 - [ ] **Step 1: Write the failing dispatch tests**
@@ -534,13 +534,13 @@ async def cancel_steer(
 
 - [ ] **Step 6: Verify lint/type**
 
-Run: `cd .../backend && uv run mypy cubebox/ && uv run ruff check cubebox/`
+Run: `cd .../backend && uv run mypy cubeplex/ && uv run ruff check cubeplex/`
 Expected: no errors
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/cubebox/api/routes/v1/conversations.py backend/tests/unit/test_run_manager_steer.py
+git add backend/cubeplex/streams/run_manager.py backend/cubeplex/api/routes/v1/conversations.py backend/tests/unit/test_run_manager_steer.py
 git commit -m "feat(api): thread steer_id through steer; add best-effort cancel-steer endpoint"
 ```
 
@@ -1005,7 +1005,7 @@ Expected: PASS
 - [ ] **Step 8: Run the full core suite + build**
 
 Run: `cd frontend/packages/core && pnpm exec vitest run && pnpm build`
-Expected: PASS + clean build (so `@cubebox/web` sees the new types).
+Expected: PASS + clean build (so `@cubeplex/web` sees the new types).
 
 - [ ] **Step 9: Commit**
 
@@ -1039,7 +1039,7 @@ const mocks = vi.hoisted(() => ({
   pending: [] as { steerId: string; text: string }[],
 }))
 
-vi.mock('@cubebox/core', () => ({
+vi.mock('@cubeplex/core', () => ({
   createApiClient: () => ({ setWorkspaceId: mocks.setWorkspaceId }),
   useMessageStore: (sel: (s: { pendingSteers: Record<string, unknown>; cancelSteer: typeof mocks.cancelSteer }) => unknown) =>
     sel({ pendingSteers: { 'conv-1': mocks.pending }, cancelSteer: mocks.cancelSteer }),
@@ -1077,7 +1077,7 @@ Expected: FAIL (module not found)
 ```tsx
 'use client'
 
-import { useMessageStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, createApiClient } from '@cubeplex/core'
 import { X } from 'lucide-react'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 
@@ -1211,4 +1211,4 @@ git commit -m "test(e2e): steer pending chip → inline commit → reload-stable
 
 - **Spec coverage:** A=Task 1; B(schema+converter)=Task 2; B(translator+seed-skip)=Task 3; C=Task 4; D=Task 5; E(state/steer/cancel)=Task 6, E(commit/buildTurnMessages/cleanup)=Task 7; F=Task 8; Testing=Tasks 1–9 (E2E=Task 9). All spec sections mapped.
 - **Type consistency:** `pendingSteers: Record<string, { steerId; text }[]>`, `steer_id` (wire/metadata) vs `steerId` (TS), `__commitTurnAndInject`, `buildTurnMessages`, `cancelSteer`, `InjectedMessageEvent` used consistently across tasks.
-- **Cross-repo:** Task 1 commits in cubepi; Tasks 2–9 in cubebox. The cubebox steer feature depends on the cubepi `cancel_steer` for Task 4's cancel path — land cubepi first (or pin the local cubepi for dev).
+- **Cross-repo:** Task 1 commits in cubepi; Tasks 2–9 in cubeplex. The cubeplex steer feature depends on the cubepi `cancel_steer` for Task 4's cancel path — land cubepi first (or pin the local cubepi for dev).

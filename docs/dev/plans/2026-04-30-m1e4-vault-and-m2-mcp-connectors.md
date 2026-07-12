@@ -24,10 +24,10 @@ cat .worktree.env                         # confirm allocated DB/Redis/ports
 
 These corrections override earlier draft assumptions and must be applied while executing tasks:
 
-- Runtime wiring happens in `backend/cubebox/streams/run_manager.py`, not in
-  `backend/cubebox/api/routes/v1/conversations.py`. The conversations route only starts a
+- Runtime wiring happens in `backend/cubeplex/streams/run_manager.py`, not in
+  `backend/cubeplex/api/routes/v1/conversations.py`. The conversations route only starts a
   background run and passes `RunContext`.
-- The FastAPI app file is `backend/cubebox/api/app.py`, not `backend/cubebox/app.py`.
+- The FastAPI app file is `backend/cubeplex/api/app.py`, not `backend/cubeplex/app.py`.
 - `RequestContext` is a dataclass with `user: User`, `org_id`, `workspace_id`, and `role`.
   Use `ctx.user.id`, not `ctx.user_id`. For admin routes without a workspace path, resolve
   `org_id` with `resolve_current_org_id(user, session)`.
@@ -37,10 +37,10 @@ These corrections override earlier draft assumptions and must be applied while e
 - There is no `get_request_context` dependency. Workspace routes should depend on
   `require_member`; admin routes should depend on `require_org_admin` plus explicit org
   resolution where service construction needs `org_id`.
-- Keep `create_cubebox_agent()` synchronous and close to its current signature. Append DB MCP
+- Keep `create_cubeplex_agent()` synchronous and close to its current signature. Append DB MCP
   tools to the `tools` list before calling it from `RunManager`; do not pass DB sessions,
   credential services, or signers into the agent factory.
-- Legacy config MCP tools remain global startup tools through `cubebox.tools.init_mcp_tools()`.
+- Legacy config MCP tools remain global startup tools through `cubeplex.tools.init_mcp_tools()`.
   DB-backed MCP tools are run-scoped and must not be registered globally.
 - Frontend API helpers must follow existing core patterns: `ApiClient` methods return `Response`,
   so helpers must check `res.ok`, call `toApiError(res)`, and parse `res.json()`.
@@ -97,8 +97,8 @@ git commit -m "chore(deps): add pyjwt direct dep for vault user-token signer"
 ### Task 2: EncryptionBackend Protocol + FernetBackend
 
 **Files:**
-- Create: `backend/cubebox/credentials/__init__.py`
-- Create: `backend/cubebox/credentials/encryption.py`
+- Create: `backend/cubeplex/credentials/__init__.py`
+- Create: `backend/cubeplex/credentials/encryption.py`
 - Create: `backend/tests/unit/test_fernet_rotation.py`
 
 - [ ] **Step 1: Write failing unit test**
@@ -110,7 +110,7 @@ git commit -m "chore(deps): add pyjwt direct dep for vault user-token signer"
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
-from cubebox.credentials.encryption import FernetBackend
+from cubeplex.credentials.encryption import FernetBackend
 
 
 @pytest.fixture
@@ -161,19 +161,19 @@ def test_empty_keys_rejected() -> None:
 uv run pytest tests/unit/test_fernet_rotation.py -v
 ```
 
-Expected: FAIL with `ModuleNotFoundError: cubebox.credentials.encryption`
+Expected: FAIL with `ModuleNotFoundError: cubeplex.credentials.encryption`
 
 - [ ] **Step 3: Create `__init__.py`**
 
 ```python
-# backend/cubebox/credentials/__init__.py
+# backend/cubeplex/credentials/__init__.py
 """Credential vault — internal-only key/secret storage for MCP and future consumers."""
 ```
 
 - [ ] **Step 4: Implement `encryption.py`**
 
 ```python
-# backend/cubebox/credentials/encryption.py
+# backend/cubeplex/credentials/encryption.py
 """Symmetric authenticated encryption with pluggable backend.
 
 CE default: Fernet (AES-128-CBC + HMAC-SHA256) via the cryptography library,
@@ -217,8 +217,8 @@ Expected: 4 tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/credentials/__init__.py \
-        backend/cubebox/credentials/encryption.py \
+git add backend/cubeplex/credentials/__init__.py \
+        backend/cubeplex/credentials/encryption.py \
         backend/tests/unit/test_fernet_rotation.py
 git commit -m "feat(vault): add EncryptionBackend Protocol + Fernet impl with rotation"
 ```
@@ -228,8 +228,8 @@ git commit -m "feat(vault): add EncryptionBackend Protocol + Fernet impl with ro
 ### Task 3: Master key loading + fail-fast
 
 **Files:**
-- Modify: `backend/cubebox/config.py` (add VAULT_KEY parsing)
-- Create: `backend/cubebox/credentials/keys.py` (key parsing helper)
+- Modify: `backend/cubeplex/config.py` (add VAULT_KEY parsing)
+- Create: `backend/cubeplex/credentials/keys.py` (key parsing helper)
 - Create: `backend/tests/unit/test_vault_key_loading.py`
 
 - [ ] **Step 1: Write failing test**
@@ -241,7 +241,7 @@ git commit -m "feat(vault): add EncryptionBackend Protocol + Fernet impl with ro
 import pytest
 from cryptography.fernet import Fernet
 
-from cubebox.credentials.keys import parse_vault_keys
+from cubeplex.credentials.keys import parse_vault_keys
 
 
 def test_parses_single_key() -> None:
@@ -286,13 +286,13 @@ def test_one_invalid_in_list_raises() -> None:
 uv run pytest tests/unit/test_vault_key_loading.py -v
 ```
 
-Expected: FAIL `ModuleNotFoundError: cubebox.credentials.keys`
+Expected: FAIL `ModuleNotFoundError: cubeplex.credentials.keys`
 
 - [ ] **Step 3: Implement `keys.py`**
 
 ```python
-# backend/cubebox/credentials/keys.py
-"""Parse and validate CUBEBOX_AUTH__VAULT_KEY env value."""
+# backend/cubeplex/credentials/keys.py
+"""Parse and validate CUBEPLEX_AUTH__VAULT_KEY env value."""
 
 from cryptography.fernet import Fernet
 
@@ -303,16 +303,16 @@ def parse_vault_keys(raw: str) -> list[bytes]:
     Raises ValueError on empty input or any malformed key.
     """
     if not raw or not raw.strip():
-        raise ValueError("CUBEBOX_AUTH__VAULT_KEY is empty")
+        raise ValueError("CUBEPLEX_AUTH__VAULT_KEY is empty")
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     if not parts:
-        raise ValueError("CUBEBOX_AUTH__VAULT_KEY is empty after split")
+        raise ValueError("CUBEPLEX_AUTH__VAULT_KEY is empty after split")
     keys: list[bytes] = []
     for idx, p in enumerate(parts):
         try:
             Fernet(p.encode())  # constructor validates length + base64
         except Exception as e:
-            raise ValueError(f"CUBEBOX_AUTH__VAULT_KEY entry #{idx} invalid: {e}") from e
+            raise ValueError(f"CUBEPLEX_AUTH__VAULT_KEY entry #{idx} invalid: {e}") from e
         keys.append(p.encode())
     return keys
 ```
@@ -327,20 +327,20 @@ Expected: 6 pass.
 
 - [ ] **Step 5: Wire fail-fast into app startup**
 
-Read current `backend/cubebox/api/app.py` to find startup hook (lifespan or `on_startup`). Append vault key load:
+Read current `backend/cubeplex/api/app.py` to find startup hook (lifespan or `on_startup`). Append vault key load:
 
 ```python
-# backend/cubebox/api/app.py — inside lifespan / startup function
+# backend/cubeplex/api/app.py — inside lifespan / startup function
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.credentials.keys import parse_vault_keys
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.credentials.keys import parse_vault_keys
 
 
 def _build_encryption_backend() -> FernetBackend:
-    raw = os.getenv("CUBEBOX_AUTH__VAULT_KEY") or settings.get("auth.vault_key")
+    raw = os.getenv("CUBEPLEX_AUTH__VAULT_KEY") or settings.get("auth.vault_key")
     if not raw:
         raise RuntimeError(
-            "CUBEBOX_AUTH__VAULT_KEY is required. Generate one with: "
+            "CUBEPLEX_AUTH__VAULT_KEY is required. Generate one with: "
             "python -c \"from cryptography.fernet import Fernet; "
             "print(Fernet.generate_key().decode())\""
         )
@@ -356,19 +356,19 @@ Invoke `_build_encryption_backend()` at startup; store on `app.state.encryption_
 # backend/.env.example
 # Vault master key — generate with:
 #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# Production: rotate by setting CUBEBOX_AUTH__VAULT_KEY=<new>,<old> then run
-#   python -m cubebox.credentials.rotate_keys
-CUBEBOX_AUTH__VAULT_KEY=
+# Production: rotate by setting CUBEPLEX_AUTH__VAULT_KEY=<new>,<old> then run
+#   python -m cubeplex.credentials.rotate_keys
+CUBEPLEX_AUTH__VAULT_KEY=
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/credentials/keys.py \
-        backend/cubebox/api/app.py \
+git add backend/cubeplex/credentials/keys.py \
+        backend/cubeplex/api/app.py \
         backend/.env.example \
         backend/tests/unit/test_vault_key_loading.py
-git commit -m "feat(vault): load Fernet keys from CUBEBOX_AUTH__VAULT_KEY at startup"
+git commit -m "feat(vault): load Fernet keys from CUBEPLEX_AUTH__VAULT_KEY at startup"
 ```
 
 ---
@@ -376,14 +376,14 @@ git commit -m "feat(vault): load Fernet keys from CUBEBOX_AUTH__VAULT_KEY at sta
 ### Task 4: Credential SQLModel + Alembic migration
 
 **Files:**
-- Create: `backend/cubebox/models/credential.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/credential.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 - Create: `backend/alembic/versions/<hash>_add_credentials_table.py` (autogen)
 
 - [ ] **Step 1: Define model**
 
 ```python
-# backend/cubebox/models/credential.py
+# backend/cubeplex/models/credential.py
 """Credential — vault row, org-scoped, kind-tagged."""
 
 from datetime import UTC, datetime
@@ -414,8 +414,8 @@ class Credential(SQLModel, table=True):
 - [ ] **Step 2: Register in models package**
 
 ```python
-# backend/cubebox/models/__init__.py — add import
-from cubebox.models.credential import Credential
+# backend/cubeplex/models/__init__.py — add import
+from cubeplex.models.credential import Credential
 ```
 
 (Append to alphabetical block; ensure exported.)
@@ -455,8 +455,8 @@ Expected: table exists with the listed columns.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/models/credential.py \
-        backend/cubebox/models/__init__.py \
+git add backend/cubeplex/models/credential.py \
+        backend/cubeplex/models/__init__.py \
         backend/alembic/versions/*_add_credentials_table.py
 git commit -m "feat(vault): add credentials table"
 ```
@@ -466,18 +466,18 @@ git commit -m "feat(vault): add credentials table"
 ### Task 5: CredentialRepository
 
 **Files:**
-- Create: `backend/cubebox/repositories/credential.py`
+- Create: `backend/cubeplex/repositories/credential.py`
 
 - [ ] **Step 1: Implement (no tests yet — covered by service E2E in Task 7)**
 
 ```python
-# backend/cubebox/repositories/credential.py
+# backend/cubeplex/repositories/credential.py
 """Credential repository — org-scoped (no workspace dim)."""
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Credential
+from cubeplex.models import Credential
 
 
 class CredentialRepository:
@@ -518,7 +518,7 @@ class CredentialRepository:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/repositories/credential.py
+git add backend/cubeplex/repositories/credential.py
 git commit -m "feat(vault): add CredentialRepository (org-scoped, no workspace dim)"
 ```
 
@@ -527,13 +527,13 @@ git commit -m "feat(vault): add CredentialRepository (org-scoped, no workspace d
 ### Task 6: CredentialService + exceptions
 
 **Files:**
-- Create: `backend/cubebox/credentials/exceptions.py`
-- Create: `backend/cubebox/services/credential.py`
+- Create: `backend/cubeplex/credentials/exceptions.py`
+- Create: `backend/cubeplex/services/credential.py`
 
 - [ ] **Step 1: Define exceptions**
 
 ```python
-# backend/cubebox/credentials/exceptions.py
+# backend/cubeplex/credentials/exceptions.py
 """Vault domain exceptions."""
 
 
@@ -552,7 +552,7 @@ class CredentialInUseError(Exception):
 - [ ] **Step 2: Implement service (without delete-in-use check — Task 24 wires it)**
 
 ```python
-# backend/cubebox/services/credential.py
+# backend/cubeplex/services/credential.py
 """Vault service — internal API for backend consumers (MCP, future skill env, etc.).
 
 Never expose plaintext outside backend; never expose CRUD HTTP routes.
@@ -560,13 +560,13 @@ Never expose plaintext outside backend; never expose CRUD HTTP routes.
 
 from typing import Any
 
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.credentials.exceptions import (
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.credentials.exceptions import (
     CredentialKindMismatch,
     CredentialNotFound,
 )
-from cubebox.models import Credential
-from cubebox.repositories.credential import CredentialRepository
+from cubeplex.models import Credential
+from cubeplex.repositories.credential import CredentialRepository
 
 
 class CredentialService:
@@ -640,8 +640,8 @@ class CredentialService:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/credentials/exceptions.py \
-        backend/cubebox/services/credential.py
+git add backend/cubeplex/credentials/exceptions.py \
+        backend/cubeplex/services/credential.py
 git commit -m "feat(vault): add CredentialService with kind/org invariants"
 ```
 
@@ -661,13 +661,13 @@ git commit -m "feat(vault): add CredentialService with kind/org invariants"
 import pytest
 from cryptography.fernet import Fernet
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.credentials.exceptions import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.credentials.exceptions import (
     CredentialKindMismatch,
     CredentialNotFound,
 )
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.services.credential import CredentialService
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.services.credential import CredentialService
 
 
 @pytest.fixture
@@ -747,13 +747,13 @@ git commit -m "test(vault): E2E for create/get/update/delete + kind mismatch + c
 ### Task 8: MCP SQLModels (4 tables)
 
 **Files:**
-- Create: `backend/cubebox/models/mcp.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/mcp.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Define all 4 models**
 
 ```python
-# backend/cubebox/models/mcp.py
+# backend/cubeplex/models/mcp.py
 """MCP connector tables — server registry + per-workspace creds + per-user creds + bindings."""
 
 from datetime import UTC, datetime
@@ -857,8 +857,8 @@ class WorkspaceMCPBinding(SQLModel, table=True):
 - [ ] **Step 2: Register in models package**
 
 ```python
-# backend/cubebox/models/__init__.py — add imports
-from cubebox.models.mcp import (
+# backend/cubeplex/models/__init__.py — add imports
+from cubeplex.models.mcp import (
     MCPServer,
     UserMCPCredential,
     WorkspaceMCPBinding,
@@ -869,7 +869,7 @@ from cubebox.models.mcp import (
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/models/mcp.py backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/mcp.py backend/cubeplex/models/__init__.py
 git commit -m "feat(mcp): add 4 SQLModels for server/binding/cred tables"
 ```
 
@@ -935,12 +935,12 @@ git commit -m "feat(mcp): alembic migration for 4 connector tables"
 ### Task 10: MCP repositories
 
 **Files:**
-- Create: `backend/cubebox/repositories/mcp.py`
+- Create: `backend/cubeplex/repositories/mcp.py`
 
 - [ ] **Step 1: Implement all 4 repos in one file**
 
 ```python
-# backend/cubebox/repositories/mcp.py
+# backend/cubeplex/repositories/mcp.py
 """MCP connector repositories.
 
 All 4 repos are org-scoped. We do NOT use ScopedRepository because mcp_servers
@@ -951,7 +951,7 @@ distinct). All filters are explicit.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import (
+from cubeplex.models import (
     MCPServer,
     UserMCPCredential,
     WorkspaceMCPBinding,
@@ -1202,7 +1202,7 @@ class WorkspaceMCPBindingRepository:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/repositories/mcp.py
+git add backend/cubeplex/repositories/mcp.py
 git commit -m "feat(mcp): add 4 repositories (server / ws-cred / user-cred / binding)"
 ```
 
@@ -1213,12 +1213,12 @@ git commit -m "feat(mcp): add 4 repositories (server / ws-cred / user-cred / bin
 ### Task 11: MCP exceptions
 
 **Files:**
-- Create: `backend/cubebox/mcp/exceptions.py`
+- Create: `backend/cubeplex/mcp/exceptions.py`
 
 - [ ] **Step 1: Define domain exceptions**
 
 ```python
-# backend/cubebox/mcp/exceptions.py
+# backend/cubeplex/mcp/exceptions.py
 """MCP domain exceptions. Each maps to a specific HTTP error code in routes."""
 
 
@@ -1266,7 +1266,7 @@ class MCPCredentialPathMismatch(Exception):
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/mcp/exceptions.py
+git add backend/cubeplex/mcp/exceptions.py
 git commit -m "feat(mcp): add domain exceptions"
 ```
 
@@ -1275,7 +1275,7 @@ git commit -m "feat(mcp): add domain exceptions"
 ### Task 12: MCPUserTokenSigner + HS256Signer + unit test
 
 **Files:**
-- Create: `backend/cubebox/mcp/user_token.py`
+- Create: `backend/cubeplex/mcp/user_token.py`
 - Create: `backend/tests/unit/test_user_token_signer.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1289,7 +1289,7 @@ from datetime import timedelta
 import jwt
 import pytest
 
-from cubebox.mcp.user_token import HS256Signer
+from cubeplex.mcp.user_token import HS256Signer
 
 
 @pytest.fixture
@@ -1307,7 +1307,7 @@ async def test_sign_returns_decodable_jwt(signer: HS256Signer) -> None:
     assert decoded["org"] == "o1"
     assert decoded["ws"] == "w1"
     assert decoded["mcp"] == "m1"
-    assert decoded["iss"] == "cubebox"
+    assert decoded["iss"] == "cubeplex"
     assert "exp" in decoded
 
 
@@ -1338,8 +1338,8 @@ uv run pytest tests/unit/test_user_token_signer.py -v
 - [ ] **Step 3: Implement signer**
 
 ```python
-# backend/cubebox/mcp/user_token.py
-"""MCP passthrough mode: sign cubebox identity into a short-TTL JWT."""
+# backend/cubeplex/mcp/user_token.py
+"""MCP passthrough mode: sign cubeplex identity into a short-TTL JWT."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
@@ -1355,10 +1355,10 @@ class MCPUserTokenSigner(Protocol):
 
 
 class HS256Signer:
-    """v1 CE — HS256 with shared CUBEBOX_AUTH__JWT_SECRET.
+    """v1 CE — HS256 with shared CUBEPLEX_AUTH__JWT_SECRET.
 
     EE / hardened deployments may register an RS256Signer that exposes
-    /.well-known/cubebox-jwks.json.
+    /.well-known/cubeplex-jwks.json.
     """
 
     def __init__(self, secret: str) -> None:
@@ -1376,7 +1376,7 @@ class HS256Signer:
             "mcp": mcp_server_id,
             "exp": int((now + ttl).timestamp()),
             "iat": int(now.timestamp()),
-            "iss": "cubebox",
+            "iss": "cubeplex",
         }
         return jwt.encode(claims, self._secret, algorithm="HS256")
 ```
@@ -1390,7 +1390,7 @@ uv run pytest tests/unit/test_user_token_signer.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/mcp/user_token.py \
+git add backend/cubeplex/mcp/user_token.py \
         backend/tests/unit/test_user_token_signer.py
 git commit -m "feat(mcp): add HS256 user-token signer for passthrough auth"
 ```
@@ -1400,7 +1400,7 @@ git commit -m "feat(mcp): add HS256 user-token signer for passthrough auth"
 ### Task 13: Connection params builder + unit test
 
 **Files:**
-- Create: `backend/cubebox/mcp/connection_params.py`
+- Create: `backend/cubeplex/mcp/connection_params.py`
 - Create: `backend/tests/unit/test_connection_params.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1411,8 +1411,8 @@ git commit -m "feat(mcp): add HS256 user-token signer for passthrough auth"
 
 import pytest
 
-from cubebox.mcp.connection_params import build_connection_params
-from cubebox.models import MCPServer
+from cubeplex.mcp.connection_params import build_connection_params
+from cubeplex.models import MCPServer
 
 
 def _server(**overrides) -> MCPServer:
@@ -1487,18 +1487,18 @@ uv run pytest tests/unit/test_connection_params.py -v
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/mcp/connection_params.py
+# backend/cubeplex/mcp/connection_params.py
 """Build MultiServerMCPClient connection params from a DB MCPServer + resolved credential.
 
 `credential_or_token` is either:
 - The decrypted plaintext credential (for credential_scope in {org, workspace, user-static})
-- A signed cubebox JWT (for credential_scope=none — passthrough mode)
+- A signed cubeplex JWT (for credential_scope=none — passthrough mode)
 - None (for credential_scope=none with auth_method=none — server expects no auth)
 """
 
 from typing import Any
 
-from cubebox.models import MCPServer
+from cubeplex.models import MCPServer
 
 _HTTP_TRANSPORTS = {"streamable_http", "sse"}
 
@@ -1554,7 +1554,7 @@ Expected: 7 pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/mcp/connection_params.py \
+git add backend/cubeplex/mcp/connection_params.py \
         backend/tests/unit/test_connection_params.py
 git commit -m "feat(mcp): add connection params builder dispatching by transport + auth"
 ```
@@ -1564,7 +1564,7 @@ git commit -m "feat(mcp): add connection params builder dispatching by transport
 ### Task 14: Discovery + tool serialize + unit test
 
 **Files:**
-- Create: `backend/cubebox/mcp/discovery.py`
+- Create: `backend/cubeplex/mcp/discovery.py`
 - Create: `backend/tests/unit/test_discovery_serialize.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1575,7 +1575,7 @@ git commit -m "feat(mcp): add connection params builder dispatching by transport
 
 from langchain_core.tools import StructuredTool
 
-from cubebox.mcp.discovery import construct_basetools_from_cache, serialize_tool
+from cubeplex.mcp.discovery import construct_basetools_from_cache, serialize_tool
 
 
 def _dummy_tool(name: str, description: str) -> StructuredTool:
@@ -1618,7 +1618,7 @@ uv run pytest tests/unit/test_discovery_serialize.py -v
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/mcp/discovery.py
+# backend/cubeplex/mcp/discovery.py
 """MCP server discovery: connect, list tools, serialize for tools_cache.
 
 Runtime BaseTool construction reverses the serialize: each cached tool definition
@@ -1634,8 +1634,8 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.sessions import Connection
 from loguru import logger
 
-from cubebox.mcp.connection_params import build_connection_params
-from cubebox.models import MCPServer
+from cubeplex.mcp.connection_params import build_connection_params
+from cubeplex.models import MCPServer
 
 
 async def discover_tools(
@@ -1747,7 +1747,7 @@ uv run pytest tests/unit/test_discovery_serialize.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/mcp/discovery.py \
+git add backend/cubeplex/mcp/discovery.py \
         backend/tests/unit/test_discovery_serialize.py
 git commit -m "feat(mcp): add discovery + tool serialize/deserialize"
 ```
@@ -1757,7 +1757,7 @@ git commit -m "feat(mcp): add discovery + tool serialize/deserialize"
 ### Task 15: MCPServerService — create + invariants
 
 **Files:**
-- Create: `backend/cubebox/services/mcp.py`
+- Create: `backend/cubeplex/services/mcp.py`
 - Create: `backend/tests/unit/test_mcp_service_invariants.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1772,7 +1772,7 @@ with a stub that returns success or failure as the test directs.
 
 import pytest
 
-from cubebox.mcp.exceptions import (
+from cubeplex.mcp.exceptions import (
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
     MCPServerNameConflict,
@@ -1841,17 +1841,17 @@ async def test_duplicate_name_in_same_scope_conflicts(mcp_service) -> None:
 import pytest
 from cryptography.fernet import Fernet
 
-from cubebox.auth.context import RequestContext
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.mcp import (
+from cubeplex.auth.context import RequestContext
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPBindingRepository,
     WorkspaceMCPCredentialRepository,
 )
-from cubebox.services.credential import CredentialService
-from cubebox.services.mcp import MCPServerService
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.mcp import MCPServerService
 
 
 @pytest.fixture
@@ -1897,7 +1897,7 @@ uv run pytest tests/unit/test_mcp_service_invariants.py -v
 - [ ] **Step 4: Implement service skeleton + create**
 
 ```python
-# backend/cubebox/services/mcp.py
+# backend/cubeplex/services/mcp.py
 """MCP connector service — CRUD + invariants + promote + cred mgmt.
 
 discover_tools is invoked from create / refresh paths; failures yield
@@ -1906,9 +1906,9 @@ authed=False rather than raising. Caller decides what HTTP code to return.
 
 import hashlib
 
-from cubebox.auth.context import RequestContext
-from cubebox.mcp.discovery import discover_tools
-from cubebox.mcp.exceptions import (
+from cubeplex.auth.context import RequestContext
+from cubeplex.mcp.discovery import discover_tools
+from cubeplex.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
@@ -1921,19 +1921,19 @@ from cubebox.mcp.exceptions import (
     MCPUserScopeCredentialForbidden,
     MCPWorkspaceOwnedNoBinding,
 )
-from cubebox.models import (
+from cubeplex.models import (
     MCPServer,
     UserMCPCredential,
     WorkspaceMCPBinding,
     WorkspaceMCPCredential,
 )
-from cubebox.repositories.mcp import (
+from cubeplex.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPBindingRepository,
     WorkspaceMCPCredentialRepository,
 )
-from cubebox.services.credential import CredentialService
+from cubeplex.services.credential import CredentialService
 
 _VALID_SCOPES = {"org", "workspace", "user", "none"}
 _VALID_METHODS = {"static", "oauth", "none"}
@@ -2118,7 +2118,7 @@ Expected: 5 pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp.py \
+git add backend/cubeplex/services/mcp.py \
         backend/tests/unit/test_mcp_service_invariants.py \
         backend/tests/unit/conftest.py
 git commit -m "feat(mcp): add MCPServerService.create with full invariant enforcement"
@@ -2129,12 +2129,12 @@ git commit -m "feat(mcp): add MCPServerService.create with full invariant enforc
 ### Task 16: MCPServerService — update / delete with cascade
 
 **Files:**
-- Modify: `backend/cubebox/services/mcp.py`
+- Modify: `backend/cubeplex/services/mcp.py`
 
 - [ ] **Step 1: Add update / delete methods**
 
 ```python
-# backend/cubebox/services/mcp.py — append to MCPServerService class
+# backend/cubeplex/services/mcp.py — append to MCPServerService class
 
     async def update(
         self, *, server_id: str,
@@ -2276,7 +2276,7 @@ uv run pytest tests/unit/test_mcp_service_invariants.py -v
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp.py \
+git add backend/cubeplex/services/mcp.py \
         backend/tests/unit/test_mcp_service_invariants.py
 git commit -m "feat(mcp): MCPServerService.update + delete with cascade"
 ```
@@ -2286,12 +2286,12 @@ git commit -m "feat(mcp): MCPServerService.update + delete with cascade"
 ### Task 17: refresh_tools + test_connection
 
 **Files:**
-- Modify: `backend/cubebox/services/mcp.py`
+- Modify: `backend/cubeplex/services/mcp.py`
 
 - [ ] **Step 1: Add methods**
 
 ```python
-# backend/cubebox/services/mcp.py — append to MCPServerService
+# backend/cubeplex/services/mcp.py — append to MCPServerService
 
     async def refresh_tools(self, *, server_id: str) -> MCPServer:
         server = await self.server_repo.get(server_id)
@@ -2342,7 +2342,7 @@ git commit -m "feat(mcp): MCPServerService.update + delete with cascade"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp.py
+git add backend/cubeplex/services/mcp.py
 git commit -m "feat(mcp): add refresh_tools + test_connection dry-run"
 ```
 
@@ -2351,7 +2351,7 @@ git commit -m "feat(mcp): add refresh_tools + test_connection dry-run"
 ### Task 18: promote_to_org (α + β paths) + unit test
 
 **Files:**
-- Modify: `backend/cubebox/services/mcp.py`
+- Modify: `backend/cubeplex/services/mcp.py`
 - Modify: `backend/tests/unit/test_mcp_service_invariants.py`
 
 - [ ] **Step 1: Append failing unit test**
@@ -2426,7 +2426,7 @@ uv run pytest tests/unit/test_mcp_service_invariants.py::test_promote_alpha_move
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/services/mcp.py — append to MCPServerService
+# backend/cubeplex/services/mcp.py — append to MCPServerService
 
     async def promote_to_org(
         self, *, server_id: str, share_credential: bool,
@@ -2488,7 +2488,7 @@ Expected: all (8+) pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp.py \
+git add backend/cubeplex/services/mcp.py \
         backend/tests/unit/test_mcp_service_invariants.py
 git commit -m "feat(mcp): promote_to_org with α (share-cred) and β (keep-cred) paths"
 ```
@@ -2498,12 +2498,12 @@ git commit -m "feat(mcp): promote_to_org with α (share-cred) and β (keep-cred)
 ### Task 19: Workspace-credential / user-credential management methods
 
 **Files:**
-- Modify: `backend/cubebox/services/mcp.py`
+- Modify: `backend/cubeplex/services/mcp.py`
 
 - [ ] **Step 1: Implement set/get/delete for both scope kinds**
 
 ```python
-# backend/cubebox/services/mcp.py — append to MCPServerService
+# backend/cubeplex/services/mcp.py — append to MCPServerService
 
     async def set_workspace_credential(
         self, *, server_id: str, workspace_id: str, plaintext: str,
@@ -2643,7 +2643,7 @@ git commit -m "feat(mcp): promote_to_org with α (share-cred) and β (keep-cred)
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp.py
+git add backend/cubeplex/services/mcp.py
 git commit -m "feat(mcp): add workspace/user credential mgmt + bindings replace"
 ```
 
@@ -2652,7 +2652,7 @@ git commit -m "feat(mcp): add workspace/user credential mgmt + bindings replace"
 ### Task 20: Wire vault delete-in-use check
 
 **Files:**
-- Modify: `backend/cubebox/services/credential.py`
+- Modify: `backend/cubeplex/services/credential.py`
 - Modify: `backend/tests/e2e/test_credentials_vault.py`
 
 - [ ] **Step 1: Append failing E2E**
@@ -2664,10 +2664,10 @@ async def test_delete_credential_referenced_by_mcp_server_raises(
     db_session, backend, request_context,
 ) -> None:
     """If a credential is still referenced by mcp_servers.credential_id, delete fails."""
-    from cubebox.models import MCPServer
-    from cubebox.repositories.credential import CredentialRepository
-    from cubebox.repositories.mcp import MCPServerRepository
-    from cubebox.services.credential import CredentialService
+    from cubeplex.models import MCPServer
+    from cubeplex.repositories.credential import CredentialRepository
+    from cubeplex.repositories.mcp import MCPServerRepository
+    from cubeplex.services.credential import CredentialService
 
     cred_repo = CredentialRepository(db_session, org_id="org-A")
     server_repo = MCPServerRepository(db_session, org_id="org-A")
@@ -2682,7 +2682,7 @@ async def test_delete_credential_referenced_by_mcp_server_raises(
         auth_method="static", credential_scope="org",
         credential_id=cred_id, created_by_user_id="u1",
     ))
-    from cubebox.credentials.exceptions import CredentialInUseError
+    from cubeplex.credentials.exceptions import CredentialInUseError
     with pytest.raises(CredentialInUseError):
         await svc.delete(credential_id=cred_id)
 ```
@@ -2690,7 +2690,7 @@ async def test_delete_credential_referenced_by_mcp_server_raises(
 - [ ] **Step 2: Add reverse-ref check to CredentialService.delete**
 
 ```python
-# backend/cubebox/services/credential.py — modify delete
+# backend/cubeplex/services/credential.py — modify delete
 
     async def delete(self, *, credential_id: str) -> None:
         cred = await self._repo.get(credential_id)
@@ -2702,7 +2702,7 @@ async def test_delete_credential_referenced_by_mcp_server_raises(
 
     async def _guard_references(self, credential_id: str) -> None:
         """Raise CredentialInUseError if any MCP table still references this cred."""
-        from cubebox.repositories.mcp import (
+        from cubeplex.repositories.mcp import (
             MCPServerRepository,
             UserMCPCredentialRepository,
             WorkspaceMCPCredentialRepository,
@@ -2716,7 +2716,7 @@ async def test_delete_credential_referenced_by_mcp_server_raises(
             repo = repo_cls(session, org_id=self._ctx.org_id)
             refs = await repo.find_by_credential_id(credential_id)
             if refs:
-                from cubebox.credentials.exceptions import CredentialInUseError
+                from cubeplex.credentials.exceptions import CredentialInUseError
                 raise CredentialInUseError(
                     f"credential {credential_id} referenced by {repo_cls.__name__}: "
                     f"{[getattr(r, 'id', '?') for r in refs]}"
@@ -2734,7 +2734,7 @@ Expected: 6 pass (5 prior + 1 new).
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/services/credential.py \
+git add backend/cubeplex/services/credential.py \
         backend/tests/e2e/test_credentials_vault.py
 git commit -m "feat(vault): refuse delete when credential is referenced by MCP rows"
 ```
@@ -2746,12 +2746,12 @@ git commit -m "feat(vault): refuse delete when credential is referenced by MCP r
 ### Task 21: Pydantic schemas
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/mcp.py`
+- Create: `backend/cubeplex/api/schemas/mcp.py`
 
 - [ ] **Step 1: Define request/response schemas**
 
 ```python
-# backend/cubebox/api/schemas/mcp.py
+# backend/cubeplex/api/schemas/mcp.py
 """MCP request/response schemas. Plaintext credentials only flow IN; never OUT."""
 
 from datetime import datetime
@@ -2873,7 +2873,7 @@ class MCPServerListWS(BaseModel):
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/mcp.py
+git add backend/cubeplex/api/schemas/mcp.py
 git commit -m "feat(mcp): add API pydantic schemas for admin + ws routes"
 ```
 
@@ -2882,22 +2882,22 @@ git commit -m "feat(mcp): add API pydantic schemas for admin + ws routes"
 ### Task 22: Audit sink no-op
 
 **Files:**
-- Create: `backend/cubebox/audit/__init__.py`
-- Create: `backend/cubebox/audit/sink.py`
+- Create: `backend/cubeplex/audit/__init__.py`
+- Create: `backend/cubeplex/audit/sink.py`
 
 - [ ] **Step 1: Define Protocol + no-op impl**
 
 ```python
-# backend/cubebox/audit/__init__.py
+# backend/cubeplex/audit/__init__.py
 """Audit sink — Protocol + CE no-op default. M1-E5 will register a real sink."""
 
-from cubebox.audit.sink import AuditSink, NoOpAuditSink
+from cubeplex.audit.sink import AuditSink, NoOpAuditSink
 
 __all__ = ["AuditSink", "NoOpAuditSink"]
 ```
 
 ```python
-# backend/cubebox/audit/sink.py
+# backend/cubeplex/audit/sink.py
 """Audit log sink: structured event recorder. CE default no-op; EE registers real sink."""
 
 from typing import Any, Protocol
@@ -2923,7 +2923,7 @@ class NoOpAuditSink:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/audit/__init__.py backend/cubebox/audit/sink.py
+git add backend/cubeplex/audit/__init__.py backend/cubeplex/audit/sink.py
 git commit -m "feat(audit): add Protocol + NoOpAuditSink (M1-E5 will replace)"
 ```
 
@@ -2932,25 +2932,25 @@ git commit -m "feat(audit): add Protocol + NoOpAuditSink (M1-E5 will replace)"
 ### Task 23: FastAPI DI providers
 
 **Files:**
-- Modify: `backend/cubebox/auth/dependencies.py` (or wherever DI providers live — find by `grep -r "Depends(get_session)" cubebox/api`)
-- Create: `backend/cubebox/credentials/dependencies.py`
-- Create: `backend/cubebox/mcp/dependencies.py`
+- Modify: `backend/cubeplex/auth/dependencies.py` (or wherever DI providers live — find by `grep -r "Depends(get_session)" cubeplex/api`)
+- Create: `backend/cubeplex/credentials/dependencies.py`
+- Create: `backend/cubeplex/mcp/dependencies.py`
 
 - [ ] **Step 1: Vault DI provider**
 
 ```python
-# backend/cubebox/credentials/dependencies.py
+# backend/cubeplex/credentials/dependencies.py
 """FastAPI DI providers for vault."""
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.credentials.encryption import EncryptionBackend
-from cubebox.db.session import get_session
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.services.credential import CredentialService
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.credentials.encryption import EncryptionBackend
+from cubeplex.db.session import get_session
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.services.credential import CredentialService
 
 
 async def get_encryption_backend(request: Request) -> EncryptionBackend:
@@ -2990,40 +2990,40 @@ async def get_credential_service(
 - [ ] **Step 2: MCP DI provider**
 
 ```python
-# backend/cubebox/mcp/dependencies.py
+# backend/cubeplex/mcp/dependencies.py
 """FastAPI DI providers for MCP service + signer."""
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.audit.sink import AuditSink, NoOpAuditSink
-from cubebox.credentials.dependencies import get_credential_service
-from cubebox.db.session import get_session
-from cubebox.mcp.user_token import HS256Signer, MCPUserTokenSigner
-from cubebox.repositories.mcp import (
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.audit.sink import AuditSink, NoOpAuditSink
+from cubeplex.credentials.dependencies import get_credential_service
+from cubeplex.db.session import get_session
+from cubeplex.mcp.user_token import HS256Signer, MCPUserTokenSigner
+from cubeplex.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPBindingRepository,
     WorkspaceMCPCredentialRepository,
 )
-from cubebox.services.credential import CredentialService
-from cubebox.services.mcp import MCPServerService
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.mcp import MCPServerService
 
 
 def build_user_token_signer() -> MCPUserTokenSigner:
     """Build signer from config/env for non-route code such as RunManager."""
-    from cubebox.config import config
+    from cubeplex.config import config
 
     secret = config.get("auth.jwt_secret")
     if not secret:
-        raise RuntimeError("CUBEBOX_AUTH__JWT_SECRET missing")
+        raise RuntimeError("CUBEPLEX_AUTH__JWT_SECRET missing")
     return HS256Signer(secret=secret)
 
 
 async def get_user_token_signer(request: Request) -> MCPUserTokenSigner:
-    """Stored on app.state at startup using CUBEBOX_AUTH__JWT_SECRET."""
+    """Stored on app.state at startup using CUBEPLEX_AUTH__JWT_SECRET."""
     return request.app.state.mcp_user_token_signer
 
 
@@ -3049,18 +3049,18 @@ async def get_mcp_service(
 
 - [ ] **Step 3: Wire app.state at startup**
 
-In `backend/cubebox/api/app.py` lifespan / startup function, append:
+In `backend/cubeplex/api/app.py` lifespan / startup function, append:
 
 ```python
 # inside lifespan startup
-from cubebox.audit.sink import NoOpAuditSink
-from cubebox.mcp.user_token import HS256Signer
+from cubeplex.audit.sink import NoOpAuditSink
+from cubeplex.mcp.user_token import HS256Signer
 
 app.state.encryption_backend = _build_encryption_backend()  # already added in Task 3
 app.state.mcp_user_token_signer = HS256Signer(
-    secret=os.environ.get("CUBEBOX_AUTH__JWT_SECRET")
+    secret=os.environ.get("CUBEPLEX_AUTH__JWT_SECRET")
     or settings.get("auth.jwt_secret")
-    or _fail("CUBEBOX_AUTH__JWT_SECRET missing")
+    or _fail("CUBEPLEX_AUTH__JWT_SECRET missing")
 )
 app.state.audit_sink = NoOpAuditSink()
 
@@ -3072,9 +3072,9 @@ def _fail(msg: str) -> None:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/credentials/dependencies.py \
-        backend/cubebox/mcp/dependencies.py \
-        backend/cubebox/api/app.py
+git add backend/cubeplex/credentials/dependencies.py \
+        backend/cubeplex/mcp/dependencies.py \
+        backend/cubeplex/api/app.py
 git commit -m "feat(api): add DI providers for credential service / mcp service / signer"
 ```
 
@@ -3083,12 +3083,12 @@ git commit -m "feat(api): add DI providers for credential service / mcp service 
 ### Task 24: Admin MCP routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Create: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 
 - [ ] **Step 1: Implement routes**
 
 ```python
-# backend/cubebox/api/routes/v1/admin_mcp.py
+# backend/cubeplex/api/routes/v1/admin_mcp.py
 """Admin MCP routes — gated by require_org_admin.
 
 scope ∈ {org, user, none}. workspace-scope is exclusive to the WS path
@@ -3099,10 +3099,10 @@ import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from cubebox.audit.sink import AuditSink
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import get_request_context, require_org_admin
-from cubebox.api.schemas.mcp import (
+from cubeplex.audit.sink import AuditSink
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import get_request_context, require_org_admin
+from cubeplex.api.schemas.mcp import (
     CredentialRefOut,
     MCPBindingsReplace,
     MCPServerCreateAdmin,
@@ -3112,8 +3112,8 @@ from cubebox.api.schemas.mcp import (
     MCPTestConnectionResponse,
     WorkspaceBindingItem,
 )
-from cubebox.mcp.dependencies import get_audit_sink, get_mcp_service
-from cubebox.mcp.exceptions import (
+from cubeplex.mcp.dependencies import get_audit_sink, get_mcp_service
+from cubeplex.mcp.exceptions import (
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
     MCPServerNameConflict,
@@ -3122,8 +3122,8 @@ from cubebox.mcp.exceptions import (
     MCPUserScopeCredentialForbidden,
     MCPWorkspaceOwnedNoBinding,
 )
-from cubebox.models import MCPServer
-from cubebox.services.mcp import MCPServerService
+from cubeplex.models import MCPServer
+from cubeplex.services.mcp import MCPServerService
 
 router = APIRouter(
     prefix="/api/v1/admin/mcp",
@@ -3342,7 +3342,7 @@ async def put_bindings(
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_mcp.py
+git add backend/cubeplex/api/routes/v1/admin_mcp.py
 git commit -m "feat(mcp): add admin MCP routes (CRUD + bindings + test-connection)"
 ```
 
@@ -3351,12 +3351,12 @@ git commit -m "feat(mcp): add admin MCP routes (CRUD + bindings + test-connectio
 ### Task 25: WS member MCP routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Create: `backend/cubeplex/api/routes/v1/ws_mcp.py`
 
 - [ ] **Step 1: Implement routes**
 
 ```python
-# backend/cubebox/api/routes/v1/ws_mcp.py
+# backend/cubeplex/api/routes/v1/ws_mcp.py
 """Workspace-member MCP routes.
 
 Path: /api/v1/ws/{wsId}/mcp/...
@@ -3368,10 +3368,10 @@ Path: /api/v1/ws/{wsId}/mcp/...
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 
-from cubebox.audit.sink import AuditSink
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import get_request_context
-from cubebox.api.schemas.mcp import (
+from cubeplex.audit.sink import AuditSink
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import get_request_context
+from cubeplex.api.schemas.mcp import (
     MCPCredentialStatus,
     MCPCredentialUpsert,
     MCPPromoteRequest,
@@ -3382,9 +3382,9 @@ from cubebox.api.schemas.mcp import (
     MCPTestConnectionRequest,
     MCPTestConnectionResponse,
 )
-from cubebox.api.routes.v1.admin_mcp import _server_to_out
-from cubebox.mcp.dependencies import get_audit_sink, get_mcp_service
-from cubebox.mcp.exceptions import (
+from cubeplex.api.routes.v1.admin_mcp import _server_to_out
+from cubeplex.mcp.dependencies import get_audit_sink, get_mcp_service
+from cubeplex.mcp.exceptions import (
     MCPCredentialPathMismatch,
     MCPCredentialRequired,
     MCPOAuthNotImplemented,
@@ -3396,7 +3396,7 @@ from cubebox.mcp.exceptions import (
     MCPShareCredentialOnlyForWorkspaceScope,
     MCPUserScopeCredentialForbidden,
 )
-from cubebox.services.mcp import MCPServerService
+from cubeplex.services.mcp import MCPServerService
 
 router = APIRouter(prefix="/api/v1/ws/{wsId}/mcp", tags=["ws-mcp"])
 
@@ -3656,7 +3656,7 @@ async def delete_my_credential(
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_mcp.py
+git add backend/cubeplex/api/routes/v1/ws_mcp.py
 git commit -m "feat(mcp): add ws member MCP routes (CRUD + promote + cred mgmt)"
 ```
 
@@ -3665,20 +3665,20 @@ git commit -m "feat(mcp): add ws member MCP routes (CRUD + promote + cred mgmt)"
 ### Task 26: Mount routers + smoke test
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py` (or wherever routers are mounted — check for existing pattern)
+- Modify: `backend/cubeplex/api/app.py` (or wherever routers are mounted — check for existing pattern)
 - Create: `backend/tests/e2e/test_mcp_routers_mounted.py`
 
 - [ ] **Step 1: Find existing router mount location**
 
 ```bash
-grep -rn "include_router" backend/cubebox/api/ | head
+grep -rn "include_router" backend/cubeplex/api/ | head
 ```
 
 - [ ] **Step 2: Mount new routers in the file that mounts others**
 
 ```python
-# backend/cubebox/api/app.py (or routes/__init__.py — wherever others are)
-from cubebox.api.routes.v1 import admin_mcp, ws_mcp
+# backend/cubeplex/api/app.py (or routes/__init__.py — wherever others are)
+from cubeplex.api.routes.v1 import admin_mcp, ws_mcp
 
 app.include_router(admin_mcp.router)
 app.include_router(ws_mcp.router)
@@ -3723,7 +3723,7 @@ uv run pytest tests/e2e/test_mcp_routers_mounted.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py \
+git add backend/cubeplex/api/app.py \
         backend/tests/e2e/test_mcp_routers_mounted.py
 git commit -m "feat(mcp): mount admin/ws MCP routers + smoke E2E"
 ```
@@ -3825,7 +3825,7 @@ def _server_script(auth_mode: str, jwt_secret: str | None, static_token: str | N
             if AUTH_MODE == "bearer-jwt-verify":
                 try:
                     claims = _jwt.decode(tok, JWT_SECRET, algorithms=["HS256"])
-                    if claims.get("iss") != "cubebox":
+                    if claims.get("iss") != "cubeplex":
                         return False, f"bad iss: {{claims.get('iss')}}"
                     return True, json.dumps(claims)
                 except Exception as e:
@@ -3973,14 +3973,14 @@ git commit -m "test(mcp): add reference MCP server fixture (3 auth modes)"
 ### Task 28: Refactor `MCPManager` — split legacy + DB paths
 
 **Files:**
-- Modify: `backend/cubebox/mcp/client.py`
+- Modify: `backend/cubeplex/mcp/client.py`
 
 - [ ] **Step 1: Refactor existing class**
 
-Replace `backend/cubebox/mcp/client.py` content (existing config-driven `MCPManager`) with the dual-path version:
+Replace `backend/cubeplex/mcp/client.py` content (existing config-driven `MCPManager`) with the dual-path version:
 
 ```python
-# backend/cubebox/mcp/client.py
+# backend/cubeplex/mcp/client.py
 """MCPManager — two independent loading paths.
 
 Legacy: read config.yaml mcp.servers at startup, share across all workspaces.
@@ -4031,7 +4031,7 @@ class MCPManager:
         if cls._legacy_cache is not None:
             return cls._legacy_cache
 
-        from cubebox.config import config
+        from cubeplex.config import config
         if not config.get("mcp.enabled", False):
             cls._legacy_cache = []
             return cls._legacy_cache
@@ -4076,11 +4076,11 @@ class MCPManager:
 
 - [ ] **Step 2: Wire legacy loader at app startup**
 
-In `backend/cubebox/api/app.py` lifespan startup:
+In `backend/cubeplex/api/app.py` lifespan startup:
 
 ```python
 # after _build_encryption_backend() and signer registration
-from cubebox.mcp.client import MCPManager
+from cubeplex.mcp.client import MCPManager
 await MCPManager.load_legacy_config_servers()
 ```
 
@@ -4093,7 +4093,7 @@ uv run pytest tests/ -k mcp -v
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/mcp/client.py backend/cubebox/api/app.py
+git add backend/cubeplex/mcp/client.py backend/cubeplex/api/app.py
 git commit -m "refactor(mcp): split MCPManager into legacy-cache + future db path"
 ```
 
@@ -4102,13 +4102,13 @@ git commit -m "refactor(mcp): split MCPManager into legacy-cache + future db pat
 ### Task 29: Runtime — `load_db_servers_for_workspace`
 
 **Files:**
-- Create: `backend/cubebox/mcp/runtime.py`
+- Create: `backend/cubeplex/mcp/runtime.py`
 
 - [ ] **Step 1: Implement**
 
 ```python
-# backend/cubebox/mcp/runtime.py
-"""Per-(workspace, user) MCP tool assembly for create_cubebox_agent."""
+# backend/cubeplex/mcp/runtime.py
+"""Per-(workspace, user) MCP tool assembly for create_cubeplex_agent."""
 
 from datetime import timedelta
 
@@ -4116,17 +4116,17 @@ from langchain_core.tools import BaseTool
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.credentials.exceptions import CredentialNotFound
-from cubebox.mcp.connection_params import build_connection_params
-from cubebox.mcp.discovery import construct_basetools_from_cache
-from cubebox.mcp.user_token import MCPUserTokenSigner
-from cubebox.models import MCPServer
-from cubebox.repositories.mcp import (
+from cubeplex.credentials.exceptions import CredentialNotFound
+from cubeplex.mcp.connection_params import build_connection_params
+from cubeplex.mcp.discovery import construct_basetools_from_cache
+from cubeplex.mcp.user_token import MCPUserTokenSigner
+from cubeplex.models import MCPServer
+from cubeplex.repositories.mcp import (
     MCPServerRepository,
     UserMCPCredentialRepository,
     WorkspaceMCPCredentialRepository,
 )
-from cubebox.services.credential import CredentialService
+from cubeplex.services.credential import CredentialService
 
 _USER_TOKEN_TTL = timedelta(minutes=5)
 _CREDENTIAL_KIND_MCP = "mcp_server"
@@ -4231,7 +4231,7 @@ async def _resolve_token(
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/mcp/runtime.py
+git add backend/cubeplex/mcp/runtime.py
 git commit -m "feat(mcp): add per-(ws, user) DB server loader for runtime"
 ```
 
@@ -4240,12 +4240,12 @@ git commit -m "feat(mcp): add per-(ws, user) DB server loader for runtime"
 ### Task 30: RunManager DB MCP tool assembly
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Test: `backend/tests/unit/test_run_streaming.py`
 
 - [ ] **Step 1: Add a unit test that DB MCP tools are appended per run**
 
-Append a test near the existing `create_cubebox_agent` monkeypatch tests:
+Append a test near the existing `create_cubeplex_agent` monkeypatch tests:
 
 ```python
 # backend/tests/unit/test_run_streaming.py
@@ -4268,15 +4268,15 @@ async def test_run_manager_appends_db_mcp_tools(monkeypatch, fake_app, fake_redi
         assert kwargs["user_id"] == "user-1"
         return [db_echo]
 
-    def fake_create_cubebox_agent(**kwargs):
+    def fake_create_cubeplex_agent(**kwargs):
         captured_tools.extend(t.name for t in kwargs["tools"])
         return _FakeAgent()
 
     monkeypatch.setattr(
-        "cubebox.mcp.runtime.load_db_servers_for_workspace",
+        "cubeplex.mcp.runtime.load_db_servers_for_workspace",
         fake_load_db_servers_for_workspace,
     )
-    monkeypatch.setattr("cubebox.agents.graph.create_cubebox_agent", fake_create_cubebox_agent)
+    monkeypatch.setattr("cubeplex.agents.graph.create_cubeplex_agent", fake_create_cubeplex_agent)
 
     manager = RunManager(
         app=fake_app,
@@ -4297,7 +4297,7 @@ async def test_run_manager_appends_db_mcp_tools(monkeypatch, fake_app, fake_redi
 ```
 
 Adapt fixture names to the existing file; keep the assertion focused on the `tools` list passed
-to `create_cubebox_agent()`.
+to `create_cubeplex_agent()`.
 
 - [ ] **Step 2: Run, expect fail**
 
@@ -4311,13 +4311,13 @@ Expected: fail because `RunManager` has not called `load_db_servers_for_workspac
 - [ ] **Step 3: Wire DB MCP tools in `RunManager`**
 
 In `_execute_run`, after `tools = get_registry().list_tools()` and before
-`create_cubebox_agent(...)`, add:
+`create_cubeplex_agent(...)`, add:
 
 ```python
-from cubebox.credentials.dependencies import build_credential_service
-from cubebox.db.engine import async_session_maker
-from cubebox.mcp.dependencies import build_user_token_signer
-from cubebox.mcp.runtime import load_db_servers_for_workspace
+from cubeplex.credentials.dependencies import build_credential_service
+from cubeplex.db.engine import async_session_maker
+from cubeplex.mcp.dependencies import build_user_token_signer
+from cubeplex.mcp.runtime import load_db_servers_for_workspace
 
 try:
     async with async_session_maker() as mcp_session:
@@ -4341,7 +4341,7 @@ except Exception as exc:
     logger.warning("DB MCP tool assembly failed; continuing without DB MCP tools: {}", exc)
 ```
 
-Keep `create_cubebox_agent()` synchronous and leave its signature unchanged.
+Keep `create_cubeplex_agent()` synchronous and leave its signature unchanged.
 
 - [ ] **Step 4: Run, expect pass**
 
@@ -4364,7 +4364,7 @@ Expected: pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_streaming.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_streaming.py
 git commit -m "feat(mcp): append db-backed MCP tools per run"
 ```
 
@@ -4379,10 +4379,10 @@ git commit -m "feat(mcp): append db-backed MCP tools per run"
 
 ```bash
 cd backend
-grep -n "run_manager.start_run\\|create_cubebox_agent" cubebox/api/routes/v1/conversations.py
+grep -n "run_manager.start_run\\|create_cubeplex_agent" cubeplex/api/routes/v1/conversations.py
 ```
 
-Expected: `run_manager.start_run` is present; `create_cubebox_agent` is absent.
+Expected: `run_manager.start_run` is present; `create_cubeplex_agent` is absent.
 
 - [ ] **Step 2: Run conversation regression tests**
 
@@ -4864,7 +4864,7 @@ async def test_user_scope_only_user_with_cred_sees_tools(
 async def _conversation_tools_for(client, ws_id: str) -> set[str]:
     """Helper: open a conversation and inspect available tools.
 
-    Implementation note: cubebox does not expose a direct "tools list"
+    Implementation note: cubeplex does not expose a direct "tools list"
     endpoint per conversation. Use the SSE stream — first text_delta or
     a debug event reveals the tool set. If the codebase has an internal
     helper (e.g. /debug/tools), use that. Otherwise, send a message
@@ -5102,7 +5102,7 @@ git commit -m "test(mcp): oauth auth_method rejected with 409"
 
 ```python
 # backend/tests/e2e/test_mcp_passthrough.py
-"""credential_scope=none: runtime signs JWT with cubebox identity; reference server verifies claims."""
+"""credential_scope=none: runtime signs JWT with cubeplex identity; reference server verifies claims."""
 
 import os
 
@@ -5115,13 +5115,13 @@ async def test_passthrough_jwt_claims_received_by_server(
     ws_id, user_a_id,
 ) -> None:
     """Use bearer-jwt-verify mode; assert reference server received valid JWT
-    with sub=user_a_id and iss=cubebox.
+    with sub=user_a_id and iss=cubeplex.
 
     Verification path: invoke the `ping` tool via a chat turn; the reference
     server's response embeds the decoded claims, which the agent surfaces
     in tool_result.
     """
-    secret = os.environ["CUBEBOX_AUTH__JWT_SECRET"]
+    secret = os.environ["CUBEPLEX_AUTH__JWT_SECRET"]
     with reference_mcp_server(
         auth_mode="bearer-jwt-verify", jwt_secret=secret,
     ) as srv:
@@ -5148,7 +5148,7 @@ async def test_passthrough_jwt_claims_received_by_server(
         # Reference server's pong response embeds decoded claims as JSON string:
         claims_json = next(r for r in results if "pong" in r)
         assert f'"sub": "{user_a_id}"' in claims_json
-        assert '"iss": "cubebox"' in claims_json
+        assert '"iss": "cubeplex"' in claims_json
 
 
 async def _send_message_capture_tool_results(client, ws_id, message: str) -> list[str]:
@@ -5188,7 +5188,7 @@ async def test_both_sources_load(
     ws_id, monkeypatch,
 ) -> None:
     """Set up a legacy server via config + DB server via API; observe both tools."""
-    # Legacy: set CUBEBOX_MCP__SERVERS via env override or test config
+    # Legacy: set CUBEPLEX_MCP__SERVERS via env override or test config
     # (adapt to project's test config layering — see config.test.yaml)
     legacy_tool_name = "legacy_echo"  # imagine config-loaded server has this tool
     db_tool_name = "echo"
@@ -5218,7 +5218,7 @@ async def _capture_runtime_tools(client, ws_id):
 
 
 def _legacy_configured() -> bool:
-    from cubebox.config import config
+    from cubeplex.config import config
     return bool(config.get("mcp.servers"))
 ```
 
@@ -5380,7 +5380,7 @@ export * from "./types/mcp";
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 ```
 
 - [ ] **Step 5: Commit**
@@ -5628,7 +5628,7 @@ export * from "./api/mcp";
 ```
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build
+cd frontend && pnpm --filter @cubeplex/core build
 ```
 
 - [ ] **Step 3: Commit**
@@ -5858,7 +5858,7 @@ export * from "./stores/workspaceMcpStore";
 ```
 
 ```bash
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 ```
 
 - [ ] **Step 4: Commit**
@@ -5968,7 +5968,7 @@ export function MCPSecretInput({
 // frontend/packages/web/components/mcp/MCPScopeBadge.tsx
 "use client";
 
-import type { MCPCredentialScope } from "@cubebox/core";
+import type { MCPCredentialScope } from "@cubeplex/core";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -6018,7 +6018,7 @@ import type {
   MCPCredentialScope,
   MCPTestConnectionResult,
   MCPTransport,
-} from "@cubebox/core";
+} from "@cubeplex/core";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -6112,8 +6112,8 @@ export function MCPServerForm({
       help: "每个用户填自己的 key",
     },
     none: {
-      title: "Cubebox identity passthrough",
-      help: "不存 key — 由 MCP server 凭你的 cubebox 身份自鉴权",
+      title: "Cubeplex identity passthrough",
+      help: "不存 key — 由 MCP server 凭你的 cubeplex 身份自鉴权",
     },
   };
 
@@ -6302,7 +6302,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CircleDot, Plug } from "lucide-react";
 
-import type { MCPServer } from "@cubebox/core";
+import type { MCPServer } from "@cubeplex/core";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6383,7 +6383,7 @@ export function MCPServerList({
 // frontend/packages/web/components/mcp/MCPToolsTable.tsx
 "use client";
 
-import type { MCPToolEntry } from "@cubebox/core";
+import type { MCPToolEntry } from "@cubeplex/core";
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
@@ -6423,12 +6423,12 @@ export function MCPToolsTable({ tools }: { tools: MCPToolEntry[] }) {
 
 import { useEffect, useState } from "react";
 
-import type { ApiClient, MCPServer } from "@cubebox/core";
+import type { ApiClient, MCPServer } from "@cubeplex/core";
 import {
   wsDeleteMyCredential, wsDeleteWorkspaceCredential,
   wsGetMyCredential, wsGetWorkspaceCredential,
   wsPutMyCredential, wsPutWorkspaceCredential,
-} from "@cubebox/core";
+} from "@cubeplex/core";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6485,7 +6485,7 @@ export function MCPCredentialPanel({
         <CardHeader><CardTitle className="text-base">认证</CardTitle></CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-sm">
-            使用 cubebox 身份认证 — 无需配置 key。
+            使用 cubeplex 身份认证 — 无需配置 key。
           </p>
         </CardContent>
       </Card>
@@ -6573,8 +6573,8 @@ git commit -m "feat(mcp/web): server list + tools accordion + credential panel"
 
 import { useEffect, useState } from "react";
 
-import type { ApiClient, WorkspaceBinding } from "@cubebox/core";
-import { adminGetBindings, adminPutBindings } from "@cubebox/core";
+import type { ApiClient, WorkspaceBinding } from "@cubeplex/core";
+import { adminGetBindings, adminPutBindings } from "@cubeplex/core";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6683,7 +6683,7 @@ export function MCPBindingGrid({ client, serverId, workspaces }: MCPBindingGridP
 
 import { useState } from "react";
 
-import type { MCPServer } from "@cubebox/core";
+import type { MCPServer } from "@cubeplex/core";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -6793,7 +6793,7 @@ git commit -m "feat(mcp/web): bindings grid + promote dialog"
 import { useState } from "react";
 import { CircleDot, RefreshCw, Trash2 } from "lucide-react";
 
-import type { ApiClient, MCPServer } from "@cubebox/core";
+import type { ApiClient, MCPServer } from "@cubeplex/core";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6945,7 +6945,7 @@ git commit -m "feat(mcp/web): MCPServerDetail with tabs (overview/tools/bindings
 import Link from "next/link";
 import { useEffect, useMemo } from "react";
 
-import { createApiClient, useMcpStore } from "@cubebox/core";
+import { createApiClient, useMcpStore } from "@cubeplex/core";
 
 import { Button } from "@/components/ui/button";
 import { MCPServerList } from "@/components/mcp/MCPServerList";
@@ -6988,7 +6988,7 @@ import { useRouter } from "next/navigation";
 
 import { useMemo } from "react";
 
-import { createApiClient, useMcpStore } from "@cubebox/core";
+import { createApiClient, useMcpStore } from "@cubeplex/core";
 
 import { MCPServerForm, type MCPServerFormValues } from "@/components/mcp/MCPServerForm";
 
@@ -7039,8 +7039,8 @@ export default function NewAdminMcpPage() {
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { adminGetServer, createApiClient, useMcpStore, useWorkspaceStore } from "@cubebox/core";
-import type { MCPServer } from "@cubebox/core";
+import { adminGetServer, createApiClient, useMcpStore, useWorkspaceStore } from "@cubeplex/core";
+import type { MCPServer } from "@cubeplex/core";
 
 import { MCPServerDetail } from "@/components/mcp/MCPServerDetail";
 
@@ -7108,7 +7108,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo } from "react";
 
-import { createApiClient, useWorkspaceMcpStore } from "@cubebox/core";
+import { createApiClient, useWorkspaceMcpStore } from "@cubeplex/core";
 
 import { Button } from "@/components/ui/button";
 import { MCPServerList } from "@/components/mcp/MCPServerList";
@@ -7169,7 +7169,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import { useMemo } from "react";
 
-import { createApiClient, useWorkspaceMcpStore, wsTestConnection } from "@cubebox/core";
+import { createApiClient, useWorkspaceMcpStore, wsTestConnection } from "@cubeplex/core";
 
 import { MCPServerForm, type MCPServerFormValues } from "@/components/mcp/MCPServerForm";
 
@@ -7229,8 +7229,8 @@ export default function NewWsMcpPage() {
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
-import { createApiClient, wsGetServer, useWorkspaceMcpStore } from "@cubebox/core";
-import type { MCPServer } from "@cubebox/core";
+import { createApiClient, wsGetServer, useWorkspaceMcpStore } from "@cubeplex/core";
+import type { MCPServer } from "@cubeplex/core";
 
 import { MCPServerDetail } from "@/components/mcp/MCPServerDetail";
 
@@ -7324,7 +7324,7 @@ export async function registerAndGetWorkspace(page: Page): Promise<{ wsId: strin
 
 async function csrf(page: Page): Promise<string> {
   const cookies = await page.context().cookies()
-  return cookies.find((c) => c.name === 'cubebox_csrf')?.value ?? ''
+  return cookies.find((c) => c.name === 'cubeplex_csrf')?.value ?? ''
 }
 
 export async function createWorkspace(page: Page, name: string): Promise<{ id: string }> {
@@ -7475,7 +7475,7 @@ git commit -m "test(mcp/web): playwright e2e for admin + ws MCP flows"
 - [ ] **Step 1: Confirm no stale draft paths or runtime assumptions remain**
 
 ```bash
-rg -n "PHASE[_]B_TODO|PHASE[_]G|await create_cubebox_agent|create_cubebox_agent now per" \
+rg -n "PHASE[_]B_TODO|PHASE[_]G|await create_cubeplex_agent|create_cubeplex_agent now per" \
   docs/superpowers/plans/2026-04-30-m1e4-vault-and-m2-mcp-connectors.md \
   docs/superpowers/specs/2026-04-30-m1e4-vault-and-m2-mcp-connectors-design.md
 ```
@@ -7578,7 +7578,7 @@ Expected: no matches, except legitimate component prop names such as `serverId`.
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 ```
 
 Expected: exit 0.
@@ -7621,7 +7621,7 @@ git commit -m "fix(mcp/web): frontend final integration issues"
 
 ```bash
 rg -n "plaintext|value_encrypted|credential_plaintext|test-secret-value|ghp_|tok" \
-  backend/cubebox backend/tests
+  backend/cubeplex backend/tests
 ```
 
 Expected:
@@ -7646,7 +7646,7 @@ Expected:
 
 ```bash
 cd backend
-env -u CUBEBOX_AUTH__VAULT_KEY uv run pytest tests/e2e/test_app_boot.py -v
+env -u CUBEPLEX_AUTH__VAULT_KEY uv run pytest tests/e2e/test_app_boot.py -v
 ```
 
 Expected: the test that asserts fail-fast on missing vault key passes.
@@ -7675,8 +7675,8 @@ git commit -m "fix(mcp): prevent credential plaintext exposure"
 ```bash
 # Credential Vault master key. Generate with:
 # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# Rotate by setting newest first: CUBEBOX_AUTH__VAULT_KEY=<new>,<old>
-CUBEBOX_AUTH__VAULT_KEY=
+# Rotate by setting newest first: CUBEPLEX_AUTH__VAULT_KEY=<new>,<old>
+CUBEPLEX_AUTH__VAULT_KEY=
 ```
 
 - [ ] **Step 2: Add AGENTS.md backend env note**
@@ -7684,7 +7684,7 @@ CUBEBOX_AUTH__VAULT_KEY=
 Under backend environment variables in `AGENTS.md`, include:
 
 ```markdown
-  - `CUBEBOX_AUTH__VAULT_KEY` — comma-separated Fernet keys; first key encrypts,
+  - `CUBEPLEX_AUTH__VAULT_KEY` — comma-separated Fernet keys; first key encrypts,
     all keys decrypt. Required once Credential Vault is enabled.
 ```
 
@@ -7695,9 +7695,9 @@ Under backend essentials or database notes, include:
 ```markdown
 - Vault rotation:
   - Generate a new Fernet key.
-  - Deploy `CUBEBOX_AUTH__VAULT_KEY=<new>,<old>`.
+  - Deploy `CUBEPLEX_AUTH__VAULT_KEY=<new>,<old>`.
   - Run the key rotation command once it lands.
-  - Deploy `CUBEBOX_AUTH__VAULT_KEY=<new>` only after rotation is verified.
+  - Deploy `CUBEPLEX_AUTH__VAULT_KEY=<new>` only after rotation is verified.
 ```
 
 - [ ] **Step 4: Commit docs/env updates**
@@ -7727,7 +7727,7 @@ Expected: format/lint/type-check/test all pass.
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 pnpm type-check
 pnpm test:e2e
 ```
@@ -7805,12 +7805,12 @@ Write a concise handoff in the PR description or final implementation message:
 
 ## Verification
 - backend: `make check`
-- frontend: `pnpm --filter @cubebox/core build`
+- frontend: `pnpm --filter @cubeplex/core build`
 - frontend: `pnpm type-check`
 - frontend: `pnpm test:e2e`
 
 ## Operational Notes
-- Requires `CUBEBOX_AUTH__VAULT_KEY`.
+- Requires `CUBEPLEX_AUTH__VAULT_KEY`.
 - Existing `config.yaml mcp.servers` remains supported as legacy global tools.
 - OAuth is intentionally rejected with `mcp_oauth_not_implemented`.
 ```

@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { createHmac } from 'node:crypto'
 
 const PASSWORD = 'correcthorsebatterystaple'
-const BACKEND_URL = process.env.CUBEBOX_API_URL ?? 'http://localhost:8033'
+const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8033'
 
 function uniqueEmail(): string {
   return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`

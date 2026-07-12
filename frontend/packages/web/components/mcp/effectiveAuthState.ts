@@ -1,4 +1,4 @@
-import type { MCPEffectiveConnector } from '@cubebox/core'
+import type { MCPEffectiveConnector } from '@cubeplex/core'
 
 export type AuthBandState =
   | { kind: 'hidden' }

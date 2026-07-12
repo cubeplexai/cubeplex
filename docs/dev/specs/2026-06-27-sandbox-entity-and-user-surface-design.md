@@ -60,7 +60,7 @@
 ### 3.1 `UserSandbox` 改动
 
 ```python
-class UserSandbox(CubeboxBase, OrgScopedMixin, table=True):
+class UserSandbox(CubeplexBase, OrgScopedMixin, table=True):
     # ... existing scope / image / lifecycle 字段 ...
 
     # 语义重定义（取值集不变）
@@ -298,7 +298,7 @@ repo 的 `mark_terminated` 加 `clear_sandbox_id` 参数，执行 `UPDATE ... SE
 
 #### `SandboxStatusValue` Literal 补全
 
-`backend/cubebox/api/schemas/sandbox_policy.py:36` 的 `SandboxStatusValue` Literal 当前只含部分状态值。新模型下 `failed` / `kill_pending` 会出现在 status 响应里，Literal 必须补全：
+`backend/cubeplex/api/schemas/sandbox_policy.py:36` 的 `SandboxStatusValue` Literal 当前只含部分状态值。新模型下 `failed` / `kill_pending` 会出现在 status 响应里，Literal 必须补全：
 
 ```python
 SandboxStatusValue = Literal[
@@ -487,7 +487,7 @@ PVC 残留靠运维介入：delete 后 PVC 变 orphan，无任何行引用它。
 
 ## 6. API 路由（ws 用户面）
 
-挂在 `backend/cubebox/api/routes/v1/ws_sandboxes.py`（新文件，prefix `/api/v1/ws/{workspace_id}/sandboxes`）。**完全独立**于 Spec 1 的 admin 路由（CLAUDE.md scope-isolated）。
+挂在 `backend/cubeplex/api/routes/v1/ws_sandboxes.py`（新文件，prefix `/api/v1/ws/{workspace_id}/sandboxes`）。**完全独立**于 Spec 1 的 admin 路由（CLAUDE.md scope-isolated）。
 
 ### 6.1 路由清单
 
@@ -499,7 +499,7 @@ PVC 残留靠运维介入：delete 后 PVC 变 orphan，无任何行引用它。
 
 ### 6.2 响应模型
 
-`backend/cubebox/api/schemas/ws_sandbox.py`：
+`backend/cubeplex/api/schemas/ws_sandbox.py`：
 
 ```python
 class MySandboxOut(BaseModel):
@@ -561,7 +561,7 @@ async def list_my_sandboxes(...) -> list[MySandboxOut]:
 
 ### 6.4 路由实现
 
-**dep 名对齐项目实际**：项目用 `require_member`（返回 `RequestContext`，含 workspace + user）+ `current_active_user`（返回 `User`），不是 spec 之前写的 `get_workspace_for_member` / `get_current_user`。plan 实施时按 `backend/cubebox/auth/dependencies.py` 实际 dep 名对齐。
+**dep 名对齐项目实际**：项目用 `require_member`（返回 `RequestContext`，含 workspace + user）+ `current_active_user`（返回 `User`），不是 spec 之前写的 `get_workspace_for_member` / `get_current_user`。plan 实施时按 `backend/cubeplex/auth/dependencies.py` 实际 dep 名对齐。
 
 ```python
 router = APIRouter(prefix="/sandboxes", tags=["workspace-sandboxes"])
@@ -789,7 +789,7 @@ export async function deleteMySandbox(wsId: string, sandboxId: string) {
 }
 ```
 
-`MySandboxOut` 类型放 `@cubebox/core`。
+`MySandboxOut` 类型放 `@cubeplex/core`。
 
 ### 7.7 删孤儿
 
@@ -871,10 +871,10 @@ E2E 真 Postgres + 真 opensandbox + rustfs。opensandbox 不可达 → `pytest.
 
 ### 新增
 
-- `backend/cubebox/api/routes/v1/ws_sandboxes.py`
-- `backend/cubebox/api/schemas/ws_sandbox.py`（或扩展现有 schema 文件）
-- `backend/cubebox/repositories/user_sandbox.py` 内新增方法（`soft_delete` / `claim_for_provisioning` / `claim_for_kill` / `claim_for_soft_delete` / `get_active_by_scope` 改 WHERE）
-- `backend/cubebox/sandbox/manager.py` 内新增方法（`_provision_new_container` / `_connect_existing` / `_await_provisioning_winner` / `restart_user_sandbox` / `delete_user_sandbox`）+ `build_sandbox_pvc_name` 函数
+- `backend/cubeplex/api/routes/v1/ws_sandboxes.py`
+- `backend/cubeplex/api/schemas/ws_sandbox.py`（或扩展现有 schema 文件）
+- `backend/cubeplex/repositories/user_sandbox.py` 内新增方法（`soft_delete` / `claim_for_provisioning` / `claim_for_kill` / `claim_for_soft_delete` / `get_active_by_scope` 改 WHERE）
+- `backend/cubeplex/sandbox/manager.py` 内新增方法（`_provision_new_container` / `_connect_existing` / `_await_provisioning_winner` / `restart_user_sandbox` / `delete_user_sandbox`）+ `build_sandbox_pvc_name` 函数
 - `backend/scripts/dev/cull_dedicated_sandboxes.py`（部署前 kill 现有 dedicated topic / group-chat 容器，见 §3.3）
 - `frontend/packages/web/components/workspace-settings/SandboxesPanel.tsx`
 - `frontend/packages/web/components/workspace-settings/sandboxes/SandboxCard.tsx`
@@ -886,15 +886,15 @@ E2E 真 Postgres + 真 opensandbox + rustfs。opensandbox 不可达 → `pytest.
 
 ### 修改
 
-- `backend/cubebox/models/user_sandbox.py`（deleted_at + sandbox_id nullable + 唯一约束改 partial WHERE deleted_at IS NULL）
-- `backend/cubebox/sandbox/manager.py`（`_build_user_volume` 签名改 / `get_or_create` 复用 terminated 行 / `_kill_record` 加 clear_sandbox_id + sandbox_id None 守卫 / `touch_active` 加 None 守卫）
-- `backend/cubebox/repositories/user_sandbox.py`（`mark_terminated` 加 clear_sandbox_id / `get_active_by_scope` + `get_resumable_by_scope` 改 WHERE 加 deleted_at IS NULL / `rekey_to_topic` WHERE 加 deleted_at IS NULL + terminated / 新增 claim_* 方法）
-- `backend/cubebox/api/schemas/sandbox_policy.py`（`SandboxStatusValue` Literal 补 `failed` / `kill_pending`）
-- `backend/cubebox/api/routes/v1/ws_sandbox.py` + `ws_browser.py`（status / browser 路由加 sandbox_id None 守卫，terminated 行返回 browser_url=None）
-- `backend/cubebox/streams/run_manager.py`（确认 _resolve_sandbox_target 传 scope 给 manager 不变；SandboxAttachment 已就位 from Spec 1）
+- `backend/cubeplex/models/user_sandbox.py`（deleted_at + sandbox_id nullable + 唯一约束改 partial WHERE deleted_at IS NULL）
+- `backend/cubeplex/sandbox/manager.py`（`_build_user_volume` 签名改 / `get_or_create` 复用 terminated 行 / `_kill_record` 加 clear_sandbox_id + sandbox_id None 守卫 / `touch_active` 加 None 守卫）
+- `backend/cubeplex/repositories/user_sandbox.py`（`mark_terminated` 加 clear_sandbox_id / `get_active_by_scope` + `get_resumable_by_scope` 改 WHERE 加 deleted_at IS NULL / `rekey_to_topic` WHERE 加 deleted_at IS NULL + terminated / 新增 claim_* 方法）
+- `backend/cubeplex/api/schemas/sandbox_policy.py`（`SandboxStatusValue` Literal 补 `failed` / `kill_pending`）
+- `backend/cubeplex/api/routes/v1/ws_sandbox.py` + `ws_browser.py`（status / browser 路由加 sandbox_id None 守卫，terminated 行返回 browser_url=None）
+- `backend/cubeplex/streams/run_manager.py`（确认 _resolve_sandbox_target 传 scope 给 manager 不变；SandboxAttachment 已就位 from Spec 1）
 - `frontend/packages/web/components/workspace-settings/SettingsTabs.tsx`（加 sandboxes entry）
 - `frontend/packages/web/i18n/...`（sandbox.scope.* keys）
-- `@cubebox/core` 类型（MySandboxOut）
+- `@cubeplex/core` 类型（MySandboxOut）
 
 ### 删除
 

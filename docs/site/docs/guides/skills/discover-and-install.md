@@ -5,7 +5,7 @@ title: Discover & Install Skills
 
 # Discover & Install Skills
 
-CubeBox gives you two ways to find and install skills: through natural conversation with the agent, and through the Skills marketplace page.
+CubePlex gives you two ways to find and install skills: through natural conversation with the agent, and through the Skills marketplace page.
 
 ## Discovering skills in chat
 
@@ -75,7 +75,7 @@ When you install a skill:
 2. **Remote skills** are fetched from the registry, validated (the bundle must contain a valid `SKILL.md`), and published into your organization's catalog. The skill then appears as an uploaded skill owned by your org.
 3. An install record is created scoping the skill to your workspace (workspace-private install) or org-wide, depending on how the install was initiated.
 
-If the same remote skill was previously imported at the same version, CubeBox reuses the existing catalog entry instead of creating a duplicate.
+If the same remote skill was previously imported at the same version, CubePlex reuses the existing catalog entry instead of creating a duplicate.
 
 ## Next steps
 

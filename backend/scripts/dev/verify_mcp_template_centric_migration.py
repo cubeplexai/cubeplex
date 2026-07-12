@@ -2,10 +2,10 @@
 
 Usage (inside the worktree backend/, venv active):
     createdb mcp_mig_scratch_91
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch_91 uv run alembic upgrade a687284a937b
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch_91 uv run python scripts/dev/verify_mcp_template_centric_migration.py seed
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch_91 uv run alembic upgrade head
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch_91 uv run python scripts/dev/verify_mcp_template_centric_migration.py check
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch_91 uv run alembic upgrade a687284a937b
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch_91 uv run python scripts/dev/verify_mcp_template_centric_migration.py seed
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch_91 uv run alembic upgrade head
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch_91 uv run python scripts/dev/verify_mcp_template_centric_migration.py check
     dropdb mcp_mig_scratch_91
 """
 
@@ -16,7 +16,7 @@ from urllib.parse import quote_plus
 
 import sqlalchemy as sa
 
-from cubebox.config import config
+from cubeplex.config import config
 
 
 def _engine() -> sa.engine.Engine:
@@ -24,7 +24,7 @@ def _engine() -> sa.engine.Engine:
     port = config.get("database.port", 5432)
     user = config.get("database.user", "postgres")
     password = config.get("database.password", "")
-    name = config.get("database.name", "cubebox")
+    name = config.get("database.name", "cubeplex")
     encoded_password = quote_plus(password)
     url = f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}"
     return sa.create_engine(url)

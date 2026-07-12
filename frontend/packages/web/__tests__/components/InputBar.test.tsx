@@ -17,7 +17,7 @@ const storeMocks = vi.hoisted(() => ({
   state: { isStreaming: false, streamingConversationId: null as string | null },
 }))
 
-vi.mock('@cubebox/core', () => ({
+vi.mock('@cubeplex/core', () => ({
   createApiClient: () => ({
     setWorkspaceId: storeMocks.setWorkspaceId,
   }),

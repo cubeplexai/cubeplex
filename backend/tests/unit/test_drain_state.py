@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubebox.lifecycle.drain import DrainState
+from cubeplex.lifecycle.drain import DrainState
 
 
 def test_initial_state_is_accepting() -> None:

@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 
-import type { ImAccount } from '@cubebox/core'
+import type { ImAccount } from '@cubeplex/core'
 import { RailCard } from '@/components/shared/RailCard'
 import { Avatar } from '@/components/ui/avatar-resolved'
 

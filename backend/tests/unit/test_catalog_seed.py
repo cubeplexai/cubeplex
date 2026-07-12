@@ -9,15 +9,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.mcp._constants import server_url_hash
-from cubebox.mcp.template_seed import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.mcp._constants import server_url_hash
+from cubeplex.mcp.template_seed import (
     CATALOG,
     MCPConnectorTemplateSeedEntry,
     seed_templates,
 )
-from cubebox.models import Credential, MCPConnector, MCPConnectorTemplate
-from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+from cubeplex.models import Credential, MCPConnector, MCPConnectorTemplate
+from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
 
 @pytest.fixture
@@ -188,7 +188,7 @@ async def test_seed_skips_static_oauth_connector_when_env_missing(
 ) -> None:
     # Drop only github's secret env so other DCR-less connectors still seed.
     env = _full_env()
-    env.pop("CUBEBOX_MCP_OAUTH__GITHUB__CLIENT_SECRET")
+    env.pop("CUBEPLEX_MCP_OAUTH__GITHUB__CLIENT_SECRET")
 
     result = await seed_templates(session, backend, get_env=_make_get_env(env))
 
@@ -250,7 +250,7 @@ async def test_seed_persists_tool_citation_defaults(
         MCPConnectorTemplateSeedEntry(
             slug="webtools-test",
             name="WebTools Test",
-            provider="Cubebox",
+            provider="Cubeplex",
             description="test entry",
             server_url="http://example.com/mcp",
             transport="streamable_http",
@@ -343,7 +343,7 @@ def test_webtools_entry_has_web_search_and_web_fetch_citations() -> None:
 
 def test_all_seed_tool_citations_are_valid_citation_configs() -> None:
     """Every tool_citation_defaults entry across CATALOG must be a valid CitationConfig."""
-    from cubebox.middleware.citations.config import CitationConfig
+    from cubeplex.middleware.citations.config import CitationConfig
 
     for entry in CATALOG:
         for tool_name, raw in entry.tool_citation_defaults.items():

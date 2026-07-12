@@ -11,9 +11,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.users import UserManager
-from cubebox.models import ExternalIdentity, Organization, SSOConnection, User
-from cubebox.sso.identity import (
+from cubeplex.auth.users import UserManager
+from cubeplex.models import ExternalIdentity, Organization, SSOConnection, User
+from cubeplex.sso.identity import (
     SSOLoginRejected,
     SSOProvisioningDenied,
     resolve_identity,

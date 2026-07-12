@@ -28,14 +28,14 @@ from cryptography.fernet import Fernet
 from opensandbox.config import ConnectionConfig
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from cubebox.config import config
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models import Organization, Workspace
-from cubebox.models.user import User
-from cubebox.models.user_sandbox import UserSandbox
-from cubebox.repositories.user_sandbox import UserSandboxRepository
-from cubebox.sandbox.local import LocalSandbox
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.config import config
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models import Organization, Workspace
+from cubeplex.models.user import User
+from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.sandbox.local import LocalSandbox
+from cubeplex.sandbox.manager import SandboxManager
 
 pytestmark = pytest.mark.e2e
 
@@ -336,7 +336,7 @@ async def test_browser_endpoint_after_resume(
     or if G11 blocks the pause."""
     # Try to start the browser; if the image doesn't have it, skip — this is
     # documented in spec OQ-3 / browser skill notes and is not a defect.
-    from cubebox.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.opensandbox import OpenSandbox
 
     pre_backend = OpenSandbox(sandbox=sandbox_handle)
     try:

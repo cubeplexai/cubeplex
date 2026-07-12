@@ -4,10 +4,10 @@ from typing import Any
 
 import pytest
 
-from cubebox.llm.errors import CorruptPresetsRowError
-from cubebox.llm.snapshot import ModelPreset, load_llm_snapshot
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.models.provider import Model, Provider
+from cubeplex.llm.errors import CorruptPresetsRowError
+from cubeplex.llm.snapshot import ModelPreset, load_llm_snapshot
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.provider import Model, Provider
 
 
 def _presets_value(primary: str = "acme/m1", default: str = "pro") -> dict[str, Any]:

@@ -1,10 +1,10 @@
 # Admin Trace Viewer
 
 A trace browsing UI inside the org-admin console that reads from the same
-Grafana Tempo instance cubebox already exports OTLP spans to. Org admins
+Grafana Tempo instance cubeplex already exports OTLP spans to. Org admins
 can filter their org's traces by workspace, user, conversation, run id,
 model, and time window, drill into a span tree, and inspect LLM
-request/response payloads — without leaving cubebox or learning TraceQL.
+request/response payloads — without leaving cubeplex or learning TraceQL.
 
 The reference implementation `~/cubetrace` (Traceloop-shape + Elasticsearch)
 is **design reference only** — its layout, span-row treatment, and
@@ -14,9 +14,9 @@ collapsible LLM cards are worth lifting; the code is not.
 
 ## Why
 
-Tempo's Grafana panel cannot filter by cubebox business identifiers in a
+Tempo's Grafana panel cannot filter by cubeplex business identifiers in a
 usable way — TraceQL works, but `{ span.cubepi.metadata.workspace_id="ws-…" }`
-is not a UX an org admin will type. Meanwhile every cubebox trace already
+is not a UX an org admin will type. Meanwhile every cubeplex trace already
 carries the right attributes (`cubepi.metadata.{org_id, workspace_id,
 user_id, conversation_id}`, `cubepi.run_id`, full `cubepi.llm.raw_request`
 and `raw_response`), so a thin admin UI in front of Tempo is enough.
@@ -51,14 +51,14 @@ Out (deferred):
 - The acting user's `org_id` is taken from the session — never from a
   query param.
 - Every TraceQL we send to Tempo is wrapped in
-  `{ resource.service.name="cubebox" && span.cubepi.metadata.org_id="<session_org>" && (…user filters…) }`.
+  `{ resource.service.name="cubeplex" && span.cubepi.metadata.org_id="<session_org>" && (…user filters…) }`.
 - Every detail response is double-checked server-side: if any span in the
   returned trace has a `cubepi.metadata.org_id` attribute that does not
   match the session org, return `404`. (Defence in depth — TraceQL is
   the primary gate, this catches a misconfigured exporter.)
 - Traces with **no** `cubepi.metadata.org_id` attribute are invisible to
   admin trace viewer regardless of who is logged in — they're either
-  pre-instrumentation legacy spans or non-cubebox services that happen to
+  pre-instrumentation legacy spans or non-cubeplex services that happen to
   share the Tempo tenant.
 
 ---
@@ -89,13 +89,13 @@ not configured for this deployment.
 
 ### Files
 
-- `backend/cubebox/api/routes/v1/admin_traces.py` — three routes (below).
-- `backend/cubebox/services/tempo_client.py` — async httpx client that
+- `backend/cubeplex/api/routes/v1/admin_traces.py` — three routes (below).
+- `backend/cubeplex/services/tempo_client.py` — async httpx client that
   wraps Tempo's `/api/search`, `/api/search/tag/{name}/values`, and
   `/api/traces/{id}`. Builds TraceQL strings, parses OTLP JSON into the
   pydantic models the route returns. **This file is the schema mapping**
   — there is no separate mapping doc.
-- `backend/cubebox/schemas/trace.py` — pydantic response models
+- `backend/cubeplex/schemas/trace.py` — pydantic response models
   (`TraceSummary`, `TraceDetail`, `SpanNode`, `LlmCallPayload`, …).
 
 ### Routes
@@ -113,7 +113,7 @@ stabilise.
 
 Every filter value is escape-checked before being embedded in the
 TraceQL — values containing `"`, `\`, newline, or NUL are rejected with
-a 400. cubebox business identifiers are well-formed slugs that never
+a 400. cubeplex business identifiers are well-formed slugs that never
 contain these characters; rejecting is safer than backslash-escaping
 because it leaves no ambiguity at the parser layer.
 

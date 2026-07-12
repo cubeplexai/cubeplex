@@ -4,7 +4,7 @@
  * OAuth return page (popup side).
  * Spec: docs/superpowers/specs/2026-05-16-mcp-install-auth-handoff-spec.md §5.6.
  *
- * - Posts a typed message on BroadcastChannel('cubebox-mcp-oauth'), then
+ * - Posts a typed message on BroadcastChannel('cubeplex-mcp-oauth'), then
  *   closes itself after a 250ms grace period.
  * - If `state` is missing entirely (the genuinely-unrecoverable path),
  *   renders a static fallback and DOES NOT broadcast or auto-close.
@@ -13,7 +13,7 @@
 import React, { useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-const CHANNEL_NAME = 'cubebox-mcp-oauth'
+const CHANNEL_NAME = 'cubeplex-mcp-oauth'
 
 export default function OAuthReturnPage(): React.ReactElement {
   const params = useSearchParams()

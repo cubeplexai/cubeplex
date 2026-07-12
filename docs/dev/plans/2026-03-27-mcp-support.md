@@ -17,9 +17,9 @@
 | `backend/pyproject.toml` | Modify | Add `langchain-mcp-adapters` dependency |
 | `backend/config.yaml` | Modify | Update `mcp` section: `servers: {}` (dict, not list) |
 | `backend/config.development.yaml` | Modify | Add webtools example server config |
-| `backend/cubebox/mcp/client.py` | Rewrite | `MCPManager` — build connection params, load & filter tools, per-server graceful errors |
-| `backend/cubebox/tools/registry.py` | Modify | Accept `BaseTool` instead of `StructuredTool` (MCP tools are `BaseTool` subclasses) |
-| `backend/cubebox/tools/__init__.py` | Modify | Call `MCPManager.load_tools()` at init if MCP enabled; wrap in try/except |
+| `backend/cubeplex/mcp/client.py` | Rewrite | `MCPManager` — build connection params, load & filter tools, per-server graceful errors |
+| `backend/cubeplex/tools/registry.py` | Modify | Accept `BaseTool` instead of `StructuredTool` (MCP tools are `BaseTool` subclasses) |
+| `backend/cubeplex/tools/__init__.py` | Modify | Call `MCPManager.load_tools()` at init if MCP enabled; wrap in try/except |
 | `backend/tests/e2e/test_mcp.py` | Create | Tests: disabled MCP skips loading; unreachable server fails gracefully; tool filtering works |
 
 ---
@@ -108,7 +108,7 @@ The `dynaconf_merge: true` at the top of `config.development.yaml` ensures this 
 ```bash
 cd backend
 uv run python -c "
-from cubebox.config import config
+from cubeplex.config import config
 import os; os.environ['ENV_FOR_DYNACONF'] = 'development'
 print(config.get('mcp.enabled'))
 print(list(config.get('mcp.servers', {}).keys()))
@@ -133,13 +133,13 @@ git commit -m "config: update MCP section format and add webtools example server
 ### Task 3: Update `ToolRegistry` to accept `BaseTool`
 
 **Files:**
-- Modify: `backend/cubebox/tools/registry.py`
+- Modify: `backend/cubeplex/tools/registry.py`
 
 MCP tools returned by `langchain-mcp-adapters` are `BaseTool` instances (the base class). The registry currently accepts `StructuredTool` which is a subclass, causing a type mismatch.
 
 - [ ] **Step 1: Update the registry to use `BaseTool`**
 
-Replace the entire content of `backend/cubebox/tools/registry.py` with:
+Replace the entire content of `backend/cubeplex/tools/registry.py` with:
 
 ```python
 """Tool Registry
@@ -202,7 +202,7 @@ class ToolRegistry:
 
 ```bash
 cd backend
-uv run mypy cubebox/
+uv run mypy cubeplex/
 ```
 
 Expected: `Success: no issues found in N source files`
@@ -210,7 +210,7 @@ Expected: `Success: no issues found in N source files`
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/tools/registry.py
+git add cubeplex/tools/registry.py
 git commit -m "refactor: ToolRegistry accepts BaseTool to support MCP tools"
 ```
 
@@ -219,7 +219,7 @@ git commit -m "refactor: ToolRegistry accepts BaseTool to support MCP tools"
 ### Task 4: Implement `MCPManager`
 
 **Files:**
-- Rewrite: `backend/cubebox/mcp/client.py`
+- Rewrite: `backend/cubeplex/mcp/client.py`
 
 - [ ] **Step 1: Write the failing test first**
 
@@ -230,7 +230,7 @@ Create `backend/tests/e2e/test_mcp.py`:
 
 import pytest
 
-from cubebox.mcp.client import MCPManager
+from cubeplex.mcp.client import MCPManager
 
 
 class TestMCPManager:
@@ -281,7 +281,7 @@ class TestMCPManager:
         mock_client = MagicMock()
         mock_client.get_tools = AsyncMock(return_value=[tool_a, tool_b])
 
-        import cubebox.mcp.client as mcp_module
+        import cubeplex.mcp.client as mcp_module
         monkeypatch.setattr(mcp_module, "MultiServerMCPClient", lambda params: mock_client)
 
         manager = MCPManager(
@@ -311,7 +311,7 @@ class TestMCPManager:
         mock_client = MagicMock()
         mock_client.get_tools = AsyncMock(return_value=[tool_a, tool_b])
 
-        import cubebox.mcp.client as mcp_module
+        import cubeplex.mcp.client as mcp_module
         monkeypatch.setattr(mcp_module, "MultiServerMCPClient", lambda params: mock_client)
 
         manager = MCPManager(
@@ -339,7 +339,7 @@ Expected: `ImportError` or `AttributeError` — `MCPManager` doesn't accept `ser
 
 - [ ] **Step 3: Implement `MCPManager`**
 
-Replace the entire content of `backend/cubebox/mcp/client.py` with:
+Replace the entire content of `backend/cubeplex/mcp/client.py` with:
 
 ```python
 """MCP (Model Context Protocol) Client
@@ -425,7 +425,7 @@ class MCPManager:
 
     def _load_from_config(self) -> None:
         """Load server configs from dynaconf config."""
-        from cubebox.config import config
+        from cubeplex.config import config
 
         servers = config.get("mcp.servers", {})
         if not servers:
@@ -493,7 +493,7 @@ Expected: all 4 tests pass.
 
 ```bash
 cd backend
-uv run mypy cubebox/
+uv run mypy cubeplex/
 ```
 
 Expected: `Success: no issues found in N source files`
@@ -501,7 +501,7 @@ Expected: `Success: no issues found in N source files`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/mcp/client.py tests/e2e/test_mcp.py
+git add cubeplex/mcp/client.py tests/e2e/test_mcp.py
 git commit -m "feat: implement MCPManager with per-server graceful error handling"
 ```
 
@@ -510,11 +510,11 @@ git commit -m "feat: implement MCPManager with per-server graceful error handlin
 ### Task 5: Load MCP tools at startup
 
 **Files:**
-- Modify: `backend/cubebox/tools/__init__.py`
+- Modify: `backend/cubeplex/tools/__init__.py`
 
 - [ ] **Step 1: Update `tools/__init__.py` to load MCP tools**
 
-Replace the entire content of `backend/cubebox/tools/__init__.py` with:
+Replace the entire content of `backend/cubeplex/tools/__init__.py` with:
 
 ```python
 """Tool system module"""
@@ -525,8 +525,8 @@ import nest_asyncio
 from langchain_core.tools import BaseTool
 from loguru import logger
 
-from cubebox.tools.builtin.calculator import create_calculator_tool
-from cubebox.tools.registry import ToolRegistry
+from cubeplex.tools.builtin.calculator import create_calculator_tool
+from cubeplex.tools.registry import ToolRegistry
 
 # Create global tool registry instance
 _registry = ToolRegistry()
@@ -544,13 +544,13 @@ def _load_mcp_tools() -> None:
     prevent the system from starting.
     """
     try:
-        from cubebox.config import config
+        from cubeplex.config import config
 
         if not config.get("mcp.enabled", False):
             logger.debug("MCP is disabled, skipping MCP tool loading")
             return
 
-        from cubebox.mcp.client import MCPManager
+        from cubeplex.mcp.client import MCPManager
 
         nest_asyncio.apply()
         manager = MCPManager()
@@ -588,7 +588,7 @@ __all__ = ["ToolRegistry", "get_registry"]
 
 ```bash
 cd backend
-uv run mypy cubebox/
+uv run mypy cubeplex/
 ```
 
 Expected: `Success: no issues found in N source files`
@@ -600,7 +600,7 @@ The test environment uses `ENV_FOR_DYNACONF=test`. Confirm it imports cleanly:
 ```bash
 cd backend
 ENV_FOR_DYNACONF=test uv run python -c "
-from cubebox.tools import get_registry
+from cubeplex.tools import get_registry
 r = get_registry()
 print('Tools loaded:', r.list_tool_names())
 "
@@ -623,7 +623,7 @@ Expected: all tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/tools/__init__.py
+git add cubeplex/tools/__init__.py
 git commit -m "feat: load MCP tools into ToolRegistry at startup"
 ```
 
@@ -645,7 +645,7 @@ Expected: all checks pass (format, lint, mypy, pytest).
 ```bash
 cd backend
 ENV_FOR_DYNACONF=development uv run python -c "
-from cubebox.config import config
+from cubeplex.config import config
 servers = config.get('mcp.servers', {})
 for name, cfg in servers.items():
     print(f'{name}: transport={cfg[\"transport\"]}, tools={cfg.get(\"tools\", \"all\")}')
@@ -673,7 +673,7 @@ git commit -m "chore: mcp support final cleanup"
 | `pyproject.toml` | `langchain-mcp-adapters>=0.1.0` added |
 | `config.yaml` | `mcp.servers` changed from `[]` to `{}` |
 | `config.development.yaml` | webtools example server with `web_search`, `web_fetch` tools |
-| `cubebox/tools/registry.py` | Uses `BaseTool` instead of `StructuredTool` |
-| `cubebox/mcp/client.py` | Full `MCPManager` implementation |
-| `cubebox/tools/__init__.py` | Calls `_load_mcp_tools()` at init |
+| `cubeplex/tools/registry.py` | Uses `BaseTool` instead of `StructuredTool` |
+| `cubeplex/mcp/client.py` | Full `MCPManager` implementation |
+| `cubeplex/tools/__init__.py` | Calls `_load_mcp_tools()` at init |
 | `tests/e2e/test_mcp.py` | 4 tests covering disabled/unreachable/filter/all-tools cases |

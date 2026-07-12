@@ -20,7 +20,7 @@ pytestmark = pytest.mark.real_llm
 def _flatten_content(evt: dict) -> str:  # type: ignore[type-arg]
     """Extract plain text from a tool_result event's content.
 
-    The cubebox SSE envelope nests the payload inside 'data':
+    The cubeplex SSE envelope nests the payload inside 'data':
       {'type': 'tool_result', 'data': {'content': '1131', ...}, ...}
     Fall back to top-level 'content' / 'result' for forward-compat and
     handle list-of-blocks from providers that return structured content.
@@ -39,7 +39,7 @@ def _flatten_content(evt: dict) -> str:  # type: ignore[type-arg]
             return "".join(parts)
         return None
 
-    # Prefer data.content (cubebox SSE envelope)
+    # Prefer data.content (cubeplex SSE envelope)
     data = evt.get("data")
     if isinstance(data, dict):
         v = _from_value(data.get("content"))

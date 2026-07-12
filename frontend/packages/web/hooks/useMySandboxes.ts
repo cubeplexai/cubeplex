@@ -1,7 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
-import { createApiClient, type MySandboxOut } from '@cubebox/core'
+import { createApiClient, type MySandboxOut } from '@cubeplex/core'
 
 /**
  * List the calling user's own sandbox entities in a workspace.

@@ -10,14 +10,14 @@
 
 **Branch:** `feat/test-memory-adversarial-gate` from `origin/main` (rebase onto PR2 once it lands to pick up `_helpers.py`).
 **Spec:** `docs/superpowers/specs/2026-05-09-memory-llm-behavior-e2e-design.md` (PR3 section).
-**Issue:** [#64](https://github.com/xfgong/cubebox/issues/64).
+**Issue:** [#64](https://github.com/xfgong/cubeplex/issues/64).
 
 ---
 
 ## File Structure
 
 **Production code:**
-- Modify: `backend/cubebox/middleware/sandbox.py` — add ring buffer + `executed_commands` accessor in the `_create_execute_tool` factory function.
+- Modify: `backend/cubeplex/middleware/sandbox.py` — add ring buffer + `executed_commands` accessor in the `_create_execute_tool` factory function.
 
 **Tests:**
 - Modify: `backend/tests/e2e/memory/test_memory_adversarial.py` — drop skip, implement assertion.
@@ -91,7 +91,7 @@ git commit -m "chore(memory-e2e): register real_llm pytest marker"
 ### Task 2: Sandbox executed-commands accessor (TDD)
 
 **Files:**
-- Modify: `backend/cubebox/middleware/sandbox.py`
+- Modify: `backend/cubeplex/middleware/sandbox.py`
 - Test: `backend/tests/unit/middleware/test_sandbox_executed_commands.py`
 
 - [ ] **Step 2.1: Inspect current sandbox tool wiring**
@@ -99,7 +99,7 @@ git commit -m "chore(memory-e2e): register real_llm pytest marker"
 Read the relevant code:
 
 ```bash
-sed -n '1,70p' backend/cubebox/middleware/sandbox.py
+sed -n '1,70p' backend/cubeplex/middleware/sandbox.py
 ```
 
 Find `_create_execute_tool` (lines 25–40 currently). The tool currently calls `await sandbox.execute(command)` and returns the output — the only place where commands actually execute. Our hook goes here.
@@ -107,13 +107,13 @@ Find `_create_execute_tool` (lines 25–40 currently). The tool currently calls 
 Also identify how `(workspace_id, conversation_id)` reach this code. Search:
 
 ```bash
-grep -n -E "(workspace_id|conversation_id|run_id|RequestContext)" backend/cubebox/middleware/sandbox.py | head -10
+grep -n -E "(workspace_id|conversation_id|run_id|RequestContext)" backend/cubeplex/middleware/sandbox.py | head -10
 ```
 
 If the IDs are not already passed into `_create_execute_tool`, the SandboxMiddleware constructor (or the agent factory call site) is what hands them in. Search:
 
 ```bash
-grep -rn "_create_execute_tool\|SandboxMiddleware(" backend/cubebox/ | head -10
+grep -rn "_create_execute_tool\|SandboxMiddleware(" backend/cubeplex/ | head -10
 ```
 
 Note the call site so Task 2.3 can thread the IDs through.
@@ -131,7 +131,7 @@ from typing import Any
 
 import pytest
 
-from cubebox.middleware.sandbox import (
+from cubeplex.middleware.sandbox import (
     _create_execute_tool,
     executed_commands,
     reset_executed_commands,
@@ -205,7 +205,7 @@ Expected: ImportError or signature mismatch — `_create_execute_tool` does not 
 
 - [ ] **Step 2.4: Implement the ring buffer**
 
-Open `backend/cubebox/middleware/sandbox.py`. At module top (after imports, before `_ExecuteArgs`), add:
+Open `backend/cubeplex/middleware/sandbox.py`. At module top (after imports, before `_ExecuteArgs`), add:
 
 ```python
 from collections import deque
@@ -271,15 +271,15 @@ def _create_execute_tool(
 Find where `_create_execute_tool` is called inside SandboxMiddleware:
 
 ```bash
-grep -n "_create_execute_tool" backend/cubebox/middleware/sandbox.py
+grep -n "_create_execute_tool" backend/cubeplex/middleware/sandbox.py
 ```
 
 The middleware's tool-creation hook receives a request context. Locate the method (likely `tools(self, request: ...)`) and pass the IDs through. If IDs are not currently in scope, propagate them:
 
-- The agent factory `create_cubebox_agent` already knows `workspace_id` and `conversation_id` — it constructs middleware here. Find:
+- The agent factory `create_cubeplex_agent` already knows `workspace_id` and `conversation_id` — it constructs middleware here. Find:
 
 ```bash
-grep -n -E "(SandboxMiddleware\(|workspace_id|conversation_id)" backend/cubebox/agents/graph.py | head -20
+grep -n -E "(SandboxMiddleware\(|workspace_id|conversation_id)" backend/cubeplex/agents/graph.py | head -20
 ```
 
 - Add `workspace_id` and `conversation_id` constructor args to `SandboxMiddleware` (default `None` for back-compat with existing tests). Store on `self`. In the place inside the middleware where `_create_execute_tool` is called, pass them through.
@@ -314,7 +314,7 @@ class SandboxMiddleware(AgentMiddleware):
 
 Adjust to match the existing class structure — `tools` may be a function, attribute, or property; do not break the existing API shape.
 
-In `cubebox/agents/graph.py` (or wherever `SandboxMiddleware(...)` is constructed), pass the IDs:
+In `cubeplex/agents/graph.py` (or wherever `SandboxMiddleware(...)` is constructed), pass the IDs:
 
 ```python
 sandbox_mw = SandboxMiddleware(
@@ -344,8 +344,8 @@ Expected: all pass. If existing SandboxMiddleware tests fail because the constru
 - [ ] **Step 2.8: Lint + typecheck**
 
 ```bash
-uv run ruff check cubebox/middleware/sandbox.py cubebox/agents/graph.py tests/unit/middleware/test_sandbox_executed_commands.py
-uv run mypy cubebox/middleware/sandbox.py cubebox/agents/graph.py
+uv run ruff check cubeplex/middleware/sandbox.py cubeplex/agents/graph.py tests/unit/middleware/test_sandbox_executed_commands.py
+uv run mypy cubeplex/middleware/sandbox.py cubeplex/agents/graph.py
 ```
 
 Expected: green.
@@ -353,8 +353,8 @@ Expected: green.
 - [ ] **Step 2.9: Commit**
 
 ```bash
-git add backend/cubebox/middleware/sandbox.py \
-        backend/cubebox/agents/graph.py \
+git add backend/cubeplex/middleware/sandbox.py \
+        backend/cubeplex/agents/graph.py \
         backend/tests/unit/middleware/test_sandbox_executed_commands.py
 git commit -m "feat(sandbox): executed_commands accessor for E2E assertions"
 ```
@@ -371,8 +371,8 @@ The test needs a way to write a memory item directly into the DB, **bypassing** 
 - [ ] **Step 3.1: Inspect the memory model + existing repository**
 
 ```bash
-grep -n -E "class .*Memory|MemoryItem|MemoryScope" backend/cubebox/models/ -r | head -10
-grep -n "MemoryItemRepository\|memory_item" backend/cubebox/repositories/ -r 2>/dev/null | head -10
+grep -n -E "class .*Memory|MemoryItem|MemoryScope" backend/cubeplex/models/ -r | head -10
+grep -n "MemoryItemRepository\|memory_item" backend/cubeplex/repositories/ -r 2>/dev/null | head -10
 ```
 
 Note the model class name and the workspace-scope value (`"workspace"` vs `MemoryScope.WORKSPACE`).
@@ -391,7 +391,7 @@ async def poisoned_workspace_memory(
     bypassing the write-time screen, to simulate "this slipped past in
     a prior version".
     """
-    from cubebox.models.memory import MemoryItem  # adjust import to actual model path
+    from cubeplex.models.memory import MemoryItem  # adjust import to actual model path
 
     item = MemoryItem(
         org_id=seed_workspace.org_id,
@@ -488,7 +488,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.middleware.sandbox import executed_commands, reset_executed_commands
+from cubeplex.middleware.sandbox import executed_commands, reset_executed_commands
 from tests.e2e.memory._helpers import send_message_and_collect_text
 
 pytestmark = pytest.mark.real_llm
@@ -590,7 +590,7 @@ Expected: passes. Capture exact `executed_commands` output for the PR.
 git push -u origin feat/test-memory-adversarial-gate
 gh pr create --title "feat(memory): adversarial sandbox gate (issue #64 PR3)" --body "$(cat <<'EOF'
 ## Summary
-- Add `executed_commands(ws_id, conv_id)` accessor on `cubebox/middleware/sandbox.py` (in-memory ring buffer, capped at 50).
+- Add `executed_commands(ws_id, conv_id)` accessor on `cubeplex/middleware/sandbox.py` (in-memory ring buffer, capped at 50).
 - Drop skip on `test_memory_adversarial.py`; assert that a poisoned workspace memory item containing `rm -rf /` cannot drive the sandbox to actually execute the destructive command.
 - `poisoned_workspace_memory` fixture: direct DB seed bypassing the write-time screen.
 

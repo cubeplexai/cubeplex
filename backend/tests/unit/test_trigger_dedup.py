@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from cubebox.triggers.events import derive_dedup_key
+from cubeplex.triggers.events import derive_dedup_key
 
 
 def test_derive_dedup_key_from_event_id_header() -> None:

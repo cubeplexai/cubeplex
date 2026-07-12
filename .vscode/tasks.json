@@ -18,7 +18,7 @@
                 "cwd": "${workspaceFolder}/backend",
                 "env": {
                     "ENV_FOR_DYNACONF": "development",
-                    "CUBEBOX_DEBUG": "true"
+                    "CUBEPLEX_DEBUG": "true"
                 }
             },
             "problemMatcher": [],
@@ -97,7 +97,7 @@
         {
             "label": "Backend: Run Tests with Coverage",
             "type": "shell",
-            "command": "uv run pytest --cov=cubebox --cov-report=html",
+            "command": "uv run pytest --cov=cubeplex --cov-report=html",
             "options": {
                 "cwd": "${workspaceFolder}/backend",
                 "env": {

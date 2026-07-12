@@ -9,7 +9,7 @@ import pytest
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 
-from cubebox.middleware.artifacts import ArtifactMiddleware, _SaveArtifactArgs
+from cubeplex.middleware.artifacts import ArtifactMiddleware, _SaveArtifactArgs
 
 # ---------------------------------------------------------------------------
 # Helpers for transform_system_prompt tests
@@ -206,14 +206,14 @@ async def test_tool_execute_creates_artifact_in_db() -> None:
     # The lazy imports inside _execute resolve through the original modules;
     # patch at the source locations used by those lazy imports.
     with (
-        patch("cubebox.db.engine.async_session_maker", return_value=mock_session),
-        patch("cubebox.repositories.ArtifactRepository", return_value=mock_repo),
+        patch("cubeplex.db.engine.async_session_maker", return_value=mock_session),
+        patch("cubeplex.repositories.ArtifactRepository", return_value=mock_repo),
         patch(
-            "cubebox.repositories.ArtifactVersionRepository",
+            "cubeplex.repositories.ArtifactVersionRepository",
             return_value=mock_version_repo,
         ),
         patch(
-            "cubebox.objectstore.get_objectstore_client",
+            "cubeplex.objectstore.get_objectstore_client",
             side_effect=RuntimeError("no objectstore in unit test"),
         ),
     ):
@@ -270,14 +270,14 @@ async def test_tool_execute_updates_existing_artifact() -> None:
     mock_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("cubebox.db.engine.async_session_maker", return_value=mock_session),
-        patch("cubebox.repositories.ArtifactRepository", return_value=mock_repo),
+        patch("cubeplex.db.engine.async_session_maker", return_value=mock_session),
+        patch("cubeplex.repositories.ArtifactRepository", return_value=mock_repo),
         patch(
-            "cubebox.repositories.ArtifactVersionRepository",
+            "cubeplex.repositories.ArtifactVersionRepository",
             return_value=mock_version_repo,
         ),
         patch(
-            "cubebox.objectstore.get_objectstore_client",
+            "cubeplex.objectstore.get_objectstore_client",
             side_effect=RuntimeError("no objectstore"),
         ),
     ):

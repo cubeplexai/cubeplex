@@ -8,7 +8,7 @@ import {
   type CitationConfigJSON,
   type MCPConnector,
   type MCPToolEntry,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { MasterDetailList } from './detail/MasterDetailList'
 import { MCPCitationEditor } from './MCPCitationEditor'

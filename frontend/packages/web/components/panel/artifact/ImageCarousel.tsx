@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import { buildPreviewUrl } from './previewUtils'
 import { ImageViewer } from '@/components/shared/previews'
 

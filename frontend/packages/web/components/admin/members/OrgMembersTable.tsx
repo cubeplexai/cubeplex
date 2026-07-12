@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Trash2 } from 'lucide-react'
-import { createApiClient, useMemberStore, type OrgMember } from '@cubebox/core'
+import { createApiClient, useMemberStore, type OrgMember } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {

@@ -4,7 +4,7 @@ Spec: [../specs/2026-06-23-fork-conversation-design.md](../specs/2026-06-23-fork
 
 Branch: `feat/2026-06-23-fork-conversation`
 Worktree: `.worktrees/feat/2026-06-23-fork-conversation/` (slot 78,
-ports 8078/3078, DB `cubebox_feat_2026_06_23_fork_conversation`)
+ports 8078/3078, DB `cubeplex_feat_2026_06_23_fork_conversation`)
 
 Single PR. The frontend touches one new affordance and three files; the
 backend adds one route + one repo method. Splitting would mean shipping
@@ -12,7 +12,7 @@ a backend endpoint nothing calls — not worth the review overhead.
 
 ## Step 1 — Backend: repository method
 
-File: `backend/cubebox/repositories/conversation.py`
+File: `backend/cubeplex/repositories/conversation.py`
 
 Add `ConversationRepository.fork(src: Conversation, *, after_run_id: str) -> Conversation`:
 
@@ -22,7 +22,7 @@ Add `ConversationRepository.fork(src: Conversation, *, after_run_id: str) -> Con
 3. `async with init_checkpointer() as cp: await cp.fork(src.id, new_id,
    after_run_id=after_run_id, metadata={"source_conversation_id": src.id,
    "forked_by_user_id": self.user_id, "forked_at": utc_isoformat(now())})`.
-4. Catch `cubepi.RunNotCompletedError` → re-raise as a typed cubebox
+4. Catch `cubepi.RunNotCompletedError` → re-raise as a typed cubeplex
    exception the route maps to 400. Same for `ThreadNotFoundError` and
    `ThreadAlreadyExistsError`.
 5. Insert `Conversation(id=new_id, ...)` carrying over fields per spec.
@@ -41,7 +41,7 @@ for `TitleGenerationError`.
 
 ## Step 2 — Backend: route
 
-File: `backend/cubebox/api/routes/v1/conversations.py`
+File: `backend/cubeplex/api/routes/v1/conversations.py`
 
 Insert after the existing `PATCH /{id}/pin` block (so the file's
 ordering — list/create/get → mutations → message ops → run ops — stays
@@ -183,13 +183,13 @@ before writing). Keys:
 
 ```bash
 cd backend
-uv run mypy cubebox 2>&1 | tee tmp/mypy.log | tail -3
+uv run mypy cubeplex 2>&1 | tee tmp/mypy.log | tail -3
 uv run pytest tests/e2e/test_conversation_fork.py --no-cov 2>&1 | tee tmp/fork.log | tail -10
 
 cd ../frontend
-pnpm --filter @cubebox/core build 2>&1 | tee ../tmp/core-build.log | tail -3
-pnpm --filter @cubebox/web lint 2>&1 | tee ../tmp/lint.log | tail -5
-pnpm --filter @cubebox/web typecheck 2>&1 | tee ../tmp/tsc.log | tail -3
+pnpm --filter @cubeplex/core build 2>&1 | tee ../tmp/core-build.log | tail -3
+pnpm --filter @cubeplex/web lint 2>&1 | tee ../tmp/lint.log | tail -5
+pnpm --filter @cubeplex/web typecheck 2>&1 | tee ../tmp/tsc.log | tail -3
 ```
 
 Manual smoke (optional, gated on time): start the dev server on this

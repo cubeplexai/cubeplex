@@ -29,8 +29,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cubebox.mcp.template_seed import CATALOG, MCPConnectorTemplateSeedEntry
-from cubebox.middleware.citations.config import CitationConfig
+from cubeplex.mcp.template_seed import CATALOG, MCPConnectorTemplateSeedEntry
+from cubeplex.middleware.citations.config import CitationConfig
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "search_responses"
 

@@ -20,35 +20,35 @@
 
 **Backend — created**
 - `backend/alembic/versions/<rev>_add_attachment_cols_to_im_run_queue.py` — adds BOTH `attachment_refs` and `attachment_ids`.
-- `backend/cubebox/im/inbound_attachments.py` — `resolve_inbound_attachments` factory + per-platform download dispatch `download_for(platform, client, ref, message_id)`.
+- `backend/cubeplex/im/inbound_attachments.py` — `resolve_inbound_attachments` factory + per-platform download dispatch `download_for(platform, client, ref, message_id)`.
 - `backend/tests/unit/test_inbound_attachment_ref.py`
 - `backend/tests/e2e/test_im_inbound_attachments.py`
 
 **Backend — modified**
-- `backend/cubebox/im/types.py:114` — `InboundAttachmentRef` dataclass; `InboundEvent.attachments`.
-- `backend/cubebox/models/im_connector.py:142` — `attachment_refs` + `attachment_ids` JSON columns.
-- `backend/cubebox/im/inbound.py:167` — serialize `event.attachments` → `attachment_refs`.
-- `backend/cubebox/im/worker.py:55,149,164` — accept injected `resolve_inbound_attachments`; resolve-before-start_run with persisted-id idempotency; pass `attachments`.
-- `backend/cubebox/im/runtime.py:134-212` — construct `resolve_inbound_attachments` closure (scoped `AttachmentService`); pass into `IMRunQueueWorker`.
-- `backend/cubebox/im/feishu/connector.py:98,121` — parse `image`/`file`/`audio`/`media` into refs (`handle = file_key`).
-- `backend/cubebox/im/slack/connector.py:60,69` — admit `subtype=="file_share"` + no-subtype-with-`files[]`; parse `files[]` into refs.
-- `backend/cubebox/im/discord/connector.py:84,107` — read `message.attachments`; allow attachment-only messages.
-- `backend/cubebox/config*.yaml` (or wherever `attachments.allowed_mime_types` is defined) — extend to cover IM doc/image/archive MIME types.
+- `backend/cubeplex/im/types.py:114` — `InboundAttachmentRef` dataclass; `InboundEvent.attachments`.
+- `backend/cubeplex/models/im_connector.py:142` — `attachment_refs` + `attachment_ids` JSON columns.
+- `backend/cubeplex/im/inbound.py:167` — serialize `event.attachments` → `attachment_refs`.
+- `backend/cubeplex/im/worker.py:55,149,164` — accept injected `resolve_inbound_attachments`; resolve-before-start_run with persisted-id idempotency; pass `attachments`.
+- `backend/cubeplex/im/runtime.py:134-212` — construct `resolve_inbound_attachments` closure (scoped `AttachmentService`); pass into `IMRunQueueWorker`.
+- `backend/cubeplex/im/feishu/connector.py:98,121` — parse `image`/`file`/`audio`/`media` into refs (`handle = file_key`).
+- `backend/cubeplex/im/slack/connector.py:60,69` — admit `subtype=="file_share"` + no-subtype-with-`files[]`; parse `files[]` into refs.
+- `backend/cubeplex/im/discord/connector.py:84,107` — read `message.attachments`; allow attachment-only messages.
+- `backend/cubeplex/config*.yaml` (or wherever `attachments.allowed_mime_types` is defined) — extend to cover IM doc/image/archive MIME types.
 
 ### PR2 — Outbound
 
 **Backend — created**
-- `backend/cubebox/im/artifact_delivery.py` — pure `artifact_outbound_kind(artifact_type)` + `outbound_size_cap(platform)`.
+- `backend/cubeplex/im/artifact_delivery.py` — pure `artifact_outbound_kind(artifact_type)` + `outbound_size_cap(platform)`.
 - `backend/tests/unit/test_artifact_delivery.py`
 - `backend/tests/e2e/test_im_outbound_files.py`
 
 **Backend — modified**
-- `backend/cubebox/im/types.py` — new `OutboundConnector` bound-connector Protocol covering the 3 methods `artifacts.py` calls on `connector` (`send_file` + `upload_image` + `send_to_chat`); Slack/Discord gain `upload_image`→`None`. NOT `registry.py` (that's the stateless `PlatformConnector`).
-- `backend/cubebox/im/{feishu,slack,discord}/connector.py` — `send_file(*, local_path, filename, mime)` impls (bound chat).
-- `backend/cubebox/im/{dingtalk,teams}/connector.py` — `send_file` returns `False`.
-- `backend/cubebox/im/artifacts.py:26-83` — type `connector: OutboundConnector`; add `run_id` + `_file_artifacts` to ctor; extract `download_artifact_to_tempfile(...)`; route `handle()` by `artifact_outbound_kind` (file-kind captured, NOT share-linked); add `deliver_terminal_files()` (Redis `SET NX` → download → size-check → `wait_for(send_file)` → share-link fallback).
-- `backend/cubebox/im/slack/_platform.py:70`, `backend/cubebox/im/discord/_platform.py:77` — construct + pass `IMArtifactDispatcher` (mirror `feishu/_platform.py:71`), incl. `run_id`.
-- `backend/cubebox/im/outbound.py:566-582` — after the terminal `_dispatch_op` **and** `succeeded`-marking, call `self._artifact_dispatcher.deliver_terminal_files()` (guarded on dispatcher present).
+- `backend/cubeplex/im/types.py` — new `OutboundConnector` bound-connector Protocol covering the 3 methods `artifacts.py` calls on `connector` (`send_file` + `upload_image` + `send_to_chat`); Slack/Discord gain `upload_image`→`None`. NOT `registry.py` (that's the stateless `PlatformConnector`).
+- `backend/cubeplex/im/{feishu,slack,discord}/connector.py` — `send_file(*, local_path, filename, mime)` impls (bound chat).
+- `backend/cubeplex/im/{dingtalk,teams}/connector.py` — `send_file` returns `False`.
+- `backend/cubeplex/im/artifacts.py:26-83` — type `connector: OutboundConnector`; add `run_id` + `_file_artifacts` to ctor; extract `download_artifact_to_tempfile(...)`; route `handle()` by `artifact_outbound_kind` (file-kind captured, NOT share-linked); add `deliver_terminal_files()` (Redis `SET NX` → download → size-check → `wait_for(send_file)` → share-link fallback).
+- `backend/cubeplex/im/slack/_platform.py:70`, `backend/cubeplex/im/discord/_platform.py:77` — construct + pass `IMArtifactDispatcher` (mirror `feishu/_platform.py:71`), incl. `run_id`.
+- `backend/cubeplex/im/outbound.py:566-582` — after the terminal `_dispatch_op` **and** `succeeded`-marking, call `self._artifact_dispatcher.deliver_terminal_files()` (guarded on dispatcher present).
 
 ---
 
@@ -56,7 +56,7 @@
 
 ### Task 1 — `InboundAttachmentRef` + `InboundEvent.attachments`
 
-**Files:** Modify `backend/cubebox/im/types.py:114`; create `backend/tests/unit/test_inbound_attachment_ref.py`.
+**Files:** Modify `backend/cubeplex/im/types.py:114`; create `backend/tests/unit/test_inbound_attachment_ref.py`.
 
 - [ ] **Step 1:** Add the dataclass above `InboundEvent`. `handle` is the file resource id ONLY (e.g. Feishu `file_key`) — the message id is read from the queue row at resolve time, not encoded here.
 
@@ -83,7 +83,7 @@ class InboundAttachmentRef:
 
 ### Task 2 — Queue columns + migration
 
-**Files:** Modify `backend/cubebox/models/im_connector.py:142`; autogen migration.
+**Files:** Modify `backend/cubeplex/models/im_connector.py:142`; autogen migration.
 
 - [ ] **Step 1:** Add two columns to `IMRunQueueItem`:
 
@@ -97,13 +97,13 @@ attachment_ids:  list[str]           | None = Field(default=None, sa_column=Colu
 
 ### Task 3 — Ingest serializes raw refs
 
-**Files:** Modify `backend/cubebox/im/inbound.py:167`
+**Files:** Modify `backend/cubeplex/im/inbound.py:167`
 
 - [ ] In the `IMRunQueueItem(...)` constructor add `attachment_refs=[r.to_json() for r in event.attachments] or None`. (Leave `attachment_ids` null — the worker fills it.) Refs are recomputed deterministically on the thread-link retry; no upload happens here, so retry is safe.
 
 ### Task 4 — `resolve_inbound_attachments` closure + per-platform download
 
-**Files:** Create `backend/cubebox/im/inbound_attachments.py`; modify `backend/cubebox/im/runtime.py:134-212`.
+**Files:** Create `backend/cubeplex/im/inbound_attachments.py`; modify `backend/cubeplex/im/runtime.py:134-212`.
 
 - [ ] **Step 1:** In `inbound_attachments.py`, `download_for(platform, client, ref, message_id) -> tuple[bytes, str, str]` dispatching **per platform** (the client type differs):
   - Feishu: `client` is a lark `Client`; `client.im.v1.message_resource.get(message_id, file_key=ref.handle, type=_lark_type(ref.kind))` in `asyncio.to_thread`. `_lark_type`: `"image"` for `kind=="image"`, else `"file"` — must match the resource kind, never guessed from MIME. If `message_id` is falsy (the column is nullable, `im_connector.py:180`), raise `DownloadError` → note-and-skip rather than calling the SDK with `None`.
@@ -120,7 +120,7 @@ attachment_ids:  list[str]           | None = Field(default=None, sa_column=Colu
 
 ### Task 5 — Worker wiring (resolve-before-start_run, idempotent)
 
-**Files:** Modify `backend/cubebox/im/worker.py:55,149,164`
+**Files:** Modify `backend/cubeplex/im/worker.py:55,149,164`
 
 - [ ] **Step 1:** Add `resolve_inbound_attachments: Callable[[IMRunQueueItem, str], Awaitable[tuple[list[str], list[str]]]] | None` to `process_one_queue_item` + `IMRunQueueWorker.__init__` **and thread it through `IMRunQueueWorker._loop`** (`worker.py:275`, the only caller of `process_one_queue_item` — it currently forwards only `session_maker/run_manager/on_run_started/lease_seconds`; without adding the resolver here the worker stores it on `self` but never passes it down, so resolution is silently skipped and the whole feature no-ops).
 - [ ] **Step 2:** After claim, before `start_run`: if `item.attachment_refs` and not `item.attachment_ids` and resolver present → `ids, notes = await resolver(item, effective_user_id)`; in **one** `session_maker()` tx persist **both** `item.attachment_ids = ids` **and** `item.content = "\n".join(notes + [item.content])` (so the note survives a rewind). Set `captured["content"]` to that same noted value and `captured_ids = ids`. If `item.attachment_ids` already set (re-claim) → `captured_ids = item.attachment_ids`, content already noted on the row, no re-resolve.
@@ -129,20 +129,20 @@ attachment_ids:  list[str]           | None = Field(default=None, sa_column=Colu
 
 ### Task 6 — Feishu inbound parse
 
-**Files:** Modify `backend/cubebox/im/feishu/connector.py:98,121`
+**Files:** Modify `backend/cubeplex/im/feishu/connector.py:98,121`
 
 - [ ] Replace the hard `message_type != "text"` drop with a branch: text → existing; `image`/`file`/`audio`/`media` → parse `content` JSON for `image_key`/`file_key` + `file_name`, build a ref (`handle=<key>`, `kind`, `filename`, `mime` if available). Keep `text=""` when no caption. `inbound_message_id` is already set on the event — the resolver uses it.
 
 ### Task 7 — Slack inbound parse
 
-**Files:** Modify `backend/cubebox/im/slack/connector.py:60,69`
+**Files:** Modify `backend/cubeplex/im/slack/connector.py:60,69`
 
 - [ ] **Scope = DM only** this round. Slack delivers a channel mention+file as **two separate events** — an `app_mention` (text, no files) and a `file_share` `message` (files, no mention) — so files can't be reliably tied to a mention in channels without admitting every channel file. DM is the clean, unambiguous case (a DM file arrives as a `message`/`file_share` event the DM branch already handles). Channel/thread file ingestion is a **documented limitation / future work**, not silent breakage.
 - [ ] **Two guards.** Both sit at the **top** of `parse_inbound`, before the channel-type split — so relaxing them is structurally global, but the **DM-only outcome still holds** because every channel/thread branch is gated on `event_type == "app_mention"` and a `file_share` is an `event_type == "message"` that falls through to the final `return None`. Do NOT add a channel `message`/`file_share` acceptance path (that would leak every channel file). (1) Change `if raw.get("subtype"): return None` (`:69`) to admit `subtype in (None, "file_share")`; keep dropping all other subtypes and `bot_id`. (2) Relax `if not text: return None` (`:90`) to drop only when there is neither text nor `files[]`. Parse `files[]` into one ref per file (`url_private_download`/`url_private`, `name`, `mimetype`, `size`). Leave the `app_mention` branch untouched (it never carries files).
 
 ### Task 8 — Discord inbound parse
 
-**Files:** Modify `backend/cubebox/im/discord/connector.py:84,107`
+**Files:** Modify `backend/cubeplex/im/discord/connector.py:84,107`
 
 - [ ] Read `message.attachments`; build a ref per attachment (`.url`, `.filename`, `.content_type`, `.size`). Relax `if not text: return None` to drop only when there is neither text nor attachments.
 
@@ -168,15 +168,15 @@ attachment_ids:  list[str]           | None = Field(default=None, sa_column=Colu
 
 ### Task 11 — `artifact_outbound_kind` + caps helper
 
-**Files:** Create `backend/cubebox/im/artifact_delivery.py`, `backend/tests/unit/test_artifact_delivery.py`.
+**Files:** Create `backend/cubeplex/im/artifact_delivery.py`, `backend/tests/unit/test_artifact_delivery.py`.
 
-- [ ] `artifact_outbound_kind(artifact_type) -> Literal["image","file","link"]` using the **real** `save_artifact` vocabulary defined in `cubebox/prompts/artifacts.py:12-21` (`website`/`document`/`image`/`code`/`data`/`skill`, plus the implicit default `file`): `image`→image; `website`→link (interactive, opens in browser); `code`/`document`/`data`/`skill`/`file`/unknown→file. The HTML renderer at `api/routes/v1/artifact_share.py:143-151` is a parallel precedent for the same buckets but is an inline if-chain (no extractable classifier and it omits `file`), so this helper re-lists the literals itself — do NOT invent `html`/`widget`/`archive` names (they don't exist).
+- [ ] `artifact_outbound_kind(artifact_type) -> Literal["image","file","link"]` using the **real** `save_artifact` vocabulary defined in `cubeplex/prompts/artifacts.py:12-21` (`website`/`document`/`image`/`code`/`data`/`skill`, plus the implicit default `file`): `image`→image; `website`→link (interactive, opens in browser); `code`/`document`/`data`/`skill`/`file`/unknown→file. The HTML renderer at `api/routes/v1/artifact_share.py:143-151` is a parallel precedent for the same buckets but is an inline if-chain (no extractable classifier and it omits `file`), so this helper re-lists the literals itself — do NOT invent `html`/`widget`/`archive` names (they don't exist).
 - [ ] `outbound_size_cap(platform) -> int`: Slack 20MB, Discord 25MB, Feishu 30MB.
 - [ ] Unit test the full mapping + caps. Bug: "a `website` artifact routed to `file` → undownloadable blob instead of a working iframe link."
 
 ### Task 12 — `send_file` on a bound-connector Protocol + impls
 
-**Files:** Create the `OutboundConnector` Protocol in `backend/cubebox/im/types.py`; modify the 3 connectors + 2 stubs; type `artifacts.py:30` `connector: OutboundConnector`.
+**Files:** Create the `OutboundConnector` Protocol in `backend/cubeplex/im/types.py`; modify the 3 connectors + 2 stubs; type `artifacts.py:30` `connector: OutboundConnector`.
 
 - [ ] **Step 1:** Define `OutboundConnector` Protocol (bound connector, NOT the stateless `PlatformConnector` in `registry.py`) covering **every method `artifacts.py` calls on `self.connector`**: `send_file`, `upload_image`, `send_to_chat`. Type `IMArtifactDispatcher.connector` as `OutboundConnector`. (A `send_file`-only Protocol would break mypy-strict at the existing `_fill_image_key` → `connector.upload_image(...)` and the new fallback → `connector.send_to_chat(...)` call sites.) To make all three connectors satisfy it uniformly, **add `upload_image` to Slack/Discord returning `None`** (they have no inline-image API) — the existing `_fill_image_key` None-branch already falls back to `_fill_share_url`, so no `hasattr` guard is needed. `send_to_chat` already exists on all three (`slack:280`, `discord:277`, `feishu:285`).
 - [ ] **Step 2:** `async def send_file(self, *, local_path, filename, mime) -> bool` — no `chat_id`/`reply_to_id`; each connector reads **its own** bound chat state (Feishu `_channel_id`/`_reply_to_id`; Slack `_channel_id`/`_thread_ts`, `slack/connector.py:52-53`; Discord its own), set from `queue_item` at `_platform` build, exactly as `upload_image(local_path)` relies on the bound `_client`. The field names are NOT uniform across platforms — each impl reads its own.
@@ -187,7 +187,7 @@ attachment_ids:  list[str]           | None = Field(default=None, sa_column=Colu
 
 ### Task 13 — Extract download helper + `deliver_terminal_files`
 
-**Files:** Modify `backend/cubebox/im/artifacts.py:26-83`
+**Files:** Modify `backend/cubeplex/im/artifacts.py:26-83`
 
 - [ ] **Step 1:** Extract `download_artifact_to_tempfile(conversation_id, artifact_payload) -> Path` (the `key` build at `:60-61` + `get_objectstore_client().download_file` + `NamedTemporaryFile` block currently inside `_fill_image_key`); reuse it from `_fill_image_key` AND the new method. It needs the **raw artifact payload** (version + entry_file/path), not the stripped `ArtifactItem`.
 - [ ] **Step 2:** Capture payloads + route by kind. `ArtifactItem` (`card_model.py:39-47`) has no `version`/`entry_file`, so `deliver_terminal_files` can't rebuild the key from it. In `handle()`, route by `artifact_outbound_kind`:
@@ -203,7 +203,7 @@ attachment_ids:  list[str]           | None = Field(default=None, sa_column=Colu
 
 ### Task 14 — Wire dispatcher into Slack/Discord + terminal hook
 
-**Files:** Modify `backend/cubebox/im/slack/_platform.py:70`, `backend/cubebox/im/discord/_platform.py:77`, `backend/cubebox/im/outbound.py:566-582`.
+**Files:** Modify `backend/cubeplex/im/slack/_platform.py:70`, `backend/cubeplex/im/discord/_platform.py:77`, `backend/cubeplex/im/outbound.py:566-582`.
 
 - [ ] **Step 1:** In Slack/Discord `_platform.build_tailer`, construct `IMArtifactDispatcher` (mirror `feishu/_platform.py:71`) with the bound connector + redis + `public_base_url` + org/ws/conversation ids + mint fn + **`run_id`**, and pass `artifact_dispatcher=` to the tailer.
 - [ ] **Step 2:** In `OutboundRunTailer.run()`, inside the `if op.final:` block, after the `succeeded`-flag logic (`outbound.py:580`) but before `if done: return` (`:582`), if `self._artifact_dispatcher is not None`: `await self._artifact_dispatcher.deliver_terminal_files()`. Run it on **any** terminal (done OR error — `op.final` is set for both, `outbound.py:373-381`), NOT gated on `succeeded`, so file artifacts from a non-clean terminal still deliver (or fall back). Internally it `gather`s the per-file sends, each `wait_for`-bounded; swallow+log per-file errors. Note: `on_processing_complete` runs in the `finally` block after the loop returns, so this awaits **delays** terminal cleanup by the bounded upload time — acceptable (bounded by `wait_for`), not the "immediate" the earlier wording implied.
@@ -223,7 +223,7 @@ attachment_ids:  list[str]           | None = Field(default=None, sa_column=Colu
 
 ## Verification (pre-PR sweep, each PR)
 
-- [ ] `cd backend && uv run mypy cubebox 2>&1 | tee tmp/mypy.log | tail -3` — strict, clean. (`send_file` on the Protocol means a missing impl is caught here.)
+- [ ] `cd backend && uv run mypy cubeplex 2>&1 | tee tmp/mypy.log | tail -3` — strict, clean. (`send_file` on the Protocol means a missing impl is caught here.)
 - [ ] `uv run pytest tests/unit/test_inbound_attachment_ref.py tests/unit/test_artifact_delivery.py --no-cov 2>&1 | tee tmp/unit.log | tail -5`.
 - [ ] `uv run pytest tests/e2e/test_im_inbound_attachments.py tests/e2e/test_im_outbound_files.py 2>&1 | tee tmp/e2e.log | tail -8`.
 - [ ] `uv run alembic upgrade head` clean; single head.

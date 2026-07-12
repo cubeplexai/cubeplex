@@ -17,14 +17,14 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.im import inbound_attachments
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.inbound_attachments import make_resolver
-from cubebox.im.types import InboundAttachmentRef, InboundEvent
-from cubebox.im.worker import process_one_queue_item
-from cubebox.models.attachment import Attachment
-from cubebox.models.im_connector import IMConnectorAccount, IMRunQueueItem
-from cubebox.streams.run_manager import RunContext
+from cubeplex.im import inbound_attachments
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.inbound_attachments import make_resolver
+from cubeplex.im.types import InboundAttachmentRef, InboundEvent
+from cubeplex.im.worker import process_one_queue_item
+from cubeplex.models.attachment import Attachment
+from cubeplex.models.im_connector import IMConnectorAccount, IMRunQueueItem
+from cubeplex.streams.run_manager import RunContext
 from tests.e2e.conftest import _build_database_url
 from tests.e2e.im_fixtures import (
     im_cleanup,
@@ -260,7 +260,7 @@ async def test_all_rejected_persists_empty_and_does_not_re_resolve(
     '[附件 … 已忽略]' note and re-hitting the platform download on each re-claim.
     """
     maker, account = _seeded
-    from cubebox.im.inbound_attachments import DownloadError
+    from cubeplex.im.inbound_attachments import DownloadError
 
     download_calls = {"n": 0}
 

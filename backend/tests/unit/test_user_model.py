@@ -1,4 +1,4 @@
-from cubebox.models.user import AvatarKind, User
+from cubeplex.models.user import AvatarKind, User
 
 
 def test_avatar_kind_enum_values():

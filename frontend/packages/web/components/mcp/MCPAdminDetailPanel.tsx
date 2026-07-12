@@ -28,7 +28,7 @@ import {
   type MCPAuthMethod,
   type MCPConnector,
   type MCPTemplateScope,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'

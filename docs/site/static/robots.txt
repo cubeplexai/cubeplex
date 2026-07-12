@@ -1,7 +1,7 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://docs.cubebox.ai/sitemap.xml
+Sitemap: https://docs.cubeplex.ai/sitemap.xml
 
 User-agent: GPTBot
 Allow: /

@@ -24,7 +24,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 pytestmark = pytest.mark.usefixtures("stub_discover_tools")
 
@@ -161,14 +161,14 @@ async def test_distribute_does_not_resurrect_explicitly_disabled_workspace(
 
     # Manually set our workspace's state to disabled via the DB
     # (simulates a workspace admin clicking "disable").
-    from cubebox.repositories.mcp import MCPWorkspaceConnectorStateRepository
+    from cubeplex.repositories.mcp import MCPWorkspaceConnectorStateRepository
 
     eng = create_async_engine(_build_database_url(), poolclass=NullPool)
     sm = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
     try:
         async with sm() as sess:
             # Resolve org_id from the workspace
-            from cubebox.repositories.workspace import WorkspaceRepository
+            from cubeplex.repositories.workspace import WorkspaceRepository
 
             ws_repo = WorkspaceRepository(sess)
             ws = await ws_repo.get(workspace_id)
@@ -243,11 +243,11 @@ async def test_disable_hides_from_workspace_and_rejects_enable(
     assert row_after["disabled"] is True
 
     # DB-level: settings row exists with disabled=True
-    from cubebox.repositories.mcp import MCPTemplateSettingsRepository
+    from cubeplex.repositories.mcp import MCPTemplateSettingsRepository
 
     async with db_maker() as sess:
         # Need to get the org_id
-        from cubebox.repositories.workspace import WorkspaceRepository
+        from cubeplex.repositories.workspace import WorkspaceRepository
 
         ws_repo = WorkspaceRepository(sess)
         ws = await ws_repo.get(workspace_id)
@@ -426,7 +426,7 @@ async def test_admin_catalog_needs_attention_on_expired_grant(
     async with db_maker() as sess:
         from sqlalchemy import select
 
-        from cubebox.models.mcp import MCPCredentialGrant
+        from cubeplex.models.mcp import MCPCredentialGrant
 
         grant_row = (
             await sess.execute(

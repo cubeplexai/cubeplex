@@ -7,9 +7,9 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.credentials.exceptions import CredentialKindMismatch, CredentialNotFound
-from cubebox.repositories.credential import CredentialRepository
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.credentials.exceptions import CredentialKindMismatch, CredentialNotFound
+from cubeplex.repositories.credential import CredentialRepository
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def backend() -> FernetBackend:
 async def test_credential_service_encrypts_and_decrypts(
     session: AsyncSession, backend: FernetBackend
 ) -> None:
-    from cubebox.services.credential import CredentialService
+    from cubeplex.services.credential import CredentialService
 
     repo = CredentialRepository(session, org_id="org-1")
     service = CredentialService(repo, backend, org_id="org-1", actor_user_id="user-1")
@@ -59,7 +59,7 @@ async def test_credential_service_encrypts_and_decrypts(
 async def test_credential_service_rejects_kind_mismatch(
     session: AsyncSession, backend: FernetBackend
 ) -> None:
-    from cubebox.services.credential import CredentialService
+    from cubeplex.services.credential import CredentialService
 
     service = CredentialService(
         CredentialRepository(session, org_id="org-1"),
@@ -76,7 +76,7 @@ async def test_credential_service_rejects_kind_mismatch(
 async def test_credential_service_update_and_delete(
     session: AsyncSession, backend: FernetBackend
 ) -> None:
-    from cubebox.services.credential import CredentialService
+    from cubeplex.services.credential import CredentialService
 
     service = CredentialService(
         CredentialRepository(session, org_id="org-1"),
@@ -118,7 +118,7 @@ async def test_credential_service_upsert_by_kind_name_rotates_existing(
     install whose tokens were already in the vault crashed with a
     psycopg ``UniqueViolation``.
     """
-    from cubebox.services.credential import CredentialService
+    from cubeplex.services.credential import CredentialService
 
     service = CredentialService(
         CredentialRepository(session, org_id="org-1"),

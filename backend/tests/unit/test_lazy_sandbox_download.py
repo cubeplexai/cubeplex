@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.sandbox.lazy import LazySandbox
-from cubebox.sandbox.manager import SandboxAttachment
+from cubeplex.sandbox.lazy import LazySandbox
+from cubeplex.sandbox.manager import SandboxAttachment
 
 
 class _FakeSandbox:

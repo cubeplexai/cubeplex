@@ -16,11 +16,11 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.conversation import Conversation
-from cubebox.models.search_backfill_progress import SearchBackfillProgress
-from cubebox.models.workspace import Workspace
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.search_backfill_progress import SearchBackfillProgress
+from cubeplex.models.workspace import Workspace
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
 
 logger = logging.getLogger("backfill")
 

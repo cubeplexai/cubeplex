@@ -5,7 +5,7 @@ Worktree: `feat/helm-deploy`
 
 ## Goal
 
-Make cubebox deployable to an existing single-node kubeadm cluster via one
+Make cubeplex deployable to an existing single-node kubeadm cluster via one
 `helm upgrade --install`, alongside its required infrastructure (Postgres,
 Redis, MinIO, OpenSandbox). Deliver the artifacts to 192.168.1.101 and run a
 deployment-correctness smoke test (boot + auth + UI shell + ingress).
@@ -24,19 +24,19 @@ in the existing backend/frontend test suites; here we only verify the
 - Root partition: 51 G (already cleaned to 2.1 G free 2026-06-10); large
   data partition `/work` 1.8 T (~920 G free)
 - Existing `cubechat` namespace runs an unrelated sibling product — **do
-  not touch**, deploy cubebox in its own namespace
+  not touch**, deploy cubeplex in its own namespace
 
 ## Decisions (from brainstorming Q&A)
 
 | Q | Decision |
 |---|---|
-| Cluster | Reuse existing kubeadm; namespace `cubebox` |
-| Disk | Cleaned root partition; cubebox PVCs use a new SC pinned to `/work/cubebox` |
-| Images | Local build → push to `192.168.1.101:8050/library/cubebox-{backend,frontend}:<git-sha>` |
+| Cluster | Reuse existing kubeadm; namespace `cubeplex` |
+| Disk | Cleaned root partition; cubeplex PVCs use a new SC pinned to `/work/cubeplex` |
+| Images | Local build → push to `192.168.1.101:8050/library/cubeplex-{backend,frontend}:<git-sha>` |
 | Infra | All in chart: bitnami/postgresql + bitnami/redis + minio + opensandbox subcharts |
 | LLM | Reuse current `backend/config.development.local.yaml` content → committed-but-private `values.local.yaml` (gitignored) |
 | Sandbox | Bundle alibaba OpenSandbox umbrella chart (controller + server) as subchart, default on |
-| Ingress | ingress-nginx, host `cubebox.local`, user maps `/etc/hosts` locally |
+| Ingress | ingress-nginx, host `cubeplex.local`, user maps `/etc/hosts` locally |
 
 ## Repo Layout
 
@@ -46,7 +46,7 @@ deploy/
 │   ├── backend/Dockerfile                # uv → slim runtime
 │   └── frontend/Dockerfile               # pnpm build → Next.js standalone
 ├── charts/
-│   └── cubebox/                          # umbrella chart
+│   └── cubeplex/                          # umbrella chart
 │       ├── Chart.yaml                    # deps: postgresql, redis, minio, opensandbox
 │       ├── Chart.lock
 │       ├── charts/                       # vendored subcharts (helm dep update)
@@ -55,7 +55,7 @@ deploy/
 │       └── templates/
 │           ├── _helpers.tpl
 │           ├── namespace.yaml
-│           ├── storageclass.yaml         # cubebox-work-hostpath → /work/cubebox
+│           ├── storageclass.yaml         # cubeplex-work-hostpath → /work/cubeplex
 │           ├── backend-configmap.yaml
 │           ├── backend-secret.yaml
 │           ├── backend-deployment.yaml
@@ -70,7 +70,7 @@ deploy/
     └── smoke-test.sh                     # see Smoke Test section
 ```
 
-`deploy/kubernetes/charts/cubebox/charts/opensandbox` is vendored from
+`deploy/kubernetes/charts/cubeplex/charts/opensandbox` is vendored from
 `~/work/OpenSandbox/kubernetes/charts/opensandbox` at install time (it's not
 on a public Helm repository).
 
@@ -86,7 +86,7 @@ Builder stage:
 Runtime stage:
 - Base `python:3.12-slim`
 - Copy `.venv` from builder
-- Copy `cubebox/`, `alembic/`, `alembic.ini`, `main.py`, `config.yaml`,
+- Copy `cubeplex/`, `alembic/`, `alembic.ini`, `main.py`, `config.yaml`,
   `config.development.yaml`, `config.production.yaml`
 - **Do not** bake `config.*.local.yaml` — those are runtime-mounted from a
   Secret + ConfigMap
@@ -107,7 +107,7 @@ Going with **two separate mounts** — simpler, no init container needed:
 /app/config.production.secrets.yaml        ← Secret (api_keys + jwt + csrf)
 ```
 
-And update `backend/cubebox/config.py` to also load
+And update `backend/cubeplex/config.py` to also load
 `config.{env}.secrets.yaml` if present.
 
 ## Frontend Image
@@ -118,14 +118,14 @@ Builder stage:
 - Base `node:20-alpine`
 - Install pnpm globally
 - Copy frontend monorepo files; `pnpm install --frozen-lockfile`
-- `pnpm --filter @cubebox/core build`
-- `pnpm --filter @cubebox/web build` (produces `.next/standalone`)
+- `pnpm --filter @cubeplex/core build`
+- `pnpm --filter @cubeplex/web build` (produces `.next/standalone`)
 
 Runtime stage:
 - Base `node:20-alpine`
 - Copy `.next/standalone`, `.next/static`, `public`
 - Default env: `PORT=3000`, `HOSTNAME=0.0.0.0`,
-  `CUBEBOX_API_URL=http://cubebox-backend.cubebox.svc.cluster.local:8000`
+  `CUBEPLEX_API_URL=http://cubeplex-backend.cubeplex.svc.cluster.local:8000`
 - Default cmd: `node server.js`
 
 Requires `next.config.ts` to set `output: 'standalone'` (conditionally, so
@@ -133,7 +133,7 @@ dev mode is unaffected — gated on `process.env.NEXT_OUTPUT === 'standalone'`).
 
 ## Chart Behaviour
 
-Helm release name: `cubebox`, namespace: `cubebox`.
+Helm release name: `cubeplex`, namespace: `cubeplex`.
 
 `values.yaml` contains only safe defaults. **All secrets, all model
 provider api_keys, the sandbox image+domain+key, and the OSS endpoint+keys
@@ -143,7 +143,7 @@ Subchart dependencies and the rationale for each:
 
 - `postgresql` (bitnami) — primary DB
 - `redis` (bitnami) — streaming Redis + cache
-- `minio` (bitnami) — S3-compatible object store, bucket `cubebox`
+- `minio` (bitnami) — S3-compatible object store, bucket `cubeplex`
   auto-created via a one-shot Job
 - `opensandbox` (local file path from `~/work/OpenSandbox/kubernetes/charts`)
   — sandbox runtime; default enabled
@@ -157,9 +157,9 @@ piece (e.g. point at external Postgres).
 `/app/config.production.local.yaml` and `/app/config.production.secrets.yaml`
 mounts. The chart renders:
 
-- DB host = `cubebox-postgresql.cubebox.svc.cluster.local`, password from
+- DB host = `cubeplex-postgresql.cubeplex.svc.cluster.local`, password from
   the postgresql subchart's generated Secret
-- Redis URL = `redis://:<pw>@cubebox-redis-master.cubebox.svc.cluster.local:6379/0`
+- Redis URL = `redis://:<pw>@cubeplex-redis-master.cubeplex.svc.cluster.local:6379/0`
 - Object store = MinIO service + bucket + access keys
 - Sandbox = OpenSandbox server service URL + image + api_key
 - LLM providers = whatever the operator put in `values.local.yaml.llm`
@@ -175,11 +175,11 @@ as backend, just a different command.
 
 ### Ingress
 
-ingress-nginx, host `cubebox.local`, single Ingress resource:
+ingress-nginx, host `cubeplex.local`, single Ingress resource:
 
 ```
-/api/  → cubebox-backend:8000
-/      → cubebox-frontend:3000
+/api/  → cubeplex-backend:8000
+/      → cubeplex-frontend:3000
 ```
 
 SSE-friendly annotations: `nginx.ingress.kubernetes.io/proxy-buffering: "off"`,
@@ -191,18 +191,18 @@ SSE-friendly annotations: `nginx.ingress.kubernetes.io/proxy-buffering: "off"`,
 installed release. **No** LLM call, **no** sandbox spawn — verify the
 deployment, not the agent runtime. Checks:
 
-1. `kubectl -n cubebox rollout status deploy/cubebox-backend deploy/cubebox-frontend`
+1. `kubectl -n cubeplex rollout status deploy/cubeplex-backend deploy/cubeplex-frontend`
    completes within 5 min
-2. `kubectl -n cubebox get pods -l app.kubernetes.io/name=postgresql` is
+2. `kubectl -n cubeplex get pods -l app.kubernetes.io/name=postgresql` is
    Running and Ready
 3. Migrate Job's last run is `Succeeded`
-4. `curl -fsS http://cubebox.local/api/v1/health` returns 200
-5. `curl -fsS http://cubebox.local/` returns 200 with HTML containing
+4. `curl -fsS http://cubeplex.local/api/v1/health` returns 200
+5. `curl -fsS http://cubeplex.local/` returns 200 with HTML containing
    `<title>` (Next.js server rendered)
 6. Register an org-admin via the operator CLI baked into the backend image:
-   `kubectl exec deploy/cubebox-backend -- python -m cubebox.cli admin create-org ...`
+   `kubectl exec deploy/cubeplex-backend -- python -m cubeplex.cli admin create-org ...`
    and verify the resulting org/workspace shows up via the admin API
-7. Final: `kubectl -n cubebox get pods` summary printed
+7. Final: `kubectl -n cubeplex get pods` summary printed
 
 Exit non-zero on any failure with the failing step's logs.
 
@@ -215,13 +215,13 @@ Exit non-zero on any failure with the failing step's logs.
 - Real LLM end-to-end chat verification in smoke test (covered by the
   backend test suite, not deployment smoke)
 - Modifying the existing `openebs-hostpath` StorageClass — we add a new SC
-  pinned to `/work/cubebox` and leave the existing one alone
+  pinned to `/work/cubeplex` and leave the existing one alone
 
 ## Sequencing
 
 1. Add Dockerfiles + chart skeleton + scripts
 2. Build images locally, push to `192.168.1.101:8050`
-3. Vendor OpenSandbox chart into `deploy/kubernetes/charts/cubebox/charts/`
+3. Vendor OpenSandbox chart into `deploy/kubernetes/charts/cubeplex/charts/`
 4. Author `values.local.yaml` from the operator's existing
    `backend/config.development.local.yaml`
 5. `helm upgrade --install`

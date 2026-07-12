@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.seeders.provider_seeder import _merge_cost, resolve_provider_config
+from cubeplex.seeders.provider_seeder import _merge_cost, resolve_provider_config
 
 
 def test_merge_cost_partial_override_inherits_other_legs():

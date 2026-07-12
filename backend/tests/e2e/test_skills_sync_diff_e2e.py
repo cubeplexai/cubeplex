@@ -26,11 +26,11 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from cubebox.sandbox.lazy import _sync_skills
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.sandbox_paths import SKILLS_ROOT
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sync_manifest import MANIFEST_PATH
+from cubeplex.sandbox.lazy import _sync_skills
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.sandbox_paths import SKILLS_ROOT
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sync_manifest import MANIFEST_PATH
 from tests.e2e.conftest import MemSandbox
 
 

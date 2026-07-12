@@ -1,6 +1,6 @@
 # MCP Catalog + OAuth (M2)
 
-This document describes how cubebox manages and runs remote MCP
+This document describes how cubeplex manages and runs remote MCP
 connectors. It is a working reference for operators and engineers; the
 authoritative source for design decisions remains the spec at
 `docs/dev/specs/2026-05-08-mcp-catalog-oauth-design.md`.
@@ -15,7 +15,7 @@ Four layers, each with distinct ownership and lifecycle:
    pre-registered client credentials), and static-form schema. These are
    immutable from a tenant's perspective — org admins cannot edit them.
    The list is materialized from a Python source-of-truth
-   (`cubebox.mcp.catalog_seed.CATALOG`) via an explicit deploy step
+   (`cubeplex.mcp.catalog_seed.CATALOG`) via an explicit deploy step
    (see "Deploy: catalog seed step" below).
 
 2. **Connector layer (org-scoped).** `mcp_connectors` rows are created
@@ -39,7 +39,7 @@ Four layers, each with distinct ownership and lifecycle:
    access-token and refresh-token credentials; `grant.grant_status`
    is the canonical auth signal (`valid` / `expired` / `pending`).
 
-The runtime (`cubebox/mcp/runtime.py`) walks all four layers when
+The runtime (`cubeplex/mcp/runtime.py`) walks all four layers when
 building the tool list for a workspace turn: templates describe what
 exists, connectors describe what the org has adopted, workspace-state
 rows determine which are enabled, and grants supply the credentials.
@@ -64,7 +64,7 @@ for non-OAuth connectors.
 ## API endpoints
 
 High-level summary; route bodies live in
-`backend/cubebox/api/routes/v1/`. All scoped routes require workspace
+`backend/cubeplex/api/routes/v1/`. All scoped routes require workspace
 membership; admin routes require org admin.
 
 ### Admin routes (`/api/v1/admin/mcp/...`)
@@ -184,7 +184,7 @@ static-client.)
 
 ## Token refresh
 
-`cubebox.mcp.oauth.token_manager.OAuthTokenManager` encapsulates the
+`cubeplex.mcp.oauth.token_manager.OAuthTokenManager` encapsulates the
 read / refresh / persist cycle for OAuth-scoped connectors. Behavior:
 
 - On every tool call that needs an OAuth bearer, the runtime asks the
@@ -201,23 +201,23 @@ read / refresh / persist cycle for OAuth-scoped connectors. Behavior:
 
 ## Catalog seeder
 
-`backend/cubebox/mcp/catalog_seed.py` defines the source-of-truth
+`backend/cubeplex/mcp/catalog_seed.py` defines the source-of-truth
 `CATALOG` list and the idempotent `seed_catalog()` routine.
 
 Invocation (from `backend/`):
 
 ```bash
-python -m cubebox.cli seed-mcp-templates            # apply
-python -m cubebox.cli seed-mcp-templates --dry-run  # preview only
-python -m cubebox.cli seed-mcp-templates --quiet    # warnings only
+python -m cubeplex.cli seed-mcp-templates            # apply
+python -m cubeplex.cli seed-mcp-templates --dry-run  # preview only
+python -m cubeplex.cli seed-mcp-templates --quiet    # warnings only
 ```
 
 The seeder:
 
 1. Reads static `client_id` / `client_secret` env vars for non-DCR
    connectors. The convention is
-   `CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_ID` and
-   `CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_SECRET` (slug uppercased,
+   `CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_ID` and
+   `CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_SECRET` (slug uppercased,
    `-` mapped to `_`). Missing vars cause the connector to be skipped
    with a warning; the rest of the run continues.
 2. Upserts each `CATALOG` entry into `mcp_catalog_connectors` keyed by
@@ -238,24 +238,24 @@ that includes catalog changes:
 ```bash
 cd backend
 alembic upgrade head
-python -m cubebox.cli seed-mcp-templates
+python -m cubeplex.cli seed-mcp-templates
 ```
 
 The seeder is idempotent: re-running with no changes is a no-op.
 
 Static OAuth `client_id` / `client_secret` pairs (GitHub, Slack,
 Google Workspace) are read from environment variables
-`CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_ID` and `…__CLIENT_SECRET`. If
+`CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_ID` and `…__CLIENT_SECRET`. If
 unset, the seeder skips those connectors with a warning and continues
 with the rest.
 
-`CUBEBOX_PUBLIC_BASE_URL` and `CUBEBOX_FRONTEND_BASE_URL` MUST be set
+`CUBEPLEX_PUBLIC_BASE_URL` and `CUBEPLEX_FRONTEND_BASE_URL` MUST be set
 to real public origins in production. These drive the `redirect_uri`
 sent to authorization servers and the post-callback browser
 redirect; OAuth flows fail (or break the user's session) if either
 points at `localhost` in a deployed environment.
 
-Run `python -m cubebox.cli seed-mcp-templates --dry-run` to see what
+Run `python -m cubeplex.cli seed-mcp-templates --dry-run` to see what
 would change without committing.
 
 ## Operator runbook
@@ -263,10 +263,10 @@ would change without committing.
 ### Adding a new catalog connector
 
 1. Add a `CatalogSeedEntry` to `CATALOG` in
-   `backend/cubebox/mcp/catalog_seed.py`.
+   `backend/cubeplex/mcp/catalog_seed.py`.
 2. If the vendor doesn't support DCR, register an OAuth App in the
    vendor's developer console with redirect URI
-   `${CUBEBOX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`. Place the
+   `${CUBEPLEX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`. Place the
    credentials in env (see env-var convention above).
 3. If the vendor exposes OAuth authorization-server metadata but does
    not expose the MCP protected-resource metadata endpoint, add
@@ -275,7 +275,7 @@ would change without committing.
    protected-resource discovery path and uses this URL only as a
    provider compatibility fallback.
 4. Deploy the new code.
-5. Run the seeder: `python -m cubebox.cli seed-mcp-templates`.
+5. Run the seeder: `python -m cubeplex.cli seed-mcp-templates`.
 6. Verify `GET /api/v1/ws/{ws}/mcp/catalog` (from any workspace) lists
    the new template with `status="active"`.
 7. (Optional) Distribute to the org: `POST /api/v1/admin/mcp/templates/{template_id}/distribute`.
@@ -293,7 +293,7 @@ would change without committing.
 ### Rotating an OAuth App's client secret
 
 1. In the vendor's developer console, generate a new client secret.
-2. Update the corresponding `CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_SECRET`
+2. Update the corresponding `CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_SECRET`
    env var.
 3. Re-run the seeder: it re-encrypts and updates the system-level
    credential row in place. New OAuth flows immediately use the new
@@ -306,7 +306,7 @@ would change without committing.
   env var name. The seeder's exit code is 0 even on partial-skip;
   check the JSON summary on stdout for `skipped > 0`.
 - **OAuth callback 4xx**: confirm the redirect URI registered with
-  the vendor exactly matches `${CUBEBOX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`.
+  the vendor exactly matches `${CUBEPLEX_PUBLIC_BASE_URL}/api/v1/oauth/mcp/callback`.
   Path mismatch (trailing slash, scheme) is the most common cause.
 - **Refresh fails repeatedly**: a server-side revocation by the user
   is the typical cause. The connector row's `last_error` will record

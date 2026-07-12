@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { BarChart3 } from 'lucide-react'
-import type { TurnUsage, SessionUsage } from '@cubebox/core'
+import type { TurnUsage, SessionUsage } from '@cubeplex/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
 

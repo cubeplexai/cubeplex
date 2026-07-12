@@ -1,4 +1,4 @@
-from cubebox.auth.password_policy import (
+from cubeplex.auth.password_policy import (
     HIGH_RULES,
     LOW_RULES,
     PasswordPolicy,

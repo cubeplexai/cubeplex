@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add three real-LLM E2E tests in a new worktree that drive the cubepi agent through the full cubebox middleware stack and assert on SSE event streams only.
+**Goal:** Add three real-LLM E2E tests in a new worktree that drive the cubepi agent through the full cubeplex middleware stack and assert on SSE event streams only.
 
-**Architecture:** Three test files under `backend/tests/e2e/middleware/`, each exercising one scenario (happy path, subagent dispatch, forced compaction). Shared constants + SSE helpers live in `_helpers.py` next to them so the three test files can be written in parallel without merge conflicts. All tests go through the production HTTP route `POST /api/v1/ws/{wsId}/conversations/{id}/messages`, reuse `member_client` + `collect_sse_events`, and hit the real LLM configured by `CUBEBOX_E2E_LLM_*` (currently `qwen3.6-flash`).
+**Architecture:** Three test files under `backend/tests/e2e/middleware/`, each exercising one scenario (happy path, subagent dispatch, forced compaction). Shared constants + SSE helpers live in `_helpers.py` next to them so the three test files can be written in parallel without merge conflicts. All tests go through the production HTTP route `POST /api/v1/ws/{wsId}/conversations/{id}/messages`, reuse `member_client` + `collect_sse_events`, and hit the real LLM configured by `CUBEPLEX_E2E_LLM_*` (currently `qwen3.6-flash`).
 
 **Tech Stack:** pytest + pytest-asyncio, httpx async client (from `member_client` fixture), `@pytest.mark.real_llm`, existing `collect_sse_events` helper.
 
@@ -35,7 +35,7 @@ Task 2 (research + _helpers.py)
 
 - [ ] **Step 1: Run new-worktree wrapper from main repo root**
 
-Run (from `/home/chris/cubebox`):
+Run (from `/home/chris/cubeplex`):
 
 ```bash
 ./scripts/new-worktree feat/agent-middleware-e2e
@@ -49,7 +49,7 @@ Expected: prints allocated slot, DB names, ports; creates the worktree directory
 cd $WT
 cat .worktree.env
 git rev-parse --abbrev-ref HEAD   # expect: feat/agent-middleware-e2e
-git rev-parse --show-toplevel     # expect: $WT (NOT /home/chris/cubebox)
+git rev-parse --show-toplevel     # expect: $WT (NOT /home/chris/cubeplex)
 ```
 
 Expected: branch is `feat/agent-middleware-e2e`, toplevel is the worktree path, `.worktree.env` shows non-default ports.
@@ -63,14 +63,14 @@ ls backend/.env backend/config.development.local.yaml
 If either is missing, copy from main:
 
 ```bash
-cp /home/chris/cubebox/backend/.env backend/.env
-cp /home/chris/cubebox/backend/config.development.local.yaml backend/config.development.local.yaml
+cp /home/chris/cubeplex/backend/.env backend/.env
+cp /home/chris/cubeplex/backend/config.development.local.yaml backend/config.development.local.yaml
 ```
 
 Verify E2E LLM vars are set:
 
 ```bash
-grep -E "^CUBEBOX_E2E_LLM_" backend/.env
+grep -E "^CUBEPLEX_E2E_LLM_" backend/.env
 ```
 
 Expected: `BASE_URL`, `API_KEY`, `MODEL_ID` all populated.
@@ -108,17 +108,17 @@ Expected: PASS. If it fails, **stop and diagnose** — env is broken, no point c
 **Files:**
 - Create: `backend/tests/e2e/middleware/__init__.py` (empty)
 - Create: `backend/tests/e2e/middleware/_helpers.py`
-- Read-only: `backend/cubebox/middleware/{todo,memory,sandbox,subagents}.py`, `backend/cubebox/middleware/compaction/*.py`, `backend/cubebox/streams/run_manager.py`, `backend/tests/e2e/conftest.py`, `backend/tests/e2e/test_cubepi_path_tools.py`
+- Read-only: `backend/cubeplex/middleware/{todo,memory,sandbox,subagents}.py`, `backend/cubeplex/middleware/compaction/*.py`, `backend/cubeplex/streams/run_manager.py`, `backend/tests/e2e/conftest.py`, `backend/tests/e2e/test_cubepi_path_tools.py`
 
 - [ ] **Step 1: Discover tool names**
 
 ```bash
 cd backend
 grep -nE "name *= *\"|AgentTool\(|register_tool" \
-  cubebox/middleware/todo.py \
-  cubebox/middleware/memory.py \
-  cubebox/middleware/sandbox.py \
-  cubebox/middleware/subagents.py
+  cubeplex/middleware/todo.py \
+  cubeplex/middleware/memory.py \
+  cubeplex/middleware/sandbox.py \
+  cubeplex/middleware/subagents.py
 ```
 
 Record exact values for:
@@ -132,7 +132,7 @@ If a middleware registers multiple tools, pick the one most likely to fire on a 
 - [ ] **Step 2: Confirm SSE event types**
 
 ```bash
-grep -nE "\"type\" *: *\"|type=\"[a-z_]+\"" cubebox/streams/run_manager.py | head -40
+grep -nE "\"type\" *: *\"|type=\"[a-z_]+\"" cubeplex/streams/run_manager.py | head -40
 ```
 
 Confirm the canonical strings: `text_delta`, `tool_call`, `tool_result`, `usage`, `error`, `done`. Use whatever the code actually emits — do not guess.
@@ -140,7 +140,7 @@ Confirm the canonical strings: `text_delta`, `tool_call`, `tool_result`, `usage`
 - [ ] **Step 3: Locate the compaction threshold**
 
 ```bash
-grep -nE "threshold|max_tokens|trigger|should_compact" cubebox/middleware/compaction/*.py | head -20
+grep -nE "threshold|max_tokens|trigger|should_compact" cubeplex/middleware/compaction/*.py | head -20
 ```
 
 Record the condition (token-based or message-count-based) and default value. Note any env var override.
@@ -449,7 +449,7 @@ async def test_subagent_dispatch_real_llm(member_client: tuple) -> None:  # type
         client,
         ws_id,
         conv_id,
-        "请用 subagent 工具派一个子代理去帮我总结一句话：'cubebox 是什么'，"
+        "请用 subagent 工具派一个子代理去帮我总结一句话：'cubeplex 是什么'，"
         "你只负责派单和汇总，不要自己回答。",
     )
 
@@ -654,5 +654,5 @@ Each subagent creates one new file. There is no shared-file edit, so no merge co
 - Integration sweep, lint, type-check, regression check → Task 6 ✓
 - "Weak-loaded" middleware (skills/citation/attachments/artifacts) → covered by zero-error assertions in Tasks 3/4/5 ✓
 - SSE-only assertion policy → enforced throughout ✓
-- Real LLM via `CUBEBOX_E2E_LLM_*` → enforced via `pytest.mark.real_llm` ✓
+- Real LLM via `CUBEPLEX_E2E_LLM_*` → enforced via `pytest.mark.real_llm` ✓
 - Parallel execution map → Tasks 3/4/5 each in own file with shared `_helpers.py` ✓

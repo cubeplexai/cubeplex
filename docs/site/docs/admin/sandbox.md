@@ -5,7 +5,7 @@ title: Sandbox
 
 # Sandbox
 
-CubeBox executes agent-generated code in an isolated sandbox powered by OpenSandbox. The sandbox provides a secure environment where the agent can run code, install packages, and interact with files without affecting your host infrastructure.
+CubePlex executes agent-generated code in an isolated sandbox powered by OpenSandbox. The sandbox provides a secure environment where the agent can run code, install packages, and interact with files without affecting your host infrastructure.
 
 Sandbox configuration is split across two admin pages: **Admin > Sandbox** (`/admin/sandbox`) for policies and **Admin > Sandbox Environment** (`/admin/sandbox-env`) for environment variables and secrets.
 
@@ -90,10 +90,10 @@ The **Admin > Sandbox Environment** page manages **Organization**-scope variable
 
 ### How secrets stay out of the sandbox
 
-For anything sensitive — API keys, tokens, database passwords — **use a secret entry**, not a plain variable. CubeBox is designed so the real secret value never lives inside the sandbox, where agent-written code (or its logs) could leak it. The two entry kinds behave differently:
+For anything sensitive — API keys, tokens, database passwords — **use a secret entry**, not a plain variable. CubePlex is designed so the real secret value never lives inside the sandbox, where agent-written code (or its logs) could leak it. The two entry kinds behave differently:
 
 - **Plain variables** (not marked secret) are injected into the sandbox environment as their literal value. Use them for non-sensitive config (base URLs, region names, feature flags). Code reads them directly, and they can appear in output and logs.
-- **Secrets** are **never** injected as their real value. The sandbox instead receives an opaque **placeholder** token (e.g. `cbxref_…`). Your code uses the placeholder exactly as it would the real key — for example, putting it in an `Authorization` header. When the sandbox makes an outbound request, CubeBox's **egress proxy** substitutes the placeholder for the real secret **at the network boundary**, and only when both:
+- **Secrets** are **never** injected as their real value. The sandbox instead receives an opaque **placeholder** token (e.g. `cbxref_…`). Your code uses the placeholder exactly as it would the real key — for example, putting it in an `Authorization` header. When the sandbox makes an outbound request, CubePlex's **egress proxy** substitutes the placeholder for the real secret **at the network boundary**, and only when both:
   - the destination **host** is one you allowed for that secret, and
   - the placeholder appears in one of the allowed **header names** (when you configured them).
 

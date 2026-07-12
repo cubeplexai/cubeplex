@@ -23,7 +23,7 @@ identification only. See [theSVG legal](https://thesvg.org/legal).
 | `tavily.svg`     | [`tavily`](https://thesvg.org/icons/tavily/default.svg)                                    | `default` | MIT                |
 | `jina.svg`       | [`jina-ai`](https://thesvg.org/icons/jina-ai/default.svg)                                  | `default` | MIT                |
 
-| `webtools.svg` | — | custom cubebox placeholder (not in theSVG) |
+| `webtools.svg` | — | custom cubeplex placeholder (not in theSVG) |
 
 When adding a catalog connector, look up the brand on https://thesvg.org, drop
 `{icon}.svg` here matching `template_metadata.icon`, and update this table.

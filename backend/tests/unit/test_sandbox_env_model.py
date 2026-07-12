@@ -1,4 +1,4 @@
-from cubebox.models import SandboxEnvVar
+from cubeplex.models import SandboxEnvVar
 
 
 def test_public_id_prefix():

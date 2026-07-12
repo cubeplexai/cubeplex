@@ -4,7 +4,7 @@ import { use, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, resetPassword } from '@cubebox/core'
+import { createApiClient, resetPassword } from '@cubeplex/core'
 
 export default function ResetPasswordPage({
   searchParams,

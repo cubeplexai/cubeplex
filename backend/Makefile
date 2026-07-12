@@ -30,24 +30,24 @@ dev-install:
 
 format:
 	@echo "Running ruff format..."
-	uv run ruff format cubebox/ scripts/ tests/
+	uv run ruff format cubeplex/ scripts/ tests/
 	@echo "Running ruff check --select I --fix (import sorting)..."
-	uv run ruff check --select I --fix cubebox/ scripts/ tests/
+	uv run ruff check --select I --fix cubeplex/ scripts/ tests/
 	@echo "✓ Code formatted"
 
 lint:
 	@echo "Running ruff..."
-	uv run ruff check cubebox/ scripts/ tests/
+	uv run ruff check cubeplex/ scripts/ tests/
 	@echo "✓ Linting passed"
 
 lint-fix:
 	@echo "Running ruff with auto-fix..."
-	uv run ruff check --fix cubebox/ scripts/ tests/
+	uv run ruff check --fix cubeplex/ scripts/ tests/
 	@echo "✓ Linting issues fixed"
 
 type-check:
 	@echo "Running mypy..."
-	uv run mypy cubebox/
+	uv run mypy cubeplex/
 	@echo "✓ Type checking passed"
 
 test:
@@ -62,7 +62,7 @@ test-real-llm:
 
 test-cov:
 	@echo "Running tests with coverage..."
-	uv run pytest -s --cov=cubebox --cov-report=term-missing --cov-report=html
+	uv run pytest -s --cov=cubeplex --cov-report=term-missing --cov-report=html
 	@echo "✓ Coverage report generated in htmlcov/"
 
 test-e2e:
@@ -87,16 +87,16 @@ check: format lint type-check
 
 check-ci:
 	@echo "Running CI-equivalent checks..."
-	uv run ruff check cubebox/ scripts/ tests/
-	uv run ruff format --check cubebox/ scripts/ tests/
-	uv run mypy cubebox/
+	uv run ruff check cubeplex/ scripts/ tests/
+	uv run ruff format --check cubeplex/ scripts/ tests/
+	uv run mypy cubeplex/
 	@echo "Running pytest unit tests (dummy env for dynaconf @format)..."
-	CUBEBOX_E2E_LLM_BASE_URL=http://dummy \
-	CUBEBOX_E2E_LLM_API_KEY=dummy \
-	CUBEBOX_E2E_LLM_MODEL_ID=dummy \
-	CUBEBOX_SANDBOX__DOMAIN=dummy:9000 \
-	CUBEBOX_SANDBOX__IMAGE=dummy:image \
-	CUBEBOX_SANDBOX__API_KEY=dummy \
+	CUBEPLEX_E2E_LLM_BASE_URL=http://dummy \
+	CUBEPLEX_E2E_LLM_API_KEY=dummy \
+	CUBEPLEX_E2E_LLM_MODEL_ID=dummy \
+	CUBEPLEX_SANDBOX__DOMAIN=dummy:9000 \
+	CUBEPLEX_SANDBOX__IMAGE=dummy:image \
+	CUBEPLEX_SANDBOX__API_KEY=dummy \
 		uv run pytest --ignore=tests/e2e --ignore=tests/diagnostic -m "not sandbox and not e2e and not real_llm and not diagnostic and not requires_api_key" --cov-report=xml
 	@echo "✓ CI-equivalent checks passed"
 

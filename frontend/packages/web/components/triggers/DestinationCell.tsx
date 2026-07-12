@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Hash, MessageCircle, MessageSquare } from 'lucide-react'
-import { createApiClient, getTopic } from '@cubebox/core'
-import type { Trigger } from '@cubebox/core'
+import { createApiClient, getTopic } from '@cubeplex/core'
+import type { Trigger } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { topicDisplayTitle } from '@/lib/topicTitle'
 
@@ -23,7 +23,7 @@ interface DestinationCellProps {
  *   - ``im_channel``     → IM-channel pill showing the channel id
  *
  * Trigger destinations are immutable once created (see ``UpdateTriggerBody``
- * in @cubebox/core); we never have to keep this cell in sync with form edits.
+ * in @cubeplex/core); we never have to keep this cell in sync with form edits.
  */
 export function DestinationCell({ wsId, trigger, className }: DestinationCellProps) {
   const t = useTranslations('triggers')

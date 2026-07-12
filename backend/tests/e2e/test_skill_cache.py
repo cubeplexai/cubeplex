@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.storage_paths import global_skill_prefix
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.storage_paths import global_skill_prefix
 
 
 @pytest.mark.asyncio

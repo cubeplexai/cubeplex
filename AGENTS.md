@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI agents working in cubebox. Auto-loaded on every session, from
+Guidance for AI agents working in cubeplex. Auto-loaded on every session, from
 any subdir. This file holds the **rules and the index**; specifics live in the
 linked docs — when a pointer exists, read the doc before acting, don't guess.
 
@@ -11,12 +11,12 @@ Subsystems**.
 
 ## What This Repo Is
 
-cubebox is a full-stack agent platform.
+cubeplex is a full-stack agent platform.
 
 - `backend/` — FastAPI + cubepi streaming agent runtime, SSE API, Postgres
   message history, MCP tool integration.
 - `frontend/` — Next.js + React 19 monorepo (`packages/web` + shared
-  `@cubebox/core`).
+  `@cubeplex/core`).
 - `docs/` — cross-cutting documentation, including
   `docs/dev/{specs,plans,notes}` for **all** feature specs, multi-step
   plans, and engineering notes.
@@ -77,7 +77,7 @@ cubebox is a full-stack agent platform.
   migration trap: [backend/docs/quick-reference.md](backend/docs/quick-reference.md)
   → "Datetime columns".
 - **New business table → public ID prefix** in
-  `backend/cubebox/models/public_id.py`. How-to:
+  `backend/cubeplex/models/public_id.py`. How-to:
   [backend/docs/quick-reference.md](backend/docs/quick-reference.md)
   → "Short prefixed public IDs".
 - **Migrations: `alembic revision --autogenerate -m "..."`.** Do not hand-edit
@@ -241,14 +241,14 @@ Full details, role tables, operator CLI, system endpoints:
 - **Subagent CWD**: subagents don't inherit cwd. When dispatching into a
   worktree, pin the absolute path AND tell them to `cat .worktree.env` first.
 - **pnpm not npm** in frontend, always.
-- **`@cubebox/core` must build** before web sees API/type changes.
+- **`@cubeplex/core` must build** before web sees API/type changes.
 - **shadcn/ui**: run `npx shadcn-ui@latest` from `packages/web/`.
 - **SSE compress**: Next.js rewrite buffers SSE if compress is on. Keep
   `compress: false`.
 - **Worktree ports**: `8000` / `3000` are wrong inside worktrees — port
   collisions silently test the wrong code.
 - **Worktree test DB**: plain `uv run pytest` is safe — conftest auto-routes
-  to the per-slot `cubebox_test_<slug>` DB. S3 tests need rustfs on `:9000`.
+  to the per-slot `cubeplex_test_<slug>` DB. S3 tests need rustfs on `:9000`.
   See [docs/worktrees.md](docs/worktrees.md) → "Running tests in a worktree".
 
 ---

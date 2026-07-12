@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 cubebox 用户端引入 `Organization / Workspace / User / Membership` 多租户身份层，给现有业务表加 `org_id + workspace_id` 范围隔离，启用 fastapi-users 的 email/password + httpOnly cookie JWT 认证，挂上 `admin` / `member` 两级 RBAC，并把数据库历史数据安全回填到默认 org/workspace。
+**Goal:** 在 cubeplex 用户端引入 `Organization / Workspace / User / Membership` 多租户身份层，给现有业务表加 `org_id + workspace_id` 范围隔离，启用 fastapi-users 的 email/password + httpOnly cookie JWT 认证，挂上 `admin` / `member` 两级 RBAC，并把数据库历史数据安全回填到默认 org/workspace。
 
 **Architecture:**
 - 新增 7 张表（4 张 identity + agent_configs 预留 + invite_tokens；credentials 表留给 P4）
@@ -22,30 +22,30 @@
 
 ## File Structure
 
-**新增（cubebox 模块）：**
-- `backend/cubebox/models/organization.py` — `Organization`
-- `backend/cubebox/models/workspace.py` — `Workspace`
-- `backend/cubebox/models/user.py` — `User`（含 fastapi-users `SQLModelBaseUserDB` 集成）
-- `backend/cubebox/models/membership.py` — `Membership` + role enum
-- `backend/cubebox/models/agent_config.py` — `AgentConfig`（P1 仅建表，CRUD 留 P5）
-- `backend/cubebox/models/invite_token.py` — `InviteToken`
-- `backend/cubebox/models/mixins.py` — `OrgScopedMixin`
-- `backend/cubebox/repositories/base.py` — `ScopedRepository[T]`
-- `backend/cubebox/repositories/organization.py` — `OrganizationRepository`
-- `backend/cubebox/repositories/workspace.py` — `WorkspaceRepository`
-- `backend/cubebox/repositories/membership.py` — `MembershipRepository`
-- `backend/cubebox/repositories/invite_token.py` — `InviteTokenRepository`
-- `backend/cubebox/auth/__init__.py`
-- `backend/cubebox/auth/users.py` — `UserManager` + `fastapi_users` instance
-- `backend/cubebox/auth/db.py` — User SQLAlchemy adapter
-- `backend/cubebox/auth/jwt.py` — JWT cookie strategy
-- `backend/cubebox/auth/csrf.py` — CSRF double-submit-cookie middleware
-- `backend/cubebox/auth/dependencies.py` — `current_user` / `current_active_user` / `RequireRole`
-- `backend/cubebox/auth/context.py` — `RequestContext`（user + workspace + role 三元组）
-- `backend/cubebox/api/routes/v1/auth.py` — `/auth/register` `/auth/login` `/auth/logout`
-- `backend/cubebox/api/routes/v1/workspaces.py` — workspace CRUD + invite
-- `backend/cubebox/api/middleware/rate_limit.py` — slowapi config
-- `backend/cubebox/api/middleware/csrf.py` — CSRF enforcement
+**新增（cubeplex 模块）：**
+- `backend/cubeplex/models/organization.py` — `Organization`
+- `backend/cubeplex/models/workspace.py` — `Workspace`
+- `backend/cubeplex/models/user.py` — `User`（含 fastapi-users `SQLModelBaseUserDB` 集成）
+- `backend/cubeplex/models/membership.py` — `Membership` + role enum
+- `backend/cubeplex/models/agent_config.py` — `AgentConfig`（P1 仅建表，CRUD 留 P5）
+- `backend/cubeplex/models/invite_token.py` — `InviteToken`
+- `backend/cubeplex/models/mixins.py` — `OrgScopedMixin`
+- `backend/cubeplex/repositories/base.py` — `ScopedRepository[T]`
+- `backend/cubeplex/repositories/organization.py` — `OrganizationRepository`
+- `backend/cubeplex/repositories/workspace.py` — `WorkspaceRepository`
+- `backend/cubeplex/repositories/membership.py` — `MembershipRepository`
+- `backend/cubeplex/repositories/invite_token.py` — `InviteTokenRepository`
+- `backend/cubeplex/auth/__init__.py`
+- `backend/cubeplex/auth/users.py` — `UserManager` + `fastapi_users` instance
+- `backend/cubeplex/auth/db.py` — User SQLAlchemy adapter
+- `backend/cubeplex/auth/jwt.py` — JWT cookie strategy
+- `backend/cubeplex/auth/csrf.py` — CSRF double-submit-cookie middleware
+- `backend/cubeplex/auth/dependencies.py` — `current_user` / `current_active_user` / `RequireRole`
+- `backend/cubeplex/auth/context.py` — `RequestContext`（user + workspace + role 三元组）
+- `backend/cubeplex/api/routes/v1/auth.py` — `/auth/register` `/auth/login` `/auth/logout`
+- `backend/cubeplex/api/routes/v1/workspaces.py` — workspace CRUD + invite
+- `backend/cubeplex/api/middleware/rate_limit.py` — slowapi config
+- `backend/cubeplex/api/middleware/csrf.py` — CSRF enforcement
 - `backend/alembic/versions/<rev>_m1_identity_and_scoping.py` — 单 migration 文件
 - `backend/tests/e2e/test_auth.py`
 - `backend/tests/e2e/test_rbac.py`
@@ -53,19 +53,19 @@
 - `backend/tests/e2e/test_migration.py`
 
 **修改：**
-- `backend/cubebox/models/__init__.py` — 导出新模型
-- `backend/cubebox/models/conversation.py` — 加 `OrgScopedMixin`
-- `backend/cubebox/models/artifact.py` — 加 `OrgScopedMixin`
-- `backend/cubebox/models/artifact_version.py` — 加 `OrgScopedMixin`
-- `backend/cubebox/models/user_sandbox.py` — 加 `OrgScopedMixin` 且把 `user_id` 与 `workspace_id` 一起组成 sandbox identity
-- `backend/cubebox/repositories/conversation.py` — 继承 `ScopedRepository`
-- `backend/cubebox/repositories/artifact.py` — 继承 `ScopedRepository`
-- `backend/cubebox/repositories/user_sandbox.py` — 继承 `ScopedRepository` + 改 sandbox identity
-- `backend/cubebox/api/app.py` — register auth router、rate_limit、csrf middleware
-- `backend/cubebox/api/middleware/user_identity.py` — 加注释说明仅 fallback
-- `backend/cubebox/api/routes/v1/conversations.py` — 注入 `RequestContext`
-- `backend/cubebox/api/routes/v1/artifacts.py` — 注入 `RequestContext`
-- `backend/cubebox/api/routes/v1/__init__.py` — 导出 auth/workspaces router
+- `backend/cubeplex/models/__init__.py` — 导出新模型
+- `backend/cubeplex/models/conversation.py` — 加 `OrgScopedMixin`
+- `backend/cubeplex/models/artifact.py` — 加 `OrgScopedMixin`
+- `backend/cubeplex/models/artifact_version.py` — 加 `OrgScopedMixin`
+- `backend/cubeplex/models/user_sandbox.py` — 加 `OrgScopedMixin` 且把 `user_id` 与 `workspace_id` 一起组成 sandbox identity
+- `backend/cubeplex/repositories/conversation.py` — 继承 `ScopedRepository`
+- `backend/cubeplex/repositories/artifact.py` — 继承 `ScopedRepository`
+- `backend/cubeplex/repositories/user_sandbox.py` — 继承 `ScopedRepository` + 改 sandbox identity
+- `backend/cubeplex/api/app.py` — register auth router、rate_limit、csrf middleware
+- `backend/cubeplex/api/middleware/user_identity.py` — 加注释说明仅 fallback
+- `backend/cubeplex/api/routes/v1/conversations.py` — 注入 `RequestContext`
+- `backend/cubeplex/api/routes/v1/artifacts.py` — 注入 `RequestContext`
+- `backend/cubeplex/api/routes/v1/__init__.py` — 导出 auth/workspaces router
 - `backend/alembic/env.py` — `target_metadata` 自动 pickup 新模型
 - `backend/tests/e2e/conftest.py` — 加 `authenticated_client` / `admin_client` / `member_client` fixture
 - `backend/tests/e2e/test_conversations.py` — 适配 `authenticated_client`
@@ -106,8 +106,8 @@ git commit -m "chore: add fastapi-users, slowapi, cryptography deps for P1 auth"
 ## Task 2: OrgScopedMixin 与 ScopedRepository 基类
 
 **Files:**
-- Create: `backend/cubebox/models/mixins.py`
-- Create: `backend/cubebox/repositories/base.py`
+- Create: `backend/cubeplex/models/mixins.py`
+- Create: `backend/cubeplex/repositories/base.py`
 - Test: `backend/tests/unit/test_scoped_repository.py`
 
 - [ ] **Step 1: 写失败的单元测试**
@@ -123,8 +123,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import Field, SQLModel
 
-from cubebox.models.mixins import OrgScopedMixin
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models.mixins import OrgScopedMixin
+from cubeplex.repositories.base import ScopedRepository
 
 
 class _Item(SQLModel, OrgScopedMixin, table=True):
@@ -180,11 +180,11 @@ cd backend
 uv run pytest tests/unit/test_scoped_repository.py -v
 ```
 
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.models.mixins'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.models.mixins'`
 
 - [ ] **Step 3: 实现 mixin**
 
-`backend/cubebox/models/mixins.py`:
+`backend/cubeplex/models/mixins.py`:
 
 ```python
 """SQLModel mixins."""
@@ -211,7 +211,7 @@ def org_scope_index(table_name: str) -> Index:
 
 - [ ] **Step 4: 实现 ScopedRepository**
 
-`backend/cubebox/repositories/base.py`:
+`backend/cubeplex/repositories/base.py`:
 
 ```python
 """Base repository that auto-scopes queries by (org_id, workspace_id)."""
@@ -296,7 +296,7 @@ Expected: 2 passed
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/models/mixins.py cubebox/repositories/base.py tests/unit/test_scoped_repository.py pyproject.toml uv.lock
+git add cubeplex/models/mixins.py cubeplex/repositories/base.py tests/unit/test_scoped_repository.py pyproject.toml uv.lock
 git commit -m "feat(repo): add OrgScopedMixin and ScopedRepository base"
 ```
 
@@ -305,15 +305,15 @@ git commit -m "feat(repo): add OrgScopedMixin and ScopedRepository base"
 ## Task 3: Identity 模型（Org / Workspace / User / Membership）
 
 **Files:**
-- Create: `backend/cubebox/models/organization.py`
-- Create: `backend/cubebox/models/workspace.py`
-- Create: `backend/cubebox/models/user.py`
-- Create: `backend/cubebox/models/membership.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/organization.py`
+- Create: `backend/cubeplex/models/workspace.py`
+- Create: `backend/cubeplex/models/user.py`
+- Create: `backend/cubeplex/models/membership.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: 写 Organization 模型**
 
-`backend/cubebox/models/organization.py`:
+`backend/cubeplex/models/organization.py`:
 
 ```python
 """Organization model — top-level tenant container."""
@@ -334,7 +334,7 @@ class Organization(SQLModel, table=True):
 
 - [ ] **Step 2: 写 Workspace 模型**
 
-`backend/cubebox/models/workspace.py`:
+`backend/cubeplex/models/workspace.py`:
 
 ```python
 """Workspace model — collaboration unit inside an Organization."""
@@ -360,7 +360,7 @@ class Workspace(SQLModel, table=True):
 
 **注意**：`fastapi_users.db.SQLAlchemyBaseUserTable` 使用 SQLAlchemy 2.0 `Mapped[...]` 标注，SQLModel/Pydantic 无法在 class-body 解析时生成 schema，会抛 `PydanticSchemaGenerationError`。所以这里**不继承** `SQLAlchemyBaseUserTable`，而是把它期望的列名直接在 SQLModel 上声明。`SQLAlchemyUserDatabase` 按列名查找（`id`, `email`, `hashed_password`, `is_active`, `is_superuser`, `is_verified`），所以 Task 11 里依然可以用它。
 
-`backend/cubebox/models/user.py`:
+`backend/cubeplex/models/user.py`:
 
 ```python
 """User model — global identity (one row per email).
@@ -392,7 +392,7 @@ class User(SQLModel, table=True):
 
 - [ ] **Step 4: 写 Membership 模型**
 
-`backend/cubebox/models/membership.py`:
+`backend/cubeplex/models/membership.py`:
 
 ```python
 """Membership model — N:M between User and Workspace, with role."""
@@ -419,19 +419,19 @@ class Membership(SQLModel, table=True):
 
 - [ ] **Step 5: 更新 models 包导出**
 
-`backend/cubebox/models/__init__.py`:
+`backend/cubeplex/models/__init__.py`:
 
 ```python
 """Data models."""
 
-from cubebox.models.artifact import Artifact
-from cubebox.models.artifact_version import ArtifactVersion
-from cubebox.models.conversation import Conversation
-from cubebox.models.membership import Membership, Role
-from cubebox.models.organization import Organization
-from cubebox.models.user import User
-from cubebox.models.user_sandbox import UserSandbox
-from cubebox.models.workspace import Workspace
+from cubeplex.models.artifact import Artifact
+from cubeplex.models.artifact_version import ArtifactVersion
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.membership import Membership, Role
+from cubeplex.models.organization import Organization
+from cubeplex.models.user import User
+from cubeplex.models.user_sandbox import UserSandbox
+from cubeplex.models.workspace import Workspace
 
 __all__ = [
     "Artifact",
@@ -450,7 +450,7 @@ __all__ = [
 
 ```bash
 cd backend
-uv run mypy cubebox/models/
+uv run mypy cubeplex/models/
 ```
 
 Expected: `Success: no issues found`
@@ -458,7 +458,7 @@ Expected: `Success: no issues found`
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/models/
+git add cubeplex/models/
 git commit -m "feat(models): add Organization, Workspace, User, Membership identity models"
 ```
 
@@ -467,14 +467,14 @@ git commit -m "feat(models): add Organization, Workspace, User, Membership ident
 ## Task 4: 给现有业务表加 OrgScopedMixin
 
 **Files:**
-- Modify: `backend/cubebox/models/conversation.py`
-- Modify: `backend/cubebox/models/artifact.py`
-- Modify: `backend/cubebox/models/artifact_version.py`
-- Modify: `backend/cubebox/models/user_sandbox.py`
+- Modify: `backend/cubeplex/models/conversation.py`
+- Modify: `backend/cubeplex/models/artifact.py`
+- Modify: `backend/cubeplex/models/artifact_version.py`
+- Modify: `backend/cubeplex/models/user_sandbox.py`
 
 - [ ] **Step 1: 修改 Conversation**
 
-`backend/cubebox/models/conversation.py`:
+`backend/cubeplex/models/conversation.py`:
 
 ```python
 """Conversation model."""
@@ -485,7 +485,7 @@ from sqlalchemy import Index
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
-from cubebox.models.mixins import OrgScopedMixin
+from cubeplex.models.mixins import OrgScopedMixin
 
 
 class Conversation(SQLModel, OrgScopedMixin, table=True):
@@ -502,7 +502,7 @@ class Conversation(SQLModel, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: 修改 Artifact**
 
-Read `backend/cubebox/models/artifact.py` first to check current structure, then apply same pattern: add `OrgScopedMixin`, add `__table_args__` with composite index `ix_artifacts_org_ws`.
+Read `backend/cubeplex/models/artifact.py` first to check current structure, then apply same pattern: add `OrgScopedMixin`, add `__table_args__` with composite index `ix_artifacts_org_ws`.
 
 - [ ] **Step 3: 修改 ArtifactVersion**
 
@@ -510,7 +510,7 @@ Same pattern: add `OrgScopedMixin`, composite index `ix_artifact_versions_org_ws
 
 - [ ] **Step 4: 修改 UserSandbox（顺便修复 sandbox identity）**
 
-`backend/cubebox/models/user_sandbox.py`:
+`backend/cubeplex/models/user_sandbox.py`:
 
 ```python
 """UserSandbox model for tracking sandbox instances per user+workspace."""
@@ -523,7 +523,7 @@ from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
-from cubebox.models.mixins import OrgScopedMixin
+from cubeplex.models.mixins import OrgScopedMixin
 
 
 class UserSandbox(SQLModel, OrgScopedMixin, table=True):
@@ -555,8 +555,8 @@ class UserSandbox(SQLModel, OrgScopedMixin, table=True):
 
 ```bash
 cd backend
-uv run mypy cubebox/models/
-uv run ruff check cubebox/models/
+uv run mypy cubeplex/models/
+uv run ruff check cubeplex/models/
 ```
 
 Expected: both pass.
@@ -564,7 +564,7 @@ Expected: both pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/models/
+git add cubeplex/models/
 git commit -m "feat(models): add OrgScopedMixin to Conversation, Artifact, ArtifactVersion, UserSandbox; fix sandbox identity to (user, workspace)"
 ```
 
@@ -573,13 +573,13 @@ git commit -m "feat(models): add OrgScopedMixin to Conversation, Artifact, Artif
 ## Task 5: AgentConfig 与 InviteToken 模型（仅建表，CRUD 留后续）
 
 **Files:**
-- Create: `backend/cubebox/models/agent_config.py`
-- Create: `backend/cubebox/models/invite_token.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/agent_config.py`
+- Create: `backend/cubeplex/models/invite_token.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: 写 AgentConfig（1:1 with Workspace）**
 
-`backend/cubebox/models/agent_config.py`:
+`backend/cubeplex/models/agent_config.py`:
 
 ```python
 """AgentConfig — 1:1 with Workspace in M1.
@@ -597,7 +597,7 @@ from sqlalchemy.types import JSON
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
-from cubebox.models.mixins import OrgScopedMixin
+from cubeplex.models.mixins import OrgScopedMixin
 
 
 class AgentConfig(SQLModel, OrgScopedMixin, table=True):
@@ -617,7 +617,7 @@ class AgentConfig(SQLModel, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: 写 InviteToken**
 
-`backend/cubebox/models/invite_token.py`:
+`backend/cubeplex/models/invite_token.py`:
 
 ```python
 """Invite token — single-use, time-limited workspace invitation."""
@@ -648,9 +648,9 @@ class InviteToken(SQLModel, table=True):
 - [ ] **Step 3: 更新 models 包导出**
 
 ```python
-# Append to backend/cubebox/models/__init__.py imports + __all__:
-from cubebox.models.agent_config import AgentConfig
-from cubebox.models.invite_token import InviteToken
+# Append to backend/cubeplex/models/__init__.py imports + __all__:
+from cubeplex.models.agent_config import AgentConfig
+from cubeplex.models.invite_token import InviteToken
 # Add "AgentConfig", "InviteToken" to __all__
 ```
 
@@ -658,14 +658,14 @@ from cubebox.models.invite_token import InviteToken
 
 ```bash
 cd backend
-uv run mypy cubebox/models/
-uv run ruff check cubebox/models/
+uv run mypy cubeplex/models/
+uv run ruff check cubeplex/models/
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/models/
+git add cubeplex/models/
 git commit -m "feat(models): add AgentConfig and InviteToken models"
 ```
 
@@ -683,8 +683,8 @@ git commit -m "feat(models): add AgentConfig and InviteToken models"
 
 ```python
 # Import models and config
-from cubebox.config import config as app_config
-from cubebox.models import (  # noqa: F401
+from cubeplex.config import config as app_config
+from cubeplex.models import (  # noqa: F401
     AgentConfig,
     Artifact,
     ArtifactVersion,
@@ -760,7 +760,7 @@ def upgrade() -> None:
 ```bash
 cd backend
 # 先 drop test DB 然后重建
-mysql -u root -e "DROP DATABASE IF EXISTS cubebox_test; CREATE DATABASE cubebox_test;"
+mysql -u root -e "DROP DATABASE IF EXISTS cubeplex_test; CREATE DATABASE cubeplex_test;"
 ENV_FOR_DYNACONF=test uv run alembic upgrade head
 ```
 
@@ -769,7 +769,7 @@ Expected: 所有 migration 应用成功，新表与列都存在。
 - [ ] **Step 7: 手动验证默认数据回填**
 
 ```bash
-mysql -u root cubebox_test -e "SELECT * FROM organizations; SELECT * FROM workspaces;"
+mysql -u root cubeplex_test -e "SELECT * FROM organizations; SELECT * FROM workspaces;"
 ```
 
 Expected: 一行 `default-org`、一行 `default-ws`。
@@ -817,7 +817,7 @@ import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 
 @pytest.mark.skipif(
@@ -879,13 +879,13 @@ git commit -m "test(e2e): verify migration backfill + downgrade roundtrip"
 ## Task 8: 现有 Repository 改造为 ScopedRepository
 
 **Files:**
-- Modify: `backend/cubebox/repositories/conversation.py`
-- Modify: `backend/cubebox/repositories/artifact.py`
-- Modify: `backend/cubebox/repositories/user_sandbox.py`
+- Modify: `backend/cubeplex/repositories/conversation.py`
+- Modify: `backend/cubeplex/repositories/artifact.py`
+- Modify: `backend/cubeplex/repositories/user_sandbox.py`
 
 - [ ] **Step 1: 改造 ConversationRepository**
 
-`backend/cubebox/repositories/conversation.py`:
+`backend/cubeplex/repositories/conversation.py`:
 
 ```python
 """Conversation repository — scoped by (org_id, workspace_id)."""
@@ -895,8 +895,8 @@ from datetime import UTC, datetime
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Conversation
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models import Conversation
+from cubeplex.repositories.base import ScopedRepository
 
 
 class ConversationRepository(ScopedRepository[Conversation]):
@@ -962,7 +962,7 @@ For `UserSandboxRepository` specifically: any query that previously used `user_i
 
 ```bash
 cd backend
-uv run mypy cubebox/repositories/
+uv run mypy cubeplex/repositories/
 ```
 
 Expected: pass.
@@ -970,7 +970,7 @@ Expected: pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/repositories/
+git add cubeplex/repositories/
 git commit -m "refactor(repo): subclass ScopedRepository for Conversation/Artifact/UserSandbox"
 ```
 
@@ -979,15 +979,15 @@ git commit -m "refactor(repo): subclass ScopedRepository for Conversation/Artifa
 ## Task 9: Identity Repositories（Org / Workspace / Membership / Invite）
 
 **Files:**
-- Create: `backend/cubebox/repositories/organization.py`
-- Create: `backend/cubebox/repositories/workspace.py`
-- Create: `backend/cubebox/repositories/membership.py`
-- Create: `backend/cubebox/repositories/invite_token.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/organization.py`
+- Create: `backend/cubeplex/repositories/workspace.py`
+- Create: `backend/cubeplex/repositories/membership.py`
+- Create: `backend/cubeplex/repositories/invite_token.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: WorkspaceRepository（不 scope，因 workspace 自己就是范围根）**
 
-`backend/cubebox/repositories/workspace.py`:
+`backend/cubeplex/repositories/workspace.py`:
 
 ```python
 """Workspace repository — not org-scoped at row level (workspace IS the scope)."""
@@ -995,7 +995,7 @@ git commit -m "refactor(repo): subclass ScopedRepository for Conversation/Artifa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Workspace
+from cubeplex.models import Workspace
 
 
 class WorkspaceRepository:
@@ -1020,7 +1020,7 @@ class WorkspaceRepository:
 
 - [ ] **Step 2: MembershipRepository**
 
-`backend/cubebox/repositories/membership.py`:
+`backend/cubeplex/repositories/membership.py`:
 
 ```python
 """Membership repository — User × Workspace × role."""
@@ -1028,7 +1028,7 @@ class WorkspaceRepository:
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Membership, Role
+from cubeplex.models import Membership, Role
 
 
 class MembershipRepository:
@@ -1059,7 +1059,7 @@ class MembershipRepository:
 
 - [ ] **Step 3: OrganizationRepository**
 
-`backend/cubebox/repositories/organization.py`:
+`backend/cubeplex/repositories/organization.py`:
 
 ```python
 """Organization repository."""
@@ -1067,7 +1067,7 @@ class MembershipRepository:
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Organization
+from cubeplex.models import Organization
 
 
 class OrganizationRepository:
@@ -1088,7 +1088,7 @@ class OrganizationRepository:
 
 - [ ] **Step 4: InviteTokenRepository**
 
-`backend/cubebox/repositories/invite_token.py`:
+`backend/cubeplex/repositories/invite_token.py`:
 
 ```python
 """Invite token repository — single-use + time-limited."""
@@ -1098,7 +1098,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import InviteToken
+from cubeplex.models import InviteToken
 
 
 class InviteTokenRepository:
@@ -1131,13 +1131,13 @@ class InviteTokenRepository:
 
 - [ ] **Step 5: 导出**
 
-`backend/cubebox/repositories/__init__.py` — append:
+`backend/cubeplex/repositories/__init__.py` — append:
 
 ```python
-from cubebox.repositories.invite_token import InviteTokenRepository
-from cubebox.repositories.membership import MembershipRepository
-from cubebox.repositories.organization import OrganizationRepository
-from cubebox.repositories.workspace import WorkspaceRepository
+from cubeplex.repositories.invite_token import InviteTokenRepository
+from cubeplex.repositories.membership import MembershipRepository
+from cubeplex.repositories.organization import OrganizationRepository
+from cubeplex.repositories.workspace import WorkspaceRepository
 ```
 
 (Add to `__all__` if present.)
@@ -1146,14 +1146,14 @@ from cubebox.repositories.workspace import WorkspaceRepository
 
 ```bash
 cd backend
-uv run mypy cubebox/repositories/
-uv run ruff check cubebox/repositories/
+uv run mypy cubeplex/repositories/
+uv run ruff check cubeplex/repositories/
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cubebox/repositories/
+git add cubeplex/repositories/
 git commit -m "feat(repo): add Organization/Workspace/Membership/InviteToken repositories"
 ```
 
@@ -1163,7 +1163,7 @@ git commit -m "feat(repo): add Organization/Workspace/Membership/InviteToken rep
 
 **Files:**
 - Modify: `backend/config.yaml`
-- Modify: `backend/cubebox/config.py` (read first to see structure)
+- Modify: `backend/cubeplex/config.py` (read first to see structure)
 
 - [ ] **Step 1: 加 auth 配置块**
 
@@ -1171,12 +1171,12 @@ git commit -m "feat(repo): add Organization/Workspace/Membership/InviteToken rep
 
 ```yaml
 auth:
-  jwt_secret: "CHANGE_ME_IN_PRODUCTION"   # ENV: CUBEBOX_AUTH__JWT_SECRET
+  jwt_secret: "CHANGE_ME_IN_PRODUCTION"   # ENV: CUBEPLEX_AUTH__JWT_SECRET
   jwt_lifetime_seconds: 86400              # 24h
-  cookie_name: "cubebox_auth"
+  cookie_name: "cubeplex_auth"
   cookie_secure: false                     # production: true
   cookie_samesite: "lax"
-  csrf_secret: "CHANGE_ME_IN_PRODUCTION"   # ENV: CUBEBOX_AUTH__CSRF_SECRET
+  csrf_secret: "CHANGE_ME_IN_PRODUCTION"   # ENV: CUBEPLEX_AUTH__CSRF_SECRET
   rate_limit:
     login_per_minute: 5
     register_per_minute: 3
@@ -1198,14 +1198,14 @@ git commit -m "chore(config): add auth config block (jwt, cookie, csrf, rate lim
 ## Task 11: fastapi-users 集成（user manager + JWT cookie strategy）
 
 **Files:**
-- Create: `backend/cubebox/auth/__init__.py`
-- Create: `backend/cubebox/auth/db.py`
-- Create: `backend/cubebox/auth/users.py`
-- Create: `backend/cubebox/auth/jwt.py`
+- Create: `backend/cubeplex/auth/__init__.py`
+- Create: `backend/cubeplex/auth/db.py`
+- Create: `backend/cubeplex/auth/users.py`
+- Create: `backend/cubeplex/auth/jwt.py`
 
 - [ ] **Step 1: 空 __init__**
 
-`backend/cubebox/auth/__init__.py`:
+`backend/cubeplex/auth/__init__.py`:
 
 ```python
 """Authentication: fastapi-users + JWT cookie + RBAC."""
@@ -1213,7 +1213,7 @@ git commit -m "chore(config): add auth config block (jwt, cookie, csrf, rate lim
 
 - [ ] **Step 2: User DB adapter**
 
-`backend/cubebox/auth/db.py`:
+`backend/cubeplex/auth/db.py`:
 
 ```python
 """SQLAlchemy adapter for fastapi-users."""
@@ -1225,8 +1225,8 @@ from fastapi import Depends
 from fastapi_users.db import SQLAlchemyUserDatabase
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.db import get_session
-from cubebox.models import User
+from cubeplex.db import get_session
+from cubeplex.models import User
 
 
 async def get_user_db(
@@ -1237,7 +1237,7 @@ async def get_user_db(
 
 - [ ] **Step 3: UserManager**
 
-`backend/cubebox/auth/users.py`:
+`backend/cubeplex/auth/users.py`:
 
 ```python
 """UserManager and fastapi_users instance."""
@@ -1250,10 +1250,10 @@ from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin
 from fastapi_users.db import SQLAlchemyUserDatabase
 from loguru import logger
 
-from cubebox.auth.db import get_user_db
-from cubebox.auth.jwt import auth_backend
-from cubebox.config import config
-from cubebox.models import User
+from cubeplex.auth.db import get_user_db
+from cubeplex.auth.jwt import auth_backend
+from cubeplex.config import config
+from cubeplex.models import User
 
 
 class UserManager(BaseUserManager[User, str]):
@@ -1279,7 +1279,7 @@ fastapi_users = FastAPIUsers[User, str](get_user_manager, [auth_backend])
 
 - [ ] **Step 4: JWT cookie backend**
 
-`backend/cubebox/auth/jwt.py`:
+`backend/cubeplex/auth/jwt.py`:
 
 ```python
 """JWT cookie authentication backend."""
@@ -1290,12 +1290,12 @@ from fastapi_users.authentication import (
     JWTStrategy,
 )
 
-from cubebox.config import config
+from cubeplex.config import config
 
 
 def _cookie_transport() -> CookieTransport:
     return CookieTransport(
-        cookie_name=config.get("auth.cookie_name", "cubebox_auth"),
+        cookie_name=config.get("auth.cookie_name", "cubeplex_auth"),
         cookie_max_age=config.get("auth.jwt_lifetime_seconds", 86400),
         cookie_secure=config.get("auth.cookie_secure", False),
         cookie_httponly=True,
@@ -1321,14 +1321,14 @@ auth_backend = AuthenticationBackend(
 
 ```bash
 cd backend
-uv run mypy cubebox/auth/
-uv run ruff check cubebox/auth/
+uv run mypy cubeplex/auth/
+uv run ruff check cubeplex/auth/
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/auth/
+git add cubeplex/auth/
 git commit -m "feat(auth): wire fastapi-users with JWT httpOnly cookie backend"
 ```
 
@@ -1337,19 +1337,19 @@ git commit -m "feat(auth): wire fastapi-users with JWT httpOnly cookie backend"
 ## Task 12: RequestContext + RBAC dependencies
 
 **Files:**
-- Create: `backend/cubebox/auth/context.py`
-- Create: `backend/cubebox/auth/dependencies.py`
+- Create: `backend/cubeplex/auth/context.py`
+- Create: `backend/cubeplex/auth/dependencies.py`
 
 - [ ] **Step 1: RequestContext**
 
-`backend/cubebox/auth/context.py`:
+`backend/cubeplex/auth/context.py`:
 
 ```python
 """Request-scoped context: who you are + which workspace + which role."""
 
 from dataclasses import dataclass
 
-from cubebox.models import Role, User
+from cubeplex.models import Role, User
 
 
 @dataclass(frozen=True)
@@ -1370,7 +1370,7 @@ class RequestContext:
 
 - [ ] **Step 2: dependencies — current_user + require_workspace + require_role**
 
-`backend/cubebox/auth/dependencies.py`:
+`backend/cubeplex/auth/dependencies.py`:
 
 ```python
 """FastAPI dependencies for auth + scoping."""
@@ -1380,11 +1380,11 @@ from typing import Annotated
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.auth.users import fastapi_users
-from cubebox.db import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import MembershipRepository, WorkspaceRepository
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.users import fastapi_users
+from cubeplex.db import get_session
+from cubeplex.models import Role, User
+from cubeplex.repositories import MembershipRepository, WorkspaceRepository
 
 current_active_user = fastapi_users.current_user(active=True)
 
@@ -1444,14 +1444,14 @@ require_member = require_role(Role.ADMIN, Role.MEMBER)
 
 ```bash
 cd backend
-uv run mypy cubebox/auth/
-uv run ruff check cubebox/auth/
+uv run mypy cubeplex/auth/
+uv run ruff check cubeplex/auth/
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/auth/context.py cubebox/auth/dependencies.py
+git add cubeplex/auth/context.py cubeplex/auth/dependencies.py
 git commit -m "feat(auth): add RequestContext + require_role dependencies for RBAC"
 ```
 
@@ -1460,12 +1460,12 @@ git commit -m "feat(auth): add RequestContext + require_role dependencies for RB
 ## Task 13: 限流 + CSRF middleware
 
 **Files:**
-- Create: `backend/cubebox/api/middleware/rate_limit.py`
-- Create: `backend/cubebox/api/middleware/csrf.py`
+- Create: `backend/cubeplex/api/middleware/rate_limit.py`
+- Create: `backend/cubeplex/api/middleware/csrf.py`
 
 - [ ] **Step 1: Rate limiter**
 
-`backend/cubebox/api/middleware/rate_limit.py`:
+`backend/cubeplex/api/middleware/rate_limit.py`:
 
 ```python
 """Per-route rate limit using slowapi."""
@@ -1473,7 +1473,7 @@ git commit -m "feat(auth): add RequestContext + require_role dependencies for RB
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
-from cubebox.config import config
+from cubeplex.config import config
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -1483,12 +1483,12 @@ REGISTER_LIMIT = f"{config.get('auth.rate_limit.register_per_minute', 3)}/minute
 
 - [ ] **Step 2: CSRF double-submit-cookie middleware**
 
-`backend/cubebox/api/middleware/csrf.py`:
+`backend/cubeplex/api/middleware/csrf.py`:
 
 ```python
 """CSRF double-submit-cookie middleware.
 
-On every safe request (GET/HEAD/OPTIONS), set a `cubebox_csrf` cookie if absent.
+On every safe request (GET/HEAD/OPTIONS), set a `cubeplex_csrf` cookie if absent.
 On every mutating request (POST/PUT/PATCH/DELETE), require the cookie value to match
 the `X-CSRF-Token` header. Skip enforcement if there is no auth cookie present (so
 unauthenticated routes still work).
@@ -1500,9 +1500,9 @@ from http.cookies import SimpleCookie
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from cubebox.config import config
+from cubeplex.config import config
 
-CSRF_COOKIE = "cubebox_csrf"
+CSRF_COOKIE = "cubeplex_csrf"
 CSRF_HEADER = "x-csrf-token"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
@@ -1510,7 +1510,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 class CSRFMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self.auth_cookie = config.get("auth.cookie_name", "cubebox_auth")
+        self.auth_cookie = config.get("auth.cookie_name", "cubeplex_auth")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -1581,14 +1581,14 @@ async def _send_403(send: Send, message: str) -> None:
 
 ```bash
 cd backend
-uv run mypy cubebox/api/middleware/
-uv run ruff check cubebox/api/middleware/
+uv run mypy cubeplex/api/middleware/
+uv run ruff check cubeplex/api/middleware/
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cubebox/api/middleware/rate_limit.py cubebox/api/middleware/csrf.py
+git add cubeplex/api/middleware/rate_limit.py cubeplex/api/middleware/csrf.py
 git commit -m "feat(api): add slowapi rate limiter + CSRF double-submit middleware"
 ```
 
@@ -1597,12 +1597,12 @@ git commit -m "feat(api): add slowapi rate limiter + CSRF double-submit middlewa
 ## Task 14: Auth router（注册 / 登录 / 登出）
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/auth.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
+- Create: `backend/cubeplex/api/routes/v1/auth.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
 
 - [ ] **Step 1: Auth router**
 
-`backend/cubebox/api/routes/v1/auth.py`:
+`backend/cubeplex/api/routes/v1/auth.py`:
 
 ```python
 """Auth routes: register, login, logout (cookie-based) with rate limit."""
@@ -1613,12 +1613,12 @@ from fastapi import APIRouter, Body, Depends, Request
 from fastapi_users.schemas import BaseUser, BaseUserCreate
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.middleware.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limiter
-from cubebox.auth.dependencies import current_active_user
-from cubebox.auth.jwt import auth_backend
-from cubebox.auth.users import UserManager, fastapi_users, get_user_manager
-from cubebox.db import get_session
-from cubebox.models import User
+from cubeplex.api.middleware.rate_limit import LOGIN_LIMIT, REGISTER_LIMIT, limiter
+from cubeplex.auth.dependencies import current_active_user
+from cubeplex.auth.jwt import auth_backend
+from cubeplex.auth.users import UserManager, fastapi_users, get_user_manager
+from cubeplex.db import get_session
+from cubeplex.models import User
 
 
 class UserRead(BaseUser[str]):
@@ -1680,24 +1680,24 @@ async def me(user: Annotated[User, Depends(current_active_user)]) -> dict[str, s
 
 - [ ] **Step 2: 注册 router**
 
-`backend/cubebox/api/routes/v1/__init__.py` — append:
+`backend/cubeplex/api/routes/v1/__init__.py` — append:
 
 ```python
-from cubebox.api.routes.v1.auth import router as auth_router
-from cubebox.api.routes.v1.workspaces import router as workspaces_router
+from cubeplex.api.routes.v1.auth import router as auth_router
+from cubeplex.api.routes.v1.workspaces import router as workspaces_router
 ```
 
 (Add to whatever the file already exports.)
 
 - [ ] **Step 3: 在 app.py 注册**
 
-`backend/cubebox/api/app.py` — modify the router registration block:
+`backend/cubeplex/api/app.py` — modify the router registration block:
 
 ```python
 # Register routers
-from cubebox.api.middleware.csrf import CSRFMiddleware
-from cubebox.api.middleware.rate_limit import limiter
-from cubebox.api.routes.v1 import (
+from cubeplex.api.middleware.csrf import CSRFMiddleware
+from cubeplex.api.middleware.rate_limit import limiter
+from cubeplex.api.routes.v1 import (
     artifacts_router,
     auth_router,
     conversations_router,
@@ -1728,7 +1728,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 ```bash
 cd backend
-uv run python -c "from cubebox.api.app import create_app; create_app()"
+uv run python -c "from cubeplex.api.app import create_app; create_app()"
 ```
 
 Expected: 无异常输出。
@@ -1736,7 +1736,7 @@ Expected: 无异常输出。
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/api/
+git add cubeplex/api/
 git commit -m "feat(api): register fastapi-users auth router + CSRF + rate limit"
 ```
 
@@ -1745,11 +1745,11 @@ git commit -m "feat(api): register fastapi-users auth router + CSRF + rate limit
 ## Task 15: Workspace router（CRUD + invite）
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/workspaces.py`
+- Create: `backend/cubeplex/api/routes/v1/workspaces.py`
 
 - [ ] **Step 1: Workspace router**
 
-`backend/cubebox/api/routes/v1/workspaces.py`:
+`backend/cubeplex/api/routes/v1/workspaces.py`:
 
 ```python
 """Workspace routes: list / create / invite / accept-invite."""
@@ -1760,11 +1760,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import current_active_user, request_context, require_admin
-from cubebox.db import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import (
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import current_active_user, request_context, require_admin
+from cubeplex.db import get_session
+from cubeplex.models import Role, User
+from cubeplex.repositories import (
     InviteTokenRepository,
     MembershipRepository,
     WorkspaceRepository,
@@ -1864,14 +1864,14 @@ async def accept_invite(
 
 ```bash
 cd backend
-uv run mypy cubebox/api/routes/v1/workspaces.py
-uv run ruff check cubebox/api/routes/v1/workspaces.py
+uv run mypy cubeplex/api/routes/v1/workspaces.py
+uv run ruff check cubeplex/api/routes/v1/workspaces.py
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/api/routes/v1/workspaces.py
+git add cubeplex/api/routes/v1/workspaces.py
 git commit -m "feat(api): workspace CRUD + invite token issue/consume"
 ```
 
@@ -1880,8 +1880,8 @@ git commit -m "feat(api): workspace CRUD + invite token issue/consume"
 ## Task 16: 改造现有路由用 RequestContext + ScopedRepository
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
-- Modify: `backend/cubebox/api/routes/v1/artifacts.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/routes/v1/artifacts.py`
 
 - [ ] **Step 1: conversations 路由注入 ctx**
 
@@ -1889,8 +1889,8 @@ git commit -m "feat(api): workspace CRUD + invite token issue/consume"
 
 ```python
 # at top:
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import request_context, require_member
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import request_context, require_member
 
 # Update each handler signature, e.g.:
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -1916,15 +1916,15 @@ Read `artifacts.py`, apply same pattern: every handler gets `ctx: RequestContext
 
 ```bash
 cd backend
-uv run mypy cubebox/api/routes/
-uv run ruff check cubebox/api/routes/
+uv run mypy cubeplex/api/routes/
+uv run ruff check cubeplex/api/routes/
 ```
 
 - [ ] **Step 4: 启动应用 smoke check**
 
 ```bash
 cd backend
-uv run python -c "from cubebox.api.app import create_app; app = create_app(); print(len(app.routes))"
+uv run python -c "from cubeplex.api.app import create_app; app = create_app(); print(len(app.routes))"
 ```
 
 Expected: number > 10, no exception.
@@ -1932,7 +1932,7 @@ Expected: number > 10, no exception.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/api/routes/
+git add cubeplex/api/routes/
 git commit -m "refactor(api): conversations + artifacts use RequestContext + scoped repos"
 ```
 
@@ -1965,18 +1965,18 @@ from langgraph.checkpoint.memory import MemorySaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.api.app import create_app
-from cubebox.auth.db import SQLAlchemyUserDatabase
-from cubebox.auth.users import UserManager
-from cubebox.db.engine import _build_database_url, engine
-from cubebox.db.session import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import (
+from cubeplex.api.app import create_app
+from cubeplex.auth.db import SQLAlchemyUserDatabase
+from cubeplex.auth.users import UserManager
+from cubeplex.db.engine import _build_database_url, engine
+from cubeplex.db.session import get_session
+from cubeplex.models import Role, User
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationRepository,
     WorkspaceRepository,
 )
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.sandbox.local import LocalSandbox
 
 DEFAULT_ORG_ID = "default-org"
 DEFAULT_WS_ID = "default-ws"
@@ -2067,9 +2067,9 @@ async def _login_and_attach(
     """Log in and set default X-Workspace-Id on the client."""
     # 1) Issue a GET to obtain a CSRF cookie (CSRFMiddleware sets it on safe methods)
     await client.get("/api/v1/auth/me")
-    csrf = client.cookies.get("cubebox_csrf") or ""
+    csrf = client.cookies.get("cubeplex_csrf") or ""
 
-    # 2) Login (sets cubebox_auth cookie)
+    # 2) Login (sets cubeplex_auth cookie)
     r = await client.post(
         "/api/v1/auth/login",
         data={"username": email, "password": password},
@@ -2079,7 +2079,7 @@ async def _login_and_attach(
 
     # 3) Attach workspace + CSRF to every subsequent request
     client.headers["X-Workspace-Id"] = workspace_id
-    client.headers["X-CSRF-Token"] = client.cookies.get("cubebox_csrf") or csrf
+    client.headers["X-CSRF-Token"] = client.cookies.get("cubeplex_csrf") or csrf
 
 
 # -------------------- Legacy fixtures (backward compatible) --------------------
@@ -2100,7 +2100,7 @@ async def client() -> AsyncIterator[TestClient]:
 
     # Issue safe GET to get CSRF cookie
     sync_client.get("/api/v1/auth/me")
-    csrf = sync_client.cookies.get("cubebox_csrf") or ""
+    csrf = sync_client.cookies.get("cubeplex_csrf") or ""
 
     r = sync_client.post(
         "/api/v1/auth/login",
@@ -2109,7 +2109,7 @@ async def client() -> AsyncIterator[TestClient]:
     )
     assert r.status_code in (200, 204), f"login failed: {r.status_code} {r.text}"
     sync_client.headers["X-Workspace-Id"] = DEFAULT_WS_ID
-    sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get("cubebox_csrf") or csrf
+    sync_client.headers["X-CSRF-Token"] = sync_client.cookies.get("cubeplex_csrf") or csrf
     yield sync_client
 
 
@@ -2288,7 +2288,7 @@ async def test_register_and_login_sets_cookie(memory_client):
         "/api/v1/auth/login", data={"username": email, "password": pw}
     )
     assert r.status_code == 204
-    assert "cubebox_auth" in memory_client.cookies
+    assert "cubeplex_auth" in memory_client.cookies
 
 
 @pytest.mark.asyncio
@@ -2630,7 +2630,7 @@ Expected: **100% 绿**。包括但不限于：
 
 - `ruff format --check` 全绿
 - `ruff check` 全绿
-- `mypy cubebox/` 全绿
+- `mypy cubeplex/` 全绿
 - `pytest -s -v` **全部 test 通过**，尤其是：
   - `tests/e2e/test_conversations.py`（Task 21 已验证）
   - `tests/e2e/test_conversation_flow.py`（Task 21 已验证）
@@ -2646,7 +2646,7 @@ Expected: **100% 绿**。包括但不限于：
 - [ ] **Step 2: 在 backend/CLAUDE.md "Architecture" 段末加一段**
 
 ```markdown
-- **Auth & Identity**: `cubebox/auth/` 用 fastapi-users + JWT httpOnly cookie。所有 mutation 路由要求 `X-Workspace-Id` header；`request_context` 依赖解析 `(user, org_id, workspace_id, role)` 注入到 handler。`OrgScopedMixin` + `ScopedRepository` 在 ORM 层强制 workspace 边界。
+- **Auth & Identity**: `cubeplex/auth/` 用 fastapi-users + JWT httpOnly cookie。所有 mutation 路由要求 `X-Workspace-Id` header；`request_context` 依赖解析 `(user, org_id, workspace_id, role)` 注入到 handler。`OrgScopedMixin` + `ScopedRepository` 在 ORM 层强制 workspace 边界。
 ```
 
 - [ ] **Step 3: Commit**
@@ -2679,7 +2679,7 @@ After completing all tasks, run this self-check before declaring P1 done:
 
 ## Out of P1 Scope (deferred)
 
-- AgentConfig CRUD + parameterized `create_cubebox_agent()` → P2/P5
+- AgentConfig CRUD + parameterized `create_cubeplex_agent()` → P2/P5
 - Credential store + CRUD → P4
 - AdminClient + audit/tracing emission → P2
 - Anthropic SDK + multi-model UI → P5

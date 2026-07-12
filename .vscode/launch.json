@@ -9,7 +9,7 @@
             "cwd": "${workspaceFolder}/backend",
             "env": {
                 "ENV_FOR_DYNACONF": "development",
-                "CUBEBOX_DEBUG": "true"
+                "CUBEPLEX_DEBUG": "true"
             },
             "console": "integratedTerminal",
             "justMyCode": false
@@ -22,7 +22,7 @@
             "cwd": "${workspaceFolder}/backend",
             "env": {
                 "ENV_FOR_DYNACONF": "development",
-                "CUBEBOX_DEBUG": "true"
+                "CUBEPLEX_DEBUG": "true"
             },
             "console": "integratedTerminal",
             "justMyCode": false
@@ -34,7 +34,7 @@
             "command": "pnpm -F web dev",
             "cwd": "${workspaceFolder}/frontend",
             "env": {
-                "CUBEBOX_API_URL": "http://localhost:8000"
+                "CUBEPLEX_API_URL": "http://localhost:8000"
             }
         }
     ],

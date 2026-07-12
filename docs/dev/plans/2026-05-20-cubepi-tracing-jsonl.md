@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Attach cubepi 0.4's `Tracer` + `JsonlSpanExporter` to cubebox's per-run agent so each conversation turn writes an on-disk OTLP/JSON trace, gated behind a new `tracing:` config block.
+**Goal:** Attach cubepi 0.4's `Tracer` + `JsonlSpanExporter` to cubeplex's per-run agent so each conversation turn writes an on-disk OTLP/JSON trace, gated behind a new `tracing:` config block.
 
-**Architecture:** A small config-driven factory (`cubebox/agents/tracing.py`) builds a per-run `Tracer` (or returns `None` when disabled / on any failure). `RunManager._run_cubepi_path` wraps `agent.prompt(...)` with the tracer via an `AsyncExitStack`, so attach/detach/flush happen per run with no global state. JSONL files shard by `run_id` automatically.
+**Architecture:** A small config-driven factory (`cubeplex/agents/tracing.py`) builds a per-run `Tracer` (or returns `None` when disabled / on any failure). `RunManager._run_cubepi_path` wraps `agent.prompt(...)` with the tracer via an `AsyncExitStack`, so attach/detach/flush happen per run with no global state. JSONL files shard by `run_id` automatically.
 
 **Tech Stack:** Python 3.12, cubepi 0.4 (`cubepi.tracing`), dynaconf config, pytest + pytest-asyncio.
 
@@ -15,7 +15,7 @@ Spec: `docs/dev/specs/2026-05-20-cubepi-tracing-jsonl-design.md`.
 ### Task 1: Config-driven Tracer factory
 
 **Files:**
-- Create: `cubebox/agents/tracing.py`
+- Create: `cubeplex/agents/tracing.py`
 - Test: `tests/unit/agents/test_tracing.py`
 
 - [ ] **Step 1: Write the failing tests**
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.agents import tracing as tracing_mod
+from cubeplex.agents import tracing as tracing_mod
 
 
 def _fake_config(values: dict[str, object]):
@@ -79,13 +79,13 @@ async def test_build_run_tracer_enabled_returns_tracer(monkeypatch, tmp_path):
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `uv run pytest tests/unit/agents/test_tracing.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.agents.tracing'` (or `AttributeError: build_run_tracer`).
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.agents.tracing'` (or `AttributeError: build_run_tracer`).
 
 - [ ] **Step 3: Write the factory**
 
 ```python
-# cubebox/agents/tracing.py
-"""Build a per-run cubepi Tracer from cubebox config.
+# cubeplex/agents/tracing.py
+"""Build a per-run cubepi Tracer from cubeplex config.
 
 Tracing is opt-in via the ``tracing:`` config block. When disabled — or when
 construction fails for any reason — the run proceeds untraced. A tracing fault
@@ -98,7 +98,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from cubebox.config import config
+from cubeplex.config import config
 
 if TYPE_CHECKING:
     from cubepi.tracing import Tracer
@@ -118,9 +118,9 @@ def build_run_tracer() -> "Tracer | None":
         directory = config.get("tracing.directory", "./cubepi-traces")
         record_content = bool(config.get("tracing.record_content", False))
         return Tracer(
-            service_name="cubebox",
+            service_name="cubeplex",
             deployment_environment=str(config.get("env", "development")),
-            agent_name="cubebox-agent",
+            agent_name="cubeplex-agent",
             exporters=[JsonlSpanExporter(directory=directory)],
             record_content=record_content,
         )
@@ -137,7 +137,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/agents/tracing.py tests/unit/agents/test_tracing.py
+git add cubeplex/agents/tracing.py tests/unit/agents/test_tracing.py
 git commit -m "feat(tracing): config-driven per-run cubepi Tracer factory"
 ```
 
@@ -146,7 +146,7 @@ git commit -m "feat(tracing): config-driven per-run cubepi Tracer factory"
 ### Task 2: Wire the tracer into the cubepi run path
 
 **Files:**
-- Modify: `cubebox/streams/run_manager.py` (import line ~6; the `agent.prompt(_user_msg)` block ~1133-1139)
+- Modify: `cubeplex/streams/run_manager.py` (import line ~6; the `agent.prompt(_user_msg)` block ~1133-1139)
 
 - [ ] **Step 1: Extend the contextlib import**
 
@@ -190,7 +190,7 @@ Replace with:
                 metadata=_user_msg_metadata,
             )
 
-            from cubebox.agents.tracing import build_run_tracer
+            from cubeplex.agents.tracing import build_run_tracer
 
             tracer = build_run_tracer()
             try:
@@ -222,7 +222,7 @@ Replace with:
 
 - [ ] **Step 3: Verify it imports and type-checks**
 
-Run: `uv run mypy cubebox/streams/run_manager.py cubebox/agents/tracing.py`
+Run: `uv run mypy cubeplex/streams/run_manager.py cubeplex/agents/tracing.py`
 Expected: `Success: no issues found`.
 
 - [ ] **Step 4: Run the run-manager unit tests to confirm no regression**
@@ -233,7 +233,7 @@ Expected: PASS (no regressions; tracing is disabled by default in base config so
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/streams/run_manager.py
+git add cubeplex/streams/run_manager.py
 git commit -m "feat(tracing): attach per-run cubepi Tracer around agent.prompt"
 ```
 
@@ -278,13 +278,13 @@ other dev override blocks such as `sandbox:`), add:
 
 Run:
 ```bash
-ENV_FOR_DYNACONF=development uv run python -c "from cubebox.config import config; print('enabled=', config.get('tracing.enabled'), 'dir=', config.get('tracing.directory'), 'content=', config.get('tracing.record_content'))"
+ENV_FOR_DYNACONF=development uv run python -c "from cubeplex.config import config; print('enabled=', config.get('tracing.enabled'), 'dir=', config.get('tracing.directory'), 'content=', config.get('tracing.record_content'))"
 ```
 Expected: `enabled= True dir= ./cubepi-traces content= True`
 
 Run (base):
 ```bash
-ENV_FOR_DYNACONF=production uv run python -c "from cubebox.config import config; print('enabled=', config.get('tracing.enabled', False))"
+ENV_FOR_DYNACONF=production uv run python -c "from cubeplex.config import config; print('enabled=', config.get('tracing.enabled', False))"
 ```
 Expected: `enabled= False`
 

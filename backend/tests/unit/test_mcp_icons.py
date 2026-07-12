@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.icons — SSRF guard + materialisation."""
+"""Unit tests for cubeplex.mcp.icons — SSRF guard + materialisation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import httpx
 import pytest
 import respx
 
-from cubebox.mcp.icons import (
+from cubeplex.mcp.icons import (
     IconFetchRefused,
     enrich_server_icons,
     fetch_icon_as_data_uri,
@@ -68,7 +68,7 @@ async def test_fetch_icon_as_data_uri_success(monkeypatch: pytest.MonkeyPatch) -
     # the HTTP call, but refuse_ssrf still resolves DNS. Patch the guard
     # for the known-good public host used below.
     monkeypatch.setattr(
-        "cubebox.mcp.icons.refuse_ssrf_icon_url",
+        "cubeplex.mcp.icons.refuse_ssrf_icon_url",
         lambda url: None,
     )
     body = b"<svg/>"
@@ -82,7 +82,7 @@ async def test_fetch_icon_as_data_uri_success(monkeypatch: pytest.MonkeyPatch) -
 @pytest.mark.asyncio
 @respx.mock
 async def test_fetch_icon_rejects_non_image(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cubebox.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
+    monkeypatch.setattr("cubeplex.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
     respx.get("https://icons.example.com/not-image").mock(
         return_value=httpx.Response(
             200, content=b"<html>nope</html>", headers={"content-type": "text/html"}
@@ -95,7 +95,7 @@ async def test_fetch_icon_rejects_non_image(monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.mark.asyncio
 @respx.mock
 async def test_fetch_icon_rejects_oversized(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cubebox.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
+    monkeypatch.setattr("cubeplex.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
     respx.get("https://icons.example.com/big.svg").mock(
         return_value=httpx.Response(
             200,
@@ -113,8 +113,8 @@ async def test_fetch_icon_rejects_oversized(monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.mark.asyncio
 @respx.mock
 async def test_enrich_server_icons_adds_cached_src(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cubebox.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
-    monkeypatch.setattr("cubebox.mcp.icons.icons_fetch_remote_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
+    monkeypatch.setattr("cubeplex.mcp.icons.icons_fetch_remote_enabled", lambda: True)
     body = b"<svg id='x'/>"
     respx.get("https://icons.example.com/logo.svg").mock(
         return_value=httpx.Response(200, content=body, headers={"content-type": "image/svg+xml"})
@@ -134,8 +134,8 @@ async def test_enrich_server_icons_adds_cached_src(monkeypatch: pytest.MonkeyPat
 @pytest.mark.asyncio
 @respx.mock
 async def test_enrich_server_icons_fail_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cubebox.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
-    monkeypatch.setattr("cubebox.mcp.icons.icons_fetch_remote_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.mcp.icons.refuse_ssrf_icon_url", lambda url: None)
+    monkeypatch.setattr("cubeplex.mcp.icons.icons_fetch_remote_enabled", lambda: True)
     respx.get("https://icons.example.com/missing.svg").mock(return_value=httpx.Response(404))
     out = await enrich_server_icons(
         [{"src": "https://icons.example.com/missing.svg", "mime_type": "image/svg+xml"}]
@@ -146,7 +146,7 @@ async def test_enrich_server_icons_fail_open(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.asyncio
 async def test_enrich_skips_fetch_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("cubebox.mcp.icons.icons_fetch_remote_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.mcp.icons.icons_fetch_remote_enabled", lambda: False)
     out = await enrich_server_icons([{"src": "https://icons.example.com/logo.svg"}])
     assert out == [{"src": "https://icons.example.com/logo.svg"}]
     assert "cached_src" not in out[0]

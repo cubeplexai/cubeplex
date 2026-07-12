@@ -1,3 +1,0 @@
-Your cubebox verification code is: {{ code }}
-
-It expires in {{ ttl_minutes }} minutes. If you didn't request this, ignore this email.

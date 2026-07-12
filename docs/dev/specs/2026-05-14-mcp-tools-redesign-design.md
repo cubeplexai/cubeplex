@@ -8,7 +8,7 @@ Worktree slot: 19
 
 The tools tab in `MCPServerDetail` renders an accordion of raw JSON. There is no search, no parameter table, no type / required indicators, and no way to "try it." The server detail page header is also under-designed — the connection status is a tiny dot and the connection-info card is a flat list of grey rows.
 
-(An originally-paired backend bug — empty `input_schema` from the old `langchain-mcp-adapters`-based discovery — was fixed independently by PR #95, which replaced `cubebox/mcp/discovery.py` with `cubebox/mcp/cubepi_admin_discovery.py` using the raw `mcp` SDK. That path now reads `desc.inputSchema` directly, so no cubebox-side serialization fix is needed.)
+(An originally-paired backend bug — empty `input_schema` from the old `langchain-mcp-adapters`-based discovery — was fixed independently by PR #95, which replaced `cubeplex/mcp/discovery.py` with `cubeplex/mcp/cubepi_admin_discovery.py` using the raw `mcp` SDK. That path now reads `desc.inputSchema` directly, so no cubeplex-side serialization fix is needed.)
 
 ## Goals
 

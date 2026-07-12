@@ -1,6 +1,6 @@
 """Unit tests for audit sink defaults."""
 
-from cubebox.audit import NoOpAuditSink
+from cubeplex.audit import NoOpAuditSink
 
 
 async def test_noop_audit_sink_record_is_callable() -> None:

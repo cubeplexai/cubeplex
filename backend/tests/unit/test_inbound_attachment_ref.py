@@ -4,8 +4,8 @@ Guards the queue-row round-trip: if a ref loses its ``handle``, the worker's
 resolver downloads nothing and the user's file silently vanishes.
 """
 
-from cubebox.im.inbound_attachments import _effective_name_mime
-from cubebox.im.types import InboundAttachmentRef
+from cubeplex.im.inbound_attachments import _effective_name_mime
+from cubeplex.im.types import InboundAttachmentRef
 
 
 def test_to_json_from_json_round_trip() -> None:

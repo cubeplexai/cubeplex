@@ -44,17 +44,17 @@ cat .worktree.env
 `.worktree.env` declares values like:
 
 ```
-CUBEBOX_WORKTREE_NAME=feat-m7-file-upload
-CUBEBOX_WORKTREE_SLOT=37
-CUBEBOX_API__PORT=8037
-CUBEBOX_DATABASE__NAME=cubebox_feat_m7_file_upload
-CUBEBOX_REDIS__KEY_PREFIX=cubebox-feat-m7-file-upload
-CUBEBOX_API_URL=http://localhost:8037
+CUBEPLEX_WORKTREE_NAME=feat-m7-file-upload
+CUBEPLEX_WORKTREE_SLOT=37
+CUBEPLEX_API__PORT=8037
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_m7_file_upload
+CUBEPLEX_REDIS__KEY_PREFIX=cubeplex-feat-m7-file-upload
+CUBEPLEX_API_URL=http://localhost:8037
 PORT=3037
 BASE_URL=http://localhost:3037
 ```
 
-Backend (`backend/cubebox/config.py`), Next (`next.config.ts`), and
+Backend (`backend/cubeplex/config.py`), Next (`next.config.ts`), and
 Playwright (`playwright.config.ts`) all auto-load this file. So
 `python main.py`, `pnpm dev`, and `pnpm test:e2e` just work with the
 allocated ports — but **never assume 3000 / 8000** when checking
@@ -71,18 +71,18 @@ must never touch your dev data:
 
 | | dynaconf env | config | database |
 |---|---|---|---|
-| `python main.py` (dev server) | `development` | `config.development(.local).yaml` | dev DB (`cubebox_<slug>`, from `.worktree.env`) |
-| `pytest` / e2e | `test` | `config.test.yaml` | per-slot test DB (`cubebox_test_<slug>`) |
+| `python main.py` (dev server) | `development` | `config.development(.local).yaml` | dev DB (`cubeplex_<slug>`, from `.worktree.env`) |
+| `pytest` / e2e | `test` | `config.test.yaml` | per-slot test DB (`cubeplex_test_<slug>`) |
 
 `tests/conftest.py` handles the routing for you. In a worktree it reads
 `.worktree.env`'s dev DB name and **force-derives the per-slot test DB**
-(`cubebox_<slug>` → `cubebox_test_<slug>`), so a plain `uv run pytest`
+(`cubeplex_<slug>` → `cubeplex_test_<slug>`), so a plain `uv run pytest`
 runs against the test DB and **cannot** clobber your dev data — no env
 juggling needed. (It also pins the object-store creds to the local rustfs
 values and refuses to start if the resolved DB name isn't a test DB.)
 
 ```bash
-# Just works — routed to cubebox_test_<slug>, dev DB untouched:
+# Just works — routed to cubeplex_test_<slug>, dev DB untouched:
 cd backend && uv run pytest tests/e2e/...
 ```
 
@@ -90,11 +90,11 @@ Prerequisites:
 
 - The per-slot test DB must be migrated. Worktree provisioning runs
   `alembic upgrade head` on it; if it's behind, `worktree-env reseed-db`
-  (or `CUBEBOX_DATABASE__NAME=cubebox_test_<slug> uv run alembic upgrade
+  (or `CUBEPLEX_DATABASE__NAME=cubeplex_test_<slug> uv run alembic upgrade
   head`) fixes it.
 - S3-backed tests (skills, attachments) need the local **rustfs** object
   store on `:9000` — see `~/infra/rustfs` (`docker compose up -d`). conftest
-  pins the `rustfsadmin` creds; the bucket is `cubebox-test`.
+  pins the `rustfsadmin` creds; the bucket is `cubeplex-test`.
 
 Why conftest pins these: a dynaconf env var beats `config.test.yaml`, so a
 developer's `.env` (real dev DB name + real Aliyun OSS creds) would

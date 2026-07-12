@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import Link from 'next/link'
-import { createApiClient, resendOtp, useAuthStore } from '@cubebox/core'
+import { createApiClient, resendOtp, useAuthStore } from '@cubeplex/core'
 
 export function VerificationBanner() {
   const t = useTranslations('verificationBanner')

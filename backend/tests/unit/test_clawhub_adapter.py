@@ -9,8 +9,8 @@ import zipfile
 import httpx
 import pytest
 
-from cubebox.skills.sources.base import TrustTier
-from cubebox.skills.sources.clawhub import ClawhubAdapter, _unpack_zip
+from cubeplex.skills.sources.base import TrustTier
+from cubeplex.skills.sources.clawhub import ClawhubAdapter, _unpack_zip
 
 
 def _make_zip(files: dict[str, str]) -> bytes:
@@ -202,7 +202,7 @@ def test_unpack_zip_filters_unsafe_paths():
 
 
 def test_unpack_zip_rejects_oversized_entry():
-    from cubebox.skills.service import MAX_FILE_BYTES
+    from cubeplex.skills.service import MAX_FILE_BYTES
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -213,7 +213,7 @@ def test_unpack_zip_rejects_oversized_entry():
 
 
 def test_unpack_zip_rejects_oversized_bundle():
-    from cubebox.skills.service import MAX_FILE_BYTES, MAX_TOTAL_BYTES
+    from cubeplex.skills.service import MAX_FILE_BYTES, MAX_TOTAL_BYTES
 
     # Two files each just under the per-file cap but together over the bundle cap
     file_size = MAX_FILE_BYTES - 1

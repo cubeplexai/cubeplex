@@ -1,7 +1,7 @@
 // frontend/packages/core/src/stores/messageStore.ts
 //
 // All persisted Message values mirror cubepi's pydantic dump shape — content is
-// always a list of typed blocks (text / thinking / tool_call), and cubebox-
+// always a list of typed blocks (text / thinking / tool_call), and cubeplex-
 // specific extras (attachments, memory snapshots, citations, subagent_events)
 // ride inside `metadata`. The store builds the same shape on the streaming
 // path so the in-memory view matches what bootstrap returns.
@@ -405,7 +405,7 @@ function hydrateCitationsFromHistory(conversationId: string, messages: Message[]
   for (const msg of messages) {
     if (msg.role !== 'tool_result') continue
     // CitationMiddleware persists citations on ToolResultMessage.details
-    // (cubebox/middleware/citation.py:169 — AfterToolCallResult(details={"citations": [...]})).
+    // (cubeplex/middleware/citation.py:169 — AfterToolCallResult(details={"citations": [...]})).
     // metadata.citations only exists for in-memory finalized messages.
     const details = msg.details as
       | { citations?: import('../types').CitationData[] }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { createApiClient } from '@cubebox/core'
+import { createApiClient } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { ImageLightbox } from './ImageLightbox'
 import { MessageFileChip } from './MessageFileChip'

@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { CostSummaryResponse } from '@cubebox/core'
+import type { CostSummaryResponse } from '@cubeplex/core'
 import { formatPercent, percentDelta } from '@/lib/cost/helpers'
 import { cn } from '@/lib/utils'
 

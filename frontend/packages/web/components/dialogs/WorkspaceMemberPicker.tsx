@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import { Search, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import { type WsMember } from '@cubebox/core'
+import { type WsMember } from '@cubeplex/core'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'

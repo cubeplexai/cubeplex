@@ -10,7 +10,7 @@ import {
   type ModelPresetEntry,
   type ModelUpdate,
   type VendorPreset,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'

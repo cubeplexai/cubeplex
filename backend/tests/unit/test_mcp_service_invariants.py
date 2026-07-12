@@ -1,7 +1,7 @@
 """Service-layer invariants for ``MCPConnectorService``.
 
 These tests exercise the pure service logic with fake repositories so the
-invariants documented inside ``cubebox/services/mcp_installs.py`` are
+invariants documented inside ``cubeplex/services/mcp_installs.py`` are
 guarded without a real DB session. The focus is the
 ``auto_enroll_new_workspaces`` derivation from ``distribution.mode`` at
 connector create time — a wrong default here causes the
@@ -15,9 +15,9 @@ from typing import Any
 
 import pytest
 
-from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
-from cubebox.models.mcp import MCPConnector
-from cubebox.services.mcp_installs import MCPConnectorService
+from cubeplex.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
+from cubeplex.models.mcp import MCPConnector
+from cubeplex.services.mcp_installs import MCPConnectorService
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -293,15 +293,15 @@ async def test_bootstrap_hook_skips_connector_with_auto_enroll_disabled(
             return set()
 
     monkeypatch.setattr(
-        "cubebox.mcp.workspace_bootstrap.MCPWorkspaceConnectorStateRepository",
+        "cubeplex.mcp.workspace_bootstrap.MCPWorkspaceConnectorStateRepository",
         _FakeStateRepoBootstrap,
     )
     monkeypatch.setattr(
-        "cubebox.mcp.workspace_bootstrap.MCPConnectorRepository",
+        "cubeplex.mcp.workspace_bootstrap.MCPConnectorRepository",
         _FakeConnectorRepoBootstrap,
     )
     monkeypatch.setattr(
-        "cubebox.mcp.workspace_bootstrap.MCPTemplateSettingsRepository",
+        "cubeplex.mcp.workspace_bootstrap.MCPTemplateSettingsRepository",
         _FakeTemplateSettingsRepo,
     )
 

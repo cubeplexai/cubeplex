@@ -17,18 +17,18 @@
 ## File structure
 
 Backend:
-- `backend/cubebox/llm/snapshot_schema.py` — REWRITE: `ModelTier`, `TaskKey`, `TierSetting`, `CustomPreset`, `ModelPresetsConfig` + validation.
-- `backend/cubebox/llm/snapshot.py` — `LLMPreset`→`ModelPreset` (+ `chain` property + `key`/`kind`); `LLMSnapshot.presets`→`model_presets`, `.task_presets`→`.task_routing`; `_load_presets` flattens config.
-- `backend/cubebox/llm/resolver.py` — `resolve_preset`→`resolve_model_preset` (key-based); `resolve_task_preset` reads `task_routing`.
-- `backend/cubebox/llm/__init__.py` — export renames.
-- `backend/cubebox/streams/run_manager.py`, `backend/cubebox/llm/builder.py` — update call sites (names only; `.chain` unchanged).
-- `backend/cubebox/seeders/provider_seeder.py` — `seed_default_presets_from_config`→`seed_model_presets_from_config` (reads `llm.model_presets`).
-- `backend/cubebox/api/app.py` — call the renamed seeder.
+- `backend/cubeplex/llm/snapshot_schema.py` — REWRITE: `ModelTier`, `TaskKey`, `TierSetting`, `CustomPreset`, `ModelPresetsConfig` + validation.
+- `backend/cubeplex/llm/snapshot.py` — `LLMPreset`→`ModelPreset` (+ `chain` property + `key`/`kind`); `LLMSnapshot.presets`→`model_presets`, `.task_presets`→`.task_routing`; `_load_presets` flattens config.
+- `backend/cubeplex/llm/resolver.py` — `resolve_preset`→`resolve_model_preset` (key-based); `resolve_task_preset` reads `task_routing`.
+- `backend/cubeplex/llm/__init__.py` — export renames.
+- `backend/cubeplex/streams/run_manager.py`, `backend/cubeplex/llm/builder.py` — update call sites (names only; `.chain` unchanged).
+- `backend/cubeplex/seeders/provider_seeder.py` — `seed_default_presets_from_config`→`seed_model_presets_from_config` (reads `llm.model_presets`).
+- `backend/cubeplex/api/app.py` — call the renamed seeder.
 - `backend/config.yaml`, `backend/config.development.local.yaml` (+ main checkout copy) — `llm.model_presets` block.
 - `backend/alembic/versions/<new>_drop_legacy_model_presets_rows.py` — data migration.
-- `backend/cubebox/api/schemas/model_presets.py` — re-export `ModelPresetsConfig`; new `WorkspacePresetSummary` fields.
-- `backend/cubebox/services/model_presets.py` — `write_org_presets` validates primary+fallbacks availability.
-- `backend/cubebox/api/routes/v1/model_presets.py` — workspace route maps `snap.model_presets`.
+- `backend/cubeplex/api/schemas/model_presets.py` — re-export `ModelPresetsConfig`; new `WorkspacePresetSummary` fields.
+- `backend/cubeplex/services/model_presets.py` — `write_org_presets` validates primary+fallbacks availability.
+- `backend/cubeplex/api/routes/v1/model_presets.py` — workspace route maps `snap.model_presets`.
 
 Frontend:
 - `frontend/packages/web/lib/types/presets.ts` — new types.
@@ -49,7 +49,7 @@ Tests:
 ### Task 1: New `ModelPresetsConfig` schema + validation
 
 **Files:**
-- Rewrite: `backend/cubebox/llm/snapshot_schema.py`
+- Rewrite: `backend/cubeplex/llm/snapshot_schema.py`
 - Test: `backend/tests/unit/test_model_presets_schema.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -58,7 +58,7 @@ Tests:
 # backend/tests/unit/test_model_presets_schema.py
 import pytest
 from pydantic import ValidationError
-from cubebox.llm.snapshot_schema import ModelPresetsConfig
+from cubeplex.llm.snapshot_schema import ModelPresetsConfig
 
 def _tiers(**over):
     base = {
@@ -119,7 +119,7 @@ def test_custom_preset_available_as_default_and_task():
 - [ ] **Step 3: Rewrite the schema**
 
 ```python
-# backend/cubebox/llm/snapshot_schema.py
+# backend/cubeplex/llm/snapshot_schema.py
 """Pydantic schema for the OrgSettings.model_presets row value.
 
 Structured authoring shape: four built-in tiers + admin custom presets + a
@@ -205,14 +205,14 @@ class ModelPresetsConfig(BaseModel):
 
 - [ ] **Step 4: Run → pass** — `uv run pytest tests/unit/test_model_presets_schema.py -q` → all pass.
 
-- [ ] **Step 5: Commit** — `git add backend/cubebox/llm/snapshot_schema.py backend/tests/unit/test_model_presets_schema.py && git commit -m "feat(llm): model preset tiers schema (tiers + custom + default + task_routing)"`
+- [ ] **Step 5: Commit** — `git add backend/cubeplex/llm/snapshot_schema.py backend/tests/unit/test_model_presets_schema.py && git commit -m "feat(llm): model preset tiers schema (tiers + custom + default + task_routing)"`
 
 ---
 
 ### Task 2: Runtime `ModelPreset` + snapshot flatten
 
 **Files:**
-- Modify: `backend/cubebox/llm/snapshot.py`
+- Modify: `backend/cubeplex/llm/snapshot.py`
 
 - [ ] **Step 1: Replace `LLMPreset`, `LLMSnapshot`, and `_load_presets`**
 
@@ -251,13 +251,13 @@ class LLMSnapshot:
 
 ```python
 # snapshot.py — _load_presets (flatten config -> uniform list)
-from cubebox.llm.snapshot_schema import ModelPresetsConfig, ModelTier
+from cubeplex.llm.snapshot_schema import ModelPresetsConfig, ModelTier
 
 async def _load_presets(
     session: AsyncSession,
     org_id: str,
 ) -> tuple[tuple[ModelPreset, ...], dict[str, str]]:
-    from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
     org_stmt = select(OrgSettings).where(
         OrgSettings.org_id == org_id,  # type: ignore[arg-type]
@@ -304,7 +304,7 @@ async def _load_presets(
     return tuple(presets), {k.value: v for k, v in cfg.task_routing.items()}
 ```
 
-- [ ] **Step 2: Update the import line** — change `from cubebox.llm.snapshot_schema import ModelPresetsValue` to `from cubebox.llm.snapshot_schema import ModelPresetsConfig, ModelTier`.
+- [ ] **Step 2: Update the import line** — change `from cubeplex.llm.snapshot_schema import ModelPresetsValue` to `from cubeplex.llm.snapshot_schema import ModelPresetsConfig, ModelTier`.
 
 - [ ] **Step 3: Commit** — `git commit -am "refactor(llm): ModelPreset + snapshot.model_presets flattening"` (compile checked in Task 4 once call sites are updated).
 
@@ -313,7 +313,7 @@ async def _load_presets(
 ### Task 3: Key-based resolver
 
 **Files:**
-- Modify: `backend/cubebox/llm/resolver.py`, `backend/cubebox/llm/__init__.py`
+- Modify: `backend/cubeplex/llm/resolver.py`, `backend/cubeplex/llm/__init__.py`
 - Test: `backend/tests/unit/test_model_preset_resolver.py`
 
 - [ ] **Step 1: Write failing test**
@@ -321,10 +321,10 @@ async def _load_presets(
 ```python
 # backend/tests/unit/test_model_preset_resolver.py
 import pytest
-from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
-from cubebox.llm.config import ProviderConfig, ModelConfig  # adjust to actual ctor
-from cubebox.llm.resolver import resolve_model_preset, resolve_task_preset
-from cubebox.llm.errors import UnknownPresetError, NoDefaultPresetError
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.llm.config import ProviderConfig, ModelConfig  # adjust to actual ctor
+from cubeplex.llm.resolver import resolve_model_preset, resolve_task_preset
+from cubeplex.llm.errors import UnknownPresetError, NoDefaultPresetError
 
 def _snap():
     prov = {"p": ProviderConfig(slug="p", models=[ModelConfig(id="pro")], base_url="x", api_key="x", api="openai-completions")}  # adjust
@@ -352,7 +352,7 @@ def test_task_routing_falls_back_to_default():
     assert resolve_task_preset(snap, "title").key == "pro"
 ```
 
-(Adjust `ProviderConfig`/`ModelConfig` constructors to the real signatures in `cubebox/llm/config.py`.)
+(Adjust `ProviderConfig`/`ModelConfig` constructors to the real signatures in `cubeplex/llm/config.py`.)
 
 - [ ] **Step 2: Run → fail** — `uv run pytest tests/unit/test_model_preset_resolver.py -q`.
 
@@ -360,7 +360,7 @@ def test_task_routing_falls_back_to_default():
 
 ```python
 # resolver.py — replace imports + functions
-from cubebox.llm.snapshot import ModelPreset, LLMSnapshot
+from cubeplex.llm.snapshot import ModelPreset, LLMSnapshot
 
 def resolve_model_preset(snap: LLMSnapshot, key: str | None) -> ModelPreset:
     if key is None:
@@ -397,7 +397,7 @@ def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) 
     return missing
 ```
 
-- [ ] **Step 4: Update `cubebox/llm/__init__.py`** — `resolve_preset`→`resolve_model_preset` in imports and `__all__`.
+- [ ] **Step 4: Update `cubeplex/llm/__init__.py`** — `resolve_preset`→`resolve_model_preset` in imports and `__all__`.
 
 - [ ] **Step 5: Run → pass.**
 
@@ -408,9 +408,9 @@ def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) 
 ### Task 4: Update call sites (builder, run_manager)
 
 **Files:**
-- Modify: `backend/cubebox/llm/builder.py`, `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/llm/builder.py`, `backend/cubeplex/streams/run_manager.py`
 
-- [ ] **Step 1: Grep + fix** — `grep -rn "resolve_preset\|\.presets\b\|task_presets\|LLMPreset\|\.label" backend/cubebox/llm backend/cubebox/streams` and update:
+- [ ] **Step 1: Grep + fix** — `grep -rn "resolve_preset\|\.presets\b\|task_presets\|LLMPreset\|\.label" backend/cubeplex/llm backend/cubeplex/streams` and update:
   - `resolve_preset(` → `resolve_model_preset(`
   - `snap.presets` → `snap.model_presets`
   - `snap.task_presets` → `snap.task_routing`
@@ -418,7 +418,7 @@ def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) 
   - `preset.label` → `preset.key`
   - `preset.chain` — unchanged (now a property; still a tuple of refs).
 
-- [ ] **Step 2: Whole-repo type-check** — `cd backend && uv run mypy cubebox 2>&1 | tail -5` → no errors.
+- [ ] **Step 2: Whole-repo type-check** — `cd backend && uv run mypy cubeplex 2>&1 | tail -5` → no errors.
 
 - [ ] **Step 3: Commit** — `git commit -am "refactor(llm): update builder/run_manager call sites to ModelPreset"`
 
@@ -429,23 +429,23 @@ def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) 
 ### Task 5: Restructure config files
 
 **Files:**
-- Modify: `backend/config.yaml`, `backend/config.development.local.yaml` (and the main-checkout copy at `/home/chris/cubebox/backend/config.development.local.yaml`).
+- Modify: `backend/config.yaml`, `backend/config.development.local.yaml` (and the main-checkout copy at `/home/chris/cubeplex/backend/config.development.local.yaml`).
 
 - [ ] **Step 1: `config.yaml`** — replace `llm.default_model` / `fallback_models` / `title_model` / `summarize_model` / `compaction.summary_model` (preset-seed part) with:
 
 ```yaml
     model_presets:
       tiers:
-        lite:  { enabled: true,  primary: "cubebox/doubao-seed-1.8-thinking", fallbacks: [] }
+        lite:  { enabled: true,  primary: "cubeplex/doubao-seed-1.8-thinking", fallbacks: [] }
         flash: { enabled: false, primary: null, fallbacks: [] }
-        pro:   { enabled: true,  primary: "cubebox/doubao-seed-1.8-thinking",
-                 fallbacks: ["cubebox/qwen3.5-plus-thinking"] }
+        pro:   { enabled: true,  primary: "cubeplex/doubao-seed-1.8-thinking",
+                 fallbacks: ["cubeplex/qwen3.5-plus-thinking"] }
         max:   { enabled: false, primary: null, fallbacks: [] }
       default_preset: pro
       task_routing: {}
 ```
 
-  (Keep `llm.compaction.*` runtime settings that are NOT the preset seed, e.g. context-window knobs — only remove `summary_model`/`summary_provider` if they only fed the old seeder. Verify with `grep -rn "summary_model\|summary_provider\|title_model\|summarize_model\|default_model\|fallback_models" backend/cubebox` before deleting; keep any still-read keys.)
+  (Keep `llm.compaction.*` runtime settings that are NOT the preset seed, e.g. context-window knobs — only remove `summary_model`/`summary_provider` if they only fed the old seeder. Verify with `grep -rn "summary_model\|summary_provider\|title_model\|summarize_model\|default_model\|fallback_models" backend/cubeplex` before deleting; keep any still-read keys.)
 
 - [ ] **Step 2: `config.development.local.yaml`** (both checkouts) — under the existing `dynaconf_merge: false` llm block:
 
@@ -463,7 +463,7 @@ def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) 
     # default_model / fallback_models removed (superseded by model_presets)
 ```
 
-- [ ] **Step 3: Verify resolution** — `cd backend && uv run --active python -c "from cubebox.config import config; print(config.get('llm',{}).get('model_presets'))"` → shows the nested structure.
+- [ ] **Step 3: Verify resolution** — `cd backend && uv run --active python -c "from cubeplex.config import config; print(config.get('llm',{}).get('model_presets'))"` → shows the nested structure.
 
 - [ ] **Step 4: Commit** — `git commit -am "config: restructure llm into model_presets tiers"` (local files are gitignored; only `config.yaml` commits).
 
@@ -472,7 +472,7 @@ def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) 
 ### Task 6: Seeder reads `llm.model_presets`
 
 **Files:**
-- Modify: `backend/cubebox/seeders/provider_seeder.py`, `backend/cubebox/api/app.py`, `backend/cubebox/seeders/__init__.py`
+- Modify: `backend/cubeplex/seeders/provider_seeder.py`, `backend/cubeplex/api/app.py`, `backend/cubeplex/seeders/__init__.py`
 - Test: `backend/tests/e2e/test_model_presets_seed.py`
 
 - [ ] **Step 1: Write failing e2e test** — seeds into a fresh org_settings system row from a config dict.
@@ -481,8 +481,8 @@ def _missing_refs(preset: ModelPreset, providers: Mapping[str, ProviderConfig]) 
 # backend/tests/e2e/test_model_presets_seed.py
 import pytest
 from sqlalchemy import select
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.seeders.provider_seeder import seed_model_presets_from_config
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.seeders.provider_seeder import seed_model_presets_from_config
 
 @pytest.mark.asyncio
 async def test_seed_writes_system_row(db_session, monkeypatch):
@@ -492,7 +492,7 @@ async def test_seed_writes_system_row(db_session, monkeypatch):
     )
     await db_session.commit()
     monkeypatch.setattr(
-        "cubebox.seeders.provider_seeder.settings",
+        "cubeplex.seeders.provider_seeder.settings",
         {"llm": {"model_presets": {
             "tiers": {"lite": {"enabled": True, "primary": "p/l"},
                       "flash": {"enabled": False, "primary": None},
@@ -517,8 +517,8 @@ async def test_seed_writes_system_row(db_session, monkeypatch):
 async def seed_model_presets_from_config(session: AsyncSession) -> None:
     """Seed the system OrgSettings.model_presets row from llm.model_presets.
     Idempotent: skip if the system row exists (never clobber admin edits)."""
-    from cubebox.llm.snapshot_schema import ModelPresetsConfig
-    from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+    from cubeplex.llm.snapshot_schema import ModelPresetsConfig
+    from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
     raw = dict(settings.get("llm", {})).get("model_presets")
     if not raw:
@@ -585,12 +585,12 @@ def downgrade() -> None:
 ### Task 8: API schemas
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/model_presets.py`
+- Modify: `backend/cubeplex/api/schemas/model_presets.py`
 
 - [ ] **Step 1: Re-export config + new workspace summary**
 
 ```python
-from cubebox.llm.snapshot_schema import ModelPresetsConfig as AdminModelPresetsBody
+from cubeplex.llm.snapshot_schema import ModelPresetsConfig as AdminModelPresetsBody
 
 class WorkspacePresetSummary(BaseModel):
     key: str
@@ -605,14 +605,14 @@ class WorkspacePresetsResponse(BaseModel):
 
 (Remove `AdminPresetEntry` re-export; update `__all__`. Update importers that referenced `AdminPresetEntry`.)
 
-- [ ] **Step 2: type-check + commit** — `uv run mypy cubebox | tail -3 && git commit -am "feat(api): model_presets admin/workspace schemas"`
+- [ ] **Step 2: type-check + commit** — `uv run mypy cubeplex | tail -3 && git commit -am "feat(api): model_presets admin/workspace schemas"`
 
 ---
 
 ### Task 9: Admin write validation (primary + fallbacks)
 
 **Files:**
-- Modify: `backend/cubebox/services/model_presets.py`
+- Modify: `backend/cubeplex/services/model_presets.py`
 - Test: `backend/tests/e2e/test_admin_model_presets.py`
 
 - [ ] **Step 1: Write failing e2e** — PUT a config whose `pro.primary` ref is unknown → 4xx broken_preset; valid config round-trips.
@@ -641,7 +641,7 @@ def _available_chains(body: AdminModelPresetsBody) -> list[tuple[str, list[str]]
 ### Task 10: Workspace route exposes available presets
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/model_presets.py`
+- Modify: `backend/cubeplex/api/routes/v1/model_presets.py`
 - Test: `backend/tests/e2e/test_workspace_model_presets.py`
 
 - [ ] **Step 1: Write failing e2e** — GET returns the enabled tiers + custom, each with `key`/`kind`/`primary`/`is_default`; tier `description == ""`.
@@ -701,7 +701,7 @@ export interface WorkspacePresetSummary {
 }
 ```
 
-- [ ] **Step 2: api layer** — `AdminModelPresetsResponse.value: ModelPresetsConfig | null`; `putAdminModelPresets(body: ModelPresetsConfig)`; `fetchWorkspaceModelPresets` returns `WorkspacePresetSummary[]` (already does). Build `@cubebox/core` if types are shared (`pnpm --filter @cubebox/core build`).
+- [ ] **Step 2: api layer** — `AdminModelPresetsResponse.value: ModelPresetsConfig | null`; `putAdminModelPresets(body: ModelPresetsConfig)`; `fetchWorkspaceModelPresets` returns `WorkspacePresetSummary[]` (already does). Build `@cubeplex/core` if types are shared (`pnpm --filter @cubeplex/core build`).
 
 - [ ] **Step 3: type-check + commit** — `pnpm -C frontend/packages/web type-check && git commit -am "feat(web): model_presets config types"`
 
@@ -822,4 +822,4 @@ State shape: hold a `ModelPresetsConfig` in `body`; `savedBody` baseline (keep t
 
 - **Spec coverage:** tiers/custom/default/task_routing (Task 1), primary/fallbacks split (Tasks 1–2, surfaced Task 10/12), runtime flatten + key resolver (Tasks 2–3), naming renames (Tasks 2–4, 8, 11, 14), config restructure (Task 5), seeder (Task 6), clean-cutover migration (Task 7), admin UI incl. task-routing visual (Tasks 12–13), workspace API for the future ModelPicker (Task 10). ModelPicker redesign intentionally deferred (Task 14 keeps it working only).
 - **Carry `description` on `ModelPreset`:** Task 10 Step 2 amends Task 2's dataclass to include `description` — apply that when doing Task 2 if implementing in order, or revisit Task 2 at Task 10.
-- **Provider constructor names** in Task 3's test are placeholders for the real `cubebox/llm/config.py` signatures — confirm before writing the test.
+- **Provider constructor names** in Task 3's test are placeholders for the real `cubeplex/llm/config.py` signatures — confirm before writing the test.

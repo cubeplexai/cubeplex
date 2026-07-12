@@ -1,5 +1,5 @@
-from cubebox.streams.replay_coalescer import ReplayCoalescer
-from cubebox.streams.run_events import RunEvent
+from cubeplex.streams.replay_coalescer import ReplayCoalescer
+from cubeplex.streams.run_events import RunEvent
 
 
 def _ev(event_id: str, etype: str, *, data=None, agent_id=None) -> RunEvent:

@@ -1,4 +1,4 @@
-import type { ContentBlock, ToolCallRef } from '@cubebox/core'
+import type { ContentBlock, ToolCallRef } from '@cubeplex/core'
 import { extractJsonStringPrefix } from '@/lib/partialJson'
 
 export type WriteFileStatus = 'streaming_args' | 'pending_execution' | 'completed'

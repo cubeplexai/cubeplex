@@ -6,7 +6,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Membership, Organization, OrganizationMembership, User
+from cubeplex.models import Membership, Organization, OrganizationMembership, User
 from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e

@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react'
-import { useMessageStore } from '@cubebox/core'
+import { useMessageStore } from '@cubeplex/core'
 
 const CONV_ID = 'conv-yield'
 

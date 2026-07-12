@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python/FastAPI/SQLModel/Alembic (backend), Next.js/React 19/TS (frontend), `@dicebear/core`+`@dicebear/collection` ^9.4.2 (already installed), rustfs S3 object store.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/2026-06-26-avatar-system` — ports 8070/3070, DB `cubebox_feat_2026_06_26_avatar_system`. **Every shell command must `cd` into this worktree and `cat .worktree.env` first.**
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/2026-06-26-avatar-system` — ports 8070/3070, DB `cubeplex_feat_2026_06_26_avatar_system`. **Every shell command must `cd` into this worktree and `cat .worktree.env` first.**
 
 ## Global Constraints
 
@@ -17,7 +17,7 @@
 - Migrations: `alembic revision --autogenerate -m "..."` — do not hand-edit beyond autogen output. No `postgresql_using` needed (string columns only).
 - Enums: `StrEnum` class in the model file; column is plain `str` with a comment. Never `sa_column=Column(Enum(...))`.
 - Dependencies: `uv add` (backend), `pnpm add` (frontend). No new backend deps expected. Frontend: `npx shadcn-ui@latest add avatar` from `frontend/packages/web/`.
-- `@cubebox/core` must `pnpm build` before `packages/web` sees type changes.
+- `@cubeplex/core` must `pnpm build` before `packages/web` sees type changes.
 - Docs ship with the code: update `docs/site/docs/` profile page + new licenses page in the same PR.
 - pnpm not npm. `compress: false` in Next config (existing — don't touch).
 - Scope-isolated: avatar endpoints are self-scoped (`/api/v1/auth/me/avatar`), not workspace routes.
@@ -29,16 +29,16 @@
 ## File Structure
 
 **Backend — create/modify:**
-- Modify `backend/cubebox/models/user.py` — add `AvatarKind` enum + 3 columns.
+- Modify `backend/cubeplex/models/user.py` — add `AvatarKind` enum + 3 columns.
 - Create `backend/alembic/versions/<rev>_avatar_columns.py` — autogen migration.
-- Modify `backend/cubebox/sso/identity.py` — gate SSO re-sync on `avatar_kind != "uploaded"`, set `avatar_kind="sso"`.
-- Modify `backend/cubebox/api/routes/v1/social_login.py` — pass Google `picture` claim.
-- Modify `backend/cubebox/objectstore/client.py` (or new `backend/cubebox/services/avatar_store.py`) — `save_avatar_png(user_id, bytes) -> url`.
-- Modify `backend/cubebox/api/routes/v1/auth.py` — `PUT/DELETE /me/avatar`; add `avatar_seed`/`avatar_kind` to `/me` payloads.
-- Modify `backend/cubebox/api/routes/v1/ws_topics.py`, `conversations.py`, `schemas/conversations.py`, `ws_members.py` — add `avatar_url`+`avatar_seed` to participant serializers.
+- Modify `backend/cubeplex/sso/identity.py` — gate SSO re-sync on `avatar_kind != "uploaded"`, set `avatar_kind="sso"`.
+- Modify `backend/cubeplex/api/routes/v1/social_login.py` — pass Google `picture` claim.
+- Modify `backend/cubeplex/objectstore/client.py` (or new `backend/cubeplex/services/avatar_store.py`) — `save_avatar_png(user_id, bytes) -> url`.
+- Modify `backend/cubeplex/api/routes/v1/auth.py` — `PUT/DELETE /me/avatar`; add `avatar_seed`/`avatar_kind` to `/me` payloads.
+- Modify `backend/cubeplex/api/routes/v1/ws_topics.py`, `conversations.py`, `schemas/conversations.py`, `ws_members.py` — add `avatar_url`+`avatar_seed` to participant serializers.
 - Tests: `backend/tests/e2e/test_avatar.py` (new), modify `backend/tests/e2e/test_sso_*.py` / `test_social_login.py` as needed.
 
-**Frontend core (`@cubebox/core`) — modify:**
+**Frontend core (`@cubeplex/core`) — modify:**
 - `frontend/packages/core/src/api/auth.ts` — `MeResult` + `uploadAvatar`/`deleteAvatar`.
 - `frontend/packages/core/src/types/topic.ts`, `conversation-participant.ts` — add fields.
 
@@ -59,7 +59,7 @@
 ## Task 1: User model — AvatarKind enum + columns
 
 **Files:**
-- Modify: `backend/cubebox/models/user.py`
+- Modify: `backend/cubeplex/models/user.py`
 - Test: `backend/tests/unit/test_user_model.py` (new)
 
 **Interfaces:**
@@ -70,7 +70,7 @@
 ```python
 # backend/tests/unit/test_user_model.py
 import pytest
-from cubebox.models.user import User, AvatarKind
+from cubeplex.models.user import User, AvatarKind
 
 
 def test_avatar_kind_enum_values():
@@ -94,7 +94,7 @@ Expected: FAIL — `cannot import name 'AvatarKind'`.
 
 - [ ] **Step 3: Implement — add enum + columns to `user.py`**
 
-At the top of `backend/cubebox/models/user.py`, after existing imports, add:
+At the top of `backend/cubeplex/models/user.py`, after existing imports, add:
 
 ```python
 from enum import StrEnum
@@ -122,7 +122,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/user.py backend/tests/unit/test_user_model.py
+git add backend/cubeplex/models/user.py backend/tests/unit/test_user_model.py
 git commit -m "feat(avatar): add AvatarKind enum + avatar columns to User"
 ```
 
@@ -162,8 +162,8 @@ git commit -m "feat(avatar): migration for avatar columns"
 ## Task 3: SSO re-sync gating + Google picture fix
 
 **Files:**
-- Modify: `backend/cubebox/sso/identity.py` (lines ~118-122, 166-168, 193-195)
-- Modify: `backend/cubebox/api/routes/v1/social_login.py` (lines ~153-164)
+- Modify: `backend/cubeplex/sso/identity.py` (lines ~118-122, 166-168, 193-195)
+- Modify: `backend/cubeplex/api/routes/v1/social_login.py` (lines ~153-164)
 - Test: `backend/tests/e2e/test_sso_avatar_gating.py` (new)
 
 **Interfaces:**
@@ -175,7 +175,7 @@ git commit -m "feat(avatar): migration for avatar columns"
 ```python
 # backend/tests/e2e/test_sso_avatar_gating.py
 import pytest
-from cubebox.models.user import User, AvatarKind
+from cubeplex.models.user import User, AvatarKind
 
 pytestmark = pytest.mark.e2e
 
@@ -190,7 +190,7 @@ async def test_sso_does_not_overwrite_uploaded_avatar(session_factory):
 
     # Simulate SSO re-sync with a different URL via resolve_identity would require
     # a full IdP fixture; assert the guard predicate directly instead.
-    from cubebox.sso.identity import _should_sso_overwrite_avatar
+    from cubeplex.sso.identity import _should_sso_overwrite_avatar
     assert _should_sso_overwrite_avatar(u, "https://x/new.png") is False
 
     u.avatar_kind = AvatarKind.generated.value
@@ -204,7 +204,7 @@ Expected: FAIL — `_should_sso_overwrite_avatar` not defined.
 
 - [ ] **Step 3: Implement the guard + apply at the three write sites**
 
-In `backend/cubebox/sso/identity.py`, add a module-level helper:
+In `backend/cubeplex/sso/identity.py`, add a module-level helper:
 
 ```python
 def _should_sso_overwrite_avatar(user, avatar_url: str | None) -> bool:
@@ -229,7 +229,7 @@ At each of the three avatar write sites, replace the `if avatar_url is not None 
 
 - [ ] **Step 4: Fix Google social login — pass the picture claim**
 
-In `backend/cubebox/api/routes/v1/social_login.py`, add `avatar_url=` to the `resolve_identity(...)` call (~line 153):
+In `backend/cubeplex/api/routes/v1/social_login.py`, add `avatar_url=` to the `resolve_identity(...)` call (~line 153):
 
 ```python
     result = await resolve_identity(
@@ -254,7 +254,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/sso/identity.py backend/cubebox/api/routes/v1/social_login.py backend/tests/e2e/test_sso_avatar_gating.py
+git add backend/cubeplex/sso/identity.py backend/cubeplex/api/routes/v1/social_login.py backend/tests/e2e/test_sso_avatar_gating.py
 git commit -m "fix(avatar): SSO never overwrites uploaded avatar; persist Google picture"
 ```
 
@@ -263,8 +263,8 @@ git commit -m "fix(avatar): SSO never overwrites uploaded avatar; persist Google
 ## Task 4: Avatar object-store helper
 
 **Files:**
-- Modify: `backend/cubebox/objectstore/client.py` (add public-URL builder + avatar convenience)
-- Create: `backend/cubebox/services/avatar_store.py`
+- Modify: `backend/cubeplex/objectstore/client.py` (add public-URL builder + avatar convenience)
+- Create: `backend/cubeplex/services/avatar_store.py`
 - Test: `backend/tests/e2e/test_avatar_store.py` (new)
 
 **Interfaces:**
@@ -272,7 +272,7 @@ git commit -m "fix(avatar): SSO never overwrites uploaded avatar; persist Google
 
 - [ ] **Step 1: Inspect the existing client for a URL builder**
 
-Read `backend/cubebox/objectstore/client.py`. The survey found `upload_file(key, data, content_type)` and a singleton `get_objectstore_client()`, but no public-URL builder. Check whether the attachment service constructs URLs from `endpoint/bucket/key` and mirror that exact construction — do not invent a new URL scheme.
+Read `backend/cubeplex/objectstore/client.py`. The survey found `upload_file(key, data, content_type)` and a singleton `get_objectstore_client()`, but no public-URL builder. Check whether the attachment service constructs URLs from `endpoint/bucket/key` and mirror that exact construction — do not invent a new URL scheme.
 
 - [ ] **Step 2: Write the failing e2e test**
 
@@ -284,11 +284,11 @@ pytestmark = pytest.mark.e2e
 
 
 async def test_save_avatar_png_returns_url_and_stores():
-    from cubebox.services.avatar_store import save_avatar_png
+    from cubeplex.services.avatar_store import save_avatar_png
     url = await save_avatar_png("usr_test123", b"\x89PNG\r\n\x1a\nfakepng")
     assert url.endswith("avatars/usr_test123.png")
     # Stored object is fetchable (rustfs must be up on :9000).
-    from cubebox.objectstore.client import get_objectstore_client
+    from cubeplex.objectstore.client import get_objectstore_client
     c = get_objectstore_client()
     fetched = await c.get_object_bytes("avatars/usr_test123.png")  # or existing read helper
     assert fetched == b"\x89PNG\r\n\x1a\nfakepng"
@@ -304,8 +304,8 @@ Expected: FAIL — module not found.
 - [ ] **Step 4: Implement `avatar_store.py`**
 
 ```python
-# backend/cubebox/services/avatar_store.py
-from cubebox.objectstore.client import get_objectstore_client
+# backend/cubeplex/services/avatar_store.py
+from cubeplex.objectstore.client import get_objectstore_client
 
 
 def _avatar_public_url(key: str) -> str:
@@ -332,7 +332,7 @@ Expected: PASS (requires rustfs on :9000).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/objectstore/client.py backend/cubebox/services/avatar_store.py backend/tests/e2e/test_avatar_store.py
+git add backend/cubeplex/objectstore/client.py backend/cubeplex/services/avatar_store.py backend/tests/e2e/test_avatar_store.py
 git commit -m "feat(avatar): object-store helper for materialized avatar PNGs"
 ```
 
@@ -341,7 +341,7 @@ git commit -m "feat(avatar): object-store helper for materialized avatar PNGs"
 ## Task 5: `PUT /me/avatar` and `DELETE /me/avatar` endpoints
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py`
+- Modify: `backend/cubeplex/api/routes/v1/auth.py`
 - Test: `backend/tests/e2e/test_avatar_endpoints.py` (new)
 
 **Interfaces:**
@@ -410,11 +410,11 @@ Expected: FAIL — 404 (routes don't exist).
 
 - [ ] **Step 3: Implement the endpoints in `auth.py`**
 
-Add imports at top of `backend/cubebox/api/routes/v1/auth.py`:
+Add imports at top of `backend/cubeplex/api/routes/v1/auth.py`:
 
 ```python
-from cubebox.models.user import AvatarKind
-from cubebox.services.avatar_store import save_avatar_png
+from cubeplex.models.user import AvatarKind
+from cubeplex.services.avatar_store import save_avatar_png
 ```
 
 Add the two routes near the existing `PATCH /me` handler:
@@ -464,7 +464,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/auth.py backend/tests/e2e/test_avatar_endpoints.py
+git add backend/cubeplex/api/routes/v1/auth.py backend/tests/e2e/test_avatar_endpoints.py
 git commit -m "feat(avatar): PUT/DELETE /me/avatar endpoints"
 ```
 
@@ -473,7 +473,7 @@ git commit -m "feat(avatar): PUT/DELETE /me/avatar endpoints"
 ## Task 6: Expose `avatar_seed`/`avatar_kind` in `/me` payload + frontend `MeResult`
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py` (`_me_payload` — extracted in Task 5)
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` (`_me_payload` — extracted in Task 5)
 - Modify: `frontend/packages/core/src/api/auth.ts`
 - Test: extend `backend/tests/e2e/test_avatar_endpoints.py` (assert `/me` returns the new fields)
 
@@ -526,7 +526,7 @@ Run: `cd frontend/packages/core && pnpm build` → succeeds.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/auth.py backend/tests/e2e/test_avatar_endpoints.py frontend/packages/core/src/api/auth.ts
+git add backend/cubeplex/api/routes/v1/auth.py backend/tests/e2e/test_avatar_endpoints.py frontend/packages/core/src/api/auth.ts
 git commit -m "feat(avatar): expose avatar_seed/avatar_kind in /me payload and MeResult"
 ```
 
@@ -535,10 +535,10 @@ git commit -m "feat(avatar): expose avatar_seed/avatar_kind in /me payload and M
 ## Task 7: Participant serializers — add `avatar_url` + `avatar_seed`
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_topics.py` (`_serialize_participant`)
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` (`_serialize_conv_participant`)
-- Modify: `backend/cubebox/api/schemas/conversations.py` (`ConversationParticipantOut`)
-- Modify: `backend/cubebox/api/routes/v1/ws_members.py` (`WsMemberOut`)
+- Modify: `backend/cubeplex/api/routes/v1/ws_topics.py` (`_serialize_participant`)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` (`_serialize_conv_participant`)
+- Modify: `backend/cubeplex/api/schemas/conversations.py` (`ConversationParticipantOut`)
+- Modify: `backend/cubeplex/api/routes/v1/ws_members.py` (`WsMemberOut`)
 - Modify: `frontend/packages/core/src/types/topic.ts`, `conversation-participant.ts`
 - Test: `backend/tests/e2e/test_participant_avatar_fields.py` (new)
 
@@ -632,7 +632,7 @@ Run: `cd frontend/packages/core && pnpm build` → succeeds.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ backend/cubebox/api/schemas/conversations.py backend/tests/e2e/test_participant_avatar_fields.py frontend/packages/core/src/types/
+git add backend/cubeplex/api/routes/v1/ backend/cubeplex/api/schemas/conversations.py backend/tests/e2e/test_participant_avatar_fields.py frontend/packages/core/src/types/
 git commit -m "feat(avatar): carry avatar_url+seed through participant serializers"
 ```
 
@@ -816,7 +816,7 @@ import { useMemo, useEffect, useRef } from 'react'
 import { createAvatar } from '@dicebear/core'
 import { notionists, bottts } from '@dicebear/collection'
 import { initials as toInitials, avatarColor } from '@/lib/avatar'
-import { uploadAvatar } from '@cubebox/core/api/auth'
+import { uploadAvatar } from '@cubeplex/core/api/auth'
 import { useApiClient } from '@/hooks/useApiClient' // adjust to the real hook name
 
 export interface AvatarProps {
@@ -870,7 +870,7 @@ export function Avatar({ src, seed, name, style = 'notionists', size = 32, userI
 }
 ```
 
-**Confirm** the real hook name for obtaining an `ApiClient` (search `packages/web/hooks/` for `useApiClient`/`useApi`/`apiClient`). Also confirm `@cubebox/core/api/auth` is the correct deep import path the web package uses.
+**Confirm** the real hook name for obtaining an `ApiClient` (search `packages/web/hooks/` for `useApiClient`/`useApi`/`apiClient`). Also confirm `@cubeplex/core/api/auth` is the correct deep import path the web package uses.
 
 - [ ] **Step 3: Typecheck**
 
@@ -1070,7 +1070,7 @@ import { useState } from 'react'
 import { createAvatar } from '@dicebear/core'
 import { notionists } from '@dicebear/collection'
 import { Avatar } from '@/components/ui/avatar'
-import { uploadAvatar, deleteAvatar } from '@cubebox/core/api/auth'
+import { uploadAvatar, deleteAvatar } from '@cubeplex/core/api/auth'
 import { useApiClient } from '@/hooks/useApiClient' // real hook name
 import { randomSeed, svgToPngBlob } from '@/lib/avatar'
 import { useAuthStore } from '@/stores/auth' // real store path
@@ -1181,7 +1181,7 @@ Fetch DiceBear's official license list (https://www.dicebear.com/licenses/) and 
 - [ ] **Step 2: Create repo `NOTICE`**
 
 ```
-cubebox — avatar attribution
+cubeplex — avatar attribution
 
 Avatars generated with DiceBear (https://www.dicebear.com):
   - "Notionists" by Zoish — licensed under CC BY 4.0

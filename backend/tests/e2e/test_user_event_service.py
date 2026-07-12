@@ -10,10 +10,10 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.user_event import UserEventType
-from cubebox.repositories.user_event import UserEventRepository
-from cubebox.services.user_event import PublishUserEventInput, UserEventService
-from cubebox.services.user_event_bus import UserEventBus, UserEventDTO
+from cubeplex.models.user_event import UserEventType
+from cubeplex.repositories.user_event import UserEventRepository
+from cubeplex.services.user_event import PublishUserEventInput, UserEventService
+from cubeplex.services.user_event_bus import UserEventBus, UserEventDTO
 
 
 def _unique_user_id() -> str:

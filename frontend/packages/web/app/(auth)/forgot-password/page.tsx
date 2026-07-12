@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, forgotPassword } from '@cubebox/core'
+import { createApiClient, forgotPassword } from '@cubeplex/core'
 
 export default function ForgotPasswordPage() {
   const t = useTranslations('auth')

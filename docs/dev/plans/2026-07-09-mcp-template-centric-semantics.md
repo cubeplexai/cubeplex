@@ -6,7 +6,7 @@
 
 **Architecture:** Backend-first cutover on one branch. Schema migration first (additive columns + data backfill + drops), then repositories, then the pure list-composition and effective-state functions, then services/routes, then the frontend against the new API. The project is unreleased: old endpoints are deleted, not shimmed.
 
-**Tech Stack:** FastAPI + SQLModel + Alembic (backend, mypy strict), Next.js + React 19 + `@cubebox/core` (frontend, strict TS), pytest e2e against real Postgres, Playwright for frontend flows.
+**Tech Stack:** FastAPI + SQLModel + Alembic (backend, mypy strict), Next.js + React 19 + `@cubeplex/core` (frontend, strict TS), pytest e2e against real Postgres, Playwright for frontend flows.
 
 ## Global Constraints
 
@@ -14,7 +14,7 @@
   - Worktree first; **read `.worktree.env`** — ports 8000/3000 are wrong inside worktrees. `cat .worktree.env` on every fresh shell (subagents: re-`cd` + `pwd` on every Bash call).
   - Tests touching Postgres/the app → `backend/tests/e2e/`. Pure functions → `backend/tests/unit/`. Misplacing breaks `make check-ci`.
   - tz-aware datetimes only (`datetime.now(UTC)`).
-  - New table → public-ID prefix in `backend/cubebox/models/public_id.py`.
+  - New table → public-ID prefix in `backend/cubeplex/models/public_id.py`.
   - Migrations via `alembic revision --autogenerate`; data-migration statements are added to the generated revision (never hand-craft schema ops autogen can produce).
   - Line length 100. `uv add` / `pnpm add` for deps (none expected). pnpm, never npm.
   - Pipe noisy output through `tee tmp/<task>.log`, then `tail -3`.
@@ -26,23 +26,23 @@
 ## File Structure (what exists where when we're done)
 
 ```
-backend/cubebox/models/mcp.py                      # template scope cols; settings model; grant auth_method; connector minus auth cols
-backend/cubebox/models/public_id.py                # + PREFIX_MCP_TEMPLATE_SETTINGS = "mcts"
-backend/cubebox/repositories/mcp.py                # visibility queries; settings repo; lazy get_or_create
-backend/cubebox/services/mcp_catalog.py            # NEW: pure list-composition for both pages
-backend/cubebox/services/mcp_installs.py           # MCPConnectorService: ensure/distribute/purge (install/promote/distribution machinery deleted)
-backend/cubebox/services/mcp_templates.py          # template service grows create/promote/visibility
-backend/cubebox/services/mcp_ws_available.py       # DELETED
-backend/cubebox/services/mcp_admin_connectors.py   # DELETED
-backend/cubebox/mcp/effective.py                   # disabled veto; grant-level auth
-backend/cubebox/mcp/workspace_bootstrap.py         # skips org-disabled templates
-backend/cubebox/mcp/oauth/start.py                 # validates via template.supported_auth_methods
-backend/cubebox/api/routes/v1/admin_mcp.py         # catalog/templates/disable/distribute/purge; installs+promote+connectors removed
-backend/cubebox/api/routes/v1/ws_mcp.py            # catalog/template-state/templates+promote; installs+available removed
-backend/cubebox/api/schemas/mcp_catalog.py         # NEW: catalog Out models (admin + ws)
-backend/cubebox/api/schemas/mcp.py                 # install-create/promote/distribution In models removed
-backend/cubebox/api/schemas/mcp_admin_connector.py # DELETED
-backend/cubebox/api/schemas/mcp_ws_available.py    # DELETED
+backend/cubeplex/models/mcp.py                      # template scope cols; settings model; grant auth_method; connector minus auth cols
+backend/cubeplex/models/public_id.py                # + PREFIX_MCP_TEMPLATE_SETTINGS = "mcts"
+backend/cubeplex/repositories/mcp.py                # visibility queries; settings repo; lazy get_or_create
+backend/cubeplex/services/mcp_catalog.py            # NEW: pure list-composition for both pages
+backend/cubeplex/services/mcp_installs.py           # MCPConnectorService: ensure/distribute/purge (install/promote/distribution machinery deleted)
+backend/cubeplex/services/mcp_templates.py          # template service grows create/promote/visibility
+backend/cubeplex/services/mcp_ws_available.py       # DELETED
+backend/cubeplex/services/mcp_admin_connectors.py   # DELETED
+backend/cubeplex/mcp/effective.py                   # disabled veto; grant-level auth
+backend/cubeplex/mcp/workspace_bootstrap.py         # skips org-disabled templates
+backend/cubeplex/mcp/oauth/start.py                 # validates via template.supported_auth_methods
+backend/cubeplex/api/routes/v1/admin_mcp.py         # catalog/templates/disable/distribute/purge; installs+promote+connectors removed
+backend/cubeplex/api/routes/v1/ws_mcp.py            # catalog/template-state/templates+promote; installs+available removed
+backend/cubeplex/api/schemas/mcp_catalog.py         # NEW: catalog Out models (admin + ws)
+backend/cubeplex/api/schemas/mcp.py                 # install-create/promote/distribution In models removed
+backend/cubeplex/api/schemas/mcp_admin_connector.py # DELETED
+backend/cubeplex/api/schemas/mcp_ws_available.py    # DELETED
 frontend/packages/core/src/api/mcp.ts              # client rewritten to new surface
 frontend/packages/web/app/admin/mcp/page.tsx       # single catalog list + filters
 frontend/packages/web/app/(app)/w/[wsId]/.../mcp   # ws page → single catalog list (locate exact path in Task 10)
@@ -59,14 +59,14 @@ docs/site/docs/…connectors…                        # rewritten around catalo
 - [ ] **Step 1: Create the worktree** — from the **main repo root**:
 
 ```bash
-cd /home/chris/cubebox
+cd /home/chris/cubeplex
 ./scripts/new-worktree feat/2026-07-09-mcp-template-centric
 ```
 
 - [ ] **Step 2: Enter it, read the env, run doctor**
 
 ```bash
-cd ../cubebox-worktrees/feat-2026-07-09-mcp-template-centric 2>/dev/null || cd "$(git worktree list | grep 2026-07-09-mcp-template-centric | awk '{print $1}')"
+cd ../cubeplex-worktrees/feat-2026-07-09-mcp-template-centric 2>/dev/null || cd "$(git worktree list | grep 2026-07-09-mcp-template-centric | awk '{print $1}')"
 cat .worktree.env
 ./scripts/worktree-env doctor
 ```
@@ -93,9 +93,9 @@ git commit -m "docs: spec + plan for MCP template-centric semantics"
 ### Task 2: Models + public-ID prefix
 
 **Files:**
-- Modify: `backend/cubebox/models/mcp.py`
-- Modify: `backend/cubebox/models/public_id.py` (after line 59, `PREFIX_MCP_CONNECTOR`)
-- Modify: `backend/cubebox/models/__init__.py` (export `MCPConnectorTemplateSettings`)
+- Modify: `backend/cubeplex/models/mcp.py`
+- Modify: `backend/cubeplex/models/public_id.py` (after line 59, `PREFIX_MCP_CONNECTOR`)
+- Modify: `backend/cubeplex/models/__init__.py` (export `MCPConnectorTemplateSettings`)
 
 **Interfaces:**
 - Produces: `MCPConnectorTemplate.scope/org_id/workspace_id/created_by_user_id`; `MCPConnectorTemplateSettings` model; `MCPCredentialGrant.auth_method`; `MCPConnector` **without** `auth_method`/`auth_status`/`install_scope`/`workspace_id` and with `template_id: str` (non-null).
@@ -142,7 +142,7 @@ PREFIX_MCP_TEMPLATE_SETTINGS: str = "mcts"
 - [ ] **Step 3: Add `MCPConnectorTemplateSettings`** (new class at the end of models/mcp.py):
 
 ```python
-class MCPConnectorTemplateSettings(CubeboxBase, table=True):
+class MCPConnectorTemplateSettings(CubeplexBase, table=True):
     """Per-(org, template) settings. Absent row = all defaults (spec §3.4)."""
 
     _PREFIX: ClassVar[str] = PREFIX_MCP_TEMPLATE_SETTINGS
@@ -195,7 +195,7 @@ Simplify the partial index accordingly (drop the now-tautological NULL clause):
 - [ ] **Step 6: Export + typecheck**. Add `MCPConnectorTemplateSettings` to `models/__init__.py`. Then:
 
 ```bash
-cd backend && uv run mypy cubebox/models 2>&1 | tee ../tmp/task2-mypy.log | tail -3
+cd backend && uv run mypy cubeplex/models 2>&1 | tee ../tmp/task2-mypy.log | tail -3
 ```
 
 Expected: models package clean. The rest of the codebase now fails mypy/imports — that is expected until Tasks 4-9; do **not** run the full suite here.
@@ -203,7 +203,7 @@ Expected: models package clean. The rest of the codebase now fails mypy/imports 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/models
+git add backend/cubeplex/models
 git commit -m "feat(mcp): template scope, template settings table, grant auth_method; slim connector"
 ```
 
@@ -287,7 +287,7 @@ cd backend && uv run alembic revision --autogenerate -m "mcp template centric se
     # 5) settings table create (autogen op).
 ```
 
-Adjust the JSON column casts to match the template `id` length limit (`mctpl_` + 20 hex chars must fit the id column width — check `CubeboxBase` id length and shorten the `substr` if needed). If the templates table stores `supported_auth_methods` as `JSON` not `JSONB`, use `to_json` instead — copy whatever type autogen shows for that column.
+Adjust the JSON column casts to match the template `id` length limit (`mctpl_` + 20 hex chars must fit the id column width — check `CubeplexBase` id length and shorten the `substr` if needed). If the templates table stores `supported_auth_methods` as `JSON` not `JSONB`, use `to_json` instead — copy whatever type autogen shows for that column.
 
 - [ ] **Step 3: Write the disposable-DB verification script** `backend/scripts/dev/verify_mcp_template_centric_migration.py`:
 
@@ -296,10 +296,10 @@ Adjust the JSON column casts to match the template `id` length limit (`mctpl_` +
 
 Usage (inside the worktree, venv active):
     createdb mcp_mig_scratch
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch uv run alembic upgrade <previous_head>
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch uv run python scripts/dev/verify_mcp_template_centric_migration.py seed
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch uv run alembic upgrade head
-    CUBEBOX_DATABASE__NAME=mcp_mig_scratch uv run python scripts/dev/verify_mcp_template_centric_migration.py check
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch uv run alembic upgrade <previous_head>
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch uv run python scripts/dev/verify_mcp_template_centric_migration.py seed
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch uv run alembic upgrade head
+    CUBEPLEX_DATABASE__NAME=mcp_mig_scratch uv run python scripts/dev/verify_mcp_template_centric_migration.py check
     dropdb mcp_mig_scratch
 """
 ```
@@ -320,7 +320,7 @@ git commit -m "feat(mcp): migration to template-centric schema with grant/custom
 ### Task 4: Repositories — visibility, settings, lazy connector
 
 **Files:**
-- Modify: `backend/cubebox/repositories/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
 - Test: `backend/tests/e2e/test_mcp_template_repositories.py` (opens AsyncSession ⇒ e2e per repo rules)
 
 **Interfaces:**
@@ -437,13 +437,13 @@ Expected: FAIL with `AttributeError` (methods don't exist).
             return raced
 ```
 
-(`slugify_for_namespace` / `server_url_hash` live in `cubebox/mcp/_constants.py` — same imports `services/mcp_installs.py` uses today.)
+(`slugify_for_namespace` / `server_url_hash` live in `cubeplex/mcp/_constants.py` — same imports `services/mcp_installs.py` uses today.)
 
 - [ ] **Step 4: Green + commit**
 
 ```bash
 uv run pytest tests/e2e/test_mcp_template_repositories.py --no-cov 2>&1 | tee ../tmp/task4-green.log | tail -3
-git add backend/cubebox/repositories/mcp.py backend/tests/e2e/test_mcp_template_repositories.py
+git add backend/cubeplex/repositories/mcp.py backend/tests/e2e/test_mcp_template_repositories.py
 git commit -m "feat(mcp): template visibility queries, settings repo, lazy connector creation"
 ```
 
@@ -452,8 +452,8 @@ git commit -m "feat(mcp): template visibility queries, settings repo, lazy conne
 ### Task 5: Pure catalog composition — `services/mcp_catalog.py`
 
 **Files:**
-- Create: `backend/cubebox/services/mcp_catalog.py`
-- Delete: `backend/cubebox/services/mcp_ws_available.py`, `backend/cubebox/services/mcp_admin_connectors.py` (+ their unit tests under `backend/tests/unit/` — find with `grep -rl "mcp_ws_available\|mcp_admin_connectors" backend/tests`)
+- Create: `backend/cubeplex/services/mcp_catalog.py`
+- Delete: `backend/cubeplex/services/mcp_ws_available.py`, `backend/cubeplex/services/mcp_admin_connectors.py` (+ their unit tests under `backend/tests/unit/` — find with `grep -rl "mcp_ws_available\|mcp_admin_connectors" backend/tests`)
 - Test: `backend/tests/unit/test_mcp_catalog.py` (pure ⇒ unit)
 
 **Interfaces:**
@@ -524,7 +524,7 @@ def test_workspace_enabled_comes_from_state_row(): ...
 
 ```bash
 uv run pytest tests/unit/test_mcp_catalog.py --no-cov 2>&1 | tee ../tmp/task5.log | tail -3
-git add -A backend/cubebox/services backend/tests
+git add -A backend/cubeplex/services backend/tests
 git commit -m "feat(mcp): pure catalog composition; retire ws_available/admin_connectors derivations"
 ```
 
@@ -533,9 +533,9 @@ git commit -m "feat(mcp): pure catalog composition; retire ws_available/admin_co
 ### Task 6: Effective state — disabled veto + grant-level auth
 
 **Files:**
-- Modify: `backend/cubebox/mcp/effective.py`
-- Modify: `backend/cubebox/services/mcp_discovery.py` (`_build_runtime_spec_for_discovery`, line ~213; usability check line ~359)
-- Modify: `backend/cubebox/mcp/oauth/start.py:143`
+- Modify: `backend/cubeplex/mcp/effective.py`
+- Modify: `backend/cubeplex/services/mcp_discovery.py` (`_build_runtime_spec_for_discovery`, line ~213; usability check line ~359)
+- Modify: `backend/cubeplex/mcp/oauth/start.py:143`
 - Test: `backend/tests/unit/test_mcp_effective_state.py` (extend the existing unit tests for `compute_effective_state` — locate via `grep -rl compute_effective_state backend/tests/unit`)
 
 **Interfaces:**
@@ -587,7 +587,7 @@ def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
     return MCPEffectiveResult(True, "usable", "available")
 ```
 
-- [ ] **Step 4: Rewire `_collect_rows`** (effective.py:239): construct `MCPTemplateSettingsRepository` (new constructor param `settings_repo`, threaded through `cubebox/mcp/dependencies.py` — grep `MCPEffectiveConnectorService(` for all construction sites and add the arg), load `disabled_ids = await settings_repo.disabled_template_ids()` once, and per connector derive:
+- [ ] **Step 4: Rewire `_collect_rows`** (effective.py:239): construct `MCPTemplateSettingsRepository` (new constructor param `settings_repo`, threaded through `cubeplex/mcp/dependencies.py` — grep `MCPEffectiveConnectorService(` for all construction sites and add the arg), load `disabled_ids = await settings_repo.disabled_template_ids()` once, and per connector derive:
 
 ```python
             template = templates_by_id[connector.template_id]  # template_id now non-null
@@ -599,13 +599,13 @@ def compute_effective_state(value: MCPEffectiveInput) -> MCPEffectiveResult:
 
 `_resolve_grant`: refresh condition becomes `grant.auth_method == "oauth"` (drop the connector check). `_credential_availability_by_scope`: replace `connector.auth_method == "none"` with `not auth_required` (pass the bool in). `list_runtime_specs`: `auth_method=row.grant.auth_method if row.grant is not None else "none"`.
 
-- [ ] **Step 5: Fix the two remaining readers.** `mcp_discovery.py`: `_build_runtime_spec_for_discovery(install=..., grant=...)` sets `auth_method` from the grant the same way (line ~213); the usability guard at ~359 (`install.auth_method == "none" or ...`) re-derives from the template (the function already has session access — load the template by `install.template_id`). `oauth/start.py:143`: replace `if install.auth_method != "oauth"` with a template lookup asserting `"oauth" in template.supported_auth_methods`, error code `auth_method_not_supported_by_template`. Find the OAuth callback's grant-creation site (`grep -rn "MCPCredentialGrant(" backend/cubebox/mcp backend/cubebox/api`) and set `auth_method="oauth"` there; `create_static_grant` in `mcp_installs.py` sets `auth_method="static"` (formal change lands in Task 7, add the field now to keep the model NOT NULL satisfied).
+- [ ] **Step 5: Fix the two remaining readers.** `mcp_discovery.py`: `_build_runtime_spec_for_discovery(install=..., grant=...)` sets `auth_method` from the grant the same way (line ~213); the usability guard at ~359 (`install.auth_method == "none" or ...`) re-derives from the template (the function already has session access — load the template by `install.template_id`). `oauth/start.py:143`: replace `if install.auth_method != "oauth"` with a template lookup asserting `"oauth" in template.supported_auth_methods`, error code `auth_method_not_supported_by_template`. Find the OAuth callback's grant-creation site (`grep -rn "MCPCredentialGrant(" backend/cubeplex/mcp backend/cubeplex/api`) and set `auth_method="oauth"` there; `create_static_grant` in `mcp_installs.py` sets `auth_method="static"` (formal change lands in Task 7, add the field now to keep the model NOT NULL satisfied).
 
 - [ ] **Step 6: Green + commit**
 
 ```bash
 uv run pytest tests/unit/test_mcp_effective_state.py tests/e2e/test_mcp_four_layer_runtime.py --no-cov 2>&1 | tee ../tmp/task6.log | tail -3
-git add backend/cubebox backend/tests
+git add backend/cubeplex backend/tests
 git commit -m "feat(mcp): org-disable veto and grant-level auth in effective/runtime derivation"
 ```
 
@@ -616,8 +616,8 @@ git commit -m "feat(mcp): org-disable veto and grant-level auth in effective/run
 ### Task 7: Connector service — ensure / distribute / purge; bootstrap filter
 
 **Files:**
-- Modify: `backend/cubebox/services/mcp_installs.py`
-- Modify: `backend/cubebox/mcp/workspace_bootstrap.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
+- Modify: `backend/cubeplex/mcp/workspace_bootstrap.py`
 - Test: `backend/tests/e2e/test_mcp_distribute_and_purge.py`
 
 **Interfaces:**
@@ -681,13 +681,13 @@ async def test_bootstrap_skips_org_disabled_templates(): ...
         return await self._connector_repo.update(connector)
 ```
 
-Delete the superseded methods and the now-dead `install_defaults_for_auth_method` if nothing else imports it (`grep -rn install_defaults_for_auth_method backend/cubebox`). Delete `MCPConnector.install_state` property once `_install_to_out` (its last caller) dies in Task 9 — leave a journal note if it must wait.
+Delete the superseded methods and the now-dead `install_defaults_for_auth_method` if nothing else imports it (`grep -rn install_defaults_for_auth_method backend/cubeplex`). Delete `MCPConnector.install_state` property once `_install_to_out` (its last caller) dies in Task 9 — leave a journal note if it must wait.
 
 - [ ] **Step 4: Green + commit**
 
 ```bash
 uv run pytest tests/e2e/test_mcp_distribute_and_purge.py --no-cov 2>&1 | tee ../tmp/task7.log | tail -3
-git add backend/cubebox backend/tests
+git add backend/cubeplex backend/tests
 git commit -m "feat(mcp): distribute/purge/lazy-enable service ops; bootstrap honors org disable"
 ```
 
@@ -696,9 +696,9 @@ git commit -m "feat(mcp): distribute/purge/lazy-enable service ops; bootstrap ho
 ### Task 8: API schemas — `mcp_catalog.py`; prune `mcp.py`
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/mcp_catalog.py`
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Delete: `backend/cubebox/api/schemas/mcp_admin_connector.py`, `backend/cubebox/api/schemas/mcp_ws_available.py`
+- Create: `backend/cubeplex/api/schemas/mcp_catalog.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Delete: `backend/cubeplex/api/schemas/mcp_admin_connector.py`, `backend/cubeplex/api/schemas/mcp_ws_available.py`
 
 **Interfaces (produced — routes in Tasks 9-10 return exactly these):**
 
@@ -770,10 +770,10 @@ class TemplateStateIn(BaseModel):        # ws enable/disable
 
 - [ ] **Step 1: Write the module** (all of the above, plus move the pairing validator from `AdminCreateInstallIn` into `CreateTemplateIn`).
 - [ ] **Step 2: Prune `schemas/mcp.py`** — delete `AdminCreateInstallIn`, `PromoteInstallIn`, the distribution/auto-enable models, `MCPAdminInstallEffectiveOut`; keep grant/invoke/test-connection/refresh/tool-citation models. `CreateGrantIn` needs no `auth_method` field: org grants via `credential_plaintext` are static by definition; OAuth grants are minted by the callback.
-- [ ] **Step 3: `uv run mypy cubebox/api/schemas 2>&1 | tail -3`** — clean. Commit:
+- [ ] **Step 3: `uv run mypy cubeplex/api/schemas 2>&1 | tail -3`** — clean. Commit:
 
 ```bash
-git add backend/cubebox/api/schemas
+git add backend/cubeplex/api/schemas
 git commit -m "feat(mcp): catalog API schemas; retire install/promote/available schemas"
 ```
 
@@ -782,8 +782,8 @@ git commit -m "feat(mcp): catalog API schemas; retire install/promote/available 
 ### Task 9: Admin routes rewrite
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/mcp/dependencies.py` (settings-repo dependency)
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/mcp/dependencies.py` (settings-repo dependency)
 - Test: `backend/tests/e2e/test_mcp_admin_catalog_routes.py`
 
 **Interfaces (produced — the frontend consumes exactly these paths):**
@@ -858,7 +858,7 @@ async def admin_catalog(
 
 ```bash
 uv run pytest tests/e2e/test_mcp_admin_catalog_routes.py tests/e2e -k "mcp" --no-cov 2>&1 | tee ../tmp/task9.log | tail -3
-git add backend/cubebox backend/tests
+git add backend/cubeplex backend/tests
 git commit -m "feat(mcp): admin catalog/template routes; retire install+promote surface"
 ```
 
@@ -867,7 +867,7 @@ git commit -m "feat(mcp): admin catalog/template routes; retire install+promote 
 ### Task 10: Workspace routes rewrite
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_ws_catalog_routes.py`
 
 **Interfaces:**
@@ -894,13 +894,13 @@ async def test_mixed_grants_oauth_user_plus_static_workspace(): ...        # spe
     # directly via db_maker (auth_method='oauth'); both resolve in runtime specs.
 ```
 
-- [ ] **Step 2: Red** → **Step 3: Implement**, mirroring the admin catalog assembly with the workspace visibility query and per-row effective enrichment. Workspace deletion cascade (spec §10, unpromoted ws templates purged with the workspace): find the workspace-deletion service (`grep -rn "def delete_workspace" backend/cubebox/services`) and add: purge connectors of, then delete, `scope='workspace'` templates owned by the deleted workspace.
+- [ ] **Step 2: Red** → **Step 3: Implement**, mirroring the admin catalog assembly with the workspace visibility query and per-row effective enrichment. Workspace deletion cascade (spec §10, unpromoted ws templates purged with the workspace): find the workspace-deletion service (`grep -rn "def delete_workspace" backend/cubeplex/services`) and add: purge connectors of, then delete, `scope='workspace'` templates owned by the deleted workspace.
 
 - [ ] **Step 4: Green + commit**
 
 ```bash
 uv run pytest tests/e2e/test_mcp_ws_catalog_routes.py --no-cov 2>&1 | tee ../tmp/task10.log | tail -3
-git add backend/cubebox backend/tests
+git add backend/cubeplex backend/tests
 git commit -m "feat(mcp): workspace catalog + template state/create/promote routes"
 ```
 
@@ -910,11 +910,11 @@ git commit -m "feat(mcp): workspace catalog + template state/create/promote rout
 
 **Files:** whatever the sweep flags.
 
-- [ ] **Step 1:** `grep -rn "install_scope\|list_workspace_installs\|mcp_ws_available\|mcp_admin_connectors\|AdminCreateInstallIn\|auth_status" backend/cubebox` — must return nothing (delete stragglers; `MCPConnector.install_state` property goes now if Task 7 deferred it).
+- [ ] **Step 1:** `grep -rn "install_scope\|list_workspace_installs\|mcp_ws_available\|mcp_admin_connectors\|AdminCreateInstallIn\|auth_status" backend/cubeplex` — must return nothing (delete stragglers; `MCPConnector.install_state` property goes now if Task 7 deferred it).
 - [ ] **Step 2:** Full backend gate:
 
 ```bash
-cd backend && uv run mypy cubebox 2>&1 | tee ../tmp/task11-mypy.log | tail -3
+cd backend && uv run mypy cubeplex 2>&1 | tee ../tmp/task11-mypy.log | tail -3
 uv run pytest --no-cov 2>&1 | tee ../tmp/task11-pytest.log | tail -3
 ```
 
@@ -958,7 +958,7 @@ export async function wsPromoteTemplate(client: ApiClient, wsId: string, templat
 
 Delete from `mcp.ts`: `adminCreateInstall`, `wsCreateInstall`, `wsDeleteInstall`, `wsListAvailable`, `adminPromoteToOrg`, `adminListConnectors`, `adminGetInstallEffective`, `wsPatchConnectorState`, `PromoteDistribution`. Keep grant/invoke/discovery/test-connection functions (paths unchanged).
 
-- [ ] **Step 1: Rewrite `mcp.ts`** to the interface above; `cd frontend && pnpm --filter @cubebox/core build 2>&1 | tee ../tmp/task12-core.log | tail -3` (core must build before web sees the types).
+- [ ] **Step 1: Rewrite `mcp.ts`** to the interface above; `cd frontend && pnpm --filter @cubeplex/core build 2>&1 | tee ../tmp/task12-core.log | tail -3` (core must build before web sees the types).
 - [ ] **Step 2: Rework the admin page** (`app/admin/mcp/page.tsx`). Replace the two-section rail (lines 124-176: `installs` header + `MCPConnectorList` + `templates` section with install/custom buttons) with one `MCPCatalogList` fed by `adminListCatalog`, filtered client-side:
 
 ```typescript
@@ -1021,7 +1021,7 @@ Default filter `'in_use'`; source dropdown filters on `template.scope`. Row chip
 - [ ] **Step 1:** Full gates, in order, all through tee:
 
 ```bash
-cd backend && uv run mypy cubebox 2>&1 | tee ../tmp/final-mypy.log | tail -3
+cd backend && uv run mypy cubeplex 2>&1 | tee ../tmp/final-mypy.log | tail -3
 uv run pytest --no-cov 2>&1 | tee ../tmp/final-pytest.log | tail -3
 cd ../frontend && pnpm lint 2>&1 | tee ../tmp/final-lint.log | tail -3 && pnpm build 2>&1 | tee ../tmp/final-build.log | tail -3
 ```

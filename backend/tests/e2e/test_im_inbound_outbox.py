@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.models.im_connector import (
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMThreadLink,

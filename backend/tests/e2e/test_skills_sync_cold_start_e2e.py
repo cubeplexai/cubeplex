@@ -23,12 +23,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 # The private function under test — importing directly keeps the test focused
 # on the sync function itself (not the LazySandbox wrapper).
-from cubebox.sandbox.lazy import LazySandbox, _sync_skills
-from cubebox.sandbox.manager import SandboxManager
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.sandbox_paths import SKILLS_ROOT
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sync_manifest import MANIFEST_PATH
+from cubeplex.sandbox.lazy import LazySandbox, _sync_skills
+from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.sandbox_paths import SKILLS_ROOT
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sync_manifest import MANIFEST_PATH
 from tests.e2e.conftest import MemSandbox
 
 # ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ async def test_cold_start_writes_files_and_manifest(
     # -----------------------------------------------------------------------
     from cryptography.fernet import Fernet
 
-    from cubebox.credentials.encryption import FernetBackend
+    from cubeplex.credentials.encryption import FernetBackend
 
     cache_dir2 = Path(tempfile.mkdtemp())
     enc_backend = FernetBackend([Fernet.generate_key()])

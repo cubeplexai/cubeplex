@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useMessageScopedToolResults } from '@/hooks/useMessageScopedToolResults'
-import type { Message } from '@cubebox/core'
+import type { Message } from '@cubeplex/core'
 
 type Entry = { content: string; receivedAt: number }
 

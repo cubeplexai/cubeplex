@@ -11,7 +11,7 @@ Backend + frontend started in the worktree:
 
 ```bash
 cd .worktrees/feat/im-frontend/backend
-nohup env CUBEBOX_API__RELOAD=false uv run python main.py > /tmp/im-fe-test/backend.log 2>&1 < /dev/null & disown
+nohup env CUBEPLEX_API__RELOAD=false uv run python main.py > /tmp/im-fe-test/backend.log 2>&1 < /dev/null & disown
 cd ../frontend
 HOSTNAME=0.0.0.0 nohup pnpm dev > /tmp/im-fe-test/frontend.log 2>&1 < /dev/null & disown
 ```

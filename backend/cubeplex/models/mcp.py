@@ -1,0 +1,370 @@
+"""MCP connector models — four-layer schema.
+
+These models intentionally do NOT inherit ``OrgScopedMixin``: connectors and
+grants carry nullable scope columns (``workspace_id``, ``user_id``) that the
+mixin's NOT NULL contract forbids. Each model declares its own scope FKs
+explicitly.
+"""
+
+from datetime import datetime
+from typing import Any, ClassVar
+
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    String,
+    UniqueConstraint,
+    event,
+    text,
+)
+from sqlmodel import Field
+
+from cubeplex.models.mixins import CubeplexBase
+from cubeplex.models.public_id import PREFIX_MCP_CONNECTOR, PREFIX_MCP_TEMPLATE_SETTINGS
+
+
+class MCPConnectorTemplate(CubeplexBase, table=True):
+    """Global catalog of installable remote MCP connectors (templates only).
+
+    No credentials and no runtime tool state live here. Organizations add
+    templates as :class:`MCPConnector` identity rows referencing ``template_id``.
+    """
+
+    _PREFIX: ClassVar[str] = "mctpl"
+    __tablename__ = "mcp_connector_templates"
+    __table_args__ = (
+        UniqueConstraint("slug", name="uq_mcp_connector_template_slug"),
+        CheckConstraint(
+            "(scope='global' AND org_id IS NULL AND workspace_id IS NULL)"
+            " OR (scope='org' AND org_id IS NOT NULL AND workspace_id IS NULL)"
+            " OR (scope='workspace' AND org_id IS NOT NULL AND workspace_id IS NOT NULL)",
+            name="ck_mcp_connector_templates_scope_shape",
+        ),
+    )
+
+    slug: str = Field(max_length=64, index=True)
+    name: str = Field(max_length=128)
+    description: str = Field(max_length=2048)
+    provider: str = Field(max_length=64)
+    server_url: str = Field(max_length=2048)
+    transport: str = Field(max_length=16)
+    supported_auth_methods: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    default_credential_policy: str = Field(max_length=16)
+
+    # OAuth-specific fields (NULL when 'oauth' is not in supported_auth_methods).
+    oauth_dcr_supported: bool | None = Field(default=None)
+    oauth_default_scope: str | None = Field(default=None, max_length=512)
+    oauth_static_client_id: str | None = Field(default=None, max_length=256)
+    oauth_static_client_secret_credential_id: str | None = Field(
+        default=None, foreign_key="credentials.id", max_length=20
+    )
+
+    # Static-auth metadata (NULL when 'static' is not in supported_auth_methods).
+    static_form_schema: list[dict[str, Any]] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    static_auth_header_template: str | None = Field(default=None, max_length=256)
+    # How the runtime injects the static credential into outbound requests.
+    # ``bearer`` → ``Authorization: Bearer <token>`` (default, matches legacy
+    # behaviour). ``header`` → custom request header named
+    # ``static_auth_header_name`` carrying the raw token (e.g. ``x-api-key``).
+    # ``query`` → key/value appended to the connector URL (e.g.
+    # ``?tavilyApiKey=<token>``) — only honoured for streamable_http/sse
+    # transports.
+    static_auth_style: str = Field(
+        default="bearer",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'bearer'")},
+    )
+    static_auth_header_name: str | None = Field(default=None, max_length=64)
+    static_auth_query_param: str | None = Field(default=None, max_length=64)
+
+    template_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    tool_citation_defaults: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    status: str = Field(default="active", max_length=16)
+    # Visibility scope (spec §3.1). 'global' rows are the seeded catalog and
+    # carry no owner; 'org'/'workspace' rows are custom templates.
+    scope: str = Field(
+        default="global",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'global'")},
+    )
+    org_id: str | None = Field(
+        default=None, foreign_key="organizations.id", max_length=20, nullable=True, index=True
+    )
+    workspace_id: str | None = Field(
+        default=None, foreign_key="workspaces.id", max_length=20, nullable=True, index=True
+    )
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
+
+
+class MCPConnector(CubeplexBase, table=True):
+    """Organization-owned connector identity, independent of credentials."""
+
+    _PREFIX: ClassVar[str] = PREFIX_MCP_CONNECTOR
+    __tablename__ = "mcp_connectors"
+    __table_args__ = (
+        Index(
+            "uq_mcp_connector_slug_per_org",
+            "org_id",
+            "slug_name",
+            unique=True,
+            postgresql_where="status = 'active'",
+        ),
+        Index(
+            "uq_mcp_connector_template_per_org",
+            "org_id",
+            "template_id",
+            unique=True,
+            postgresql_where="status = 'active'",
+        ),
+        Index(
+            "uq_mcp_connector_url_per_org",
+            "org_id",
+            "server_url_hash",
+            unique=True,
+            postgresql_where="status = 'active'",
+        ),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    template_id: str = Field(foreign_key="mcp_connector_templates.id", max_length=20, index=True)
+
+    name: str = Field(max_length=64)
+    slug_name: str = Field(
+        default="mcp",
+        sa_column=Column(
+            String(length=72),
+            nullable=False,
+            server_default=text("'mcp'"),
+        ),
+    )
+    server_url: str = Field(max_length=2048)
+    server_url_hash: str = Field(max_length=64)
+    transport: str = Field(max_length=16)
+
+    default_credential_policy: str = Field(
+        default="org",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'org'")},
+    )
+    oauth_client_config: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    static_auth_style: str = Field(
+        default="bearer",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'bearer'")},
+    )
+    static_auth_header_name: str | None = Field(default=None, max_length=64)
+    static_auth_query_param: str | None = Field(default=None, max_length=64)
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+
+    tools_cache: list[dict[str, Any]] = Field(
+        default_factory=list,
+        sa_column=Column(JSON, nullable=False, server_default=text("'[]'")),
+    )
+    tool_citations: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    discovery_status: str = Field(default="not_run", max_length=16)
+    discovery_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON, nullable=False, server_default=text("'{}'")),
+    )
+    last_error: str | None = Field(default=None, max_length=2048)
+    last_discovered_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    timeout: float = Field(default=30.0)
+    sse_read_timeout: float = Field(default=300.0)
+    auto_enroll_new_workspaces: bool = Field(
+        default=True, sa_column_kwargs={"server_default": text("true")}
+    )
+    status: str = Field(
+        default="active",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'active'")},
+    )
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
+
+
+class MCPWorkspaceConnectorState(CubeplexBase, table=True):
+    """Per-workspace enablement and credential policy override for a connector."""
+
+    _PREFIX: ClassVar[str] = "mcwcs"
+    __tablename__ = "mcp_workspace_connector_states"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "connector_id", name="uq_mcp_workspace_connector_state"),
+        CheckConstraint(
+            "credential_policy IN ('org','workspace','user','none')",
+            name="ck_mcp_workspace_connector_states_policy",
+        ),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    workspace_id: str = Field(foreign_key="workspaces.id", max_length=20, index=True)
+    connector_id: str = Field(foreign_key="mcp_connectors.id", max_length=20, index=True)
+    enabled: bool = Field(default=True, sa_column_kwargs={"server_default": text("true")})
+    credential_policy: str = Field(max_length=16)
+    enablement_source: str = Field(max_length=32)
+    updated_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
+
+
+class MCPCredentialGrant(CubeplexBase, table=True):
+    """Credential binding for a connector at org / workspace / user scope.
+
+    Uniqueness across scopes (one org grant per connector; one workspace grant
+    per (connector, workspace); one user grant per (connector, workspace, user))
+    is enforced via partial unique indexes declared in the alembic migration,
+    because Postgres treats NULL as distinct in plain ``UNIQUE`` and we need
+    NULL ``workspace_id``/``user_id`` to collide on the same scope.
+
+    A row-shape check constraint also enforces that the nullable scope
+    columns line up with ``grant_scope``.
+    """
+
+    _PREFIX: ClassVar[str] = "mcgrn"
+    __tablename__ = "mcp_credential_grants"
+    __table_args__ = (
+        CheckConstraint(
+            "grant_scope IN ('org','workspace','user')",
+            name="ck_mcp_credential_grants_scope",
+        ),
+        CheckConstraint(
+            "(grant_scope='org' AND workspace_id IS NULL AND user_id IS NULL)"
+            " OR (grant_scope='workspace' AND workspace_id IS NOT NULL AND user_id IS NULL)"
+            " OR (grant_scope='user' AND workspace_id IS NOT NULL AND user_id IS NOT NULL)",
+            name="ck_mcp_credential_grants_scope_columns",
+        ),
+        CheckConstraint(
+            "auth_method IN ('oauth','static')",
+            name="ck_mcp_credential_grants_auth_method",
+        ),
+        # Partial unique indexes (one grant per install per scope). These match
+        # the DB created by migration 3fcdfc800664 — declared here (not
+        # migration-only) so autogenerate sees no drift.
+        Index(
+            "uq_mcp_credential_grant_org",
+            "connector_id",
+            unique=True,
+            postgresql_where="grant_scope = 'org'",
+        ),
+        Index(
+            "uq_mcp_credential_grant_workspace",
+            "connector_id",
+            "workspace_id",
+            unique=True,
+            postgresql_where="grant_scope = 'workspace'",
+        ),
+        Index(
+            "uq_mcp_credential_grant_user",
+            "connector_id",
+            "workspace_id",
+            "user_id",
+            unique=True,
+            postgresql_where="grant_scope = 'user'",
+        ),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    connector_id: str = Field(foreign_key="mcp_connectors.id", max_length=20, index=True)
+    grant_scope: str = Field(max_length=16)
+    auth_method: str = Field(max_length=16)
+    workspace_id: str | None = Field(
+        default=None, foreign_key="workspaces.id", max_length=20, index=True, nullable=True
+    )
+    user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, index=True, nullable=True
+    )
+
+    credential_id: str = Field(foreign_key="credentials.id", max_length=20)
+    refresh_credential_id: str | None = Field(
+        default=None, foreign_key="credentials.id", max_length=20
+    )
+    expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    grant_status: str = Field(
+        default="valid",
+        max_length=16,
+        sa_column_kwargs={"server_default": text("'valid'")},
+    )
+    created_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# slug_name invariant — set/refresh on every ORM write
+# ---------------------------------------------------------------------------
+
+
+class MCPConnectorTemplateSettings(CubeplexBase, table=True):
+    """Per-(org, template) settings. Absent row = all defaults (spec §3.4)."""
+
+    _PREFIX: ClassVar[str] = PREFIX_MCP_TEMPLATE_SETTINGS
+    __tablename__ = "mcp_connector_templates_settings"
+    __table_args__ = (
+        UniqueConstraint("org_id", "template_id", name="uq_mcp_connector_templates_settings"),
+    )
+
+    org_id: str = Field(foreign_key="organizations.id", max_length=20, index=True)
+    template_id: str = Field(foreign_key="mcp_connector_templates.id", max_length=20, index=True)
+    disabled: bool = Field(default=False, sa_column_kwargs={"server_default": text("false")})
+    updated_by_user_id: str | None = Field(
+        default=None, foreign_key="users.id", max_length=20, nullable=True
+    )
+
+
+# ---------------------------------------------------------------------------
+# slug_name invariant — set/refresh on every ORM write
+# ---------------------------------------------------------------------------
+
+
+@event.listens_for(MCPConnector, "before_insert")
+@event.listens_for(MCPConnector, "before_update")
+def _populate_slug_name(_mapper: Any, _connection: Any, target: MCPConnector) -> None:
+    """Mirror connector display names into ``slug_name``.
+
+    Keeps the canonical namespace slug in sync with the display name so
+    the org-wide ``uq_mcp_connector_slug_per_org`` partial unique
+    index catches any pair of connectors whose names slugify to the same
+    value (e.g. ``Web Tools`` vs ``Web-Tools``). The matching service
+    preflight queries this column too — both layers stay correct by
+    using one shared helper.
+
+    Cross-database: SQLite (used by some unit tests) doesn't accept the
+    PG regex expression a generated column would need, so the slug
+    invariant is enforced in Python rather than via ``Computed``.
+    Production writes always go through the ORM so this is a sound
+    place for the invariant.
+    """
+    from cubeplex.mcp._constants import slugify_for_namespace
+
+    if target.name is not None:
+        target.slug_name = slugify_for_namespace(target.name)

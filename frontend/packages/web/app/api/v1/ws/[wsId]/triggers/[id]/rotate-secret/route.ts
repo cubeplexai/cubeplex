@@ -1,6 +1,6 @@
 import { type NextRequest } from 'next/server'
 
-const BACKEND_URL = process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'
+const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
 
 function buildProxyHeaders(request: NextRequest, accept: string): HeadersInit {
   const headers: Record<string, string> = { Accept: accept }

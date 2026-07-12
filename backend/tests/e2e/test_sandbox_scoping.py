@@ -17,9 +17,9 @@ import pytest
 import sqlalchemy as sa
 from cryptography.fernet import Fernet
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.middleware import sandbox as sandbox_mw
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.middleware import sandbox as sandbox_mw
+from cubeplex.sandbox.manager import SandboxManager
 
 _ENCRYPTION_BACKEND = FernetBackend([Fernet.generate_key()])
 
@@ -143,7 +143,7 @@ async def test_image_drift_is_lazy_existing_keeps_old_new_uses_new(
     picks up the new image."""
     del fake_opensandbox
     org_id, ws_a, ws_b, user_id = seeded_org_ws_user
-    from cubebox.repositories.sandbox_policy import SandboxPolicyRepository
+    from cubeplex.repositories.sandbox_policy import SandboxPolicyRepository
 
     async with session_factory() as s:
         await SandboxPolicyRepository(s, org_id=org_id).upsert(

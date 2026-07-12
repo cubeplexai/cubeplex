@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useMemo } from 'react'
-import { usePanelStore, useConversationStore } from '@cubebox/core'
+import { usePanelStore, useConversationStore } from '@cubeplex/core'
 import type { SandboxMarkdownContext } from '@/components/shared/MarkdownWithCitations'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 

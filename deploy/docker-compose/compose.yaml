@@ -1,4 +1,4 @@
-# cubebox single-host docker-compose deployment.
+# cubeplex single-host docker-compose deployment.
 #
 # Variables come from .env (operator copies from .env.example). Images
 # are pulled from the same registry the kubernetes mode uses; build them
@@ -15,7 +15,7 @@
 # `backend:8000` from frontend; frontend serves the user on host port
 # ${FRONTEND_PORT:-3000} and proxies /api/* to backend internally.
 
-name: cubebox
+name: cubeplex
 
 x-restart-policy: &restart-policy
   restart: unless-stopped
@@ -29,14 +29,14 @@ services:
     image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
     <<: *restart-policy
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-cubebox}
+      POSTGRES_USER: ${POSTGRES_USER:-cubeplex}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-cubebox}
+      POSTGRES_DB: ${POSTGRES_DB:-cubeplex}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cubebox} -d ${POSTGRES_DB:-cubebox}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cubeplex} -d ${POSTGRES_DB:-cubeplex}"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -66,7 +66,7 @@ services:
     image: ${RUSTFS_IMAGE:-rustfs/rustfs:latest}
     <<: *restart-policy
     environment:
-      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-cubebox}
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-cubeplex}
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}
       RUSTFS_ADDRESS: ":9000"
       RUSTFS_CONSOLE_ENABLE: "true"
@@ -89,9 +89,9 @@ services:
       rustfs:
         condition: service_healthy
     environment:
-      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-cubebox}
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-cubeplex}
       RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
-      BUCKET: ${OBJECTSTORE_BUCKET:-cubebox}
+      BUCKET: ${OBJECTSTORE_BUCKET:-cubeplex}
     entrypoint:
       - sh
       - -c
@@ -106,7 +106,7 @@ services:
 
   # Alembic migrate. Runs to completion before backend starts.
   backend-migrate:
-    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubebox-backend:${BACKEND_TAG:?set BACKEND_TAG in .env}
+    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubeplex-backend:${BACKEND_TAG:?set BACKEND_TAG in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,7 +119,7 @@ services:
     restart: "no"
 
   backend:
-    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubebox-backend:${BACKEND_TAG}
+    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubeplex-backend:${BACKEND_TAG}
     <<: *restart-policy
     depends_on:
       postgres:
@@ -145,14 +145,14 @@ services:
       start_period: 30s
 
   frontend:
-    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubebox-frontend:${FRONTEND_TAG:?set FRONTEND_TAG in .env}
+    image: ${IMAGE_REGISTRY:-192.168.1.101:8050}/${IMAGE_REPO:-library}/cubeplex-frontend:${FRONTEND_TAG:?set FRONTEND_TAG in .env}
     <<: *restart-policy
     depends_on:
       backend:
         condition: service_healthy
     environment:
       # Frontend's Next.js server proxies /api/* server-side to this URL.
-      CUBEBOX_API_URL: "http://backend:8000"
+      CUBEPLEX_API_URL: "http://backend:8000"
       PORT: "3000"
       HOSTNAME: "0.0.0.0"
     ports:

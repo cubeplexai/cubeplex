@@ -13,7 +13,7 @@ and landed scheduled-tasks as the first capability built on it. The existing
 skill tools — `find_skills`, `preview_skill`, `install_skill` — predate that
 mechanism and are still wired ad-hoc in `streams/run_manager.py:1116-1193`:
 
-- Each tool is its own `create_X_tool(...)` factory in `cubebox/tools/builtin/`.
+- Each tool is its own `create_X_tool(...)` factory in `cubeplex/tools/builtin/`.
 - `run_manager.py` constructs a `SkillsAdapterManager`, an
   `OrganizationRepository`, a `SkillCatalogService` reference, a catalog
   session, and threads them through three separate factory calls.
@@ -182,11 +182,11 @@ The `install` handler also needs `org_slug` + `actor_user_id` to construct
 ### Deletions
 
 After migration, delete:
-- `backend/cubebox/tools/builtin/find_skills.py`
-- `backend/cubebox/tools/builtin/preview_skill.py`
-- `backend/cubebox/tools/builtin/install_skill.py`
+- `backend/cubeplex/tools/builtin/find_skills.py`
+- `backend/cubeplex/tools/builtin/preview_skill.py`
+- `backend/cubeplex/tools/builtin/install_skill.py`
 
-The corresponding `from cubebox.tools.builtin.find_skills import ...`
+The corresponding `from cubeplex.tools.builtin.find_skills import ...`
 imports in `run_manager.py` are removed.
 
 `load_skill.py` and its registration stay.

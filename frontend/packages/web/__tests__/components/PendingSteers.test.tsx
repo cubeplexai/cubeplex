@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   pending: [] as { steerId: string; text: string }[],
 }))
 
-vi.mock('@cubebox/core', () => ({
+vi.mock('@cubeplex/core', () => ({
   createApiClient: () => ({ setWorkspaceId: mocks.setWorkspaceId }),
   useMessageStore: (
     sel: (s: {

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Download, ExternalLink } from 'lucide-react'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { csrfHeaders } from '@/lib/csrf'

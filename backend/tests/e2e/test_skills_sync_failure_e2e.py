@@ -28,12 +28,12 @@ import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.sandbox.lazy import LazySandbox, _sync_skills
-from cubebox.sandbox.manager import SandboxManager
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sync_manifest import MANIFEST_PATH
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.sandbox.lazy import LazySandbox, _sync_skills
+from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sync_manifest import MANIFEST_PATH
 from tests.e2e.conftest import MemSandbox
 
 # ---------------------------------------------------------------------------

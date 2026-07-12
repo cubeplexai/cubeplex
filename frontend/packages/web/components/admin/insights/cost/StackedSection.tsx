@@ -3,7 +3,7 @@
 import * as React from 'react'
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import type { TimeseriesResponse } from '@cubebox/core'
+import type { TimeseriesResponse } from '@cubeplex/core'
 import { StackedChart } from './StackedChart'
 import { topNWithOther } from '@/lib/cost/helpers'
 

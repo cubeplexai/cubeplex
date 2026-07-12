@@ -1,10 +1,10 @@
 // frontend/packages/core/src/types/message.ts
 //
 // Messages mirror cubepi's wire shape (cubepi/providers/base.py:Message). The
-// backend returns `m.model_dump(mode="json")` directly; no cubebox-specific
+// backend returns `m.model_dump(mode="json")` directly; no cubeplex-specific
 // conversion layer.
 //
-// cubebox-specific data (attachments, memory snapshots, citations, subagent
+// cubeplex-specific data (attachments, memory snapshots, citations, subagent
 // payloads) lives inside `metadata` — cubepi treats metadata as opaque and
 // round-trips it through the checkpointer unchanged.
 import type { CitationData } from './citation'
@@ -132,10 +132,10 @@ export function getTextContent(msg: Message): string {
  * Content to feed tool-result previews (SearchResultView / WebFetchView, citation
  * popovers). CitationMiddleware rewrites a tool result's `.content` to 【N-M】-marked
  * chunk text for the LLM and stashes the raw, parseable output in
- * `details.original_content` (see backend cubebox/middleware/citation.py). Previews
+ * `details.original_content` (see backend cubeplex/middleware/citation.py). Previews
  * need that raw output — falling back to `.content` would feed them the citation
  * markup, which they can't parse. The live SSE path already prefers original_content
- * (cubebox/agents/stream.py `_stringify_tool_result`); this keeps reload consistent.
+ * (cubeplex/agents/stream.py `_stringify_tool_result`); this keeps reload consistent.
  */
 export function getToolResultPreviewContent(msg: ToolResultMessage): string {
   const details = msg.details as { original_content?: unknown } | null | undefined

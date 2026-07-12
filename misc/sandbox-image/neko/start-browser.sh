@@ -32,8 +32,8 @@ chown neko:neko /var/log/neko /tmp/runtime-neko 2>/dev/null || true
 # The Chromium profile lives on the PVC (/workspace is a runtime mount owned by
 # root), but Chromium runs as the neko user — create + own the dir at runtime so
 # it can write its profile. This is what persists auth state across the session.
-mkdir -p /workspace/.cubebox-browser-profile
-chown -R neko:neko /workspace/.cubebox-browser-profile 2>/dev/null || true
+mkdir -p /workspace/.cubeplex-browser-profile
+chown -R neko:neko /workspace/.cubeplex-browser-profile 2>/dev/null || true
 
 # Daemonize supervisord; it brings up Xorg, openbox, pulseaudio, neko, chromium.
 # Close the lock fd (9) in the child: otherwise supervisord (and its children)

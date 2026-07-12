@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Lay the dual-track foundation in cubebox for cubepi-based main agent: add cubepi as a path dependency, run alembic migration creating cubepi's Postgres tables (64 hash partitions), add `agents/checkpointer_pi.py` thin wrapper around `cubepi.PostgresCheckpointer`, add `LLMFactory.build_cubepi_provider()`, add `CUBEBOX_AGENTS__RUNTIME` flag plumbing. After M0, both langgraph and cubepi runtime paths can coexist; later milestones flesh out the cubepi path; M6 deletes langgraph.
+**Goal:** Lay the dual-track foundation in cubeplex for cubepi-based main agent: add cubepi as a path dependency, run alembic migration creating cubepi's Postgres tables (64 hash partitions), add `agents/checkpointer_pi.py` thin wrapper around `cubepi.PostgresCheckpointer`, add `LLMFactory.build_cubepi_provider()`, add `CUBEPLEX_AGENTS__RUNTIME` flag plumbing. After M0, both langgraph and cubepi runtime paths can coexist; later milestones flesh out the cubepi path; M6 deletes langgraph.
 
 **Architecture:** No behavior change for users with `runtime=langgraph` (the default). The flag is consumed by call sites added in M1+ (in M0 we only stand up the prerequisites: deps, DB schema, factory methods, config). Everything new is additive — no existing file gets a destructive change in M0.
 
@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-13-cubepi-main-agent-migration-design.md` (Spec B)
 
-**Companion plan (cubepi side):** `~/cubepi/docs/plans/2026-05-13-cubepi-cubebox-readiness-plan.md` (Plan A)
+**Companion plan (cubepi side):** `~/cubepi/docs/plans/2026-05-13-cubepi-cubeplex-readiness-plan.md` (Plan A)
 
 **Prerequisite:** Plan A D1 (PostgresCheckpointer), D5 (Message.metadata), D9 ([postgres] extra) must be implemented in cubepi (path dep can pick them up without releasing).
 
@@ -24,8 +24,8 @@
 |---|---|
 | `backend/pyproject.toml` | Add `cubepi[postgres,mcp]` via `[tool.uv.sources]` path dep |
 | `backend/alembic/env.py` | Import `cubepi.checkpointer.postgres.models.cubepi_metadata`; set `target_metadata = [SQLModel.metadata, cubepi_metadata]` |
-| `backend/cubebox/config.py` | Add `AgentRuntimeConfig.runtime: Literal["langgraph","cubepi"]` |
-| `backend/cubebox/llm/factory.py` | Add `build_cubepi_provider(provider_config)` method routing by `api` field; keep existing `build_langchain_model()` |
+| `backend/cubeplex/config.py` | Add `AgentRuntimeConfig.runtime: Literal["langgraph","cubepi"]` |
+| `backend/cubeplex/llm/factory.py` | Add `build_cubepi_provider(provider_config)` method routing by `api` field; keep existing `build_langchain_model()` |
 | `backend/config.development.yaml` | Add `agents.runtime: "langgraph"` (explicit default) |
 | `backend/config.test.yaml` | Add `agents.runtime: "cubepi"` (CI uses cubepi path; tests verify cubepi works) |
 
@@ -34,7 +34,7 @@
 | File | Purpose |
 |---|---|
 | `backend/alembic/versions/<rev>_add_cubepi_checkpointer_tables.py` | autogen + manual partition DDL + version row |
-| `backend/cubebox/agents/checkpointer_pi.py` | Thin wrapper around `cubepi.PostgresCheckpointer` with cubebox connection pooling |
+| `backend/cubeplex/agents/checkpointer_pi.py` | Thin wrapper around `cubepi.PostgresCheckpointer` with cubeplex connection pooling |
 | `backend/tests/unit/test_agent_runtime_config.py` | Unit test for `AgentRuntimeConfig` |
 | `backend/tests/unit/test_llm_factory_cubepi.py` | Unit tests for `build_cubepi_provider` |
 | `backend/tests/e2e/test_cubepi_checkpointer_integration.py` | E2E test the alembic-created schema works with PostgresCheckpointer |
@@ -50,9 +50,9 @@
 - [ ] **Step 1: Verify in worktree**
 
 Run: `pwd`
-Expected: `/home/chris/cubebox/.worktrees/feat/integrate-cubepi`
+Expected: `/home/chris/cubeplex/.worktrees/feat/integrate-cubepi`
 
-Run: `cat .worktree.env | grep CUBEBOX_API__PORT`
+Run: `cat .worktree.env | grep CUBEPLEX_API__PORT`
 Expected: a non-default port (NOT 8000).
 
 - [ ] **Step 2: Verify cubepi has Plan A D1+D5+D9 implemented**
@@ -62,7 +62,7 @@ Expected: see `PostgresCheckpointer` defined and recent commits referencing D1/D
 
 - [ ] **Step 3: Verify baseline test pass on this branch**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend && uv run pytest tests/ -q --tb=no`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend && uv run pytest tests/ -q --tb=no`
 Expected: all current tests pass. Note the count — every M0 task must keep it non-decreasing.
 
 ---
@@ -157,7 +157,7 @@ def test_env_module_loads_with_cubepi_metadata() -> None:
     )
     # target_metadata must be a list, not a single SQLModel.metadata
     assert "target_metadata = [" in text, (
-        "target_metadata must be a list to combine cubebox + cubepi metadata"
+        "target_metadata must be a list to combine cubeplex + cubepi metadata"
     )
 ```
 
@@ -172,7 +172,7 @@ Edit `backend/alembic/env.py`. Find the imports section (top of file) and the `t
 
 ```python
 # Existing imports
-from cubebox.models import (  # noqa: F401
+from cubeplex.models import (  # noqa: F401
     # ... existing model imports ...
 )
 from sqlmodel import SQLModel
@@ -210,7 +210,7 @@ git add backend/alembic/env.py backend/tests/unit/test_alembic_env.py
 git commit -m "feat(alembic): include cubepi_metadata in target_metadata
 
 target_metadata is now a list [SQLModel.metadata, cubepi_metadata]
-so autogen produces DDL for cubepi tables alongside cubebox tables.
+so autogen produces DDL for cubepi tables alongside cubeplex tables.
 alembic supports list targets natively."
 ```
 
@@ -303,7 +303,7 @@ Expected: applies the migration. Verify in DB:
 
 ```bash
 PGOPTIONS="-c search_path=public" psql -h localhost -p 5432 \
-  -d cubebox_feat_integrate_cubepi \
+  -d cubeplex_feat_integrate_cubepi \
   -c "\dt cubepi_*"
 ```
 
@@ -312,7 +312,7 @@ Expected: lists `cubepi_threads`, `cubepi_messages`,
 `cubepi_schema_version`.
 
 ```bash
-psql -h localhost -p 5432 -d cubebox_feat_integrate_cubepi \
+psql -h localhost -p 5432 -d cubeplex_feat_integrate_cubepi \
   -c "SELECT version FROM cubepi_schema_version"
 ```
 
@@ -343,7 +343,7 @@ git commit -m "feat(alembic): add migration for cubepi checkpointer tables
 ## Task M0.4: Add `AgentRuntimeConfig` flag
 
 **Files:**
-- Modify: `backend/cubebox/config.py`
+- Modify: `backend/cubeplex/config.py`
 - Modify: `backend/config.development.yaml`
 - Modify: `backend/config.test.yaml`
 - Test: `backend/tests/unit/test_agent_runtime_config.py`
@@ -357,7 +357,7 @@ Create `backend/tests/unit/test_agent_runtime_config.py`:
 
 import pytest
 
-from cubebox.config import AgentRuntimeConfig
+from cubeplex.config import AgentRuntimeConfig
 
 
 def test_default_runtime_is_langgraph() -> None:
@@ -378,7 +378,7 @@ def test_runtime_rejects_invalid() -> None:
 
 def test_global_config_exposes_agents_runtime() -> None:
     """The global config object must have config.agents.runtime accessible."""
-    from cubebox.config import config
+    from cubeplex.config import config
     assert hasattr(config, "agents")
     assert hasattr(config.agents, "runtime")
     assert config.agents.runtime in ("langgraph", "cubepi")
@@ -391,7 +391,7 @@ Expected: 4 failures — `AgentRuntimeConfig` doesn't exist.
 
 - [ ] **Step 3: Add `AgentRuntimeConfig` to `config.py`**
 
-In `backend/cubebox/config.py`, find existing `BaseSettings` model classes (e.g. `LLMConfig`, `AuthConfig`). Add:
+In `backend/cubeplex/config.py`, find existing `BaseSettings` model classes (e.g. `LLMConfig`, `AuthConfig`). Add:
 
 ```python
 from typing import Literal
@@ -400,7 +400,7 @@ from typing import Literal
 class AgentRuntimeConfig(BaseModel):
     """Which agent runtime to use.
 
-    Set via CUBEBOX_AGENTS__RUNTIME env var or config.<env>.yaml's
+    Set via CUBEPLEX_AGENTS__RUNTIME env var or config.<env>.yaml's
     `agents.runtime` key. Default is `langgraph` (current production).
     `cubepi` enables the in-development cubepi-based runtime (see Spec B).
     """
@@ -415,7 +415,7 @@ class Config(BaseModel):
     agents: AgentRuntimeConfig = Field(default_factory=AgentRuntimeConfig)
 ```
 
-If cubebox's config layer uses dynaconf, ensure the field is loaded
+If cubeplex's config layer uses dynaconf, ensure the field is loaded
 via dynaconf's settings (consult existing patterns in the file).
 
 - [ ] **Step 4: Update YAML configs**
@@ -448,12 +448,12 @@ Expected: baseline + 4.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/config.py backend/config.*.yaml backend/tests/unit/test_agent_runtime_config.py
+git add backend/cubeplex/config.py backend/config.*.yaml backend/tests/unit/test_agent_runtime_config.py
 git commit -m "feat(config): add AgentRuntimeConfig.runtime flag (langgraph|cubepi)
 
 Controls which agent runtime path is used. Default langgraph; test
 config flips to cubepi so CI exercises the new path as it's built out.
-Set via CUBEBOX_AGENTS__RUNTIME env or config.yaml agents.runtime."
+Set via CUBEPLEX_AGENTS__RUNTIME env or config.yaml agents.runtime."
 ```
 
 ---
@@ -461,7 +461,7 @@ Set via CUBEBOX_AGENTS__RUNTIME env or config.yaml agents.runtime."
 ## Task M0.5: Add `checkpointer_pi.py` thin wrapper
 
 **Files:**
-- Create: `backend/cubebox/agents/checkpointer_pi.py`
+- Create: `backend/cubeplex/agents/checkpointer_pi.py`
 - Test: `backend/tests/e2e/test_cubepi_checkpointer_integration.py`
 
 - [ ] **Step 1: Write integration test (failing)**
@@ -469,7 +469,7 @@ Set via CUBEBOX_AGENTS__RUNTIME env or config.yaml agents.runtime."
 Create `backend/tests/e2e/test_cubepi_checkpointer_integration.py`:
 
 ```python
-"""Integration test: cubebox uses cubepi.PostgresCheckpointer against
+"""Integration test: cubeplex uses cubepi.PostgresCheckpointer against
 the alembic-created schema in the test database.
 
 Requires alembic upgrade head to have run on the test DB. The test
@@ -479,13 +479,13 @@ fixture in conftest handles that.
 import pytest
 from cubepi.providers.base import TextContent, UserMessage
 
-from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
-from cubebox.config import config
+from cubeplex.agents.checkpointer_pi import init_cubepi_checkpointer
+from cubeplex.config import config
 
 
 @pytest.mark.asyncio
 async def test_cubepi_checkpointer_round_trip_against_real_schema() -> None:
-    """Connecting cubepi.PostgresCheckpointer to the cubebox test DB
+    """Connecting cubepi.PostgresCheckpointer to the cubeplex test DB
     must succeed (schema version check passes) and round-trip messages."""
     dsn = (
         f"postgresql://{config.database.user}:{config.database.password}"
@@ -510,17 +510,17 @@ Expected: import error — `init_cubepi_checkpointer` doesn't exist.
 
 - [ ] **Step 3: Write checkpointer_pi.py**
 
-Create `backend/cubebox/agents/checkpointer_pi.py`:
+Create `backend/cubeplex/agents/checkpointer_pi.py`:
 
 ```python
-"""cubepi-backed Postgres checkpointer for cubebox.
+"""cubepi-backed Postgres checkpointer for cubeplex.
 
 Thin wrapper around cubepi.PostgresCheckpointer. Owns the connection
-pool lifecycle and exposes a context-manager init for use in cubebox's
+pool lifecycle and exposes a context-manager init for use in cubeplex's
 agent factory.
 
 This module is invoked when config.agents.runtime == "cubepi". For
-runtime == "langgraph", cubebox/agents/checkpointer.py (the existing
+runtime == "langgraph", cubeplex/agents/checkpointer.py (the existing
 LangGraph AsyncPostgresSaver wrapper) is used instead.
 """
 from __future__ import annotations
@@ -530,11 +530,11 @@ from typing import AsyncIterator
 
 from cubepi.checkpointer.postgres import PostgresCheckpointer
 
-from cubebox.config import config as _config
+from cubeplex.config import config as _config
 
 
 def _build_dsn() -> str:
-    """Construct the Postgres DSN from cubebox config."""
+    """Construct the Postgres DSN from cubeplex config."""
     db = _config.database
     return (
         f"postgresql://{db.user}:{db.password}@{db.host}:{db.port}/{db.name}"
@@ -548,7 +548,7 @@ async def init_cubepi_checkpointer(
     min_pool_size: int = 1,
     max_pool_size: int = 10,
 ) -> AsyncIterator[PostgresCheckpointer]:
-    """Open a cubepi.PostgresCheckpointer for cubebox's DB.
+    """Open a cubepi.PostgresCheckpointer for cubeplex's DB.
 
     Usage::
 
@@ -557,7 +557,7 @@ async def init_cubepi_checkpointer(
             ...
 
     Args:
-        dsn: explicit Postgres DSN; defaults to cubebox config.
+        dsn: explicit Postgres DSN; defaults to cubeplex config.
         min_pool_size / max_pool_size: asyncpg pool sizing.
 
     Yields:
@@ -593,12 +593,12 @@ Expected: baseline + 1.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/checkpointer_pi.py backend/tests/e2e/test_cubepi_checkpointer_integration.py
+git add backend/cubeplex/agents/checkpointer_pi.py backend/tests/e2e/test_cubepi_checkpointer_integration.py
 git commit -m "feat(agents): add checkpointer_pi.py wrapping cubepi.PostgresCheckpointer
 
 Thin async-context wrapper that:
-- builds DSN from cubebox config
-- opens cubepi.PostgresCheckpointer with the cubebox-shaped pool config
+- builds DSN from cubeplex config
+- opens cubepi.PostgresCheckpointer with the cubeplex-shaped pool config
 - relies on cubepi's __aenter__ to verify cubepi_schema_version row
 
 Consumed in M1 when agent factory dispatches by runtime flag."
@@ -609,7 +609,7 @@ Consumed in M1 when agent factory dispatches by runtime flag."
 ## Task M0.6: Add `build_cubepi_provider` in LLMFactory
 
 **Files:**
-- Modify: `backend/cubebox/llm/factory.py`
+- Modify: `backend/cubeplex/llm/factory.py`
 - Test: `backend/tests/unit/test_llm_factory_cubepi.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -621,8 +621,8 @@ Create `backend/tests/unit/test_llm_factory_cubepi.py`:
 
 import pytest
 
-from cubebox.llm.factory import LLMFactory
-from cubebox.llm.config import LLMConfig, ModelConfig, ProviderConfig
+from cubeplex.llm.factory import LLMFactory
+from cubeplex.llm.config import LLMConfig, ModelConfig, ProviderConfig
 
 
 def _mk_factory(provider_configs: list[ProviderConfig]) -> LLMFactory:
@@ -699,8 +699,8 @@ def test_build_cubepi_provider_unknown_api_raises() -> None:
 
 
 def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
-    """When constructing Anthropic provider, factory must wire in cubebox's
-    CacheMarkerPolicy. We don't have the cubebox policy yet (M1 task), so
+    """When constructing Anthropic provider, factory must wire in cubeplex's
+    CacheMarkerPolicy. We don't have the cubeplex policy yet (M1 task), so
     for M0 just verify the keyword is accepted."""
     factory = _mk_factory([
         ProviderConfig(
@@ -712,7 +712,7 @@ def test_build_cubepi_provider_anthropic_accepts_cache_policy() -> None:
     ])
     provider = factory.build_cubepi_provider(
         factory.llm_config.providers["anthropic"],
-        cache_policy=None,  # M1 will pass CubeboxCacheMarkerPolicy()
+        cache_policy=None,  # M1 will pass CubeplexCacheMarkerPolicy()
     )
     # Default policy preserves v0.2 behavior
     from cubepi.providers.anthropic import DefaultCacheMarkerPolicy
@@ -726,7 +726,7 @@ Expected: 5 failures — `build_cubepi_provider` doesn't exist.
 
 - [ ] **Step 3: Implement `build_cubepi_provider`**
 
-In `backend/cubebox/llm/factory.py`, add:
+In `backend/cubeplex/llm/factory.py`, add:
 
 ```python
 from typing import Any
@@ -786,7 +786,7 @@ If `ProviderConfig.api` doesn't currently accept the literal
 `"openai-responses"`, extend its `Literal` type:
 
 ```python
-# cubebox/llm/config.py (find ProviderConfig)
+# cubeplex/llm/config.py (find ProviderConfig)
 class ProviderConfig(BaseModel):
     # ...
     api: Literal["anthropic", "openai-completions", "openai-responses"]
@@ -806,12 +806,12 @@ Expected: baseline + 5.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/llm/factory.py backend/cubebox/llm/config.py backend/tests/unit/test_llm_factory_cubepi.py
+git add backend/cubeplex/llm/factory.py backend/cubeplex/llm/config.py backend/tests/unit/test_llm_factory_cubepi.py
 git commit -m "feat(llm): add LLMFactory.build_cubepi_provider routing by api
 
 Builds cubepi.{AnthropicProvider, OpenAIProvider, OpenAIResponsesProvider}
 from a ProviderConfig based on the api field. Accepts optional cache_policy
-to pass through to AnthropicProvider (cubebox's policy is wired in M1).
+to pass through to AnthropicProvider (cubeplex's policy is wired in M1).
 
 build_langchain_model (existing) remains the path for langgraph runtime."
 ```
@@ -839,14 +839,14 @@ Expected: format clean, lint clean, type-check clean, all tests pass.
 
 - [ ] **Step 4: Confirm config dispatch ready**
 
-Manual smoke: with `CUBEBOX_AGENTS__RUNTIME=cubepi` set, verify the
+Manual smoke: with `CUBEPLEX_AGENTS__RUNTIME=cubepi` set, verify the
 LLMFactory can build a cubepi provider via the config flow:
 
 ```bash
 cd backend
-CUBEBOX_AGENTS__RUNTIME=cubepi uv run python -c "
-from cubebox.config import config
-from cubebox.llm.factory import LLMFactory
+CUBEPLEX_AGENTS__RUNTIME=cubepi uv run python -c "
+from cubeplex.config import config
+from cubeplex.llm.factory import LLMFactory
 assert config.agents.runtime == 'cubepi'
 print('runtime:', config.agents.runtime)
 print('factory has build_cubepi_provider:', hasattr(LLMFactory, 'build_cubepi_provider'))
@@ -878,12 +878,12 @@ git tag m0-foundation-done
 
 After completing all M0 tasks:
 
-- [ ] cubepi is installed in cubebox's venv (`uv pip list | grep cubepi`) ✅
+- [ ] cubepi is installed in cubeplex's venv (`uv pip list | grep cubepi`) ✅
 - [ ] alembic env.py imports cubepi_metadata; autogen sees cubepi tables ✅
 - [ ] alembic revision created the 3 base tables + 64 message partitions + schema_version row=1 ✅
 - [ ] alembic downgrade cleanly drops everything ✅
-- [ ] `cubebox/agents/checkpointer_pi.py` exists, round-trips a UserMessage against the real test DB ✅
-- [ ] `cubebox/llm/factory.py` has `build_cubepi_provider` routing all 3 api values ✅
+- [ ] `cubeplex/agents/checkpointer_pi.py` exists, round-trips a UserMessage against the real test DB ✅
+- [ ] `cubeplex/llm/factory.py` has `build_cubepi_provider` routing all 3 api values ✅
 - [ ] `config.agents.runtime` accepts `langgraph` | `cubepi`, defaults to `langgraph` ✅
 - [ ] `config.test.yaml` sets runtime to `cubepi` for CI ✅
 - [ ] All new tests pass; no existing tests regressed ✅
@@ -898,7 +898,7 @@ After completing all M0 tasks:
 | Add `cubepi[postgres,mcp]` via `[tool.uv.sources]` path | M0.1 |
 | alembic env.py imports cubepi_metadata + list target_metadata | M0.2 |
 | New alembic revision: autogen + manual partition DDL + version row | M0.3 |
-| `cubebox/agents/checkpointer_pi.py` thin wrapper | M0.5 |
+| `cubeplex/agents/checkpointer_pi.py` thin wrapper | M0.5 |
 | `LLMFactory.build_cubepi_provider(provider_config)` routing by api | M0.6 |
 | `AgentRuntimeConfig.runtime` flag | M0.4 |
 
@@ -907,10 +907,10 @@ All M0 spec items covered. M1 begins when M0 is merged and stable.
 ## Handoff to M1
 
 M1 will:
-- Add `agents/graph_pi.py` (create_cubebox_cubepi_agent)
-- Add `agents/stream_pi.py` (cubepi event → cubebox SSE translator)
+- Add `agents/graph_pi.py` (create_cubeplex_cubepi_agent)
+- Add `agents/stream_pi.py` (cubepi event → cubeplex SSE translator)
 - Add `agents/convert_pi.py` (cubepi.Message ↔ wire format)
-- Add `llm/cache_markers_pi.py` (CubeboxCacheMarkerPolicy)
+- Add `llm/cache_markers_pi.py` (CubeplexCacheMarkerPolicy)
 - Dispatch in API route by config.agents.runtime
 
 M1's plan should be written when M0 is merged and stable — see

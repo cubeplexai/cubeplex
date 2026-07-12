@@ -5,7 +5,7 @@ title: MCP Tools Overview
 
 # MCP Tools Overview
 
-MCP (Model Context Protocol) connectors let the CubeBox agent call external services during a conversation. Instead of being limited to its own knowledge, the agent can search the web, read GitHub issues, query databases, post Slack messages, and more — all in real time.
+MCP (Model Context Protocol) connectors let the CubePlex agent call external services during a conversation. Instead of being limited to its own knowledge, the agent can search the web, read GitHub issues, query databases, post Slack messages, and more — all in real time.
 
 ## The mental model in one sentence
 
@@ -19,7 +19,7 @@ A **template** is a connector definition that describes a service — its name, 
 
 | Scope | Who creates it | Who can see it |
 |---|---|---|
-| **Global (catalog)** | CubeBox (built-in) | Everyone |
+| **Global (catalog)** | CubePlex (built-in) | Everyone |
 | **Org** | Org admins | All workspaces in the org |
 | **Workspace** | Workspace admins | Only that workspace (until promoted) |
 
@@ -52,7 +52,7 @@ The auth method (OAuth or static token) is chosen when a credential is created, 
 
 ## Available connectors
 
-CubeBox ships with global templates for a growing list of services:
+CubePlex ships with global templates for a growing list of services:
 
 | Category | Connectors |
 |---|---|
@@ -73,7 +73,7 @@ Your admin may have additional org-scope or workspace-scope templates available.
 
 Different connectors use different authentication methods:
 
-- **OAuth** — You authorize CubeBox to access the service on your behalf. The connector walks you through the vendor's consent screen. Most connectors (Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare) handle this automatically; a few (GitHub, Slack, Google Workspace) require your administrator to pre-register an OAuth app first.
+- **OAuth** — You authorize CubePlex to access the service on your behalf. The connector walks you through the vendor's consent screen. Most connectors (Notion, Linear, Atlassian, Asana, Sentry, Intercom, Cloudflare) handle this automatically; a few (GitHub, Slack, Google Workspace) require your administrator to pre-register an OAuth app first.
 - **API key** — You or your admin provides a static API key. Common for search connectors like Tavily and Exa.
 - **Bearer token** — A pre-issued token, similar to an API key. Used by connectors that issue long-lived access tokens.
 
@@ -81,7 +81,7 @@ As a workspace member, you typically do not need to worry about authentication �
 
 ## Tool citations
 
-When the agent uses an MCP tool in its response, CubeBox shows a **citation** indicating which connector provided the information and what source it came from. This helps you verify the agent's claims and trace data back to the original service.
+When the agent uses an MCP tool in its response, CubePlex shows a **citation** indicating which connector provided the information and what source it came from. This helps you verify the agent's claims and trace data back to the original service.
 
 ## Next steps
 

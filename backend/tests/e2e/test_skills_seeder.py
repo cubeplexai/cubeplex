@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from redis.asyncio import Redis
 
-from cubebox.repositories.skill import SkillRepository, SkillVersionRepository
-from cubebox.seeders import seed_preinstalled_skills
+from cubeplex.repositories.skill import SkillRepository, SkillVersionRepository
+from cubeplex.seeders import seed_preinstalled_skills
 
 
 def _unique_name(prefix: str) -> str:
@@ -102,7 +102,7 @@ async def test_seed_redis_lock_prevents_concurrent_runs(
     _write_skill_md(src / skill_name, name=skill_name, version="1.0.0")
 
     # Acquire the lock manually so seeder finds it held
-    holder = redis_client.lock("cubebox:lock:skill_seeder", timeout=10, blocking=False)
+    holder = redis_client.lock("cubeplex:lock:skill_seeder", timeout=10, blocking=False)
     acquired = await holder.acquire()
     assert acquired
 

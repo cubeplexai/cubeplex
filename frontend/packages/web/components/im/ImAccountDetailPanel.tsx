@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Info } from 'lucide-react'
 
-import type { ImAccount, ImBotSettings, ImIdentityLink } from '@cubebox/core'
+import type { ImAccount, ImBotSettings, ImIdentityLink } from '@cubeplex/core'
 import {
   createApiClient,
   wsGetImBotSettings,
   wsListIdentityLinks,
   wsUpdateImBotSettings,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -108,7 +108,7 @@ export function ImAccountDetailPanel({
     }
   }, [client, account.workspace_id, account.id, settingsScoped])
 
-  const botName = account.bot_app_name || 'cubebox'
+  const botName = account.bot_app_name || 'cubeplex'
   // Shared routing needs a channel-wide scope. The Teams connector only emits
   // per-sender scopes, so shared would silently produce one group conversation
   // per sender — disable it there.

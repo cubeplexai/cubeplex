@@ -7,21 +7,21 @@
 
 ## Context
 
-cubebox currently pins cubepi at `c25946e` (released as 0.10.0). Since that pin,
+cubeplex currently pins cubepi at `c25946e` (released as 0.10.0). Since that pin,
 cubepi shipped 23 commits, headlined by a new **dispatch strategy** for
 `DeferredToolGroup` that delivers tool schemas via `load_tools` tool results
 instead of injecting them into the model-visible tools array. This keeps the
 tools array and system prompt byte-stable across expansions — group expansion
 no longer invalidates the prompt cache.
 
-cubebox already uses `DeferredToolGroup` for one thing: per-server grouping of
-MCP tools (`cubebox/mcp/disclosure.py`, gated by `progressive_disclosure.*`
+cubeplex already uses `DeferredToolGroup` for one thing: per-server grouping of
+MCP tools (`cubeplex/mcp/disclosure.py`, gated by `progressive_disclosure.*`
 config). Everything else (calculator, datetime, memory, view_images,
 show_widget, generate_image, load_skill, scheduled_tasks, skills) is loaded
 eagerly.
 
-Separately, cubebox has its own bespoke "umbrella tool + operation
-discriminator" pattern at `cubebox/agents/actions/builder.py`. Each
+Separately, cubeplex has its own bespoke "umbrella tool + operation
+discriminator" pattern at `cubeplex/agents/actions/builder.py`. Each
 `AgentCapability` (scheduled_tasks: 8 ops; skills: 4 ops) is collapsed into one
 `AgentTool` whose input is a discriminated union over operations. The umbrella
 exists because cubepi 0.10's `inject` strategy invalidated the prompt cache
@@ -44,7 +44,7 @@ tracing, widgets, and audit logs see the real operation name instead of
    see the real tool name through the deferred dispatcher.
 3. Replace the umbrella+operation pattern for `scheduled_tasks` and `skills`
    capabilities with per-operation `AgentTool`s grouped under
-   `DeferredToolGroup`s. Delete `cubebox/agents/actions/builder.py`'s union /
+   `DeferredToolGroup`s. Delete `cubeplex/agents/actions/builder.py`'s union /
    discriminator machinery when no callers remain.
 
 ## Non-goals
@@ -58,14 +58,14 @@ tracing, widgets, and audit logs see the real operation name instead of
 - **generate_image stays eager.** Single-tool deferred groups have poor
   cost/benefit — the catalog line plus the `load_tools` round-trip cancel most
   of the schema savings on the rare runs where it would help. Revisit when a
-  second sandbox-image tool appears (video / edit / audio) and a `cubebox:media`
+  second sandbox-image tool appears (video / edit / audio) and a `cubeplex:media`
   group becomes natural.
 - **calculator / datetime / write_todos / subagent / memory_* stay eager.**
   Used on most turns; deferring just adds a round-trip with no token win.
 - **view_images / show_widget stay eager.** Small schemas, deferring saves
   almost nothing.
 - This change does not introduce expanded-group cross-run replay
-  (`prepare_resumed_state`). cubebox doesn't restore deferred-group state on
+  (`prepare_resumed_state`). cubeplex doesn't restore deferred-group state on
   resume today (only MCP runs hit it, and MCP groups are re-built fresh each
   run). Out of scope for this work.
 
@@ -76,11 +76,11 @@ Bump `backend/pyproject.toml` cubepi rev to current `main`. `uv lock` rewrites
 
 Breaking changes to absorb:
 
-| Change | cubebox impact |
+| Change | cubeplex impact |
 |---|---|
 | `deferred_tool_strategy` default `inject` → `dispatch` | MCP groups switch behavior. Tool calls now flow through `deferred_tool_call(tool_name, arguments)` and cubepi unwraps before the middleware pipeline. |
-| `resumed_schemas` removed; `prepare_resumed_state(strategy=)` required | Not used in cubebox — no edits needed. |
-| `inject` mode no longer renders schemas into system prompt | Not used in cubebox — no edits needed. |
+| `resumed_schemas` removed; `prepare_resumed_state(strategy=)` required | Not used in cubeplex — no edits needed. |
+| `inject` mode no longer renders schemas into system prompt | Not used in cubeplex — no edits needed. |
 
 Verification matrix (E2E, not unit):
 
@@ -117,7 +117,7 @@ naming-bikeshed decision in implementation), grouped as:
 
 ```python
 DeferredToolGroup(
-    group_id="cubebox:scheduled_tasks",
+    group_id="cubeplex:scheduled_tasks",
     display_name="Scheduled tasks",
     description="Create, list, update, pause, resume, and delete scheduled agent tasks.",
     tool_names=[...],  # the 8 op names
@@ -136,25 +136,25 @@ Current: dynamically built per-run via `build_skills_capability(deps)` because
 handlers close over `catalog`, `registry`, `session`, etc.
 
 Target: same per-run construction, but the resulting tools become a
-`DeferredToolGroup` with `group_id="cubebox:platform_skills"`. Loader closes
+`DeferredToolGroup` with `group_id="cubeplex:platform_skills"`. Loader closes
 over `SkillDeps` the same way today's `_skills_cap` closes over them.
 
 ### 2c. delete the umbrella machinery
 
 When no callers remain:
 
-- `cubebox/agents/actions/builder.py` — delete `_build_union_model`,
+- `cubeplex/agents/actions/builder.py` — delete `_build_union_model`,
   `_build_operation_model`, `_make_literal_type`. `build_capability_tool` either
   goes away entirely or shrinks to a thin "build per-op AgentTools from an
   AgentCapability" helper.
-- `cubebox/agents/actions/types.py` — `AgentCapability` / `AgentOperation`
+- `cubeplex/agents/actions/types.py` — `AgentCapability` / `AgentOperation`
   either stay as a convenient declaration shape (and we add a `to_tools()`
   helper) or get inlined per-capability. Decision deferred to implementation.
 
 ## Risks
 
 - **MCP middleware compatibility** — dispatch mode is supposed to be
-  middleware-transparent, but cubebox has 11 middleware including bespoke
+  middleware-transparent, but cubeplex has 11 middleware including bespoke
   citation / artifact / sandbox layers. Worst case: cubepi needs a fix.
   Caught by Phase 1 verification before any Phase 2 work begins.
 - **Tool name collisions** — splitting `scheduled_tasks` into 8 tools risks
@@ -183,10 +183,10 @@ Per-op tool names use the **group-prefix form**: `<group>_<op>`. Examples:
 
 Rationale:
 
-1. Matches cubebox's existing MCP namespacing
-   (`cubebox/mcp/cubepi_runtime.py:_build_namespaced_name_with_prefix` produces
+1. Matches cubeplex's existing MCP namespacing
+   (`cubeplex/mcp/cubepi_runtime.py:_build_namespaced_name_with_prefix` produces
    `<server_slug>_<tool>` e.g. `github_create_issue`). The deferred catalog
-   then lists cubebox-side and MCP-side groups in the same shape.
+   then lists cubeplex-side and MCP-side groups in the same shape.
 2. Trace / log queries that currently match `scheduled_tasks*` keep working.
 3. Sidesteps singular/plural inconsistency
    (`create_scheduled_task` vs `list_scheduled_tasks`).

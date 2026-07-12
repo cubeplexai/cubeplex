@@ -25,17 +25,17 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.im.bot_settings import IMBotSettings, store_bot_settings
-from cubebox.im.conversation_resolver import (
+from cubeplex.im.bot_settings import IMBotSettings, store_bot_settings
+from cubeplex.im.conversation_resolver import (
     ResolvedIMConversation,
     reset_im_conversation,
     resolve_im_conversation,
 )
-from cubebox.im.types import is_shared_mode_for_tailer
-from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
-from cubebox.models.topic import Topic, TopicParticipant
+from cubeplex.im.types import is_shared_mode_for_tailer
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_participant import ConversationParticipant
+from cubeplex.models.im_connector import IMConnectorAccount, IMThreadLink
+from cubeplex.models.topic import Topic, TopicParticipant
 from tests.e2e.conftest import _build_database_url
 from tests.e2e.im_fixtures import (
     im_cleanup,
@@ -394,7 +394,7 @@ async def test_isolated_topic_mode_creates_per_sender_topic(
         ).scalar_one()
         assert topic.creator_user_id == _USER  # sender owns their own topic
         # DM title is the bot's display name.
-        assert topic.title == "cubebox"
+        assert topic.title == "cubeplex"
         assert topic.attributes["im"]["scope_kind"] == "dm"
         owner_tp = (
             await session.execute(
@@ -614,7 +614,7 @@ async def test_dm_on_shared_account_stays_isolated(
             await session.execute(select(Topic).where(Topic.id == resolved.topic_id))
         ).scalar_one()
         assert topic.creator_user_id == _USER  # sender owns it, not the bot
-        assert topic.title == "cubebox"  # DM title is the bot name
+        assert topic.title == "cubeplex"  # DM title is the bot name
         conv = (
             await session.execute(
                 select(Conversation).where(Conversation.id == resolved.conversation_id)

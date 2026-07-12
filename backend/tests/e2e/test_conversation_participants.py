@@ -14,13 +14,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.auth.users import UserManager
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url
-from cubebox.models import OrgRole, Role, User, Workspace
-from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
-from cubebox.repositories.user_sandbox import UserSandboxRepository
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.auth.users import UserManager
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import OrgRole, Role, User, Workspace
+from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.sandbox.manager import SandboxManager
 
 pytestmark = pytest.mark.e2e
 
@@ -90,7 +90,7 @@ async def _login_extra(app: Any, email: str, password: str) -> httpx.AsyncClient
     assert login.status_code in (200, 204), login.text
     me = await c.get("/api/v1/auth/me")
     assert me.status_code == 200, me.text
-    csrf = c.cookies.get("cubebox_csrf_50") or c.cookies.get("cubebox_csrf")
+    csrf = c.cookies.get("cubeplex_csrf_50") or c.cookies.get("cubeplex_csrf")
     if csrf:
         c.headers["X-CSRF-Token"] = csrf
     return c
@@ -508,7 +508,7 @@ async def test_upgrade_to_topic_rekeys_sandbox(
     engine, maker = _engine_maker()
     try:
         # Seed a sandbox row keyed by (conversation, conv_id).
-        from cubebox.models.user_sandbox import UserSandbox
+        from cubeplex.models.user_sandbox import UserSandbox
 
         async with maker() as session:
             org_id = (
@@ -560,7 +560,7 @@ async def test_personal_to_topic_direct_rekey(
 
     engine, maker = _engine_maker()
     try:
-        from cubebox.models.user_sandbox import UserSandbox
+        from cubeplex.models.user_sandbox import UserSandbox
 
         async with maker() as session:
             org_id = (

@@ -4,7 +4,7 @@ from sqlalchemy import Index, LargeBinary
 
 
 def test_credential_model_is_registered() -> None:
-    from cubebox.models import Credential
+    from cubeplex.models import Credential
 
     assert Credential.__tablename__ == "credentials"
     assert Credential.__table__.c.value_encrypted.type.__class__ is LargeBinary
@@ -18,7 +18,7 @@ def test_credential_model_has_partial_unique_indexes() -> None:
     constraint cannot cover both system and org-scoped rows -- two partial
     indexes do.
     """
-    from cubebox.models import Credential
+    from cubeplex.models import Credential
 
     indexes: list[Index] = list(Credential.__table__.indexes)
 

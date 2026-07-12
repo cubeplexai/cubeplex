@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { ListChecks, CheckCircle2, Circle, ChevronUp, ChevronDown } from 'lucide-react'
-import type { TodoItem } from '@cubebox/core'
+import type { TodoItem } from '@cubeplex/core'
 
 interface TaskProgressBarProps {
   todos: TodoItem[]

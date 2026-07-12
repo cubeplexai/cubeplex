@@ -45,7 +45,7 @@ async def test_login_blocked_when_unverified(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Register without verification -> login returns 403 email_not_verified."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: True)
     email = f"unverified-{secrets.token_hex(4)}@example.com"
     password = "StrongPass1!"
 

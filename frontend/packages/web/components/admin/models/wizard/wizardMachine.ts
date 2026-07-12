@@ -1,4 +1,4 @@
-import type { VendorPreset } from '@cubebox/core'
+import type { VendorPreset } from '@cubeplex/core'
 
 export type WizardStep = 1 | 2 | 3 | 4
 

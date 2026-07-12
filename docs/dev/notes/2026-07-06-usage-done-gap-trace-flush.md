@@ -13,7 +13,7 @@
 3. 在 done 路径插 10 个计时日志，一轮跑出分解：**退出
    `async with trace(tracer, agent)` 占 8.65s**；其余为 HITL pending 读
    0.9s、session-usage 聚合 1.7s、杂项 <0.3s。
-4. `CUBEBOX_TRACING__ENABLED=false` A/B：trace 退出 8.65s→0ms，tail 中位
+4. `CUBEPLEX_TRACING__ENABLED=false` A/B：trace 退出 8.65s→0ms，tail 中位
    17s→8.2s。证据闭合。
 
 ## 根因（三层叠加）
@@ -34,7 +34,7 @@
   `trace()` 增加 `flush="await"|"background"`，background 模式同步
   detach、导出转后台受监督任务，tracer 持强引用、`shutdown()` 兜底
   settle——干净退出不丢 span。
-- cubebox（本分支）：bump cubepi rev（0.12.0→0.13.0），
+- cubeplex（本分支）：bump cubepi rev（0.12.0→0.13.0），
   `run_manager` 两处 `trace(...)` 调用点改 `flush="background"`；
   lifespan 已有 `await tracer.shutdown()`，链条闭合。
 

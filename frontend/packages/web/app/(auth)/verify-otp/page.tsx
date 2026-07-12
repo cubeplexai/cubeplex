@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, resendOtp, useAuthStore, verifyOtp } from '@cubebox/core'
+import { createApiClient, resendOtp, useAuthStore, verifyOtp } from '@cubeplex/core'
 import { OtpInput } from '@/components/auth/OtpInput'
 
 const RESEND_COOLDOWN = 60

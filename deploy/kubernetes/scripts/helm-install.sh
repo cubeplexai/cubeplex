@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install / upgrade the cubebox release on the current kubectl context.
+# Install / upgrade the cubeplex release on the current kubectl context.
 #
 # Prerequisites:
 #   - values.local.yaml exists alongside the chart (gitignored).
@@ -7,9 +7,9 @@
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
-CHART="$ROOT/deploy/kubernetes/charts/cubebox"
-NAMESPACE="${NAMESPACE:-cubebox}"
-RELEASE="${RELEASE:-cubebox}"
+CHART="$ROOT/deploy/kubernetes/charts/cubeplex"
+NAMESPACE="${NAMESPACE:-cubeplex}"
+RELEASE="${RELEASE:-cubeplex}"
 
 if [[ ! -f "$CHART/values.local.yaml" ]]; then
   echo "ERROR: $CHART/values.local.yaml not found." >&2

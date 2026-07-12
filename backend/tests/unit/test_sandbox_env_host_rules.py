@@ -1,6 +1,6 @@
 import pytest
 
-from cubebox.sandbox_env.host_rules import (
+from cubeplex.sandbox_env.host_rules import (
     HostPatternError,
     host_matches,
     validate_host_pattern,
@@ -34,7 +34,7 @@ def test_invalid_patterns_rejected(pattern):
 
 
 def test_regex_only_list_rejected():
-    from cubebox.sandbox_env.host_rules import validate_hosts
+    from cubeplex.sandbox_env.host_rules import validate_hosts
 
     with pytest.raises(HostPatternError):
         validate_hosts([r"/^api[0-9]+\.foo\.com$/"])  # no FQDN/wildcard companion

@@ -1,6 +1,6 @@
 """E2E: generate_image tool — sandbox-gated, artifact registered.
 
-The test drives a conversation through the full cubebox agent stack:
+The test drives a conversation through the full cubeplex agent stack:
   - FauxProvider returns a scripted generate_image tool_call on turn 1.
   - FauxImagesProvider (from cubepi) returns a 1x1 PNG without hitting OpenAI.
   - LocalSandbox writes the PNG to a temp directory.
@@ -29,11 +29,11 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-import cubebox.db as _cubebox_db
-from cubebox.api.app import create_app
-from cubebox.db.engine import _build_database_url, engine
-from cubebox.db.session import get_session
-from cubebox.sandbox.base import ExecuteResult, Sandbox
+import cubeplex.db as _cubeplex_db
+from cubeplex.api.app import create_app
+from cubeplex.db.engine import _build_database_url, engine
+from cubeplex.db.session import get_session
+from cubeplex.sandbox.base import ExecuteResult, Sandbox
 from tests.e2e.conftest import (
     DEFAULT_TEST_EMAIL,
     DEFAULT_TEST_PASSWORD,
@@ -142,7 +142,7 @@ def _make_generate_image_test_app(
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:
@@ -170,12 +170,12 @@ async def generate_image_client(
     # --- 1. Enable image_generation config via monkeypatch ---
     from cubepi.providers.images.faux import FauxImagesProvider
 
-    from cubebox.llm.config import ImageGenerationConfig
+    from cubeplex.llm.config import ImageGenerationConfig
 
     _faux_images_instance = FauxImagesProvider(provider_id="faux", png_b64=_PNG_1x1_B64)
 
     monkeypatch.setattr(
-        "cubebox.llm.config.get_image_generation_config",
+        "cubeplex.llm.config.get_image_generation_config",
         lambda: ImageGenerationConfig(
             enabled=True,
             api="openai-images",
@@ -226,7 +226,7 @@ async def generate_image_client(
         ]
     )
 
-    # Monkeypatch cubebox.llm.builder.build_provider to return our FauxProvider
+    # Monkeypatch cubeplex.llm.builder.build_provider to return our FauxProvider
     # regardless of the snapshot's resolved provider slug. We dynamically stamp
     # faux_provider.provider_id with the requested slug so downstream lookups
     # like `snap.providers[this_run_model.spec.provider_id]` resolve back to a
@@ -237,10 +237,10 @@ async def generate_image_client(
         faux_provider.provider_id = slug
         return faux_provider
 
-    monkeypatch.setattr("cubebox.llm.builder.build_provider", _build_faux_provider)
+    monkeypatch.setattr("cubeplex.llm.builder.build_provider", _build_faux_provider)
 
     # --- 5. Create temp sandbox directory ---
-    with tempfile.TemporaryDirectory(prefix="cubebox_e2e_img_") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="cubeplex_e2e_img_") as tmpdir:
         sandbox_factory = lambda: _TempLocalSandbox(tmpdir)  # noqa: E731
 
         app = _make_generate_image_test_app(sandbox_factory=sandbox_factory)
@@ -349,7 +349,7 @@ async def test_generate_image_creates_artifact(
         async with maker() as session:
             from sqlalchemy import select
 
-            from cubebox.models import Artifact
+            from cubeplex.models import Artifact
 
             stmt = select(Artifact).where(
                 Artifact.conversation_id == conv_id,  # type: ignore[arg-type]

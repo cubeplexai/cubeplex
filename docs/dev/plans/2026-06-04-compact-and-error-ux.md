@@ -34,7 +34,7 @@
 ```yaml
   compaction:
     enabled: true
-    summary_provider: "cubebox"
+    summary_provider: "cubeplex"
     summary_model: "doubao-seed-1.8"
     threshold_ratio: 0.7
     keep_recent_messages: 8
@@ -49,7 +49,7 @@ The threshold ratio stays 0.7. `fallback_context_window` bumps from `64000` to `
 
 ```bash
 cd backend && uv run python -c "
-from cubebox.config import config
+from cubeplex.config import config
 print('enabled =', config.get('compaction.enabled'))
 print('fallback =', config.get('compaction.fallback_context_window'))
 "
@@ -71,7 +71,7 @@ git commit -m "feat(compaction): enable by default, raise fallback ctx window to
 ### Task 2: Wire `CompactionMiddleware` to per-model `context_window`
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py:2344-2388` (compaction wire-up block)
+- Modify: `backend/cubeplex/streams/run_manager.py:2344-2388` (compaction wire-up block)
 
 The factory at `_build_agent_for_conversation` already resolved `_model_config = factory.get_model_config(provider_name, model_id)` at line 1932 — it's in scope when compaction is wired ~400 lines later. Use its `.context_window` directly.
 
@@ -107,7 +107,7 @@ logger.info(
 - [ ] **Step 2: Sanity-load the backend module to verify no import / lint regression**
 
 ```bash
-cd backend && uv run python -c "from cubebox.streams import run_manager"
+cd backend && uv run python -c "from cubeplex.streams import run_manager"
 ```
 
 Expected: clean import, no exception.
@@ -115,7 +115,7 @@ Expected: clean import, no exception.
 - [ ] **Step 3: Run focused mypy on the changed file**
 
 ```bash
-cd backend && uv run mypy cubebox/streams/run_manager.py
+cd backend && uv run mypy cubeplex/streams/run_manager.py
 ```
 
 Expected: `Success: no issues found in 1 source file` (or matches pre-change baseline if file already had pre-existing notes).
@@ -131,7 +131,7 @@ Expected: all pass. (No new tests needed in PR-1 per user direction.)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(compaction): use model.context_window for threshold, fallback only when unknown"
 ```
 
@@ -156,7 +156,7 @@ Compaction was shipped but never enabled in dev/prod config — long conversatio
 
 ## Test plan
 - [x] `uv run pytest tests/middleware/test_compaction.py`
-- [x] `uv run mypy cubebox/streams/run_manager.py`
+- [x] `uv run mypy cubeplex/streams/run_manager.py`
 - [ ] Manual: start a long conversation, confirm `CompactionMiddleware enabled (threshold=...)` log fires and the summary kicks in past the threshold.
 EOF
 )"
@@ -173,7 +173,7 @@ Trigger the pr-codex-review-loop skill — push, wait for codex, fix, reply, re-
 ### Task 4: Define the ErrorCode taxonomy + classifier
 
 **Files:**
-- Create: `backend/cubebox/errors/__init__.py`
+- Create: `backend/cubeplex/errors/__init__.py`
 - Create: `backend/tests/errors/test_classify.py`
 
 The classifier takes the raw exception and returns `(ErrorCode, params)`. Params capture the dynamic bits the frontend needs to render the localized string (e.g. `model`, `provider`, `tokens_in`, `context_window`).
@@ -189,7 +189,7 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.errors import ErrorCode, classify_exception
+from cubeplex.errors import ErrorCode, classify_exception
 
 
 class _FakeBadRequest(Exception):
@@ -273,11 +273,11 @@ def test_classify_unknown_exception_falls_back_to_tool_or_internal() -> None:
 cd backend && uv run pytest tests/errors/test_classify.py -v
 ```
 
-Expected: ImportError / ModuleNotFoundError — `cubebox.errors` does not yet exist.
+Expected: ImportError / ModuleNotFoundError — `cubeplex.errors` does not yet exist.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `backend/cubebox/errors/__init__.py`:
+Create `backend/cubeplex/errors/__init__.py`:
 
 ```python
 """Error taxonomy and classifier.
@@ -423,7 +423,7 @@ Expected: 9 passed.
 - [ ] **Step 5: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/errors
+cd backend && uv run mypy cubeplex/errors
 ```
 
 Expected: `Success: no issues found in 1 source file`.
@@ -432,16 +432,16 @@ Expected: `Success: no issues found in 1 source file`.
 
 ```bash
 mkdir -p backend/tests/errors && touch backend/tests/errors/__init__.py
-git add backend/cubebox/errors backend/tests/errors
+git add backend/cubeplex/errors backend/tests/errors
 git commit -m "feat(errors): add ErrorCode taxonomy + classify_exception"
 ```
 
 ### Task 5: Plumb classifier into `_append_error` + ErrorEvent payload
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py:1220-1235` (rename/extend `_append_error`)
-- Modify: `backend/cubebox/streams/run_manager.py:3032-3047` (catch block)
-- Modify: `backend/cubebox/streams/run_manager.py:3499-3507` (the respond-path catch block — parallel to 3032)
+- Modify: `backend/cubeplex/streams/run_manager.py:1220-1235` (rename/extend `_append_error`)
+- Modify: `backend/cubeplex/streams/run_manager.py:3032-3047` (catch block)
+- Modify: `backend/cubeplex/streams/run_manager.py:3499-3507` (the respond-path catch block — parallel to 3032)
 
 The classifier needs `tokens_in` and `context_window` to detect the Volcano-opaque case. Use:
 - `tokens_in`: read from `_model_config.context_window` and the running tally already exposed via `agent.state.last_input_tokens` if available; otherwise pass `None`.
@@ -449,7 +449,7 @@ The classifier needs `tokens_in` and `context_window` to detect the Volcano-opaq
 
 - [ ] **Step 1: Add `model_context_window` to the extra_ref_holder stash**
 
-In `backend/cubebox/streams/run_manager.py` at the block ending around line 2594, add a line right after the existing stashes:
+In `backend/cubeplex/streams/run_manager.py` at the block ending around line 2594, add a line right after the existing stashes:
 
 ```python
 extra_ref_holder["llm_factory"] = factory
@@ -476,7 +476,7 @@ async def _append_error(
     Either pass ``exc`` (and we'll classify it) or pass ``error_code``
     directly (used by cancel paths, which already know the code).
     """
-    from cubebox.errors import ErrorCode as _ErrorCode, classify_exception
+    from cubeplex.errors import ErrorCode as _ErrorCode, classify_exception
 
     if error_code is None:
         if exc is None:
@@ -503,7 +503,7 @@ async def _append_error(
     await self._append_event(run_id, conversation_id, error_event)
 ```
 
-Add `_english_fallback` as a module-level helper near the top of `run_manager.py` (or in `cubebox/errors/__init__.py`, your choice — keep it in `cubebox/errors` to keep run_manager smaller). Update the import: `from cubebox.errors import ErrorCode, classify_exception, english_fallback as _english_fallback`. Add `english_fallback` to `cubebox/errors/__init__.py`:
+Add `_english_fallback` as a module-level helper near the top of `run_manager.py` (or in `cubeplex/errors/__init__.py`, your choice — keep it in `cubeplex/errors` to keep run_manager smaller). Update the import: `from cubeplex.errors import ErrorCode, classify_exception, english_fallback as _english_fallback`. Add `english_fallback` to `cubeplex/errors/__init__.py`:
 
 ```python
 def english_fallback(code: ErrorCode, params: dict[str, Any]) -> str:
@@ -589,14 +589,14 @@ Actually, given the user's brainstorming answer ("`run_cancelled` 不纳入枚�
 Add to the existing import block:
 
 ```python
-from cubebox.errors import ErrorCode, classify_exception, english_fallback
+from cubeplex.errors import ErrorCode, classify_exception, english_fallback
 ```
 
 - [ ] **Step 7: mypy + smoke import**
 
 ```bash
-cd backend && uv run mypy cubebox/streams/run_manager.py cubebox/errors
-cd backend && uv run python -c "from cubebox.streams.run_manager import RunManager"
+cd backend && uv run mypy cubeplex/streams/run_manager.py cubeplex/errors
+cd backend && uv run python -c "from cubeplex.streams.run_manager import RunManager"
 ```
 
 Expected: clean.
@@ -604,15 +604,15 @@ Expected: clean.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/cubebox/errors/__init__.py
+git add backend/cubeplex/streams/run_manager.py backend/cubeplex/errors/__init__.py
 git commit -m "feat(errors): classify provider exceptions in _append_error, stamp ErrorEvent with code/params"
 ```
 
 ### Task 6: Persist error_code/params on RunMeta
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_events.py` (RunMeta dataclass + update_run_meta)
-- Modify: `backend/cubebox/streams/run_manager.py:3032-3047` and parallel respond-path block — call `update_run_meta` with the new fields right before `_append_error`.
+- Modify: `backend/cubeplex/streams/run_events.py` (RunMeta dataclass + update_run_meta)
+- Modify: `backend/cubeplex/streams/run_manager.py:3032-3047` and parallel respond-path block — call `update_run_meta` with the new fields right before `_append_error`.
 - Create: `backend/tests/streams/test_run_meta_error.py`
 
 - [ ] **Step 1: Extend RunMeta + update_run_meta**
@@ -653,7 +653,7 @@ from __future__ import annotations
 import pytest
 from fakeredis.aioredis import FakeRedis
 
-from cubebox.streams.run_events import create_run, get_run_meta, update_run_meta
+from cubeplex.streams.run_events import create_run, get_run_meta, update_run_meta
 
 
 @pytest.mark.asyncio
@@ -706,7 +706,7 @@ In `run_manager.py:3032-3047` (and the respond mirror), call `update_run_meta` w
 ```python
 except Exception as exc:
     logger.error("Run {} failed: {}", run_id, exc, exc_info=True)
-    from cubebox.errors import classify_exception
+    from cubeplex.errors import classify_exception
     import json as _json
 
     _holder = locals().get("extra_ref_holder") or {}
@@ -739,12 +739,12 @@ except Exception as exc:
         )
 ```
 
-(Imports at top of file: add `import json` if not present, and `from cubebox.errors import english_fallback` — already done in Task 5.)
+(Imports at top of file: add `import json` if not present, and `from cubeplex.errors import english_fallback` — already done in Task 5.)
 
 - [ ] **Step 6: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/streams/run_events.py cubebox/streams/run_manager.py
+cd backend && uv run mypy cubeplex/streams/run_events.py cubeplex/streams/run_manager.py
 ```
 
 Expected: clean.
@@ -752,20 +752,20 @@ Expected: clean.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_events.py backend/cubebox/streams/run_manager.py backend/tests/streams/test_run_meta_error.py
+git add backend/cubeplex/streams/run_events.py backend/cubeplex/streams/run_manager.py backend/tests/streams/test_run_meta_error.py
 git commit -m "feat(errors): persist error_code/params/message on RunMeta"
 ```
 
 ### Task 7: Expose error fields in the runs list API
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/run.py` (or wherever RunSummary schema lives — confirm with `grep -rn "class.*Run.*BaseModel" cubebox/api/schemas/`)
+- Modify: `backend/cubeplex/api/schemas/run.py` (or wherever RunSummary schema lives — confirm with `grep -rn "class.*Run.*BaseModel" cubeplex/api/schemas/`)
 - Modify: the route that builds RunSummary objects from RunMeta.
 
 - [ ] **Step 1: Find the schema**
 
 ```bash
-cd backend && grep -rn "class.*Run.*BaseModel\|RunSummary\|RunListItem" cubebox/api/schemas/ cubebox/api/routes/v1/ | head -10
+cd backend && grep -rn "class.*Run.*BaseModel\|RunSummary\|RunListItem" cubeplex/api/schemas/ cubeplex/api/routes/v1/ | head -10
 ```
 
 - [ ] **Step 2: Add three fields to the schema**
@@ -790,13 +790,13 @@ RunSummary(..., error_code=meta.error_code, error_params=err_params, error_messa
 
 ```bash
 cd backend && uv run pytest tests/api/test_runs.py -v   # or whatever the existing run-listing test is
-cd backend && uv run mypy cubebox/api/schemas cubebox/api/routes/v1
+cd backend && uv run mypy cubeplex/api/schemas cubeplex/api/routes/v1
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas backend/cubebox/api/routes/v1
+git add backend/cubeplex/api/schemas backend/cubeplex/api/routes/v1
 git commit -m "feat(errors): expose error_code/params/message on runs API"
 ```
 
@@ -1028,7 +1028,7 @@ cd backend && uv run pytest tests/errors tests/streams/test_run_meta_error.py te
 git push
 gh pr create --title "errors: classify provider failures + localized run-error bubble" --body "$(cat <<'EOF'
 ## Summary
-- Add `cubebox.errors.ErrorCode` taxonomy (`context_length_exceeded`, `rate_limited`, `provider_auth_failed`, `provider_unavailable`, `provider_bad_request`, `tool_failed`, `internal_error`) and a `classify_exception` heuristic that handles Volcano ARK's opaque `InvalidParameter` via `tokens_in` vs `context_window`.
+- Add `cubeplex.errors.ErrorCode` taxonomy (`context_length_exceeded`, `rate_limited`, `provider_auth_failed`, `provider_unavailable`, `provider_bad_request`, `tool_failed`, `internal_error`) and a `classify_exception` heuristic that handles Volcano ARK's opaque `InvalidParameter` via `tokens_in` vs `context_window`.
 - Wire the classifier into `_append_error` for both the prompt and respond paths; emit `{error_code, params, message, details}` on the `ErrorEvent` SSE.
 - Persist `error_code` / `error_params` / `error_message` on `RunMeta` (Redis hash, no Alembic) and expose them on the runs list API.
 - Frontend: per-conversation error state keyed by `conversationId`, localized via `messages/{en,zh}.json` under `runError.*`, rendered as a red bubble anchored to the failing run instead of a floating banner. Falls back to the backend's English `message` when an i18n key is missing.

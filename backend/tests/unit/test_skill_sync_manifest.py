@@ -3,7 +3,7 @@
 import json
 from dataclasses import dataclass
 
-from cubebox.skills.sync_manifest import (
+from cubeplex.skills.sync_manifest import (
     MANIFEST_PATH,
     MANIFEST_SCHEMA_VERSION,
     build_manifest,

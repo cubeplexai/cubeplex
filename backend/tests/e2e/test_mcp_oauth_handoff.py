@@ -27,21 +27,21 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.config import config as _cubebox_config
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url
-from cubebox.mcp._constants import server_url_hash
-from cubebox.mcp.exceptions import DCRError, OAuthMetadataNotFound
-from cubebox.mcp.oauth.callback import OAuthCallbackHandler
-from cubebox.mcp.oauth.dcr import DCRClient, DCRRequest
-from cubebox.mcp.oauth.metadata import (
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url
+from cubeplex.mcp._constants import server_url_hash
+from cubeplex.mcp.exceptions import DCRError, OAuthMetadataNotFound
+from cubeplex.mcp.oauth.callback import OAuthCallbackHandler
+from cubeplex.mcp.oauth.dcr import DCRClient, DCRRequest
+from cubeplex.mcp.oauth.metadata import (
     AuthorizationServerMetadata,
     ProtectedResourceMetadata,
 )
-from cubebox.mcp.oauth.start import OAuthStartError, OAuthStartResult, OAuthStartService
-from cubebox.mcp.oauth.state import OAuthStateStore
-from cubebox.models.mcp import MCPConnector
-from cubebox.repositories.mcp import (
+from cubeplex.mcp.oauth.start import OAuthStartError, OAuthStartResult, OAuthStartService
+from cubeplex.mcp.oauth.state import OAuthStateStore
+from cubeplex.models.mcp import MCPConnector
+from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
@@ -87,9 +87,9 @@ async def seed_org_workspace_user(
     from fastapi_users.db import SQLAlchemyUserDatabase
     from fastapi_users.schemas import BaseUserCreate
 
-    from cubebox.auth.users import UserManager, _slugify_org_name
-    from cubebox.models import User
-    from cubebox.repositories import (
+    from cubeplex.auth.users import UserManager, _slugify_org_name
+    from cubeplex.models import User
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationRepository,
         WorkspaceRepository,
@@ -106,7 +106,7 @@ async def seed_org_workspace_user(
         ws = await ws_repo.create(org_id=org.id, name=f"WS {email}")
         manager = UserManager(SQLAlchemyUserDatabase(session, User))
         user = await manager.create(BaseUserCreate(email=email, password=password), safe=False)
-        from cubebox.models import Role
+        from cubeplex.models import Role
 
         await mem_repo.grant(user_id=user.id, workspace_id=ws.id, role=Role.ADMIN)
         await session.commit()
@@ -343,7 +343,7 @@ async def fake_redis() -> AsyncIterator[fakeredis.aioredis.FakeRedis]:
 async def oauth_state_store(
     fake_redis: fakeredis.aioredis.FakeRedis,
 ) -> OAuthStateStore:
-    secret = str(_cubebox_config.get("auth.csrf_secret", "test-csrf-secret")).encode("utf-8")
+    secret = str(_cubeplex_config.get("auth.csrf_secret", "test-csrf-secret")).encode("utf-8")
     return OAuthStateStore(redis=fake_redis, secret_key=secret, ttl_seconds=300)
 
 
@@ -435,7 +435,7 @@ async def test_start_oauth_flow_maps_dcr_error_to_oauth_start_error(
 ) -> None:
     import secrets
 
-    from cubebox.repositories import OrganizationRepository, WorkspaceRepository
+    from cubeplex.repositories import OrganizationRepository, WorkspaceRepository
 
     suffix = secrets.token_hex(4)
     org = await OrganizationRepository(db_session).create(
@@ -485,7 +485,7 @@ async def test_start_oauth_flow_uses_template_authorization_server_metadata_url_
 ) -> None:
     import secrets
 
-    from cubebox.repositories import OrganizationRepository, WorkspaceRepository
+    from cubeplex.repositories import OrganizationRepository, WorkspaceRepository
 
     suffix = secrets.token_hex(4)
     org = await OrganizationRepository(db_session).create(
@@ -555,7 +555,7 @@ async def test_start_oauth_flow_uses_resource_metadata_scopes_when_as_omits_scop
 ) -> None:
     import secrets
 
-    from cubebox.repositories import OrganizationRepository, WorkspaceRepository
+    from cubeplex.repositories import OrganizationRepository, WorkspaceRepository
 
     suffix = secrets.token_hex(4)
     org = await OrganizationRepository(db_session).create(
@@ -652,10 +652,10 @@ async def oauth_callback_handler(
     async def _noop(**_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery.run_post_grant_discovery", _noop)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery.run_post_grant_discovery", _noop)
 
     metadata: Any = _StubDiscovery()
-    from cubebox.mcp.dependencies import build_user_token_signer
+    from cubeplex.mcp.dependencies import build_user_token_signer
 
     signer = build_user_token_signer()
     return OAuthCallbackHandler(

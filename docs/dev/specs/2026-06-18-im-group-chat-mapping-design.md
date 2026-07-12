@@ -3,7 +3,7 @@
 ## Scope
 
 Bridge external IM group chats (Slack channels, Feishu groups, Discord
-guild channels) to cubebox topics. Admin binds a channel to a bot
+guild channels) to cubeplex topics. Admin binds a channel to a bot
 account and chooses a mapping mode; the runtime creates topics and
 conversations on the fly as users @-mention the bot.
 
@@ -22,7 +22,7 @@ conversations on the fly as users @-mention the bot.
 **Out of scope (v1):**
 
 - Batch member sync (pulling the full channel member list from IM).
-- Backfilling IM message history into cubebox.
+- Backfilling IM message history into cubeplex.
 - Non-@mention triggers (keyword, auto-reply).
 - Cross-bot channel bindings (one channel, one bot).
 - Topic archival when a channel is deleted/archived in IM.
@@ -71,7 +71,7 @@ The connector's `parse_inbound` determines the scope key. Today it
 always includes the sender (`make_participant_scope`). In shared mode it
 must switch to channel/thread scoping.
 
-| Mode | IM context | scope_key | scope_kind | Cubebox result |
+| Mode | IM context | scope_key | scope_kind | Cubeplex result |
 |---|---|---|---|---|
 | isolated | DM | `"dm"` | `dm` | Per-user conversation (unchanged) |
 | isolated | Channel @bot | `"u:{sender}"` | `channel` | Per-user conversation (unchanged) |
@@ -137,7 +137,7 @@ of the gateway connection (invalidated on binding CRUD).
 ### Identity resolution (unchanged)
 
 The existing `resolve_or_reject` flow works as-is. Each inbound event
-resolves the sender's IM identity to a cubebox user. Unresolved users
+resolves the sender's IM identity to a cubeplex user. Unresolved users
 get the `/link` prompt.
 
 ### Auto-join on first message
@@ -274,7 +274,7 @@ sandbox_mode required when mode is shared.
 { "mode": "isolated" }
 ```
 Switching from shared → isolated does not delete the topic. The topic
-remains accessible in cubebox but new IM messages go to per-user
+remains accessible in cubeplex but new IM messages go to per-user
 conversations. Switching from isolated → shared creates the topic on
 the next @bot.
 
@@ -305,7 +305,7 @@ Add a "Channels" tab to the existing `ImAccountDetailPanel`. Content:
 ### No changes to sidebar or conversation UI
 
 Topic conversations created by IM bindings are regular topics. They
-appear in the sidebar for participants who have cubebox accounts. No
+appear in the sidebar for participants who have cubeplex accounts. No
 special IM-specific UI in the conversation view.
 
 ---

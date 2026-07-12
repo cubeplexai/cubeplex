@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useTranslations } from 'next-intl'
-import { useMessageStore, useAttachmentStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, useAttachmentStore, createApiClient } from '@cubeplex/core'
 import { ArrowUp, Loader2, Paperclip, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'

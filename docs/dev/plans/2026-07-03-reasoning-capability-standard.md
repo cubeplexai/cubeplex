@@ -5,12 +5,12 @@
 > superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace Cubebox's `thinking` request control with a provider-neutral
+**Goal:** Replace Cubeplex's `thinking` request control with a provider-neutral
 `reasoning` control, with official API mappings owned by cubepi and custom
 provider mappings validated through preview and lint.
 
 **Architecture:** cubepi owns `ReasoningControl`, the capability DSL v2,
-official profile registry, request rendering, preview, and lint. Cubebox stores
+official profile registry, request rendering, preview, and lint. Cubeplex stores
 profile/override configuration, passes `ReasoningControl` through runtime, and
 surfaces preview/lint to provider admins.
 
@@ -19,8 +19,8 @@ Postgres, Redis, Next.js, React 19, TypeScript, Zustand, vitest, Playwright.
 
 ## Global Constraints
 
-- Work in isolated worktrees; read `.worktree.env` first in Cubebox worktrees.
-- Use `docs/dev/plans/` and `docs/dev/specs/` for Cubebox planning docs.
+- Work in isolated worktrees; read `.worktree.env` first in Cubeplex worktrees.
+- Use `docs/dev/plans/` and `docs/dev/specs/` for Cubeplex planning docs.
 - Backend line length is 100 characters.
 - Type annotations everywhere; backend mypy is strict.
 - New migrations use `alembic revision --autogenerate -m "..."`.
@@ -68,39 +68,39 @@ Postgres, Redis, Next.js, React 19, TypeScript, Zustand, vitest, Playwright.
 - Test: `tests/providers/test_base.py`
   `StreamOptions` and `generate` API tests.
 
-### cubebox repository: current worktree
+### cubeplex repository: current worktree
 
 - Modify: `backend/pyproject.toml`, `backend/uv.lock`
   Pin the cubepi commit that includes the new reasoning API.
-- Modify: `backend/cubebox/llm/config.py`
+- Modify: `backend/cubeplex/llm/config.py`
   Adds provider `capability_profile` and `capability_overrides`.
-- Modify: `backend/cubebox/llm/catalog/data/capabilities.yaml`
+- Modify: `backend/cubeplex/llm/catalog/data/capabilities.yaml`
   Converts old capability blocks to DSL v2.
-- Modify: `backend/cubebox/llm/catalog/data/vendors.yaml`
+- Modify: `backend/cubeplex/llm/catalog/data/vendors.yaml`
   References profile ids and provider overrides.
-- Modify: `backend/cubebox/llm/catalog/loader.py`,
-  `backend/cubebox/llm/catalog/types.py`
+- Modify: `backend/cubeplex/llm/catalog/loader.py`,
+  `backend/cubeplex/llm/catalog/types.py`
   Loads and resolves profile-plus-overrides.
-- Modify: `backend/cubebox/seeders/provider_seeder.py`,
-  `backend/cubebox/llm/snapshot.py`, `backend/cubebox/llm/builder.py`
+- Modify: `backend/cubeplex/seeders/provider_seeder.py`,
+  `backend/cubeplex/llm/snapshot.py`, `backend/cubeplex/llm/builder.py`
   Persists and builds resolved capability descriptors.
-- Modify: `backend/cubebox/models/conversation.py`
+- Modify: `backend/cubeplex/models/conversation.py`
   Replaces `thinking` column with `reasoning` JSON.
 - Add: the Alembic-generated migration file for `conversation reasoning` under
   `backend/alembic/versions/`.
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`,
-  `backend/cubebox/repositories/conversation.py`,
-  `backend/cubebox/api/serializers.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`,
+  `backend/cubeplex/repositories/conversation.py`,
+  `backend/cubeplex/api/serializers.py`
   Replaces request and persistence flow with `reasoning`.
-- Modify: `backend/cubebox/streams/run_manager.py`,
-  `backend/cubebox/agents/graph.py`,
-  `backend/cubebox/services/conversation_title.py`,
-  `backend/cubebox/services/provider_probe.py`,
-  `backend/cubebox/services/provider_service.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`,
+  `backend/cubeplex/agents/graph.py`,
+  `backend/cubeplex/services/conversation_title.py`,
+  `backend/cubeplex/services/provider_probe.py`,
+  `backend/cubeplex/services/provider_service.py`
   Passes `ReasoningControl`, previews and lints custom capabilities, probes the
   resolved mapping.
-- Modify: `backend/cubebox/api/schemas/provider.py`,
-  `backend/cubebox/api/routes/v1/admin_providers.py`
+- Modify: `backend/cubeplex/api/schemas/provider.py`,
+  `backend/cubeplex/api/routes/v1/admin_providers.py`
   Adds preview/lint schemas and route.
 - Modify: `frontend/packages/core/src/api/stream.ts`,
   `frontend/packages/core/src/types/events.ts`,
@@ -706,15 +706,15 @@ git commit -m "feat: render reasoning controls in providers"
 
 ---
 
-### Task 3: Cubebox Dependency and Backend Reasoning Types
+### Task 3: Cubeplex Dependency and Backend Reasoning Types
 
 **Files:**
 - Modify: `backend/pyproject.toml`
 - Modify: `backend/uv.lock`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
-- Modify: `backend/cubebox/models/conversation.py`
-- Modify: `backend/cubebox/repositories/conversation.py`
-- Modify: `backend/cubebox/api/serializers.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/models/conversation.py`
+- Modify: `backend/cubeplex/repositories/conversation.py`
+- Modify: `backend/cubeplex/api/serializers.py`
 - Add: the Alembic-generated migration file for `conversation reasoning` under
   `backend/alembic/versions/`.
 - Test: `backend/tests/unit/test_send_message_schema.py`
@@ -723,14 +723,14 @@ git commit -m "feat: render reasoning controls in providers"
 
 **Interfaces:**
 - Consumes: cubepi `ReasoningControl`.
-- Produces: Cubebox API request/response field `reasoning`.
+- Produces: Cubeplex API request/response field `reasoning`.
 
 - [ ] **Step 1: Update cubepi dependency**
 
-After Task 2 is merged or committed in `/home/chris/cubepi`, update Cubebox:
+After Task 2 is merged or committed in `/home/chris/cubepi`, update Cubeplex:
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-07-03-reasoning-capability-standard/backend
+cd /home/chris/cubeplex/.worktrees/feat/2026-07-03-reasoning-capability-standard/backend
 NEW_CUBEPI_COMMIT="$(git -C /home/chris/cubepi rev-parse HEAD)"
 CUBEPI_SPEC="cubepi[mcp,postgres,trace-cli,tracing,tracing-otlp]"
 CUBEPI_URL="git+https://github.com/cubeplexai/cubepi.git@${NEW_CUBEPI_COMMIT}"
@@ -748,7 +748,7 @@ Replace `backend/tests/unit/test_send_message_schema.py` with:
 import pytest
 from pydantic import ValidationError
 
-from cubebox.api.routes.v1.conversations import SendMessageRequest
+from cubeplex.api.routes.v1.conversations import SendMessageRequest
 
 
 def test_request_accepts_model_key_and_reasoning() -> None:
@@ -794,7 +794,7 @@ extra fields.
 
 - [ ] **Step 4: Update API request model**
 
-In `backend/cubebox/api/routes/v1/conversations.py`:
+In `backend/cubeplex/api/routes/v1/conversations.py`:
 
 ```python
 from cubepi.providers.base import ReasoningControl
@@ -816,7 +816,7 @@ Pass `request_obj.reasoning` into repository and run manager.
 
 - [ ] **Step 5: Change conversation model**
 
-In `backend/cubebox/models/conversation.py`, replace `thinking` with:
+In `backend/cubeplex/models/conversation.py`, replace `thinking` with:
 
 ```python
 reasoning: dict[str, Any] = Field(
@@ -827,7 +827,7 @@ reasoning: dict[str, Any] = Field(
 
 - [ ] **Step 6: Update repository and serializers**
 
-In `backend/cubebox/repositories/conversation.py`, change
+In `backend/cubeplex/repositories/conversation.py`, change
 `model_setting: tuple[str | None, str] | None` to:
 
 ```python
@@ -840,7 +840,7 @@ Assign:
 conv.model_key, conv.reasoning = model_setting
 ```
 
-In `backend/cubebox/api/serializers.py`, return:
+In `backend/cubeplex/api/serializers.py`, return:
 
 ```python
 "reasoning": c.reasoning,
@@ -875,7 +875,7 @@ Expected: pass.
 - [ ] **Step 9: Commit Task 3**
 
 ```bash
-git add backend/pyproject.toml backend/uv.lock backend/cubebox \
+git add backend/pyproject.toml backend/uv.lock backend/cubeplex \
   backend/alembic/versions backend/tests/unit/test_send_message_schema.py \
   backend/tests/e2e/test_conversations.py \
   backend/tests/e2e/test_preset_switching_e2e.py
@@ -884,15 +884,15 @@ git commit -m "feat: replace conversation thinking with reasoning"
 
 ---
 
-### Task 4: Cubebox Runtime and Provider Probe Cutover
+### Task 4: Cubeplex Runtime and Provider Probe Cutover
 
 **Files:**
-- Modify: `backend/cubebox/llm/builder.py`
-- Modify: `backend/cubebox/agents/graph.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/cubebox/services/conversation_title.py`
-- Modify: `backend/cubebox/services/provider_probe.py`
-- Modify: `backend/cubebox/services/provider_service.py`
+- Modify: `backend/cubeplex/llm/builder.py`
+- Modify: `backend/cubeplex/agents/graph.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
+- Modify: `backend/cubeplex/services/conversation_title.py`
+- Modify: `backend/cubeplex/services/provider_probe.py`
+- Modify: `backend/cubeplex/services/provider_service.py`
 - Test: `backend/tests/unit/test_provider_probe.py`
 - Test: `backend/tests/unit/test_run_manager_build_agent.py`
 - Test: `backend/tests/unit/test_conversation_title_pi.py`
@@ -943,7 +943,7 @@ Expected: fail until runtime signatures are updated.
 
 - [ ] **Step 4: Update builder signatures**
 
-In `backend/cubebox/llm/builder.py`, replace `thinking` parameters with:
+In `backend/cubeplex/llm/builder.py`, replace `thinking` parameters with:
 
 ```python
 reasoning: ReasoningControl | None = None
@@ -954,16 +954,16 @@ in per-call `StreamOptions`.
 
 - [ ] **Step 5: Update agent factory**
 
-In `backend/cubebox/agents/graph.py`:
+In `backend/cubeplex/agents/graph.py`:
 
 ```python
-def create_cubebox_agent(..., reasoning: ReasoningControl | None = None, ...) -> Agent[Any]:
+def create_cubeplex_agent(..., reasoning: ReasoningControl | None = None, ...) -> Agent[Any]:
     return Agent(..., reasoning=reasoning or ReasoningControl(), ...)
 ```
 
 - [ ] **Step 6: Update run manager**
 
-In `backend/cubebox/streams/run_manager.py`, replace every run-control
+In `backend/cubeplex/streams/run_manager.py`, replace every run-control
 signature:
 
 ```python
@@ -978,7 +978,7 @@ reasoning=reasoning or ReasoningControl()
 
 - [ ] **Step 7: Update title generation**
 
-In `backend/cubebox/services/conversation_title.py`, replace title calls with:
+In `backend/cubeplex/services/conversation_title.py`, replace title calls with:
 
 ```python
 reasoning=ReasoningControl(mode="off", effort="minimal", summary="none")
@@ -994,7 +994,7 @@ options=StreamOptions(
 
 - [ ] **Step 8: Update provider probe matrix**
 
-In `backend/cubebox/services/provider_probe.py`, replace `_drain_stream`
+In `backend/cubeplex/services/provider_probe.py`, replace `_drain_stream`
 parameter `thinking` with `reasoning`. Use:
 
 ```python
@@ -1022,29 +1022,29 @@ Expected: pass.
 - [ ] **Step 10: Commit Task 4**
 
 ```bash
-git add backend/cubebox/llm/builder.py backend/cubebox/agents/graph.py \
-  backend/cubebox/streams/run_manager.py \
-  backend/cubebox/services/conversation_title.py \
-  backend/cubebox/services/provider_probe.py \
-  backend/cubebox/services/provider_service.py backend/tests/unit
-git commit -m "feat: pass reasoning through cubebox runtime"
+git add backend/cubeplex/llm/builder.py backend/cubeplex/agents/graph.py \
+  backend/cubeplex/streams/run_manager.py \
+  backend/cubeplex/services/conversation_title.py \
+  backend/cubeplex/services/provider_probe.py \
+  backend/cubeplex/services/provider_service.py backend/tests/unit
+git commit -m "feat: pass reasoning through cubeplex runtime"
 ```
 
 ---
 
-### Task 5: Provider Capability Profiles in Cubebox
+### Task 5: Provider Capability Profiles in Cubeplex
 
 **Files:**
-- Modify: `backend/cubebox/llm/config.py`
-- Modify: `backend/cubebox/models/provider.py`
-- Modify: `backend/cubebox/api/schemas/provider.py`
-- Modify: `backend/cubebox/llm/catalog/types.py`
-- Modify: `backend/cubebox/llm/catalog/loader.py`
-- Modify: `backend/cubebox/llm/catalog/data/capabilities.yaml`
-- Modify: `backend/cubebox/llm/catalog/data/vendors.yaml`
-- Modify: `backend/cubebox/seeders/provider_seeder.py`
-- Modify: `backend/cubebox/llm/snapshot.py`
-- Modify: `backend/cubebox/llm/readiness.py`
+- Modify: `backend/cubeplex/llm/config.py`
+- Modify: `backend/cubeplex/models/provider.py`
+- Modify: `backend/cubeplex/api/schemas/provider.py`
+- Modify: `backend/cubeplex/llm/catalog/types.py`
+- Modify: `backend/cubeplex/llm/catalog/loader.py`
+- Modify: `backend/cubeplex/llm/catalog/data/capabilities.yaml`
+- Modify: `backend/cubeplex/llm/catalog/data/vendors.yaml`
+- Modify: `backend/cubeplex/seeders/provider_seeder.py`
+- Modify: `backend/cubeplex/llm/snapshot.py`
+- Modify: `backend/cubeplex/llm/readiness.py`
 - Test: `backend/tests/test_provider_capability_factory.py`
 - Test: `backend/tests/unit/llm/catalog/test_loader.py`
 - Test: `backend/tests/e2e/test_admin_providers_crud.py`
@@ -1091,7 +1091,7 @@ Expected: fail until config fields and resolver exist.
 
 - [ ] **Step 3: Add provider config fields**
 
-In `backend/cubebox/llm/config.py`:
+In `backend/cubeplex/llm/config.py`:
 
 ```python
 capability_profile: str | None = None
@@ -1103,7 +1103,7 @@ fixtures.
 
 - [ ] **Step 4: Add provider model fields**
 
-In `backend/cubebox/models/provider.py`:
+In `backend/cubeplex/models/provider.py`:
 
 ```python
 capability_profile: str | None = Field(default=None, max_length=128)
@@ -1119,13 +1119,13 @@ uv run alembic revision --autogenerate -m "provider capability profile"
 
 - [ ] **Step 5: Resolve profile plus overrides**
 
-In `backend/cubebox/llm/builder.py`, before constructing provider:
+In `backend/cubeplex/llm/builder.py`, before constructing provider:
 
 ```python
 capability = resolve_provider_capability(cfg)
 ```
 
-Implement `resolve_provider_capability` in `backend/cubebox/llm/config.py`:
+Implement `resolve_provider_capability` in `backend/cubeplex/llm/config.py`:
 
 ```python
 def resolve_provider_capability(cfg: ProviderConfig) -> CapabilityDescriptor | None:
@@ -1139,10 +1139,10 @@ def resolve_provider_capability(cfg: ProviderConfig) -> CapabilityDescriptor | N
 
 - [ ] **Step 6: Convert catalog data**
 
-In `backend/cubebox/llm/catalog/data/capabilities.yaml`, replace old
+In `backend/cubeplex/llm/catalog/data/capabilities.yaml`, replace old
 `reasoning_off_payload` entries with DSL v2 fields under `reasoning`.
 
-In `backend/cubebox/llm/catalog/data/vendors.yaml`, store:
+In `backend/cubeplex/llm/catalog/data/vendors.yaml`, store:
 
 ```yaml
 capability_profile: openai.chat_completions
@@ -1156,11 +1156,11 @@ and vLLM examples.
 
 - [ ] **Step 7: Update schemas and seeders**
 
-In `backend/cubebox/api/schemas/provider.py`, add profile fields to
+In `backend/cubeplex/api/schemas/provider.py`, add profile fields to
 `ProviderCreate`, `ProviderUpdate`, `ProviderLivenessRequest`, and
 `ProviderOut`.
 
-In `backend/cubebox/seeders/provider_seeder.py`, persist `capability_profile`
+In `backend/cubeplex/seeders/provider_seeder.py`, persist `capability_profile`
 and `capability_overrides`.
 
 - [ ] **Step 8: Run provider tests**
@@ -1178,8 +1178,8 @@ Expected: pass.
 - [ ] **Step 9: Commit Task 5**
 
 ```bash
-git add backend/cubebox/llm backend/cubebox/models/provider.py \
-  backend/cubebox/api/schemas/provider.py backend/cubebox/seeders \
+git add backend/cubeplex/llm backend/cubeplex/models/provider.py \
+  backend/cubeplex/api/schemas/provider.py backend/cubeplex/seeders \
   backend/alembic/versions backend/tests/test_provider_capability_factory.py \
   backend/tests/e2e/test_admin_providers_crud.py
 git commit -m "feat: add provider capability profiles"
@@ -1190,10 +1190,10 @@ git commit -m "feat: add provider capability profiles"
 ### Task 6: Preview and Lint API
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/provider.py`
-- Modify: `backend/cubebox/services/provider_service.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_providers.py`
-- Modify: `backend/cubebox/services/provider_probe.py`
+- Modify: `backend/cubeplex/api/schemas/provider.py`
+- Modify: `backend/cubeplex/services/provider_service.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_providers.py`
+- Modify: `backend/cubeplex/services/provider_probe.py`
 - Test: `backend/tests/unit/test_provider_probe.py`
 - Test: `backend/tests/e2e/test_admin_providers_crud.py`
 
@@ -1244,7 +1244,7 @@ Expected: fail with 404 until the route exists.
 
 - [ ] **Step 3: Add schemas**
 
-In `backend/cubebox/api/schemas/provider.py`:
+In `backend/cubeplex/api/schemas/provider.py`:
 
 ```python
 class CapabilityPreviewRequest(BaseModel):
@@ -1261,7 +1261,7 @@ class CapabilityPreviewOut(BaseModel):
 
 - [ ] **Step 4: Add service method**
 
-In `backend/cubebox/services/provider_service.py`:
+In `backend/cubeplex/services/provider_service.py`:
 
 ```python
 def preview_capability(self, req: CapabilityPreviewRequest) -> CapabilityPreviewOut:
@@ -1277,7 +1277,7 @@ def preview_capability(self, req: CapabilityPreviewRequest) -> CapabilityPreview
 
 - [ ] **Step 5: Add route**
 
-In `backend/cubebox/api/routes/v1/admin_providers.py`:
+In `backend/cubeplex/api/routes/v1/admin_providers.py`:
 
 ```python
 @router.post("/providers/capability-preview", response_model=CapabilityPreviewOut)
@@ -1290,7 +1290,7 @@ async def preview_provider_capability(
 
 - [ ] **Step 6: Surface lint warnings in probe summaries**
 
-In `backend/cubebox/services/provider_probe.py`, call `lint_capability` before
+In `backend/cubeplex/services/provider_probe.py`, call `lint_capability` before
 stream tests and include warning dicts in `ProbeResult` summary metadata.
 
 - [ ] **Step 7: Run preview/probe tests**
@@ -1308,7 +1308,7 @@ Expected: pass.
 - [ ] **Step 8: Commit Task 6**
 
 ```bash
-git add backend/cubebox/api backend/cubebox/services backend/tests
+git add backend/cubeplex/api backend/cubeplex/services backend/tests
 git commit -m "feat: add capability preview and lint"
 ```
 
@@ -1516,7 +1516,7 @@ providers, capability JSON, or reasoning controls.
 Add wording equivalent to:
 
 ```md
-Cubebox exposes reasoning as three fields: `mode`, `effort`, and `summary`.
+Cubeplex exposes reasoning as three fields: `mode`, `effort`, and `summary`.
 Official OpenAI Chat, OpenAI Responses, and Anthropic Messages endpoints do not
 need manual reasoning mappings. Custom endpoints can add capability overrides;
 the preview tool shows the provider payload diff before saving.
@@ -1534,7 +1534,7 @@ cd backend
 mkdir -p tmp
 uv run pytest tests/unit tests/e2e/test_conversations.py \
   tests/e2e/test_admin_providers_crud.py --no-cov 2>&1 | tee tmp/reasoning-backend.log | tail -5
-uv run mypy cubebox 2>&1 | tee tmp/reasoning-mypy.log | tail -5
+uv run mypy cubeplex 2>&1 | tee tmp/reasoning-mypy.log | tail -5
 ```
 
 Expected: pytest and mypy exit 0.
@@ -1599,7 +1599,7 @@ Write the PR summary with:
 
 ## Tests
 - `uv run pytest ...`
-- `uv run mypy cubebox`
+- `uv run mypy cubeplex`
 - `pnpm lint`
 - `pnpm typecheck`
 ```

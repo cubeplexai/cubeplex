@@ -9,7 +9,7 @@ import {
   createApiClient,
   useAuthStore,
   type AcceptOrgInviteResult,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 export default function AcceptOrgInvitePage({
   searchParams,

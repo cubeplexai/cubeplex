@@ -7,7 +7,7 @@ import {
   fetchCostTimeseries,
   type CostSummaryResponse,
   type TimeseriesResponse,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 export type RangePreset = '7d' | '30d' | '90d'
 export type Granularity = 'day' | 'week'

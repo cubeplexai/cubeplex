@@ -14,11 +14,11 @@
 ### 1.1 现状
 
 - **Skills 仅文件系统**: 全部驻留 `backend/skills/builtin/<name>/`，进程启动时由 `SkillLoader.load_builtin()` 一次性把全部 builtin skill 文件 push 到 sandbox 的 `/.skills/builtin/...`。
-- **`SkillsMiddleware`** 在 `create_cubebox_agent()` 工厂阶段拿到一个静态 `list[SkillSpec]`，每次模型调用都把全部 builtin skill 注入提示词。无 workspace / org 维度过滤。
+- **`SkillsMiddleware`** 在 `create_cubeplex_agent()` 工厂阶段拿到一个静态 `list[SkillSpec]`，每次模型调用都把全部 builtin skill 注入提示词。无 workspace / org 维度过滤。
 - **`load_skill` 工具**直接读 `backend/skills/builtin/<name>/SKILL.md` 并返回内容。本质是后台磁盘读，不触发 sandbox。
-- **Frontmatter 解析**用正则只取 `name` / `description`（`backend/cubebox/middleware/skills.py:54-69`），完全忽略 `version` / `keywords` / Openclaw 扩展字段。
+- **Frontmatter 解析**用正则只取 `name` / `description`（`backend/cubeplex/middleware/skills.py:54-69`），完全忽略 `version` / `keywords` / Openclaw 扩展字段。
 - **管理后台 Skills tab** 在 M2 已落 `/admin/skills` 路由占位（`frontend/packages/web/app/admin/skills/page.tsx`），目前是 `<ComingSoonCard backlogRef="M3 Skills 市场">`。等 M3 替换。
-- **artifact 基础设施**已具备：`Artifact` 模型 + `ArtifactVersion` 历史 + `save_artifact` 工具（`backend/cubebox/middleware/artifacts.py`）。`artifact_type` 是自由字符串，能直接承载 `"skill"` 类型而无需扩 schema。
+- **artifact 基础设施**已具备：`Artifact` 模型 + `ArtifactVersion` 历史 + `save_artifact` 工具（`backend/cubeplex/middleware/artifacts.py`）。`artifact_type` 是自由字符串，能直接承载 `"skill"` 类型而无需扩 schema。
 - **Organization 模型只有 `id`/`name`/`created_at`**，无 slug 列；M3 设计需要"用户可见的 org 标识"作为 skill 命名空间前缀，需要扩此模型一列。
 - **现存预装 skill**：`deep-research`（仅 SKILL.md，24KB）/ `git-commit`（仅 SKILL.md，0.8KB）/ `pdf-creator`（SKILL.md + scripts/ + design/）/ `web-artifacts-builder`（SKILL.md + scripts/ + LICENSE.txt）。约一半带 sandbox-runnable 文件。
 
@@ -36,7 +36,7 @@
 - **跨组织共享 / 公有 registry / 联邦市场**: 同一部署内组织 A 上传的 skill 对组织 B 不可见。EE 或后续才考虑联邦化。
 - **评分 / 评论 / 下载量排行**: 简易市场，不做。
 - **依赖自动解析**: SKILL.md `requires.env` / `requires.bins` 字段保留至 `raw_metadata` 但不在运行时校验或拦截。
-- **`install[]` 段落执行**: Openclaw 自身的 lazy-install 模型（agent 遇错再装）由 LLM 驱动而非 loader 驱动，不属于 cubebox 的设计范畴。
+- **`install[]` 段落执行**: Openclaw 自身的 lazy-install 模型（agent 遇错再装）由 LLM 驱动而非 loader 驱动，不属于 cubeplex 的设计范畴。
 - **审核 / 提交-审批工作流**: 任意成员均可发布到自家组织市场，无中间状态。
 - **签名 / 校验**: 不做包签名；不校验 hash。
 - **付费 skill / 配额 / 计费**: 不做。
@@ -246,9 +246,9 @@ backend/skills/cache/<skill_version_id>/<rel_path>
 
 **目录键于 UUID**: 全局 `deep-research v3.2` 与组织 X 上传的同名 `deep-research v3.2` 是不同的 `skill_version_id`，本地缓存不冲突。
 
-### 4.3 Frontmatter 解析（`backend/cubebox/skills/frontmatter.py`）
+### 4.3 Frontmatter 解析（`backend/cubeplex/skills/frontmatter.py`）
 
-替换 `backend/cubebox/middleware/skills.py:54-69` 的正则解析。
+替换 `backend/cubeplex/middleware/skills.py:54-69` 的正则解析。
 
 ```python
 @dataclass(frozen=True)
@@ -585,7 +585,7 @@ def create_load_skill_tool(
 
 ### 7.3 `LazySandbox` 透明同步
 
-修改 `backend/cubebox/sandbox/lazy.py::_ensure()`：
+修改 `backend/cubeplex/sandbox/lazy.py::_ensure()`：
 
 ```python
 async def _ensure(self) -> Sandbox:
@@ -646,7 +646,7 @@ async def sync_skills_to_sandbox(self, workspace_id: str, sandbox: Sandbox) -> N
 
 ### 7.5 `SandboxManager` 删除 SkillLoader 调用
 
-`backend/cubebox/sandbox/manager.py:257` 处的 `skills_dir_str: str = config.get("sandbox.skills.builtin_dir", "skills/builtin")` + 调用 `SkillLoader(skills_dir).load_builtin()` 整段删除。`backend/cubebox/sandbox/skills.py` 整个文件删除。
+`backend/cubeplex/sandbox/manager.py:257` 处的 `skills_dir_str: str = config.get("sandbox.skills.builtin_dir", "skills/builtin")` + 调用 `SkillLoader(skills_dir).load_builtin()` 整段删除。`backend/cubeplex/sandbox/skills.py` 整个文件删除。
 
 ---
 
@@ -673,7 +673,7 @@ backend/skills/preinstalled/
       └── SKILL.md
 ```
 
-### 8.2 Seeder（`backend/cubebox/skills/seeder.py`）
+### 8.2 Seeder（`backend/cubeplex/skills/seeder.py`）
 
 启动时由 FastAPI lifespan 调用一次。流程沿用 § 4.4 的发布管线 + 写 `skills/_global/<name>/<version>/`，但 `source="preinstalled"` / `owner_org_id=NULL`。**幂等**: 相同版本不重写文件、不插重复 SkillVersion 行。
 
@@ -686,7 +686,7 @@ from redis.asyncio import Redis
 from redis.exceptions import LockNotOwnedError
 
 async def seed_preinstalled_skills(redis: Redis) -> None:
-    LOCK_KEY = "cubebox:lock:skill_seeder"
+    LOCK_KEY = "cubeplex:lock:skill_seeder"
     LOCK_TTL_SECONDS = 60   # 安全网：进程崩溃时 TTL 自动释放；
                             # v1 全部预装 skill 总量 << 1MB，秒级完成
 
@@ -743,7 +743,7 @@ async def seed_preinstalled_skills(redis: Redis) -> None:
 | `test_seed_preinstalled_creates_global_rows` | 启动 seeder 读 `preinstalled/` → global skill+version 行 + 对象存储文件；幂等 |
 | `test_seed_refuses_to_overwrite_same_version` | SKILL.md 改但 version 未改 → seeder warning，不覆盖 |
 | `test_seed_adds_new_version_on_bump` | bump version → 追加 SkillVersion，旧版本不动 |
-| `test_seed_redis_lock_prevents_concurrent_runs` | 一个 fakeredis client 持有 `cubebox:lock:skill_seeder` → seeder 在另一连接被调用时跳过；释放后再调用恢复正常 |
+| `test_seed_redis_lock_prevents_concurrent_runs` | 一个 fakeredis client 持有 `cubeplex:lock:skill_seeder` → seeder 在另一连接被调用时跳过；释放后再调用恢复正常 |
 | `test_admin_install_preinstalled_creates_org_install` | `POST /admin/skills/{id}/install` → org_install 行 + audit |
 | `test_admin_uninstall_preinstalled_creates_tombstone` | `DELETE` → tombstone；下次 reseed 不自动 install |
 | `test_admin_upgrade_changes_pin` | 重 POST install 新版本 → pin 改；下次 sandbox 唤醒同步新版本 |
@@ -793,16 +793,16 @@ async def seed_preinstalled_skills(redis: Redis) -> None:
 ### 10.1 新增
 
 **Backend**:
-- `backend/cubebox/skills/__init__.py`
-- `backend/cubebox/skills/frontmatter.py`
-- `backend/cubebox/skills/cache.py`
-- `backend/cubebox/skills/seeder.py`
-- `backend/cubebox/skills/service.py`（`SkillCatalogService` + `SkillPublishService`）
-- `backend/cubebox/models/skill.py`（5 张表）
-- `backend/cubebox/repositories/skill.py`
-- `backend/cubebox/api/routes/v1/admin_skills.py`
-- `backend/cubebox/api/routes/v1/ws_skills.py`
-- `backend/cubebox/api/schemas/skill.py`（pydantic 响应模型）
+- `backend/cubeplex/skills/__init__.py`
+- `backend/cubeplex/skills/frontmatter.py`
+- `backend/cubeplex/skills/cache.py`
+- `backend/cubeplex/skills/seeder.py`
+- `backend/cubeplex/skills/service.py`（`SkillCatalogService` + `SkillPublishService`）
+- `backend/cubeplex/models/skill.py`（5 张表）
+- `backend/cubeplex/repositories/skill.py`
+- `backend/cubeplex/api/routes/v1/admin_skills.py`
+- `backend/cubeplex/api/routes/v1/ws_skills.py`
+- `backend/cubeplex/api/schemas/skill.py`（pydantic 响应模型）
 - `backend/alembic/versions/<rev>_m3_skills_marketplace.py`
 - `backend/scripts/dev/auto_install_preinstalled_for_existing_orgs.py`
 - `backend/tests/e2e/test_skills_marketplace.py`
@@ -829,23 +829,23 @@ async def seed_preinstalled_skills(redis: Redis) -> None:
 ### 10.2 修改
 
 **Backend**:
-- `backend/cubebox/middleware/skills.py` —— 重构为 catalog 驱动；删 `load_builtin_skills`
-- `backend/cubebox/tools/builtin/load_skill.py` —— 重构为 catalog 驱动
-- `backend/cubebox/agents/graph.py` —— 删 skills 入参，注入 SkillCatalogService
-- `backend/cubebox/sandbox/lazy.py` —— `_ensure()` 加同步 hook；加 `has_synced` / `mark_synced`
-- `backend/cubebox/sandbox/base.py` —— `Sandbox` ABC 加 `has_synced` / `mark_synced` 默认实现
-- `backend/cubebox/sandbox/manager.py` —— 删 SkillLoader 调用
-- `backend/cubebox/api/app.py` —— 注册 seeder lifespan + 新路由
-- `backend/cubebox/auth/dependencies.py` 不需要改（M2 已加 `require_org_admin`）
+- `backend/cubeplex/middleware/skills.py` —— 重构为 catalog 驱动；删 `load_builtin_skills`
+- `backend/cubeplex/tools/builtin/load_skill.py` —— 重构为 catalog 驱动
+- `backend/cubeplex/agents/graph.py` —— 删 skills 入参，注入 SkillCatalogService
+- `backend/cubeplex/sandbox/lazy.py` —— `_ensure()` 加同步 hook；加 `has_synced` / `mark_synced`
+- `backend/cubeplex/sandbox/base.py` —— `Sandbox` ABC 加 `has_synced` / `mark_synced` 默认实现
+- `backend/cubeplex/sandbox/manager.py` —— 删 SkillLoader 调用
+- `backend/cubeplex/api/app.py` —— 注册 seeder lifespan + 新路由
+- `backend/cubeplex/auth/dependencies.py` 不需要改（M2 已加 `require_org_admin`）
 - `backend/config.yaml` —— 删 `sandbox.skills.builtin_dir`；保留 `container_path`
 
 **Backend Organization 改动（D20）**:
-- `backend/cubebox/models/organization.py` —— 加 `slug` 列（UNIQUE + 索引）
-- `backend/cubebox/auth/users.py::UserManager.on_after_register` —— 创建 Org 时基于 name slugify + 冲突追加后缀
+- `backend/cubeplex/models/organization.py` —— 加 `slug` 列（UNIQUE + 索引）
+- `backend/cubeplex/auth/users.py::UserManager.on_after_register` —— 创建 Org 时基于 name slugify + 冲突追加后缀
 - Alembic 迁移内同时给现存 Org 行 backfill slug（data migration 段）
 
 **Backend 删除**:
-- `backend/cubebox/sandbox/skills.py` —— 整个文件删
+- `backend/cubeplex/sandbox/skills.py` —— 整个文件删
 
 **目录改名**:
 - `backend/skills/builtin/` → `backend/skills/preinstalled/` + 4 个 SKILL.md 内容审/微调
@@ -883,9 +883,9 @@ async def seed_preinstalled_skills(redis: Redis) -> None:
 
 ### 11.2 修改
 
-- `backend/cubebox/middleware/artifacts.py` —— 扩 `save_artifact` description；`ARTIFACT_PROMPT` 加 "skill" 类型
-- `backend/cubebox/api/routes/v1/ws_skills.py` —— `publish` 端点支持 `{"artifact_id": ...}` JSON body 分支
-- `backend/cubebox/skills/service.py` —— `SkillPublishService` 加 `publish_from_artifact(artifact_id)` 入口
+- `backend/cubeplex/middleware/artifacts.py` —— 扩 `save_artifact` description；`ARTIFACT_PROMPT` 加 "skill" 类型
+- `backend/cubeplex/api/routes/v1/ws_skills.py` —— `publish` 端点支持 `{"artifact_id": ...}` JSON body 分支
+- `backend/cubeplex/skills/service.py` —— `SkillPublishService` 加 `publish_from_artifact(artifact_id)` 入口
 - `frontend/packages/web/components/panel/artifact/` —— 注册 `artifact_type === "skill"` → `SkillArtifactPreview`
 
 ### 11.3 阶段
@@ -906,7 +906,7 @@ async def seed_preinstalled_skills(redis: Redis) -> None:
 | 风险 | 缓解 |
 |---|---|
 | Seeder 写对象存储成功但 DB 失败 → 孤儿文件 | 写顺序：upsert Skill → INSERT SkillVersion → upload files；upload 失败回滚 version row。下次部署幂等重试自愈 |
-| 多副本 seeder 同时跑 race | Redis 命名锁 `cubebox:lock:skill_seeder` (TTL 60s，`blocking=False`) 互斥；其他副本跳过；seeder 自身幂等做兜底 |
+| 多副本 seeder 同时跑 race | Redis 命名锁 `cubeplex:lock:skill_seeder` (TTL 60s，`blocking=False`) 互斥；其他副本跳过；seeder 自身幂等做兜底 |
 | Frontmatter 正则→YAML 迁移破坏现存 skill | 4 个预装 SKILL.md 各跑 snapshot 单测；CI 必跑；改 frontmatter 必须同步更新 fixture |
 | Sandbox 同步失败连带 sandbox 不可用 | `LazySandbox._ensure()` 内 try/except；记日志后继续；agent 仍可用 sandbox 但缺 skill 文件 → execute 调脚本时报"file not found"，agent 自然重试或换路径 |
 | `/.skills/builtin/` 路径被 hard-code 引用 | 全部预装 SKILL.md 是我们维护的；迁移 PR 内 grep 修正 |
@@ -945,7 +945,7 @@ async def seed_preinstalled_skills(redis: Redis) -> None:
 
 - [ ] 持久化 sandbox volume + per-sandbox skill 版本状态缓存，避免每次 sandbox 唤醒重复同步（v2 优化）
 - [ ] 缓存淘汰策略（LRU + 大小上限），v1 不做
-- [ ] `cubebox-skills-extra` pip 包 + `entry_points` group `cubebox.preinstalled_skill` 让第三方贡献预装 skill
+- [ ] `cubeplex-skills-extra` pip 包 + `entry_points` group `cubeplex.preinstalled_skill` 让第三方贡献预装 skill
 - [ ] Member chat-side 的 marketplace 浏览页（v1 只暴露 API，UI 留 v2）
 - [ ] Marketplace 数据（安装数 / 最近上传），v1 显式不做
 - [ ] Skill artifact "下载 zip" 动作的服务端打包路径（B2 stretch）

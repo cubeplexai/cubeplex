@@ -889,7 +889,7 @@ wheels = [
 ]
 
 [[package]]
-name = "cubebox"
+name = "cubeplex"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

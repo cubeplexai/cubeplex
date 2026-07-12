@@ -123,7 +123,7 @@ Errors:
   `is_group_chat = True`.
 - 400 `{detail: {code: "invalid_after_run_id"}}` — empty / whitespace body.
 - 400 `{detail: {code: "source_has_no_messages"}}` — source conversation
-  exists in cubebox but has no cubepi thread (drafted but never sent).
+  exists in cubeplex but has no cubepi thread (drafted but never sent).
 - 409 `{detail: {code: "new_thread_exists"}}` — the freshly-minted
   `new_id` already exists in cubepi (vanishingly rare given
   `generate_public_id`; we surface it rather than silently retrying so

@@ -1,1 +1,0 @@
-"""cubebox Backend Package"""

@@ -1,10 +1,10 @@
 'use client'
 
 import { useEffect, useRef, useState, memo } from 'react'
-import type { MCPToolIcon, PendingConfirm, ToolCallRef } from '@cubebox/core'
+import type { MCPToolIcon, PendingConfirm, ToolCallRef } from '@cubeplex/core'
 import { CheckCircle2, Circle, PanelRight, Plug } from 'lucide-react'
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
-import { useMcpToolRegistryStore, useToolDetailStore } from '@cubebox/core'
+import { useMcpToolRegistryStore, useToolDetailStore } from '@cubeplex/core'
 import { useNowSeconds } from '@/hooks/useNowSeconds'
 import { SandboxConfirmCard } from './SandboxConfirmCard'
 

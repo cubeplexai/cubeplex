@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { X } from 'lucide-react'
-import { type CreateEnvIn, type EnvEntryOut, type UpdateEntryIn } from '@cubebox/core'
+import { type CreateEnvIn, type EnvEntryOut, type UpdateEntryIn } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

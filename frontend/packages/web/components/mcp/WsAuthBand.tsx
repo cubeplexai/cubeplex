@@ -27,7 +27,7 @@ import {
   type MCPAuthMethod,
   type MCPEffectiveConnector,
   type MCPOAuthStartResult,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 

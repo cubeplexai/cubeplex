@@ -12,7 +12,7 @@ A workspace is where your team collaborates with AI. This guide walks you throug
 
 ## Prerequisites
 
-- You have a CubeBox account (see [Quick Start](./quick-start.md)).
+- You have a CubePlex account (see [Quick Start](./quick-start.md)).
 - You have **org admin** or **owner** permissions to create workspaces. Workspace members can skip to [Join an existing workspace](#join-an-existing-workspace).
 
 ## Create a workspace
@@ -43,7 +43,7 @@ To invite to a workspace:
 <Tabs groupId="deploy-mode">
 <TabItem value="cloud" label="Cloud">
 
-Click the invite link you received by email. If you do not have a CubeBox account yet, you will be prompted to create one first.
+Click the invite link you received by email. If you do not have a CubePlex account yet, you will be prompted to create one first.
 
 </TabItem>
 <TabItem value="self-hosted" label="Self-hosted">

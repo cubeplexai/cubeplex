@@ -9,7 +9,7 @@ from webhook.cert_minter import CertMinter, load_ca
 def _make_ca(tmp_path):
     # produce a throwaway CA key+cert for the test
     from webhook.cert_minter import generate_ca
-    key_pem, cert_pem = generate_ca("cubebox-egress-test-ca")
+    key_pem, cert_pem = generate_ca("cubeplex-egress-test-ca")
     return load_ca(key_pem, cert_pem)
 
 

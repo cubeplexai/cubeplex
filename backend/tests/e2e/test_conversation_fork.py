@@ -21,9 +21,9 @@ from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.agents.checkpointer import init_checkpointer
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Conversation
+from cubeplex.agents.checkpointer import init_checkpointer
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Conversation
 from tests.e2e.conftest import DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e
@@ -106,7 +106,7 @@ async def _cleanup(conversation_ids: list[str]) -> None:
                     text("DELETE FROM cubepi_threads WHERE thread_id = :t"),
                     {"t": cid},
                 )
-                # Dependent cubebox tables that the fork route creates rows in
+                # Dependent cubeplex tables that the fork route creates rows in
                 # (search index enqueue → conversation_chunks + embedding_jobs).
                 # Drop these before the conversation row so its FK targets are
                 # free.
@@ -118,7 +118,7 @@ async def _cleanup(conversation_ids: list[str]) -> None:
                     text("DELETE FROM embedding_jobs WHERE conversation_id = :id"),
                     {"id": cid},
                 )
-                # cubebox conversation row.
+                # cubeplex conversation row.
                 await session.execute(
                     text("DELETE FROM conversations WHERE id = :id"),
                     {"id": cid},

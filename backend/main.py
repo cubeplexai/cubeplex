@@ -1,5 +1,5 @@
 """
-Entry point for cubebox Backend.
+Entry point for cubeplex Backend.
 
 Starts the FastAPI application with uvicorn.
 """
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import uvicorn
 
-from cubebox.config import config
+from cubeplex.config import config
 
 if __name__ == "__main__":
     reload_kwargs: dict[str, object] = {}
@@ -41,7 +41,7 @@ if __name__ == "__main__":
         }
 
     uvicorn.run(
-        "cubebox.api.app:create_app",
+        "cubeplex.api.app:create_app",
         host=config.api.host,
         port=config.api.port,
         reload=config.api.reload,

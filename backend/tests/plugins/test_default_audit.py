@@ -3,8 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.plugins import AuditEvent, AuditSink
-from cubebox.plugins.defaults.audit import DefaultAuditSink
+from cubeplex.plugins import AuditEvent, AuditSink
+from cubeplex.plugins.defaults.audit import DefaultAuditSink
 
 
 def test_default_audit_sink_satisfies_protocol() -> None:

@@ -30,7 +30,7 @@ import {
   type MCPConnector,
   type MCPConnectorTemplate,
   type MCPEffectiveConnector,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useWorkspaceStore } from '@cubebox/core'
+import { useWorkspaceStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 export function WorkspaceList() {

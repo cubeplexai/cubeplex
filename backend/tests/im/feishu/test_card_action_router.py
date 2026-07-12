@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.im.feishu.card_action_router import (
+from cubeplex.im.feishu.card_action_router import (
     ActionPayload,
     InvalidAction,
     ResumeAction,

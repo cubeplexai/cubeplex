@@ -9,9 +9,9 @@ cache/context cost on every turn where most servers are unused.
 
 **Architecture:** cubepi already provides the generic `DeferredToolGroup` /
 `DeferredToolsMiddleware` / `load_tools` primitive (PR #168, pinned at
-`5a85696`). cubebox maps MCP servers → deferred groups and wires them into
+`5a85696`). cubeplex maps MCP servers → deferred groups and wires them into
 `run_manager._run_cubepi_path`. No custom middleware, catalog renderer, or
-expand-tool in cubebox — cubepi handles all of that.
+expand-tool in cubeplex — cubepi handles all of that.
 
 **Tech Stack:** FastAPI + cubepi 0.9.0, Postgres/SQLModel, Python 3.13,
 mypy strict, ruff, line length 100.
@@ -26,9 +26,9 @@ Issue: #143
 
 | File | Action | Responsibility |
 |---|---|---|
-| `cubebox/mcp/disclosure.py` | Create | Config settings, threshold gate, spec→group mapping |
-| `cubebox/mcp/cubepi_runtime.py` | Modify | Add `load_tools_for_specs` (per-spec-list loader) |
-| `cubebox/streams/run_manager.py` | Modify | Wire deferred groups into `_run_cubepi_path` |
+| `cubeplex/mcp/disclosure.py` | Create | Config settings, threshold gate, spec→group mapping |
+| `cubeplex/mcp/cubepi_runtime.py` | Modify | Add `load_tools_for_specs` (per-spec-list loader) |
+| `cubeplex/streams/run_manager.py` | Modify | Wire deferred groups into `_run_cubepi_path` |
 | `config.yaml` | Modify | Add `mcp.progressive_disclosure` block |
 | `tests/unit/test_mcp_disclosure.py` | Create | Config, threshold, spec→group mapping |
 | `tests/e2e/test_mcp_disclosure_runtime.py` | Create | Full wiring, catalog, expand, threshold bypass |
@@ -40,7 +40,7 @@ Issue: #143
 Add the config surface and pure helpers deciding when disclosure is active.
 
 Files:
-- Create: `backend/cubebox/mcp/disclosure.py`
+- Create: `backend/cubeplex/mcp/disclosure.py`
 - Modify: `backend/config.yaml` (add `mcp.progressive_disclosure` block)
 - Create: `backend/tests/unit/test_mcp_disclosure.py`
 
@@ -53,7 +53,7 @@ from __future__ import annotations
 
 class TestDisclosureSettings:
     def test_defaults(self) -> None:
-        from cubebox.mcp.disclosure import DisclosureSettings
+        from cubeplex.mcp.disclosure import DisclosureSettings
 
         s = DisclosureSettings()
         assert s.enabled == "auto"
@@ -61,26 +61,26 @@ class TestDisclosureSettings:
         assert s.min_servers == 2
 
     def test_disabled_never_active(self) -> None:
-        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+        from cubeplex.mcp.disclosure import DisclosureSettings, disclosure_active
 
         s = DisclosureSettings(enabled="off")
         assert disclosure_active(s, server_count=10, total_tool_tokens=9999) is False
 
     def test_on_always_active(self) -> None:
-        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+        from cubeplex.mcp.disclosure import DisclosureSettings, disclosure_active
 
         s = DisclosureSettings(enabled="on")
         assert disclosure_active(s, server_count=1, total_tool_tokens=1) is True
 
     def test_auto_below_min_servers(self) -> None:
-        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+        from cubeplex.mcp.disclosure import DisclosureSettings, disclosure_active
 
         s = DisclosureSettings(enabled="auto", min_servers=3)
         # Even if tokens are high, too few servers → inactive.
         assert disclosure_active(s, server_count=2, total_tool_tokens=99999) is False
 
     def test_auto_below_threshold_pct(self) -> None:
-        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+        from cubeplex.mcp.disclosure import DisclosureSettings, disclosure_active
 
         s = DisclosureSettings(enabled="auto", threshold_pct=10.0, min_servers=2)
         # 3 servers but tool tokens are only 5% of context → inactive.
@@ -92,7 +92,7 @@ class TestDisclosureSettings:
         )
 
     def test_auto_above_both_thresholds(self) -> None:
-        from cubebox.mcp.disclosure import DisclosureSettings, disclosure_active
+        from cubeplex.mcp.disclosure import DisclosureSettings, disclosure_active
 
         s = DisclosureSettings(enabled="auto", threshold_pct=10.0, min_servers=2)
         # 3 servers, 15% of context → active.
@@ -107,12 +107,12 @@ class TestDisclosureSettings:
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/unit/test_mcp_disclosure.py -v`
-Expected: ImportError — `cubebox.mcp.disclosure` does not exist yet.
+Expected: ImportError — `cubeplex.mcp.disclosure` does not exist yet.
 
 - [ ] **Step 3: Implement `disclosure.py`**
 
 ```python
-# cubebox/mcp/disclosure.py
+# cubeplex/mcp/disclosure.py
 """MCP progressive disclosure — config, threshold gate, spec→group mapping."""
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from cubebox.config import config
+from cubeplex.config import config
 
 
 @dataclass(frozen=True)
@@ -178,7 +178,7 @@ Expected: 6 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/mcp/disclosure.py tests/unit/test_mcp_disclosure.py config.yaml
+git add cubeplex/mcp/disclosure.py tests/unit/test_mcp_disclosure.py config.yaml
 git commit -m "feat(mcp): disclosure config flags + threshold gate (#143)"
 ```
 
@@ -195,8 +195,8 @@ so both the eager (all-at-once) and deferred (per-group) paths call the same
 code.
 
 Files:
-- Modify: `backend/cubebox/mcp/cubepi_runtime.py` — extract `_load_tools_for_specs`
-- Modify: `backend/cubebox/mcp/disclosure.py` — add `build_deferred_groups`
+- Modify: `backend/cubeplex/mcp/cubepi_runtime.py` — extract `_load_tools_for_specs`
+- Modify: `backend/cubeplex/mcp/disclosure.py` — add `build_deferred_groups`
 - Extend: `backend/tests/unit/test_mcp_disclosure.py`
 
 - [ ] **Step 1: Write the failing tests for `_load_tools_for_specs`**
@@ -231,12 +231,12 @@ class TestLoadToolsForSpecs:
         async def _fake_load(url, *, headers=None, timeout=30.0, transport="sse"):
             return FakeDiscovery(["create_issue", "search_repos"])
 
-        monkeypatch.setattr("cubebox.mcp.cubepi_runtime.load_mcp_tools_http", _fake_load)
+        monkeypatch.setattr("cubeplex.mcp.cubepi_runtime.load_mcp_tools_http", _fake_load)
 
     @pytest.mark.usefixtures("_patch_load_mcp_tools_http")
     async def test_loads_and_namespaces_tools(self) -> None:
-        from cubebox.mcp.cubepi_runtime import _load_tools_for_specs
-        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+        from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
         spec = MCPRuntimeConnectorSpec(
             install_id="inst-001",
@@ -336,8 +336,8 @@ Expected: all existing MCP tests pass.
 # tests/unit/test_mcp_disclosure.py (append)
 class TestBuildDeferredGroups:
     def test_builds_groups_from_specs(self) -> None:
-        from cubebox.mcp.disclosure import build_deferred_groups
-        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+        from cubeplex.mcp.disclosure import build_deferred_groups
+        from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
         spec = MCPRuntimeConnectorSpec(
             install_id="inst-001",
@@ -369,8 +369,8 @@ class TestBuildDeferredGroups:
         assert callable(g.loader)
 
     def test_description_from_discovery_metadata(self) -> None:
-        from cubebox.mcp.disclosure import build_deferred_groups
-        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+        from cubeplex.mcp.disclosure import build_deferred_groups
+        from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
         spec = MCPRuntimeConnectorSpec(
             install_id="inst-002",
@@ -393,8 +393,8 @@ class TestBuildDeferredGroups:
         assert "Issue tracking" in groups[0].description
 
     def test_fallback_description_when_no_metadata(self) -> None:
-        from cubebox.mcp.disclosure import build_deferred_groups
-        from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+        from cubeplex.mcp.disclosure import build_deferred_groups
+        from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
         spec = MCPRuntimeConnectorSpec(
             install_id="inst-003",
@@ -418,7 +418,7 @@ class TestBuildDeferredGroups:
 - [ ] **Step 6: Implement `build_deferred_groups`**
 
 ```python
-# cubebox/mcp/disclosure.py (append)
+# cubeplex/mcp/disclosure.py (append)
 from __future__ import annotations
 
 from collections import Counter
@@ -426,13 +426,13 @@ from typing import Any
 
 from cubepi.deferred import DeferredToolGroup
 
-from cubebox.mcp._constants import slugify_for_namespace
-from cubebox.mcp.cubepi_runtime import (
+from cubeplex.mcp._constants import slugify_for_namespace
+from cubeplex.mcp.cubepi_runtime import (
     _build_namespaced_name_with_prefix,
     _load_tools_for_specs,
     _NS_LENGTH_DEFENCE,
 )
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 
 def _spec_description(spec: MCPRuntimeConnectorSpec) -> str:
@@ -511,7 +511,7 @@ Expected: all passed.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add cubebox/mcp/disclosure.py cubebox/mcp/cubepi_runtime.py \
+git add cubeplex/mcp/disclosure.py cubeplex/mcp/cubepi_runtime.py \
     tests/unit/test_mcp_disclosure.py
 git commit -m "feat(mcp): spec→DeferredToolGroup mapping + per-spec-list loader (#143)"
 ```
@@ -526,7 +526,7 @@ deferred groups instead of eagerly loaded tools. When inactive (below threshold
 or `"off"`), the existing eager-load path runs unchanged.
 
 Files:
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Add the disclosure branch to `_run_cubepi_path`**
 
@@ -538,7 +538,7 @@ In `_run_cubepi_path`, the MCP tool load block (~line 2155) currently:
 Replace with a disclosure-aware branch:
 
 ```python
-from cubebox.mcp.disclosure import (
+from cubeplex.mcp.disclosure import (
     build_deferred_groups,
     disclosure_active,
     load_disclosure_settings,
@@ -608,11 +608,11 @@ else:
 
 - [ ] **Step 2: Pass deferred groups to agent creation**
 
-At the `create_cubebox_agent(...)` call (~line 2663), add
+At the `create_cubeplex_agent(...)` call (~line 2663), add
 `deferred_tool_groups=_deferred_groups or None`:
 
 ```python
-agent = create_cubebox_agent(
+agent = create_cubeplex_agent(
     ...
     tools=all_tools,
     deferred_tool_groups=_deferred_groups or None,
@@ -620,7 +620,7 @@ agent = create_cubebox_agent(
 )
 ```
 
-This requires `create_cubebox_agent` to accept and forward
+This requires `create_cubeplex_agent` to accept and forward
 `deferred_tool_groups` to `Agent(...)`. Find the wrapper function and add the
 parameter — it likely just passes kwargs through to `Agent()`.
 
@@ -643,16 +643,16 @@ is the most likely gotcha.
 - [ ] **Step 4: Run mypy + ruff**
 
 ```bash
-cd backend && uv run mypy cubebox/streams/run_manager.py cubebox/mcp/disclosure.py \
-    cubebox/mcp/cubepi_runtime.py && uv run ruff check cubebox tests
+cd backend && uv run mypy cubeplex/streams/run_manager.py cubeplex/mcp/disclosure.py \
+    cubeplex/mcp/cubepi_runtime.py && uv run ruff check cubeplex tests
 ```
 Expected: no errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/streams/run_manager.py cubebox/mcp/disclosure.py \
-    cubebox/mcp/cubepi_runtime.py
+git add cubeplex/streams/run_manager.py cubeplex/mcp/disclosure.py \
+    cubeplex/mcp/cubepi_runtime.py
 git commit -m "feat(mcp): wire deferred groups into run_manager (#143)"
 ```
 
@@ -761,7 +761,7 @@ Expected: green.
 - [ ] **Step 2: Type-check + lint**
 
 ```bash
-cd backend && uv run mypy cubebox && uv run ruff check cubebox tests
+cd backend && uv run mypy cubeplex && uv run ruff check cubeplex tests
 ```
 Expected: no errors; lines ≤ 100.
 

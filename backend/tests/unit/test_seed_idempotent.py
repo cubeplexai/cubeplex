@@ -7,9 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models.provider import Model, Provider
-from cubebox.seeders import seed_system_providers_from_config
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models.provider import Model, Provider
+from cubeplex.seeders import seed_system_providers_from_config
 
 
 @pytest.fixture()
@@ -78,8 +78,8 @@ async def test_seed_updates_existing_provider_url(
     # Insert a provider manually with a different URL
     p = Provider(
         org_id=None,
-        name="cubebox",
-        slug="cubebox",
+        name="cubeplex",
+        slug="cubeplex",
         provider_type="openai-completions",
         base_url="http://old-url",
         auth_type="api_key",
@@ -93,7 +93,7 @@ async def test_seed_updates_existing_provider_url(
 
     # Verify the URL was updated
     updated = (
-        await clean_db.execute(select(Provider).where(Provider.name == "cubebox"))
+        await clean_db.execute(select(Provider).where(Provider.name == "cubeplex"))
     ).scalar_one()
     assert updated.base_url != "http://old-url"
     assert updated.provider_type == "openai-completions"
@@ -107,7 +107,7 @@ async def test_seed_backfills_capability_for_preset_ref(
     """A provider with a ``preset:`` ref gets its capability snapshot + preset_key.
 
     Under the new rule (spec §6.2), backfill is driven by an explicit ``preset:``
-    reference into the cubebox catalog — not a name==slug match. A custom provider
+    reference into the cubeplex catalog — not a name==slug match. A custom provider
     (no preset) is left with no preset_slug and no capability.
     """
     fake_llm = {
@@ -124,7 +124,7 @@ async def test_seed_backfills_capability_for_preset_ref(
         }
     }
     monkeypatch.setattr(
-        "cubebox.seeders.provider_seeder.settings",
+        "cubeplex.seeders.provider_seeder.settings",
         {"llm": fake_llm},
         raising=True,
     )
@@ -180,7 +180,7 @@ async def test_seed_refreshes_legacy_seeded_capability(
         }
     }
     monkeypatch.setattr(
-        "cubebox.seeders.provider_seeder.settings",
+        "cubeplex.seeders.provider_seeder.settings",
         {"llm": fake_llm},
         raising=True,
     )
@@ -218,7 +218,9 @@ async def test_seed_dedups_colliding_slugs(
             },
         }
     }
-    monkeypatch.setattr("cubebox.seeders.provider_seeder.settings", {"llm": fake_llm}, raising=True)
+    monkeypatch.setattr(
+        "cubeplex.seeders.provider_seeder.settings", {"llm": fake_llm}, raising=True
+    )
 
     await seed_system_providers_from_config(clean_db, backend)
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { AlertCircle, Plus, Trash2 } from 'lucide-react'
-import type { SandboxCommandRule } from '@cubebox/core'
+import type { SandboxCommandRule } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {

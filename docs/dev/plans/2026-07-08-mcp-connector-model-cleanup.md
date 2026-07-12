@@ -27,17 +27,17 @@
 
 ## File Structure
 
-- `backend/cubebox/models/mcp.py` - make workspace state and credential grants connector-centric; remove install model only after readers are cut over.
-- `backend/cubebox/models/public_id.py` - keep `mcpco` public id prefix; remove install prefix only if no remaining model uses it.
-- `backend/cubebox/repositories/mcp.py` - add connector-centric state and grant repository methods; remove install repository after callers are gone.
-- `backend/cubebox/services/mcp_installs.py` - replace with connector-centric service or shrink to compatibility wrappers during cutover.
-- `backend/cubebox/mcp/effective.py` - compute runtime availability from connector + workspace state + grant.
-- `backend/cubebox/mcp/oauth/start.py` - start OAuth by connector id, target grant scope, workspace id, and user id.
-- `backend/cubebox/mcp/oauth/callback.py` - write connector-scoped grants from OAuth callback.
-- `backend/cubebox/mcp/discovery.py` and `backend/cubebox/services/mcp_discovery.py` - update connector metadata instead of install metadata.
-- `backend/cubebox/api/routes/v1/admin_mcp.py` - expose connector-centric admin operations while preserving route isolation.
-- `backend/cubebox/api/routes/v1/ws_mcp.py` - expose connector-centric workspace operations while preserving route isolation.
-- `backend/cubebox/api/schemas/mcp.py` - make connector response types primary; remove install-centric response fields after route cutover.
+- `backend/cubeplex/models/mcp.py` - make workspace state and credential grants connector-centric; remove install model only after readers are cut over.
+- `backend/cubeplex/models/public_id.py` - keep `mcpco` public id prefix; remove install prefix only if no remaining model uses it.
+- `backend/cubeplex/repositories/mcp.py` - add connector-centric state and grant repository methods; remove install repository after callers are gone.
+- `backend/cubeplex/services/mcp_installs.py` - replace with connector-centric service or shrink to compatibility wrappers during cutover.
+- `backend/cubeplex/mcp/effective.py` - compute runtime availability from connector + workspace state + grant.
+- `backend/cubeplex/mcp/oauth/start.py` - start OAuth by connector id, target grant scope, workspace id, and user id.
+- `backend/cubeplex/mcp/oauth/callback.py` - write connector-scoped grants from OAuth callback.
+- `backend/cubeplex/mcp/discovery.py` and `backend/cubeplex/services/mcp_discovery.py` - update connector metadata instead of install metadata.
+- `backend/cubeplex/api/routes/v1/admin_mcp.py` - expose connector-centric admin operations while preserving route isolation.
+- `backend/cubeplex/api/routes/v1/ws_mcp.py` - expose connector-centric workspace operations while preserving route isolation.
+- `backend/cubeplex/api/schemas/mcp.py` - make connector response types primary; remove install-centric response fields after route cutover.
 - `frontend/packages/core/src/types/mcp.ts` - make `connector_id` required for public MCP connector objects.
 - `frontend/packages/core/src/api/mcp.ts` - call connector-centric endpoints and types.
 - `frontend/packages/web/app/admin/mcp/page.tsx` - use connector identity as the list/action key.
@@ -53,8 +53,8 @@
 
 **Files:**
 - Create: `backend/tests/e2e/test_mcp_connector_model_cleanup.py`
-- Modify: `backend/cubebox/repositories/mcp.py`
-- Modify: `backend/cubebox/models/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
+- Modify: `backend/cubeplex/models/mcp.py`
 
 **Interfaces:**
 - Consumes: existing `MCPConnector`, `MCPWorkspaceConnectorState`, `MCPCredentialGrant`.
@@ -108,7 +108,7 @@ Expected: FAIL because connector-centric repository methods do not exist or are 
 
 - [ ] **Step 4: Add connector-centric repository methods**
 
-Modify `backend/cubebox/repositories/mcp.py`:
+Modify `backend/cubeplex/repositories/mcp.py`:
 
 - keep existing install-centric methods during cutover
 - add connector-centric methods listed in the Interfaces section
@@ -131,7 +131,7 @@ Expected: PASS for the two new repository tests.
 Run:
 
 ```bash
-git add backend/tests/e2e/test_mcp_connector_model_cleanup.py backend/cubebox/repositories/mcp.py backend/cubebox/models/mcp.py
+git add backend/tests/e2e/test_mcp_connector_model_cleanup.py backend/cubeplex/repositories/mcp.py backend/cubeplex/models/mcp.py
 git commit -m "Add connector-centric MCP repository methods"
 ```
 
@@ -142,8 +142,8 @@ Expected: commit succeeds.
 ### Task 2: Migrate Workspace State and Grants to Connector Keys
 
 **Files:**
-- Modify: `backend/cubebox/models/mcp.py`
-- Modify: `backend/cubebox/repositories/mcp.py`
+- Modify: `backend/cubeplex/models/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
 - Create: one Alembic-generated migration under `backend/alembic/versions/` named by the revision command with message `mcp connector state grant keys`
 - Modify: `backend/tests/e2e/test_migration.py`
 - Modify: `backend/tests/e2e/test_mcp_connector_model_cleanup.py`
@@ -189,7 +189,7 @@ Check the generated file and ensure it:
 
 - [ ] **Step 4: Update models**
 
-Modify `backend/cubebox/models/mcp.py` so:
+Modify `backend/cubeplex/models/mcp.py` so:
 
 - `MCPWorkspaceConnectorState.connector_id` is required
 - `MCPCredentialGrant.connector_id` is required
@@ -212,7 +212,7 @@ Expected: PASS for migration and repository coverage.
 Run:
 
 ```bash
-git add backend/alembic/versions backend/cubebox/models/mcp.py backend/cubebox/repositories/mcp.py backend/tests/e2e/test_migration.py backend/tests/e2e/test_mcp_connector_model_cleanup.py
+git add backend/alembic/versions backend/cubeplex/models/mcp.py backend/cubeplex/repositories/mcp.py backend/tests/e2e/test_migration.py backend/tests/e2e/test_mcp_connector_model_cleanup.py
 git commit -m "Rekey MCP state and grants by connector"
 ```
 
@@ -223,11 +223,11 @@ Expected: commit succeeds.
 ### Task 3: Cut Over Service Creation and Workspace Enablement
 
 **Files:**
-- Modify: `backend/cubebox/services/mcp_installs.py`
-- Modify: `backend/cubebox/mcp/workspace_bootstrap.py`
-- Modify: `backend/cubebox/mcp/dependencies.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
+- Modify: `backend/cubeplex/mcp/workspace_bootstrap.py`
+- Modify: `backend/cubeplex/mcp/dependencies.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
 - Modify: `backend/tests/e2e/test_mcp_connector_model_cleanup.py`
 - Modify: existing MCP route/service tests that still assert install-centric behavior
 
@@ -268,7 +268,7 @@ Expected: FAIL because service/routes still create or depend on install rows.
 
 - [ ] **Step 3: Refactor creation service**
 
-Modify `backend/cubebox/services/mcp_installs.py` or introduce a connector-centric service in the same module to:
+Modify `backend/cubeplex/services/mcp_installs.py` or introduce a connector-centric service in the same module to:
 
 - ensure connector from template/custom server
 - write org credential grant by `connector_id`
@@ -278,7 +278,7 @@ Modify `backend/cubebox/services/mcp_installs.py` or introduce a connector-centr
 
 - [ ] **Step 4: Update admin and workspace routes**
 
-Modify `backend/cubebox/api/routes/v1/admin_mcp.py` and `backend/cubebox/api/routes/v1/ws_mcp.py` so:
+Modify `backend/cubeplex/api/routes/v1/admin_mcp.py` and `backend/cubeplex/api/routes/v1/ws_mcp.py` so:
 
 - request handlers resolve connector identity first
 - workspace enable/disable uses `connector_id`
@@ -287,7 +287,7 @@ Modify `backend/cubebox/api/routes/v1/admin_mcp.py` and `backend/cubebox/api/rou
 
 - [ ] **Step 5: Update workspace bootstrap**
 
-Modify `backend/cubebox/mcp/workspace_bootstrap.py` so new workspaces are auto-enrolled from connector rollout data and write connector-keyed state rows.
+Modify `backend/cubeplex/mcp/workspace_bootstrap.py` so new workspaces are auto-enrolled from connector rollout data and write connector-keyed state rows.
 
 - [ ] **Step 6: Run service and route tests**
 
@@ -305,7 +305,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add backend/cubebox/services/mcp_installs.py backend/cubebox/mcp/workspace_bootstrap.py backend/cubebox/mcp/dependencies.py backend/cubebox/api/routes/v1/admin_mcp.py backend/cubebox/api/routes/v1/ws_mcp.py backend/tests/e2e/test_mcp_connector_model_cleanup.py backend/tests/e2e/test_mcp_credential_layering.py backend/tests/e2e/test_mcp_install_uniqueness.py
+git add backend/cubeplex/services/mcp_installs.py backend/cubeplex/mcp/workspace_bootstrap.py backend/cubeplex/mcp/dependencies.py backend/cubeplex/api/routes/v1/admin_mcp.py backend/cubeplex/api/routes/v1/ws_mcp.py backend/tests/e2e/test_mcp_connector_model_cleanup.py backend/tests/e2e/test_mcp_credential_layering.py backend/tests/e2e/test_mcp_install_uniqueness.py
 git commit -m "Create MCP workspace state from connector identity"
 ```
 
@@ -316,12 +316,12 @@ Expected: commit succeeds.
 ### Task 4: Cut Over OAuth, Credential Grants, and Effective Runtime
 
 **Files:**
-- Modify: `backend/cubebox/mcp/oauth/start.py`
-- Modify: `backend/cubebox/mcp/oauth/callback.py`
-- Modify: `backend/cubebox/mcp/effective.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/cubebox/services/mcp_discovery.py`
-- Modify: `backend/cubebox/mcp/template_seed.py`
+- Modify: `backend/cubeplex/mcp/oauth/start.py`
+- Modify: `backend/cubeplex/mcp/oauth/callback.py`
+- Modify: `backend/cubeplex/mcp/effective.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
+- Modify: `backend/cubeplex/services/mcp_discovery.py`
+- Modify: `backend/cubeplex/mcp/template_seed.py`
 - Modify: OAuth and runtime e2e tests under `backend/tests/e2e/`
 
 **Interfaces:**
@@ -356,7 +356,7 @@ Expected: FAIL in OAuth/runtime paths that still use install ids.
 
 - [ ] **Step 3: Update OAuth start payload**
 
-Modify `backend/cubebox/mcp/oauth/start.py` so OAuth state includes:
+Modify `backend/cubeplex/mcp/oauth/start.py` so OAuth state includes:
 
 - `connector_id`
 - `grant_scope`
@@ -368,7 +368,7 @@ Reject invalid scope/identity combinations before creating provider URLs.
 
 - [ ] **Step 4: Update OAuth callback grant writes**
 
-Modify `backend/cubebox/mcp/oauth/callback.py` so callback:
+Modify `backend/cubeplex/mcp/oauth/callback.py` so callback:
 
 - resolves connector by `connector_id`
 - validates org/workspace/user ownership
@@ -377,7 +377,7 @@ Modify `backend/cubebox/mcp/oauth/callback.py` so callback:
 
 - [ ] **Step 5: Update effective runtime**
 
-Modify `backend/cubebox/mcp/effective.py` so effective state:
+Modify `backend/cubeplex/mcp/effective.py` so effective state:
 
 - lists connectors available to the workspace through org availability and workspace state
 - reads workspace state by `connector_id`
@@ -386,7 +386,7 @@ Modify `backend/cubebox/mcp/effective.py` so effective state:
 
 - [ ] **Step 6: Update stream runtime and discovery**
 
-Modify `backend/cubebox/streams/run_manager.py` and `backend/cubebox/services/mcp_discovery.py` so runtime tool specs and discovery metadata come from `MCPConnector`.
+Modify `backend/cubeplex/streams/run_manager.py` and `backend/cubeplex/services/mcp_discovery.py` so runtime tool specs and discovery metadata come from `MCPConnector`.
 
 - [ ] **Step 7: Run OAuth/runtime tests**
 
@@ -404,7 +404,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add backend/cubebox/mcp/oauth/start.py backend/cubebox/mcp/oauth/callback.py backend/cubebox/mcp/effective.py backend/cubebox/streams/run_manager.py backend/cubebox/services/mcp_discovery.py backend/cubebox/mcp/template_seed.py backend/tests/e2e
+git add backend/cubeplex/mcp/oauth/start.py backend/cubeplex/mcp/oauth/callback.py backend/cubeplex/mcp/effective.py backend/cubeplex/streams/run_manager.py backend/cubeplex/services/mcp_discovery.py backend/cubeplex/mcp/template_seed.py backend/tests/e2e
 git commit -m "Resolve MCP runtime credentials by connector"
 ```
 
@@ -415,9 +415,9 @@ Expected: commit succeeds.
 ### Task 5: Cut Over API Schemas, Frontend Types, and UI Copy
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/schemas/mcp_admin_connector.py`
-- Modify: `backend/cubebox/api/schemas/mcp_ws_available.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp_admin_connector.py`
+- Modify: `backend/cubeplex/api/schemas/mcp_ws_available.py`
 - Modify: `frontend/packages/core/src/types/mcp.ts`
 - Modify: `frontend/packages/core/src/types/mcp_admin_connector.ts`
 - Modify: `frontend/packages/core/src/types/mcp_ws_available.ts`
@@ -499,7 +499,7 @@ Expected: PASS.
 Run:
 
 ```bash
-git add backend/cubebox/api/schemas/mcp.py backend/cubebox/api/schemas/mcp_admin_connector.py backend/cubebox/api/schemas/mcp_ws_available.py frontend/packages/core/src/types/mcp.ts frontend/packages/core/src/types/mcp_admin_connector.ts frontend/packages/core/src/types/mcp_ws_available.ts frontend/packages/core/src/api/mcp.ts frontend/packages/core/__tests__/api/mcp.test.ts frontend/packages/web/app frontend/packages/web/messages/en.json frontend/packages/web/messages/zh.json
+git add backend/cubeplex/api/schemas/mcp.py backend/cubeplex/api/schemas/mcp_admin_connector.py backend/cubeplex/api/schemas/mcp_ws_available.py frontend/packages/core/src/types/mcp.ts frontend/packages/core/src/types/mcp_admin_connector.ts frontend/packages/core/src/types/mcp_ws_available.ts frontend/packages/core/src/api/mcp.ts frontend/packages/core/__tests__/api/mcp.test.ts frontend/packages/web/app frontend/packages/web/messages/en.json frontend/packages/web/messages/zh.json
 git commit -m "Expose MCP connectors as primary API objects"
 ```
 
@@ -510,12 +510,12 @@ Expected: commit succeeds.
 ### Task 6: Remove Install Runtime Dependencies and Drop Install Table
 
 **Files:**
-- Modify: `backend/cubebox/models/mcp.py`
-- Modify: `backend/cubebox/repositories/mcp.py`
-- Modify: `backend/cubebox/services/mcp_installs.py`
-- Modify: `backend/cubebox/models/__init__.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
-- Modify: `backend/cubebox/models/public_id.py`
+- Modify: `backend/cubeplex/models/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
+- Modify: `backend/cubeplex/models/__init__.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
+- Modify: `backend/cubeplex/models/public_id.py`
 - Create: one Alembic-generated migration under `backend/alembic/versions/` named by the revision command with message `drop mcp connector installs`
 - Modify: tests that import `MCPConnectorInstall`
 
@@ -531,7 +531,7 @@ Expected: commit succeeds.
 Run:
 
 ```bash
-rg -n "MCPConnectorInstall|mcp_connector_installs|install_id" backend/cubebox backend/tests frontend/packages/core frontend/packages/web docs/site/docs
+rg -n "MCPConnectorInstall|mcp_connector_installs|install_id" backend/cubeplex backend/tests frontend/packages/core frontend/packages/web docs/site/docs
 ```
 
 Expected: output lists remaining places to migrate or compatibility references to justify.
@@ -566,7 +566,7 @@ Run:
 
 ```bash
 cd backend
-uv run mypy cubebox 2>&1 | tee tmp/mcp_connector_model_cleanup_task6_mypy.log | tail -40
+uv run mypy cubeplex 2>&1 | tee tmp/mcp_connector_model_cleanup_task6_mypy.log | tail -40
 uv run pytest tests/e2e/test_mcp_connector_model_cleanup.py tests/e2e/test_migration.py --no-cov 2>&1 | tee tmp/mcp_connector_model_cleanup_task6_pytest.log | tail -40
 ```
 
@@ -577,7 +577,7 @@ Expected: PASS.
 Run:
 
 ```bash
-rg -n "MCPConnectorInstall|mcp_connector_installs|install_id" backend/cubebox frontend/packages/core frontend/packages/web docs/site/docs || true
+rg -n "MCPConnectorInstall|mcp_connector_installs|install_id" backend/cubeplex frontend/packages/core frontend/packages/web docs/site/docs || true
 ```
 
 Expected: no runtime references. Any remaining docs references must describe historical migration only.
@@ -587,7 +587,7 @@ Expected: no runtime references. Any remaining docs references must describe his
 Run:
 
 ```bash
-git add backend/cubebox backend/alembic/versions backend/tests frontend/packages/core frontend/packages/web docs/site/docs
+git add backend/cubeplex backend/alembic/versions backend/tests frontend/packages/core frontend/packages/web docs/site/docs
 git commit -m "Drop MCP connector install runtime model"
 ```
 
@@ -628,7 +628,7 @@ Run:
 
 ```bash
 cd backend
-uv run mypy cubebox 2>&1 | tee tmp/mcp_connector_model_cleanup_final_mypy.log | tail -40
+uv run mypy cubeplex 2>&1 | tee tmp/mcp_connector_model_cleanup_final_mypy.log | tail -40
 uv run pytest tests/e2e/test_mcp_connector_model_cleanup.py tests/e2e/test_mcp_oauth_handoff.py tests/e2e/test_mcp_four_layer_runtime.py tests/e2e/test_migration.py --no-cov 2>&1 | tee tmp/mcp_connector_model_cleanup_final_pytest.log | tail -40
 ```
 

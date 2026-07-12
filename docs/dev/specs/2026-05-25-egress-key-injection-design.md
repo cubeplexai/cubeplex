@@ -50,7 +50,7 @@ decrypted backend-side today and are not injected into sandbox env).
   for its real secret when sent to that secret's declared host.
 - Plain (non-secret) config env vars are supported too — injected verbatim, no
   placeholder/egress.
-- Developable/testable when the cubebox backend runs **bare** (`python
+- Developable/testable when the cubeplex backend runs **bare** (`python
   main.py`), not only in Kubernetes.
 
 ## 3. Non-goals
@@ -103,7 +103,7 @@ SidecarAuthenticator        # verify(request) -> sidecar identity (incl. sandbox
 ## 5. Architecture overview
 
 ```
- sandbox app container             egress sidecar (stock image)          cubebox (control-plane)
+ sandbox app container             egress sidecar (stock image)          cubeplex (control-plane)
  ┌────────────────────┐            ┌──────────────────────────┐        ┌────────────────────────┐
  │ tool reads env      │  HTTPS    │ mitmproxy (transparent)   │ mTLS   │ internal exchange svc   │
  │ GITHUB_TOKEN=cbxref │ ───────▶ │  inject.py:                │ ──────▶│ 1. verify sidecar cert  │
@@ -119,7 +119,7 @@ SidecarAuthenticator        # verify(request) -> sidecar identity (incl. sandbox
 
 Flow:
 
-1. **At run start**, cubebox resolves **all** applicable **Env Vault** entries
+1. **At run start**, cubeplex resolves **all** applicable **Env Vault** entries
    for the (user, workspace) scope (vault-driven, *not* filtered by which
    skills are loaded — §6.5). For every **secret** entry it mints a placeholder
    `R`, freezes a ref record (revoking the prior one — schema in §6.5), injects
@@ -131,7 +131,7 @@ Flow:
    inject CA trust into the app container (initContainer).
 3. The tool reads `NAME` and sends the placeholder in a header to its API.
 4. `inject.py` scans outbound header values for `cbxref_` tokens; for each, it
-   calls the exchange endpoint over mTLS with `R` + the request host. cubebox
+   calls the exchange endpoint over mTLS with `R` + the request host. cubeplex
    verifies sidecar identity + `sandbox_id`, checks the host is in `R`'s allowed
    hosts, decrypts the bound secret, returns it; the addon replaces the `R`
    substring with the real secret and forwards.
@@ -139,7 +139,7 @@ Flow:
 
 ## 6. Components
 
-### 6.1 Mutating admission webhook (new, cubebox-owned)
+### 6.1 Mutating admission webhook (new, cubeplex-owned)
 
 - **Trigger:** `CREATE` pods in the **dedicated sandbox namespace** (decided),
   matched on `Sandbox` CRD ownerReference (`sandbox.opensandbox.io/v1alpha1`) +
@@ -198,7 +198,7 @@ Lives in a ConfigMap → editable without rebuilding any image.
 ### 6.3 Skill env declaration (openclaw format)
 
 A skill's `SKILL.md` frontmatter declares the env var names it needs, parsed
-into `SkillVersion.raw_metadata` by the existing `cubebox/skills/frontmatter.py`:
+into `SkillVersion.raw_metadata` by the existing `cubeplex/skills/frontmatter.py`:
 
 ```json
 "requires": { "bins": ["uv"], "env": ["GITHUB_TOKEN"] },
@@ -217,7 +217,7 @@ A first-class "env vault" for sandboxes, **not** attached to skill pages. Each
 entry:
 
 ```
-SandboxEnvVar (CubeboxBase, _PREFIX = "senv")
+SandboxEnvVar (CubeplexBase, _PREFIX = "senv")
   org_id        FK organizations
   env_name      str                     (e.g. GITHUB_TOKEN)
   is_secret     bool                     (true → ref + egress; false → plain literal)
@@ -265,7 +265,7 @@ SandboxEnvVar (CubeboxBase, _PREFIX = "senv")
     Validation rejects a secret entry whose hosts can't produce a valid
     allow-list. (Regex must be anchored — see §7.)
 
-### 6.5 Run-start resolution (in `cubebox/sandbox/manager.py`)
+### 6.5 Run-start resolution (in `cubeplex/sandbox/manager.py`)
 
 Injection is **vault-driven, not skill-driven**: resolve **all** Env Vault
 entries that apply to the run's (user, workspace) by scope precedence
@@ -287,7 +287,7 @@ filter this (§6.3). Per run (per-run ref lifecycle, decided):
 Ref record schema (Postgres table; the exchange depends on these fields):
 
 ```
-EgressRef (CubeboxBase, _PREFIX = "eref")
+EgressRef (CubeplexBase, _PREFIX = "eref")
   ref_hash      str   UNIQUE        (hash of R; R itself only lives in the sandbox)
   sandbox_id    str   index         (enforced == cert.sandbox_id at exchange)
   org_id / workspace_id / user_id   (issuing scope)
@@ -307,8 +307,8 @@ Today no `network_policy` is passed, so **no egress sidecar exists at all** —
 setting it is what brings the sidecar (and the webhook patch) into being.
 
 > **Exchange endpoint exposure.** Only a **distinct internal exchange
-> host/port** (separate from the user-facing cubebox API) is on the egress
-> allow-list — never the full cubebox API. The sandbox can reach the exchange
+> host/port** (separate from the user-facing cubeplex API) is on the egress
+> allow-list — never the full cubeplex API. The sandbox can reach the exchange
 > service and its declared upstream hosts, nothing else.
 
 ### 6.6 Exchange endpoint (internal control-plane)
@@ -340,7 +340,7 @@ sandbox image stays stock.
 ### 6.8 Deployment
 
 All new pieces — webhook, `inject.py` ConfigMap, fixed-CA Secret, per-sandbox
-mTLS issuing material — ship as a **cubebox-owned bundle** (decided), deployed
+mTLS issuing material — ship as a **cubeplex-owned bundle** (decided), deployed
 to the dedicated sandbox namespace. OpenSandbox server and egress image stay
 100% stock.
 
@@ -382,7 +382,7 @@ to the dedicated sandbox namespace. OpenSandbox server and egress image stay
 - **Secret hygiene:** flow persistence off; placeholder & substituted headers
   redacted; ref stored as hash; cache TTL bounded.
 - **Exchange exposure:** only the distinct internal exchange host/port is
-  reachable from the sandbox, not the full cubebox API.
+  reachable from the sandbox, not the full cubeplex API.
 - **CA:** one fixed shared CA, no rotation in v1 (accepted; §9).
 
 ## 8. Testing & rollout
@@ -418,7 +418,7 @@ Rollout: behind a per-workspace (or global) enablement flag; default off.
 4. Scope = **skill-tool secrets via env vars** (HTTP-header-to-fixed-host), not
    LLM provider keys.
 5. CA rotation: **not in v1**.
-6. Deployment: **cubebox-owned bundle**; OpenSandbox stays stock.
+6. Deployment: **cubeplex-owned bundle**; OpenSandbox stays stock.
 7. Host source: **Env Vault entry carries host** (doubles as allow-list +
    substitution boundary); skills declare env names only.
 8. Substitution: **token find-and-replace** of `cbxref_` in headers.

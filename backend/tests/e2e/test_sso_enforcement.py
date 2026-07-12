@@ -3,7 +3,7 @@
 These are the security-critical operator paths: once an org's SSO is
 ``active``, password login for any of its members must return 403
 ``sso_required`` and steer them to ``/login/{slug}``. Conversely the
-``cubebox admin disable-sso`` CLI must flip the connection back to
+``cubeplex admin disable-sso`` CLI must flip the connection back to
 ``inactive`` so the admin can recover from a broken IdP.
 
 Notes:
@@ -30,7 +30,7 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Organization, SSOConnection
+from cubeplex.models import Organization, SSOConnection
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
     DEFAULT_TEST_EMAIL,
@@ -46,14 +46,14 @@ pytestmark = pytest.mark.e2e
 @pytest.fixture(autouse=True)
 def _bypass_ssrf_guard(monkeypatch: pytest.MonkeyPatch) -> None:
     """See tests/e2e/test_sso_admin.py — same rationale."""
-    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+    monkeypatch.setattr("cubeplex.sso.oidc._refuse_ssrf_target", lambda url: None)
 
 
 def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.setdefault("ENV_FOR_DYNACONF", "test")
     return subprocess.run(
-        ["uv", "run", "cubebox", *args],
+        ["uv", "run", "cubeplex", *args],
         capture_output=True,
         text=True,
         env=env,
@@ -214,7 +214,7 @@ async def test_disable_sso_cli_unblocks_password_login(
     db_session: object,
     session_factory: object,
 ) -> None:
-    """`cubebox admin disable-sso --org-slug X` flips status to inactive,
+    """`cubeplex admin disable-sso --org-slug X` flips status to inactive,
     after which the seeded user can password-login again.
 
     This is the operator lockout-recovery path. We verify three transitions:
@@ -318,7 +318,7 @@ async def test_list_sso_cli_shows_configured_connection(
     client: object,
     db_session: object,
 ) -> None:
-    """`cubebox admin list-sso` prints the configured connections table."""
+    """`cubeplex admin list-sso` prints the configured connections table."""
     from sqlalchemy.ext.asyncio import AsyncSession
 
     sess: AsyncSession = db_session  # type: ignore[assignment]

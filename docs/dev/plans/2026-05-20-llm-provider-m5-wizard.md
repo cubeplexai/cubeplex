@@ -22,7 +22,7 @@ Zustand, shadcn/ui, `@lobehub/icons`, vitest + Playwright.
 
 ## File Structure
 
-**Backend (`backend/cubebox/`):**
+**Backend (`backend/cubeplex/`):**
 - `api/schemas/provider.py` — extend `ProviderCreate`/`ProviderUpdate`/`ModelCreate`; add `ProviderTestStreamRequest`.
 - `services/provider_service.py` — persist new create/update fields; `run_test_stream` async generator.
 - `api/routes/v1/admin_providers.py` — `POST /providers/{id}/test/stream` (SSE).
@@ -45,8 +45,8 @@ Zustand, shadcn/ui, `@lobehub/icons`, vitest + Playwright.
 ## Task B1: Persist capability on provider create/update
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/provider.py`
-- Modify: `backend/cubebox/services/provider_service.py`
+- Modify: `backend/cubeplex/api/schemas/provider.py`
+- Modify: `backend/cubeplex/services/provider_service.py`
 - Test: `backend/tests/e2e/test_admin_providers_crud.py`
 
 - [ ] **Step 1: Failing test — create persists capability + preset_slug**
@@ -120,12 +120,12 @@ In `admin_providers.py`, `_provider_out(...)` builds `ProviderOut`. Add
 `packages/core/src/types/provider.ts` (done in Task F1, noted here for
 traceability).
 
-- [ ] **Step 6: Run test — expect pass.** Then `uv run mypy cubebox/`.
+- [ ] **Step 6: Run test — expect pass.** Then `uv run mypy cubeplex/`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/provider.py backend/cubebox/services/provider_service.py backend/tests/e2e/test_admin_providers_crud.py
+git add backend/cubeplex/api/schemas/provider.py backend/cubeplex/services/provider_service.py backend/tests/e2e/test_admin_providers_crud.py
 git commit -m "feat(provider): persist capability + preset_slug on create/update (M5)"
 ```
 
@@ -134,8 +134,8 @@ git commit -m "feat(provider): persist capability + preset_slug on create/update
 ## Task B2: `ModelCreate.enabled`
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/provider.py`
-- Modify: `backend/cubebox/services/provider_service.py` (`create_model`)
+- Modify: `backend/cubeplex/api/schemas/provider.py`
+- Modify: `backend/cubeplex/services/provider_service.py` (`create_model`)
 - Test: `backend/tests/e2e/test_admin_providers_crud.py`
 
 - [ ] **Step 1: Failing test**
@@ -178,7 +178,7 @@ git commit -am "feat(provider): ModelCreate.enabled so wizard can create disable
 ## Task B3: `usage` advisory probe step
 
 **Files:**
-- Modify: `backend/cubebox/services/provider_probe.py`
+- Modify: `backend/cubeplex/services/provider_probe.py`
 - Test: `backend/tests/unit/test_provider_probe.py`
 
 - [ ] **Step 1: Failing tests**
@@ -190,14 +190,14 @@ from cubepi.providers.base import Usage
 
 @pytest.mark.asyncio
 async def test_probe_usage_pass_when_usage_present():
-    from cubebox.services.provider_probe import probe_usage
+    from cubeplex.services.provider_probe import probe_usage
     step = await probe_usage(_UsageStub(usage=Usage(input_tokens=10, output_tokens=3),
                                         events=[]), model_id="m")
     assert step.name == "usage" and step.status == "pass"
 
 @pytest.mark.asyncio
 async def test_probe_usage_warn_when_absent():
-    from cubebox.services.provider_probe import probe_usage
+    from cubeplex.services.provider_probe import probe_usage
     step = await probe_usage(_UsageStub(usage=None, events=[]), model_id="m")
     assert step.status == "warn"
 ```
@@ -218,7 +218,7 @@ drains it, then awaits `stream.result()` and inspects `.usage`:
 ```python
 async def probe_usage(provider: Any, *, model_id: str) -> ProbeStep:
     """Advisory: did the response carry a parseable token-usage structure?
-    cubebox cost tracking records zeros without it. Own minimal stream."""
+    cubeplex cost tracking records zeros without it. Own minimal stream."""
     try:
         stream = await asyncio.wait_for(
             provider.stream(
@@ -271,10 +271,10 @@ git commit -am "feat(probe): advisory usage step — verify token-usage structur
 ## Task B4: SSE test endpoint (liveness once + per-model events)
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/provider.py` (request body)
-- Modify: `backend/cubebox/repositories/model.py` (add `list_all_for_provider`)
-- Modify: `backend/cubebox/services/provider_service.py` (`run_test_stream`)
-- Modify: `backend/cubebox/api/routes/v1/admin_providers.py` (route)
+- Modify: `backend/cubeplex/api/schemas/provider.py` (request body)
+- Modify: `backend/cubeplex/repositories/model.py` (add `list_all_for_provider`)
+- Modify: `backend/cubeplex/services/provider_service.py` (`run_test_stream`)
+- Modify: `backend/cubeplex/api/routes/v1/admin_providers.py` (route)
 - Test: `backend/tests/e2e/test_admin_llm_endpoints.py`
 
 > **Naming:** the request carries **model DB ids** (`Model.id`, the `mdl_…`
@@ -315,7 +315,7 @@ class ProviderTestStreamRequest(BaseModel):
 @pytest.mark.asyncio
 async def test_test_stream_emits_events(admin_client, monkeypatch):
     client, _ = admin_client
-    from cubebox.services import provider_probe
+    from cubeplex.services import provider_probe
     async def stub_liveness(*a, **k):
         return provider_probe.ProbeStep(name="liveness", status="pass", latency_ms=10)
     async def stub_model(*a, **k):
@@ -461,7 +461,7 @@ Extend `ProviderCreate`/`ProviderUpdate` with `preset_slug?`, `capability?`,
 per-model read type with `last_test_status?`, `last_test_at?`,
 `last_test_summary?`, `readiness?: Readiness`; `Provider` with `last_liveness_status?` etc.
 
-- [ ] **Step 2: Build core** `cd frontend && pnpm --filter @cubebox/core build` — expect clean. **Commit.**
+- [ ] **Step 2: Build core** `cd frontend && pnpm --filter @cubeplex/core build` — expect clean. **Commit.**
 
 ```bash
 git commit -am "feat(core): provider preset + probe + readiness types (M5)"
@@ -529,7 +529,7 @@ export async function setModelEnabled(client: ApiClient, providerId: string, mod
 
 - [ ] **Step 1b: barrel export** — in `api/index.ts`, export the new helpers and
   re-export `./providerTestStream` (`parseTestStream`, `startTestStream`,
-  `TestStreamEvent`). Confirm `@cubebox/core`'s public index re-exports them too
+  `TestStreamEvent`). Confirm `@cubeplex/core`'s public index re-exports them too
   if components import from the package root.
 
 - [ ] **Step 2: Failing test for the SSE client**
@@ -586,9 +586,9 @@ git commit -am "feat(core): provider preset/liveness helpers + SSE test-stream c
 
 **Files:** `frontend/packages/web/package.json`, `components/admin/models/ProviderLogo.tsx`
 
-- [ ] **Step 1:** `cd frontend && pnpm --filter @cubebox/web add @lobehub/icons` (pnpm, not npm).
+- [ ] **Step 1:** `cd frontend && pnpm --filter @cubeplex/web add @lobehub/icons` (pnpm, not npm).
 - [ ] **Step 2:** Update `ProviderLogo` to render `<ProviderIcon provider={logo} size={size} type="color" />` when a lobehub `logo` id is given, else the existing fallback (gear) when null. Keep the current props.
-- [ ] **Step 3:** `pnpm --filter @cubebox/web type-check`. **Commit.**
+- [ ] **Step 3:** `pnpm --filter @cubeplex/web type-check`. **Commit.**
 
 ```bash
 git commit -am "feat(web): lobehub provider icons in ProviderLogo (M5)"
@@ -750,7 +750,7 @@ git commit -am "feat(web): provider detail readiness dots + re-test (M7)"
   - Test: an unusable model renders disabled with its badge; a `ready` one is
     selectable.
 - [ ] **Step 3:** Add all new i18n keys under `adminModels.*` (wizard step labels, readiness labels, test sub-check names, buttons) to every locale file; run the i18n parity check.
-- [ ] **Step 4:** `pnpm --filter @cubebox/web lint && pnpm --filter @cubebox/web type-check`. **Commit.**
+- [ ] **Step 4:** `pnpm --filter @cubeplex/web lint && pnpm --filter @cubeplex/web type-check`. **Commit.**
 
 ```bash
 git commit -am "feat(web): configured-only page + readiness in pickers + i18n (M5/M7)"
@@ -760,8 +760,8 @@ git commit -am "feat(web): configured-only page + readiness in pickers + i18n (M
 
 ## Task F12: Final sweep + PR
 
-- [ ] **Step 1:** Backend: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest -k "provider or probe" -q` + `uv run mypy cubebox/` — green.
-- [ ] **Step 2:** Frontend: `cd frontend && pnpm --filter @cubebox/core build && pnpm -w lint && pnpm -w type-check && pnpm -w vitest run` — green. Playwright happy-path spec (pick preset → configure → import model → SSE test → save → appears in list) green.
+- [ ] **Step 1:** Backend: `cd backend && set -a && source ../.worktree.env && set +a && uv run pytest -k "provider or probe" -q` + `uv run mypy cubeplex/` — green.
+- [ ] **Step 2:** Frontend: `cd frontend && pnpm --filter @cubeplex/core build && pnpm -w lint && pnpm -w type-check && pnpm -w vitest run` — green. Playwright happy-path spec (pick preset → configure → import model → SSE test → save → appears in list) green.
 - [ ] **Step 3:** `git push -u origin feat/llm-provider-m5-wizard`.
 - [ ] **Step 4:** `gh pr create --base feat/llm-provider-platform` (base is the **integration branch**, not main) with summary + test plan; tag `@codex`.
 

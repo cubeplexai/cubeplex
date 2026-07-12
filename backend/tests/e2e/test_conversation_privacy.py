@@ -9,7 +9,7 @@ import secrets
 
 import pytest
 
-from cubebox.api.middleware.rate_limit import limiter
+from cubeplex.api.middleware.rate_limit import limiter
 from tests.e2e.helpers import csrf_cookie_name as _csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
@@ -25,7 +25,7 @@ def _reset_rate_limiter():
 async def _seed_csrf(client) -> str:
     await client.get("/api/v1/auth/me")
     csrf = client.cookies.get(_csrf_cookie_name())
-    assert csrf, "cubebox_csrf cookie not set after GET /api/v1/auth/me"
+    assert csrf, "cubeplex_csrf cookie not set after GET /api/v1/auth/me"
     return csrf
 
 
@@ -86,8 +86,8 @@ async def test_conversation_invisible_to_other_member_same_workspace(
     assert b_me.status_code == 200, b_me.text
     b_user_id = b_me.json()["id"]
 
-    from cubebox.models import OrgRole, Role
-    from cubebox.repositories import (
+    from cubeplex.models import OrgRole, Role
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
     )

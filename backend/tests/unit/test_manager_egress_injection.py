@@ -22,10 +22,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.models import EgressRef
-from cubebox.sandbox.manager import SandboxAttachment, SandboxManager
-from cubebox.sandbox_env.placeholder import PLACEHOLDER_RE, hash_placeholder, mint_placeholder
-from cubebox.services.sandbox_env import ResolvedEnv
+from cubeplex.models import EgressRef
+from cubeplex.sandbox.manager import SandboxAttachment, SandboxManager
+from cubeplex.sandbox_env.placeholder import PLACEHOLDER_RE, hash_placeholder, mint_placeholder
+from cubeplex.services.sandbox_env import ResolvedEnv
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -102,12 +102,12 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
         patch(
-            "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
+            "cubeplex.services.sandbox_env.SandboxEnvResolver.resolve",
             return_value=_RESOLVED_ENVS,
         ),
         # Stub get_active_by_scope → None so we always take the create-new path
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=None,
         ),
         # _RESOLVED_ENVS already has value= populated; skip DB decrypt in these
@@ -140,7 +140,7 @@ async def test_create_with_exchange_host_sets_run_env_and_persists_refs(
     assert policy.default_action == "deny"
 
     # --- run env was set on the returned backend ---
-    from cubebox.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.opensandbox import OpenSandbox
 
     assert isinstance(attachment, SandboxAttachment)
     sandbox = attachment.sandbox
@@ -221,15 +221,15 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
     with (
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=old_record,
         ),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.update_activity",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.update_activity",
             return_value=None,
         ),
         patch(
-            "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
+            "cubeplex.services.sandbox_env.SandboxEnvResolver.resolve",
             return_value=_RESOLVED_ENVS,
         ),
         # _RESOLVED_ENVS already has value= populated; skip DB decrypt.
@@ -240,7 +240,7 @@ async def test_reuse_path_sets_run_env_and_refreshes_refs(
         )
 
     # run env must have been set on the returned backend
-    from cubebox.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.opensandbox import OpenSandbox
 
     assert isinstance(attachment, SandboxAttachment)
     backend = attachment.sandbox
@@ -285,7 +285,7 @@ async def test_create_without_exchange_host_skips_injection(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=_fake_reconnect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=None,
         ),
     ):
@@ -309,7 +309,7 @@ async def test_create_without_exchange_host_skips_injection(
     )
 
     # Backend has an empty run env (no egress injection)
-    from cubebox.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.opensandbox import OpenSandbox
 
     assert isinstance(attachment, SandboxAttachment)
     backend = attachment.sandbox
@@ -385,29 +385,29 @@ async def test_unhealthy_sandbox_revokes_refs(
         patch("opensandbox.Sandbox.create", side_effect=fake_create),
         patch("opensandbox.Sandbox.connect", side_effect=fake_connect),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=old_record,
         ),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
             side_effect=flip_terminated,
         ),
         # Revive path: atomic claim wins, then provision a fresh container on
         # the same row.
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.claim_for_provisioning",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.claim_for_provisioning",
             return_value=True,
         ),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.set_sandbox_id",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.set_sandbox_id",
             return_value=None,
         ),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.promote_to_running",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.promote_to_running",
             return_value=None,
         ),
         patch(
-            "cubebox.services.sandbox_env.SandboxEnvResolver.resolve",
+            "cubeplex.services.sandbox_env.SandboxEnvResolver.resolve",
             return_value=resolved_envs,
         ),
     ):
@@ -498,11 +498,11 @@ async def test_touch_active_extends_egress_ref_expiry(
 
     with (
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.get_active_by_scope",
             return_value=record,
         ),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.update_activity",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.update_activity",
             return_value=None,
         ),
     ):
@@ -552,11 +552,11 @@ async def test_cleanup_expired_revokes_refs(
 
     with (
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.list_expired_system",
             new=AsyncMock(return_value=[fake_record]),
         ),
         patch(
-            "cubebox.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
+            "cubeplex.repositories.user_sandbox.UserSandboxRepository.mark_terminated",
             new=AsyncMock(return_value=None),
         ),
         # Stub sandbox connect+kill so no real network call is made

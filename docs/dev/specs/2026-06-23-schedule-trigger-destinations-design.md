@@ -137,7 +137,7 @@ lets the existing `IMRunQueueWorker` do the run + tailer wiring.
 Extract two helpers:
 
 ```
-backend/cubebox/im/conversation_resolver.py
+backend/cubeplex/im/conversation_resolver.py
 
 @dataclass(frozen=True)
 class ResolvedIMConversation:
@@ -177,7 +177,7 @@ async def resolve_im_conversation(
 ```
 
 ```
-backend/cubebox/im/run_handoff.py
+backend/cubeplex/im/run_handoff.py
 
 async def enqueue_im_channel_run(
     session,
@@ -369,8 +369,8 @@ payload and the contracts stay symmetric for both paths.
 
 ### Schema changes
 
-`backend/cubebox/api/schemas/ws_scheduled_tasks.py` and
-`backend/cubebox/api/schemas/trigger.py` grow the new fields and a
+`backend/cubeplex/api/schemas/ws_scheduled_tasks.py` and
+`backend/cubeplex/api/schemas/trigger.py` grow the new fields and a
 `model_validator(mode="after")` that enforces:
 
 - `fixed`: `target_conversation_id` required;

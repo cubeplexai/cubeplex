@@ -13,9 +13,9 @@
 ## File Structure
 
 **Backend (3 files):**
-- Modify: `backend/cubebox/middleware/subagents.py` — add `role`, `task` and rename `description` → `prompt` in `_SubAgentSchema`
-- Modify: `backend/cubebox/prompts/subagents.py` — update prompt with field guidelines
-- Modify: `backend/cubebox/agents/convert.py` — include `role`, `task` in subagent summary
+- Modify: `backend/cubeplex/middleware/subagents.py` — add `role`, `task` and rename `description` → `prompt` in `_SubAgentSchema`
+- Modify: `backend/cubeplex/prompts/subagents.py` — update prompt with field guidelines
+- Modify: `backend/cubeplex/agents/convert.py` — include `role`, `task` in subagent summary
 
 **Frontend (7 files):**
 - Modify: `frontend/packages/web/package.json` — add DiceBear dependencies
@@ -31,11 +31,11 @@
 ### Task 1: Backend — Update subagent schema (add `role`, `task`; rename `description` → `prompt`)
 
 **Files:**
-- Modify: `backend/cubebox/middleware/subagents.py:46-49, 75-80, 109-110`
+- Modify: `backend/cubeplex/middleware/subagents.py:46-49, 75-80, 109-110`
 
 - [ ] **Step 1: Update `_SubAgentSchema`**
 
-In `backend/cubebox/middleware/subagents.py`, replace the schema class:
+In `backend/cubeplex/middleware/subagents.py`, replace the schema class:
 
 ```python
 class _SubAgentSchema(BaseModel):
@@ -96,7 +96,7 @@ Expected: All checks pass (format, lint, type-check, test)
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/middleware/subagents.py
+git add backend/cubeplex/middleware/subagents.py
 git commit -m "feat(backend): add role, task and rename description to prompt in subagent schema"
 ```
 
@@ -105,11 +105,11 @@ git commit -m "feat(backend): add role, task and rename description to prompt in
 ### Task 2: Backend — Update subagent prompt
 
 **Files:**
-- Modify: `backend/cubebox/prompts/subagents.py`
+- Modify: `backend/cubeplex/prompts/subagents.py`
 
 - [ ] **Step 1: Replace `SUBAGENT_PROMPT`**
 
-Replace the entire content of `backend/cubebox/prompts/subagents.py`:
+Replace the entire content of `backend/cubeplex/prompts/subagents.py`:
 
 ```python
 """Subagent delegation prompt — injected when subagents are configured."""
@@ -164,7 +164,7 @@ Expected: All checks pass
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/prompts/subagents.py
+git add backend/cubeplex/prompts/subagents.py
 git commit -m "feat(backend): update subagent prompt with role/task field guidelines"
 ```
 
@@ -173,7 +173,7 @@ git commit -m "feat(backend): update subagent prompt with role/task field guidel
 ### Task 3: Backend — Include `role` and `task` in subagent summary
 
 **Files:**
-- Modify: `backend/cubebox/agents/convert.py:27-58`
+- Modify: `backend/cubeplex/agents/convert.py:27-58`
 
 - [ ] **Step 1: Update `_consolidate_subagent_events` return type**
 
@@ -348,7 +348,7 @@ import { useState, useEffect, useRef, memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { CheckCircle2, ChevronDown, ChevronRight } from 'lucide-react'
-import type { AgentStream } from '@cubebox/core'
+import type { AgentStream } from '@cubeplex/core'
 import { ToolCallItem } from './ToolCallItem'
 import { AgentAvatar } from './AgentAvatar'
 import { proseClasses } from '@/lib/utils'

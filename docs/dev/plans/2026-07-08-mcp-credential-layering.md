@@ -6,7 +6,7 @@
 
 **Architecture:** Adopt Option A from the spec: create `mcp_connectors`, migrate/deprecate `mcp_connector_installs`, and backfill old installs into connector identity plus workspace state and credential grants. Workspace credentials are preserved as overrides; org admin can add org credentials and recommend org use, but the first version does not include a force-org-credential action.
 
-**Tech Stack:** FastAPI, SQLModel, Alembic, Postgres, pytest, Next.js, React 19, TypeScript, Vitest, `@cubebox/core`.
+**Tech Stack:** FastAPI, SQLModel, Alembic, Postgres, pytest, Next.js, React 19, TypeScript, Vitest, `@cubeplex/core`.
 
 ## Scope
 
@@ -52,35 +52,35 @@ It does not mean:
 
 ### Backend
 
-- Modify: `backend/cubebox/models/mcp.py`
+- Modify: `backend/cubeplex/models/mcp.py`
   - Add `MCPConnector`.
   - Update `MCPWorkspaceConnectorState` and `MCPCredentialGrant` to reference `mcp_connectors.id`.
   - Keep `MCPConnectorInstall` only as legacy migration/compatibility data.
 
-- Modify: `backend/cubebox/services/mcp_installs.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
   - Update org create and workspace create flows.
   - Remove cross-scope credential-layering 409s.
 
-- Modify: `backend/cubebox/repositories/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
   - Add `MCPConnectorRepository`.
   - Add list/query helpers for active connector identity conflicts and workspace-scope legacy installs.
 
-- Modify: `backend/cubebox/mcp/effective.py`
+- Modify: `backend/cubeplex/mcp/effective.py`
   - Resolve connector availability from org-owned identity + workspace state.
   - Stop treating workspace-scope installs as independent runtime connector identities after migration.
 
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
   - Keep runtime credential lookup aligned with `effective.py` if it has direct MCP credential resolution paths.
 
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
   - Admin add connector uses `mcp_connectors` instead of returning 409 for workspace credential layering.
   - Admin templates/catalog responses surface "used in workspaces" state without hiding templates.
 
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
   - Workspace connect/enable creates workspace state and grants against connector identity.
   - It creates org-owned identity lazily if none exists.
 
-- Modify: `backend/cubebox/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
   - Add response fields that communicate `connector_id`, credential source, and legacy install compatibility fields cleanly.
 
 - Test: `backend/tests/e2e/test_mcp_credential_layering.py`
@@ -221,8 +221,8 @@ git commit -m "Keep MCP templates visible with workspace credentials"
 
 **Files:**
 
-- Modify: `backend/cubebox/models/mcp.py`
-- Modify: `backend/cubebox/repositories/mcp.py`
+- Modify: `backend/cubeplex/models/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
 - Create: generated Alembic migration under `backend/alembic/versions/`
 - Test: `backend/tests/unit/test_mcp_connector_repository.py`
 
@@ -278,9 +278,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.mcp._constants import server_url_hash, slugify_for_namespace
-from cubebox.models import MCPConnector
-from cubebox.repositories.mcp import MCPConnectorRepository
+from cubeplex.mcp._constants import server_url_hash, slugify_for_namespace
+from cubeplex.models import MCPConnector
+from cubeplex.repositories.mcp import MCPConnectorRepository
 
 
 @pytest.fixture
@@ -335,15 +335,15 @@ Expected: FAIL because `MCPConnector` / `MCPConnectorRepository` do not exist.
 
 - [ ] **Step 3: Add model and repository**
 
-Add `MCPConnector` to `backend/cubebox/models/mcp.py` with prefix `mcpco` in
-`backend/cubebox/models/public_id.py`. Add partial unique indexes for active
+Add `MCPConnector` to `backend/cubeplex/models/mcp.py` with prefix `mcpco` in
+`backend/cubeplex/models/public_id.py`. Add partial unique indexes for active
 rows:
 
 - `(org_id, template_id)` where `status='active' AND template_id IS NOT NULL`
 - `(org_id, server_url_hash)` where `status='active'`
 - `(org_id, slug_name)` where `status='active'`
 
-Add `MCPConnectorRepository` to `backend/cubebox/repositories/mcp.py`.
+Add `MCPConnectorRepository` to `backend/cubeplex/repositories/mcp.py`.
 
 - [ ] **Step 4: Generate migration**
 
@@ -372,9 +372,9 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/models/mcp.py \
-  backend/cubebox/models/public_id.py \
-  backend/cubebox/repositories/mcp.py \
+git add backend/cubeplex/models/mcp.py \
+  backend/cubeplex/models/public_id.py \
+  backend/cubeplex/repositories/mcp.py \
   backend/alembic/versions \
   backend/tests/unit/test_mcp_connector_repository.py
 git commit -m "Add MCP connector identity table"
@@ -386,7 +386,7 @@ git commit -m "Add MCP connector identity table"
 
 **Files:**
 
-- Modify: `backend/cubebox/repositories/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
 - Create: generated Alembic migration under `backend/alembic/versions/`
 - Test: `backend/tests/e2e/test_mcp_credential_layering.py`
 
@@ -413,8 +413,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp._constants import server_url_hash
-from cubebox.models import (
+from cubeplex.mcp._constants import server_url_hash
+from cubeplex.models import (
     MCPConnector,
     MCPConnectorInstall,
     MCPCredentialGrant,
@@ -537,7 +537,7 @@ Expected: PASS.
 
 ```bash
 git add backend/alembic/versions \
-  backend/cubebox/repositories/mcp.py \
+  backend/cubeplex/repositories/mcp.py \
   backend/tests/e2e/test_mcp_credential_layering.py
 git commit -m "Migrate MCP installs into connector identity"
 ```
@@ -548,8 +548,8 @@ git commit -m "Migrate MCP installs into connector identity"
 
 **Files:**
 
-- Modify: `backend/cubebox/services/mcp_installs.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_credential_layering.py`
 
 **Interfaces:**
@@ -632,7 +632,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp_installs.py backend/cubebox/api/routes/v1/admin_mcp.py backend/tests/e2e/test_mcp_credential_layering.py
+git add backend/cubeplex/services/mcp_installs.py backend/cubeplex/api/routes/v1/admin_mcp.py backend/tests/e2e/test_mcp_credential_layering.py
 git commit -m "Allow org MCP add with workspace credential overrides"
 ```
 
@@ -642,8 +642,8 @@ git commit -m "Allow org MCP add with workspace credential overrides"
 
 **Files:**
 
-- Modify: `backend/cubebox/services/mcp_installs.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/services/mcp_installs.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
 - Test: `backend/tests/e2e/test_mcp_credential_layering.py`
 
 **Interfaces:**
@@ -720,7 +720,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp_installs.py backend/cubebox/api/routes/v1/ws_mcp.py backend/tests/e2e/test_mcp_credential_layering.py
+git add backend/cubeplex/services/mcp_installs.py backend/cubeplex/api/routes/v1/ws_mcp.py backend/tests/e2e/test_mcp_credential_layering.py
 git commit -m "Reuse MCP connector identity from workspace enablement"
 ```
 
@@ -730,8 +730,8 @@ git commit -m "Reuse MCP connector identity from workspace enablement"
 
 **Files:**
 
-- Modify: `backend/cubebox/mcp/effective.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/mcp/effective.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Test: `backend/tests/e2e/test_mcp_credential_layering.py`
 
 **Interfaces:**
@@ -796,7 +796,7 @@ Expected: FAIL on at least one credential source assertion.
 
 - [ ] **Step 3: Update effective-state derivation**
 
-In `backend/cubebox/mcp/effective.py`, derive effective connector rows from:
+In `backend/cubeplex/mcp/effective.py`, derive effective connector rows from:
 
 1. active org-owned connector identities
 2. workspace state rows
@@ -809,7 +809,7 @@ Do not include tombstoned legacy workspace-scope installs in runtime-visible row
 Search:
 
 ```bash
-rg -n "credential_policy|MCPCredentialGrant|workspace_id" backend/cubebox/streams backend/cubebox/mcp
+rg -n "credential_policy|MCPCredentialGrant|workspace_id" backend/cubeplex/streams backend/cubeplex/mcp
 ```
 
 Update direct lookups in `run_manager.py` or related runtime code to use the
@@ -829,7 +829,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/mcp/effective.py backend/cubebox/streams/run_manager.py backend/tests/e2e/test_mcp_credential_layering.py
+git add backend/cubeplex/mcp/effective.py backend/cubeplex/streams/run_manager.py backend/tests/e2e/test_mcp_credential_layering.py
 git commit -m "Resolve MCP credentials from workspace state"
 ```
 
@@ -1050,8 +1050,8 @@ Run:
 
 ```bash
 cd backend
-uv run ruff check cubebox tests 2>&1 | tee tmp/mcp-credential-layering-ruff.log | tail -20
-uv run mypy cubebox 2>&1 | tee tmp/mcp-credential-layering-mypy.log | tail -20
+uv run ruff check cubeplex tests 2>&1 | tee tmp/mcp-credential-layering-ruff.log | tail -20
+uv run mypy cubeplex 2>&1 | tee tmp/mcp-credential-layering-mypy.log | tail -20
 ```
 
 Expected: both pass.

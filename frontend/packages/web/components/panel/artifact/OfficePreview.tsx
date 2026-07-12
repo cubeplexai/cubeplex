@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
-import type { Artifact } from '@cubebox/core'
-import { createApiClient, requestPreviewToken } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
+import { createApiClient, requestPreviewToken } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 import { getArtifactIcon } from './artifactIcons'
 import { buildDownloadUrl } from './previewUtils'

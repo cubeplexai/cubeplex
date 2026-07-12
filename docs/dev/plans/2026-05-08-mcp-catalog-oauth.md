@@ -25,14 +25,14 @@ cp /path/to/main/backend/config.development.local.yaml \
 ## Phase 0 — Cleanup (breaking, no compat)
 
 - [ ] **0.1** Remove stdio support
-  - [ ] `backend/cubebox/services/mcp.py`: drop `stdio` from `_VALID_TRANSPORTS`; remove `_stdio_params` from `mcp/connection_params.py`
-  - [ ] `backend/cubebox/api/schemas/mcp.py`: `transport: Literal["streamable_http", "sse"]`
+  - [ ] `backend/cubeplex/services/mcp.py`: drop `stdio` from `_VALID_TRANSPORTS`; remove `_stdio_params` from `mcp/connection_params.py`
+  - [ ] `backend/cubeplex/api/schemas/mcp.py`: `transport: Literal["streamable_http", "sse"]`
   - [ ] `frontend/packages/core/src/types/mcp.ts`: drop `stdio`
   - [ ] `frontend/packages/web/components/mcp/MCPServerForm.tsx`: drop stdio option
   - [ ] alembic revision: delete any rows with `transport='stdio'` (DDL-only, no data preservation)
 - [ ] **0.2** Remove legacy `config.yaml mcp.servers` startup loader
-  - [ ] `backend/cubebox/api/app.py:119`: drop `MCPManager` global registry initialization
-  - [ ] `backend/cubebox/mcp/client.py`: remove or deprecate the legacy global manager
+  - [ ] `backend/cubeplex/api/app.py:119`: drop `MCPManager` global registry initialization
+  - [ ] `backend/cubeplex/mcp/client.py`: remove or deprecate the legacy global manager
   - [ ] `backend/config.yaml` / `config.development.yaml` / `config.production.yaml`: remove `mcp.servers` blocks
 - [ ] **0.3** Drop `workspace_mcp_bindings` table (replaced by overrides)
   - [ ] alembic revision drop table
@@ -48,10 +48,10 @@ cp /path/to/main/backend/config.development.local.yaml \
 
 ## Phase 2 — Catalog Service + Seeder
 
-- [ ] **2.1** `backend/cubebox/services/mcp_catalog.py`: list / get / install (orchestrates `mcp_servers` create + credential write + tools refresh)
-- [ ] **2.2** `backend/cubebox/mcp/catalog_seed.py`: pure-Python catalog list (per spec §7) + upsert by slug + deprecated marker for removed entries
-- [ ] **2.3** Static OAuth client secret: read `CUBEBOX_MCP_OAUTH__<SLUG>__CLIENT_ID` / `__CLIENT_SECRET` env, upsert system-level credential row, link to catalog
-- [ ] **2.4** CLI command `python -m cubebox.cli seed-mcp-catalog`
+- [ ] **2.1** `backend/cubeplex/services/mcp_catalog.py`: list / get / install (orchestrates `mcp_servers` create + credential write + tools refresh)
+- [ ] **2.2** `backend/cubeplex/mcp/catalog_seed.py`: pure-Python catalog list (per spec §7) + upsert by slug + deprecated marker for removed entries
+- [ ] **2.3** Static OAuth client secret: read `CUBEPLEX_MCP_OAUTH__<SLUG>__CLIENT_ID` / `__CLIENT_SECRET` env, upsert system-level credential row, link to catalog
+- [ ] **2.4** CLI command `python -m cubeplex.cli seed-mcp-catalog`
 - [ ] **2.5** Wire seeder into deploy docs (NOT into app startup)
 
 ## Phase 3 — Catalog API
@@ -67,7 +67,7 @@ cp /path/to/main/backend/config.development.local.yaml \
 
 ## Phase 4 — OAuth Module
 
-Path: `backend/cubebox/mcp/oauth/`
+Path: `backend/cubeplex/mcp/oauth/`
 
 - [ ] **4.1** `state.py` — HMAC-SHA256 over `(install_id, actor_user_id, ts, nonce)` with `CSRF_SECRET`-derived key; redis one-shot store
 - [ ] **4.2** `pkce.py` — `code_verifier` (43–128 chars, URL-safe) + S256 challenge
@@ -87,8 +87,8 @@ Path: `backend/cubebox/mcp/oauth/`
 
 ## Phase 6 — Frontend
 
-- [ ] **6.1** `@cubebox/core` types: `MCPCatalogConnector`, `MCPInstallStatus`, request/response shapes
-- [ ] **6.2** `@cubebox/core` API client methods for catalog + install + override + oauth start
+- [ ] **6.1** `@cubeplex/core` types: `MCPCatalogConnector`, `MCPInstallStatus`, request/response shapes
+- [ ] **6.2** `@cubeplex/core` API client methods for catalog + install + override + oauth start
 - [ ] **6.3** Zustand store: catalog list + install actions + optimistic state for OAuth pending
 - [ ] **6.4** `<MCPCatalogGrid>` component
 - [ ] **6.5** `<MCPInstallDrawer>` with segmented auth-method control
@@ -109,9 +109,9 @@ Path: `backend/cubebox/mcp/oauth/`
 
 - [ ] **8.1** Update `backend/docs/` MCP architecture doc to reflect catalog model
 - [ ] **8.2** Document required env vars in `backend/.env.example`:
-  - `CUBEBOX_MCP_OAUTH__GITHUB__CLIENT_ID` / `__CLIENT_SECRET`
-  - `CUBEBOX_MCP_OAUTH__SLACK__CLIENT_ID` / `__CLIENT_SECRET`
-  - `CUBEBOX_MCP_OAUTH__GWS__CLIENT_ID` / `__CLIENT_SECRET`
+  - `CUBEPLEX_MCP_OAUTH__GITHUB__CLIENT_ID` / `__CLIENT_SECRET`
+  - `CUBEPLEX_MCP_OAUTH__SLACK__CLIENT_ID` / `__CLIENT_SECRET`
+  - `CUBEPLEX_MCP_OAUTH__GWS__CLIENT_ID` / `__CLIENT_SECRET`
 - [ ] **8.3** Document deploy flow: `alembic upgrade head` then `seed-mcp-catalog`
 - [ ] **8.4** Staging manual test plan for OAuth (real Notion / GitHub / Linear / Asana / Atlassian / Sentry / Intercom / Cloudflare / Slack / GWS) — recorded but not auto-run
 

@@ -3,10 +3,10 @@
 **Date:** 2026-05-27
 **Upstream issue:** https://github.com/alibaba/OpenSandbox/issues/949
 
-## Why this matters for cubebox
+## Why this matters for cubeplex
 
 We run two services on one sandbox with opposite exposure needs from a single
-cubebox client:
+cubeplex client:
 
 - **command execution (execd)** — should stay internal; we want it resolved via
   the server proxy so it can ride a cluster-internal address and we can drop the
@@ -16,7 +16,7 @@ cubebox client:
 
 These need different resolution strategies on the *same* connection. OpenSandbox
 can't express that today: `use_server_proxy` is a single connection-wide flag
-baked into `ConnectionConfig` (`cubebox/sandbox/manager.py:50,78`), shared by
+baked into `ConnectionConfig` (`cubeplex/sandbox/manager.py:50,78`), shared by
 both exec and the browser endpoint.
 
 ## The blocker (two problems, one root cause)
@@ -41,7 +41,7 @@ Net: **no single global `use_server_proxy` value gives us "exec via server-proxy
 uses the proxy; `True` pushes both onto server-proxy and destroys the browser's
 signature. Confirmed against the SDK + server code on 2026-05-27.
 
-## What cubebox can do while waiting on upstream
+## What cubeplex can do while waiting on upstream
 
 The clean per-endpoint split needs upstream to expose `use_server_proxy` (or a
 `mode`) per call — the high-level `Sandbox.get_endpoint` /
@@ -51,12 +51,12 @@ The clean per-endpoint split needs upstream to expose `use_server_proxy` (or a
 
 Stopgap if we need the split before #949 lands: give the browser endpoint its
 own `ConnectionConfig(use_server_proxy=False)` handle in
-`cubebox/sandbox/opensandbox.py:get_browser_endpoint` while the default stays
+`cubeplex/sandbox/opensandbox.py:get_browser_endpoint` while the default stays
 whatever exec needs. Revisit once #949 ships the per-call override / mode enum.
 
 ## Related
 
-- Requires cubebox to run in-cluster for exec to actually be internal-only (the
+- Requires cubeplex to run in-cluster for exec to actually be internal-only (the
   server-proxy address must resolve to a ClusterIP, and the server's external
   NodePort must be dropped). See `docs/dev/notes/2026-05-22-sandbox-browser-deployment.md`
   and memory `project_browser_liveview_gateway`.

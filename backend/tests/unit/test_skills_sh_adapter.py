@@ -1,6 +1,6 @@
 """Tests for SkillsShAdapter source_ref generation and path handling."""
 
-from cubebox.skills.sources.skills_sh import SkillsShAdapter
+from cubeplex.skills.sources.skills_sh import SkillsShAdapter
 
 
 def test_index_skill_paths_with_skills_directory():
@@ -122,7 +122,7 @@ def test_index_skill_paths_root_level_skill_md():
 
 def test_official_source_detection():
     """Test that official status comes only from the whitelist, not registry config."""
-    from cubebox.skills.sources.base import TrustTier
+    from cubeplex.skills.sources.base import TrustTier
 
     community_adapter = SkillsShAdapter(
         source_id="test-registry",

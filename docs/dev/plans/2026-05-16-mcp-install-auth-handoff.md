@@ -18,14 +18,14 @@
 
 | Path | Status | Purpose |
 | --- | --- | --- |
-| `backend/cubebox/mcp/oauth/start.py` | Create | `OAuthStartService` — orchestrates DCR/static client → PKCE → state token → authorize URL. |
-| `backend/cubebox/mcp/oauth/callback.py` | Create | `OAuthCallbackHandler` — verifies state, exchanges code, writes `MCPCredentialGrant`, updates `install.auth_status`, returns redirect params. |
-| `backend/cubebox/mcp/oauth/__init__.py` | Modify | Export the two new classes. |
-| `backend/cubebox/mcp/dependencies.py` | Modify | Add `get_oauth_start_service` and `get_oauth_callback_handler` DI factories. |
-| `backend/cubebox/api/routes/v1/admin_mcp.py` | Modify | Replace 501 stub at `admin_org_grant_oauth_start`; add `GET /admin/mcp/installs/{id}/effective` for the org-row reason derivation (§4 admin row). |
-| `backend/cubebox/api/routes/v1/ws_mcp.py` | Modify | Replace 501 stubs at `my_user_grant_oauth_start` and `workspace_grant_oauth_start`. |
-| `backend/cubebox/api/routes/v1/mcp_oauth.py` | Modify | Replace stub callback handler with a real implementation that calls `OAuthCallbackHandler`. |
-| `backend/cubebox/api/schemas/mcp.py` | Modify | Add `MCPOAuthStartOut` fields (`authorize_url`, `state`, `expires_at`); add `MCPAdminInstallEffectiveOut` schema. |
+| `backend/cubeplex/mcp/oauth/start.py` | Create | `OAuthStartService` — orchestrates DCR/static client → PKCE → state token → authorize URL. |
+| `backend/cubeplex/mcp/oauth/callback.py` | Create | `OAuthCallbackHandler` — verifies state, exchanges code, writes `MCPCredentialGrant`, updates `install.auth_status`, returns redirect params. |
+| `backend/cubeplex/mcp/oauth/__init__.py` | Modify | Export the two new classes. |
+| `backend/cubeplex/mcp/dependencies.py` | Modify | Add `get_oauth_start_service` and `get_oauth_callback_handler` DI factories. |
+| `backend/cubeplex/api/routes/v1/admin_mcp.py` | Modify | Replace 501 stub at `admin_org_grant_oauth_start`; add `GET /admin/mcp/installs/{id}/effective` for the org-row reason derivation (§4 admin row). |
+| `backend/cubeplex/api/routes/v1/ws_mcp.py` | Modify | Replace 501 stubs at `my_user_grant_oauth_start` and `workspace_grant_oauth_start`. |
+| `backend/cubeplex/api/routes/v1/mcp_oauth.py` | Modify | Replace stub callback handler with a real implementation that calls `OAuthCallbackHandler`. |
+| `backend/cubeplex/api/schemas/mcp.py` | Modify | Add `MCPOAuthStartOut` fields (`authorize_url`, `state`, `expires_at`); add `MCPAdminInstallEffectiveOut` schema. |
 | `backend/tests/e2e/test_mcp_oauth_handoff.py` | Create | E2E covering one OAuth start + callback round-trip per scope (org / workspace / me); verifies grant row written and `auth_status` flip. |
 
 ### Frontend
@@ -50,7 +50,7 @@
 ## Task 1: OAuth start service
 
 **Files:**
-- Create: `backend/cubebox/mcp/oauth/start.py`
+- Create: `backend/cubeplex/mcp/oauth/start.py`
 - Test: `backend/tests/e2e/test_mcp_oauth_handoff.py` (this task adds the unit-style start test only; round-trip lands in Task 9)
 
 - [ ] **Step 1: Write the failing tests for `OAuthStartService.start_oauth_flow`**
@@ -65,7 +65,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp.oauth.start import OAuthStartResult, OAuthStartService
+from cubeplex.mcp.oauth.start import OAuthStartResult, OAuthStartService
 
 
 pytestmark = pytest.mark.asyncio
@@ -96,11 +96,11 @@ Use the existing `mcp_test_factories` fixtures for the install seed (look at `ba
 - [ ] **Step 2: Run the test to verify it fails**
 
 Run: `cd backend && uv run pytest tests/e2e/test_mcp_oauth_handoff.py::test_start_oauth_flow_returns_authorize_url_state_and_expires_at -v`
-Expected: FAIL with `ImportError: cannot import name 'OAuthStartResult' from 'cubebox.mcp.oauth.start'` (module does not yet exist).
+Expected: FAIL with `ImportError: cannot import name 'OAuthStartResult' from 'cubeplex.mcp.oauth.start'` (module does not yet exist).
 
 - [ ] **Step 3: Create `OAuthStartService` with the result dataclass**
 
-Create `backend/cubebox/mcp/oauth/start.py`:
+Create `backend/cubeplex/mcp/oauth/start.py`:
 
 ```python
 """Mint authorize URLs for the four-layer MCP OAuth flow.
@@ -133,16 +133,16 @@ from urllib.parse import urlencode
 
 import httpx
 
-from cubebox.config import config
-from cubebox.mcp.oauth.dcr import DCRClient, DCRRequest
-from cubebox.mcp.oauth.metadata import (
+from cubeplex.config import config
+from cubeplex.mcp.oauth.dcr import DCRClient, DCRRequest
+from cubeplex.mcp.oauth.metadata import (
     AuthorizationServerMetadata,
     OAuthMetadataDiscovery,
 )
-from cubebox.mcp.oauth.pkce import generate_pkce
-from cubebox.mcp.oauth.state import OAuthStateStore
-from cubebox.repositories.mcp import MCPConnectorInstallRepository
-from cubebox.services.credentials import CredentialService
+from cubeplex.mcp.oauth.pkce import generate_pkce
+from cubeplex.mcp.oauth.state import OAuthStateStore
+from cubeplex.repositories.mcp import MCPConnectorInstallRepository
+from cubeplex.services.credentials import CredentialService
 
 _REDIRECT_PATH: Final[str] = "/api/v1/oauth/mcp/callback"
 
@@ -203,7 +203,7 @@ class OAuthStartService:
         # actor_org_id` post-load so a future refactor can't quietly
         # cross orgs.
         from sqlmodel import select
-        from cubebox.models.mcp import MCPConnectorInstall as _Install
+        from cubeplex.models.mcp import MCPConnectorInstall as _Install
         install = (
             await self._session.execute(
                 select(_Install).where(
@@ -346,7 +346,7 @@ class OAuthStartService:
             as_meta.registration_endpoint,
             DCRRequest(
                 redirect_uris=[_redirect_uri()],
-                client_name=f"cubebox:{install.id}",
+                client_name=f"cubeplex:{install.id}",
             ),
         )
         secret_id: str | None = None
@@ -398,7 +398,7 @@ def _build_authorize_url(
 
 - [ ] **Step 4: Add `attach_pkce` + `consume_pkce` to `OAuthStateStore`**
 
-Open `backend/cubebox/mcp/oauth/state.py` and add two methods to `OAuthStateStore`:
+Open `backend/cubeplex/mcp/oauth/state.py` and add two methods to `OAuthStateStore`:
 
 ```python
 async def attach_pkce(self, *, state: str, verifier: str) -> None:
@@ -469,8 +469,8 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/mcp/oauth/start.py \
-        backend/cubebox/mcp/oauth/state.py \
+git add backend/cubeplex/mcp/oauth/start.py \
+        backend/cubeplex/mcp/oauth/state.py \
         backend/tests/e2e/test_mcp_oauth_handoff.py
 git commit -m "feat(mcp/oauth): add four-layer OAuthStartService"
 ```
@@ -480,7 +480,7 @@ git commit -m "feat(mcp/oauth): add four-layer OAuthStartService"
 ## Task 2: OAuth callback handler
 
 **Files:**
-- Create: `backend/cubebox/mcp/oauth/callback.py`
+- Create: `backend/cubeplex/mcp/oauth/callback.py`
 - Test: `backend/tests/e2e/test_mcp_oauth_handoff.py` (extend)
 
 - [ ] **Step 1: Write the failing test**
@@ -609,7 +609,7 @@ Expected: FAIL on both new tests — `OAuthCallbackHandler` does not exist.
 
 - [ ] **Step 3: Create `OAuthCallbackHandler`**
 
-Create `backend/cubebox/mcp/oauth/callback.py`:
+Create `backend/cubeplex/mcp/oauth/callback.py`:
 
 ```python
 """Complete the four-layer OAuth handshake.
@@ -635,21 +635,21 @@ from typing import Literal
 
 import httpx
 
-from cubebox.constants import (
+from cubeplex.constants import (
     CREDENTIAL_KIND_MCP_OAUTH_ACCESS_TOKEN,
     CREDENTIAL_KIND_MCP_OAUTH_REFRESH_TOKEN,
 )
-from cubebox.mcp.oauth.state import (
+from cubeplex.mcp.oauth.state import (
     OAuthStateExpired,
     OAuthStateInvalid,
     OAuthStateStore,
 )
-from cubebox.models.mcp import MCPCredentialGrant
-from cubebox.repositories.mcp import (
+from cubeplex.models.mcp import MCPCredentialGrant
+from cubeplex.repositories.mcp import (
     MCPConnectorInstallRepository,
     MCPCredentialGrantRepository,
 )
-from cubebox.services.credentials import CredentialService
+from cubeplex.services.credentials import CredentialService
 
 
 @dataclass(frozen=True)
@@ -736,7 +736,7 @@ class OAuthCallbackHandler:
         # repo itself is org-scoped. Solve by doing a one-off org-agnostic
         # read on the raw model first.
         from sqlmodel import select
-        from cubebox.models.mcp import MCPConnectorInstall as _Install
+        from cubeplex.models.mcp import MCPConnectorInstall as _Install
         install = (
             await self._session.execute(
                 select(_Install).where(_Install.id == payload.install_id)
@@ -884,7 +884,7 @@ class OAuthCallbackHandler:
 
 
 def _redirect_uri() -> str:
-    from cubebox.config import config
+    from cubeplex.config import config
     base = str(config.get("public_base_url", "http://localhost:8000")).rstrip("/")
     return f"{base}/api/v1/oauth/mcp/callback"
 
@@ -904,7 +904,7 @@ def _grant_credential_suffix(payload) -> str:
 
 - [ ] **Step 4: Add `MCPCredentialGrantRepository.get_for_scope`**
 
-Open `backend/cubebox/repositories/mcp.py`. Add to `MCPCredentialGrantRepository`:
+Open `backend/cubeplex/repositories/mcp.py`. Add to `MCPCredentialGrantRepository`:
 
 ```python
 async def get_for_scope(
@@ -943,8 +943,8 @@ and `test_callback_writes_org_grant_and_authorizes_install`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/mcp/oauth/callback.py \
-        backend/cubebox/repositories/mcp.py \
+git add backend/cubeplex/mcp/oauth/callback.py \
+        backend/cubeplex/repositories/mcp.py \
         backend/tests/e2e/test_mcp_oauth_handoff.py
 git commit -m "feat(mcp/oauth): add four-layer OAuthCallbackHandler"
 ```
@@ -954,31 +954,31 @@ git commit -m "feat(mcp/oauth): add four-layer OAuthCallbackHandler"
 ## Task 3: DI factories + replace 501 stubs
 
 **Files:**
-- Modify: `backend/cubebox/mcp/oauth/__init__.py`
-- Modify: `backend/cubebox/mcp/dependencies.py`
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/mcp_oauth.py`
+- Modify: `backend/cubeplex/mcp/oauth/__init__.py`
+- Modify: `backend/cubeplex/mcp/dependencies.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/mcp_oauth.py`
 
 - [ ] **Step 1: Re-export the new classes**
 
-Edit `backend/cubebox/mcp/oauth/__init__.py` — add:
+Edit `backend/cubeplex/mcp/oauth/__init__.py` — add:
 
 ```python
-from cubebox.mcp.oauth.callback import OAuthCallbackHandler, OAuthCallbackResult
-from cubebox.mcp.oauth.start import OAuthStartError, OAuthStartResult, OAuthStartService
+from cubeplex.mcp.oauth.callback import OAuthCallbackHandler, OAuthCallbackResult
+from cubeplex.mcp.oauth.start import OAuthStartError, OAuthStartResult, OAuthStartService
 ```
 
 And include all five names in `__all__`.
 
 - [ ] **Step 2: Add DI factories**
 
-Edit `backend/cubebox/mcp/dependencies.py`. Critical wiring constraint:
+Edit `backend/cubeplex/mcp/dependencies.py`. Critical wiring constraint:
 `OAuthStartService` and `OAuthCallbackHandler` are mounted on routes
 that lack a `{workspace_id}` path param (admin start, callback). The
 default `get_credential_service` factory in
-`backend/cubebox/credentials/dependencies.py:37` depends on
+`backend/cubeplex/credentials/dependencies.py:37` depends on
 `require_member`, which requires a workspace path. So we MUST construct
 the credential service from `(session, encryption_backend, org_id)`
 directly via `build_credential_service`, NOT via
@@ -1062,7 +1062,7 @@ constructs the instance from the request-scoped session / redis / config
 
 - [ ] **Step 3: Add `state` to `MCPOAuthStartOut`**
 
-Edit `backend/cubebox/api/schemas/mcp.py`. Find `MCPOAuthStartOut` and replace with:
+Edit `backend/cubeplex/api/schemas/mcp.py`. Find `MCPOAuthStartOut` and replace with:
 
 ```python
 class MCPOAuthStartOut(BaseModel):
@@ -1079,7 +1079,7 @@ class MCPOAuthStartOut(BaseModel):
 
 - [ ] **Step 4: Replace the admin org OAuth start stub**
 
-Edit `backend/cubebox/api/routes/v1/admin_mcp.py`. Replace
+Edit `backend/cubeplex/api/routes/v1/admin_mcp.py`. Replace
 `admin_org_grant_oauth_start` body with:
 
 ```python
@@ -1114,13 +1114,13 @@ async def admin_org_grant_oauth_start(
 Add the import line:
 
 ```python
-from cubebox.mcp.dependencies import get_oauth_start_service
-from cubebox.mcp.oauth import OAuthStartError, OAuthStartService
+from cubeplex.mcp.dependencies import get_oauth_start_service
+from cubeplex.mcp.oauth import OAuthStartError, OAuthStartService
 ```
 
 - [ ] **Step 5: Replace the workspace OAuth start stubs**
 
-Edit `backend/cubebox/api/routes/v1/ws_mcp.py`. For BOTH `my_user_grant_oauth_start`
+Edit `backend/cubeplex/api/routes/v1/ws_mcp.py`. For BOTH `my_user_grant_oauth_start`
 AND `workspace_grant_oauth_start`, replace the body with the same shape as Step 4
 (don't forget `actor_org_id=ctx.org_id` — the cross-tenant guard added in
 Task 1's `start_oauth_flow` is mandatory on every call site).
@@ -1136,7 +1136,7 @@ Add the same imports at the top.
 
 - [ ] **Step 6: Replace the callback stub**
 
-Edit `backend/cubebox/api/routes/v1/mcp_oauth.py`. Replace `oauth_callback`
+Edit `backend/cubeplex/api/routes/v1/mcp_oauth.py`. Replace `oauth_callback`
 body with:
 
 ```python
@@ -1165,8 +1165,8 @@ Add imports:
 
 ```python
 from typing import Annotated
-from cubebox.mcp.dependencies import get_oauth_callback_handler
-from cubebox.mcp.oauth import OAuthCallbackHandler
+from cubeplex.mcp.dependencies import get_oauth_callback_handler
+from cubeplex.mcp.oauth import OAuthCallbackHandler
 ```
 
 - [ ] **Step 7: Verify route smoke**
@@ -1183,12 +1183,12 @@ Expected: PASS for the two tests added in Tasks 1–2.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/cubebox/mcp/oauth/__init__.py \
-        backend/cubebox/mcp/dependencies.py \
-        backend/cubebox/api/schemas/mcp.py \
-        backend/cubebox/api/routes/v1/admin_mcp.py \
-        backend/cubebox/api/routes/v1/ws_mcp.py \
-        backend/cubebox/api/routes/v1/mcp_oauth.py
+git add backend/cubeplex/mcp/oauth/__init__.py \
+        backend/cubeplex/mcp/dependencies.py \
+        backend/cubeplex/api/schemas/mcp.py \
+        backend/cubeplex/api/routes/v1/admin_mcp.py \
+        backend/cubeplex/api/routes/v1/ws_mcp.py \
+        backend/cubeplex/api/routes/v1/mcp_oauth.py
 git commit -m "feat(mcp/oauth): wire start/callback into routes (replace 501 stubs)"
 ```
 
@@ -1197,8 +1197,8 @@ git commit -m "feat(mcp/oauth): wire start/callback into routes (replace 501 stu
 ## Task 4: Admin org effective endpoint
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/mcp.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/schemas/mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 - Modify: `backend/tests/e2e/test_mcp_oauth_handoff.py` (extend)
 
 - [ ] **Step 1: Write the failing test**
@@ -1238,7 +1238,7 @@ Expected: FAIL — route does not exist.
 
 - [ ] **Step 3: Add the response schema**
 
-In `backend/cubebox/api/schemas/mcp.py` add:
+In `backend/cubeplex/api/schemas/mcp.py` add:
 
 ```python
 class MCPAdminInstallEffectiveOut(BaseModel):
@@ -1257,11 +1257,11 @@ class MCPAdminInstallEffectiveOut(BaseModel):
 
 - [ ] **Step 4: Add the derivation helper**
 
-In `backend/cubebox/api/routes/v1/admin_mcp.py` add a module-level helper
+In `backend/cubeplex/api/routes/v1/admin_mcp.py` add a module-level helper
 (or import it from a new module if you prefer — small enough to inline):
 
 ```python
-from cubebox.api.schemas.mcp import MCPAdminInstallEffectiveOut
+from cubeplex.api.schemas.mcp import MCPAdminInstallEffectiveOut
 
 
 def _derive_admin_org_effective(
@@ -1310,7 +1310,7 @@ def _derive_admin_org_effective(
 
 - [ ] **Step 5: Add the route**
 
-In `backend/cubebox/api/routes/v1/admin_mcp.py` add:
+In `backend/cubeplex/api/routes/v1/admin_mcp.py` add:
 
 ```python
 @router.get(
@@ -1338,8 +1338,8 @@ async def get_admin_install_effective(
 Add imports at top:
 
 ```python
-from cubebox.mcp.dependencies import get_grant_repo
-from cubebox.repositories.mcp import MCPCredentialGrantRepository
+from cubeplex.mcp.dependencies import get_grant_repo
+from cubeplex.repositories.mcp import MCPCredentialGrantRepository
 ```
 
 - [ ] **Step 6: Run tests to verify they pass**
@@ -1350,8 +1350,8 @@ Expected: PASS for all four tests now in the file.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/mcp.py \
-        backend/cubebox/api/routes/v1/admin_mcp.py \
+git add backend/cubeplex/api/schemas/mcp.py \
+        backend/cubeplex/api/routes/v1/admin_mcp.py \
         backend/tests/e2e/test_mcp_oauth_handoff.py
 git commit -m "feat(mcp/admin): add /installs/{id}/effective for org-row reason"
 ```
@@ -1400,7 +1400,7 @@ interface OAuthReturnMessage {
   reason?: string
 }
 
-const CHANNEL_NAME = 'cubebox-mcp-oauth'
+const CHANNEL_NAME = 'cubeplex-mcp-oauth'
 const TIMEOUT_MS = 90_000
 const POLL_INTERVAL_MS = 1_000
 
@@ -1535,7 +1535,7 @@ export async function adminGetInstallEffective(
 
 - [ ] **Step 4: Build core**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/core type-check`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/core type-check`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1565,7 +1565,7 @@ Create `frontend/packages/web/app/oauth/mcp/return/page.tsx`:
  * OAuth return page (popup side).
  * Spec: docs/superpowers/specs/2026-05-16-mcp-install-auth-handoff-spec.md §5.6.
  *
- * - Posts a typed message on BroadcastChannel('cubebox-mcp-oauth'), then
+ * - Posts a typed message on BroadcastChannel('cubeplex-mcp-oauth'), then
  *   closes itself after a 250ms grace period.
  * - If `state` is missing entirely (the genuinely-unrecoverable path),
  *   renders a static fallback and DOES NOT broadcast or auto-close.
@@ -1574,7 +1574,7 @@ Create `frontend/packages/web/app/oauth/mcp/return/page.tsx`:
 import { useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 
-const CHANNEL_NAME = 'cubebox-mcp-oauth'
+const CHANNEL_NAME = 'cubeplex-mcp-oauth'
 
 export default function OAuthReturnPage(): JSX.Element {
   const params = useSearchParams()
@@ -1640,7 +1640,7 @@ export default function OAuthReturnPage(): JSX.Element {
 
 - [ ] **Step 2: Verify it builds**
 
-Run: `cd frontend && pnpm --filter @cubebox/web type-check`
+Run: `cd frontend && pnpm --filter @cubeplex/web type-check`
 Expected: PASS.
 
 - [ ] **Step 3: Commit**
@@ -1760,7 +1760,7 @@ describe('computeAuthBandState', () => {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cd frontend && pnpm --filter @cubebox/web test -- effectiveAuthState`
+Run: `cd frontend && pnpm --filter @cubeplex/web test -- effectiveAuthState`
 Expected: FAIL — module does not exist.
 
 - [ ] **Step 3: Implement**
@@ -1768,7 +1768,7 @@ Expected: FAIL — module does not exist.
 Create `frontend/packages/web/components/mcp/effectiveAuthState.ts`:
 
 ```ts
-import type { MCPEffectiveConnector } from '@cubebox/core'
+import type { MCPEffectiveConnector } from '@cubeplex/core'
 
 export type AuthBandState =
   | { kind: 'hidden' }
@@ -1843,7 +1843,7 @@ export function computeAuthBandState({
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cd frontend && pnpm --filter @cubebox/web test -- effectiveAuthState`
+Run: `cd frontend && pnpm --filter @cubeplex/web test -- effectiveAuthState`
 Expected: PASS for all six test cases.
 
 - [ ] **Step 5: Commit**
@@ -1903,7 +1903,7 @@ Append the following keys under `mcp` in BOTH `messages/en.json` and
 Run i18n parity:
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web i18n:check
+cd frontend && pnpm --filter @cubeplex/web i18n:check
 ```
 
 Expected: PASS.
@@ -1936,7 +1936,7 @@ import {
   adminDeleteOrgGrant,
   type ApiClient,
   type MCPEffectiveConnector,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -2073,8 +2073,8 @@ Then implement the helpers in the same file. Key contract details:
 Run:
 ```bash
 cd frontend && \
-  pnpm --filter @cubebox/web type-check && \
-  pnpm --filter @cubebox/web test -- effectiveAuthState
+  pnpm --filter @cubeplex/web type-check && \
+  pnpm --filter @cubeplex/web test -- effectiveAuthState
 ```
 Expected: PASS.
 
@@ -2130,7 +2130,7 @@ Open `frontend/packages/web/components/workspace-settings/McpPanel.tsx`.
 Inside `ConnectorDetail`:
 
 ```tsx
-import { useWorkspaceStore } from '@cubebox/core'
+import { useWorkspaceStore } from '@cubeplex/core'
 import { AuthActionBand } from '@/components/mcp/AuthActionBand'
 
 // inside ConnectorDetail:
@@ -2171,7 +2171,7 @@ This satisfies spec §5.1's "New UI rule introduced by this spec".
 
 - [ ] **Step 4: Verify type-check + lint**
 
-Run: `cd frontend && pnpm --filter @cubebox/web type-check && pnpm --filter @cubebox/web lint`
+Run: `cd frontend && pnpm --filter @cubeplex/web type-check && pnpm --filter @cubeplex/web lint`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2232,12 +2232,12 @@ test('member without admin role does not see template list', async ({ page }) =>
 ```
 
 If the existing test fixtures don't include a static-template seed, add one
-in `backend/cubebox/cli/seed_mcp_templates.py` (or the dev-seed helper the
+in `backend/cubeplex/cli/seed_mcp_templates.py` (or the dev-seed helper the
 E2E suite uses) — guard with a clear comment that the seed is for testing.
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/web test:e2e -- mcp/install-auth-handoff.spec.ts`
+Run: `cd frontend && pnpm --filter @cubeplex/web test:e2e -- mcp/install-auth-handoff.spec.ts`
 Expected: FAIL — band copy not present yet (or template-list still
 visible to members).
 
@@ -2247,7 +2247,7 @@ task before continuing.
 
 - [ ] **Step 3: Run all MCP E2E**
 
-Run: `cd frontend && pnpm --filter @cubebox/web test:e2e -- mcp/`
+Run: `cd frontend && pnpm --filter @cubeplex/web test:e2e -- mcp/`
 Expected: PASS.
 
 - [ ] **Step 4: Commit**
@@ -2265,7 +2265,7 @@ git commit -m "test(web/mcp): E2E for install→auth handoff (static + member-hi
 
 - [ ] **Step 1: Confirm no `not_yet_wired` strings remain**
 
-Run: `cd backend && grep -rn "not_yet_wired\|callback_not_wired" cubebox/ tests/`
+Run: `cd backend && grep -rn "not_yet_wired\|callback_not_wired" cubeplex/ tests/`
 Expected: NO matches (the four 501 stubs and the callback stub are gone).
 
 - [ ] **Step 2: Backend full check**
@@ -2275,7 +2275,7 @@ Expected: format + lint + type-check + pytest all PASS.
 
 - [ ] **Step 3: Frontend full check**
 
-Run: `cd frontend && pnpm --filter @cubebox/web type-check && pnpm --filter @cubebox/web lint && pnpm --filter @cubebox/web test:e2e`
+Run: `cd frontend && pnpm --filter @cubeplex/web type-check && pnpm --filter @cubeplex/web lint && pnpm --filter @cubeplex/web test:e2e`
 Expected: PASS.
 
 - [ ] **Step 4: Commit nothing — this task is verification.**

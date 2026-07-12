@@ -5,7 +5,7 @@ import secrets
 import httpx
 import pytest
 
-from cubebox.auth.password_policy import PasswordPolicy
+from cubeplex.auth.password_policy import PasswordPolicy
 from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
@@ -40,7 +40,7 @@ async def test_register_high_policy_weak_password(
 ) -> None:
     """HIGH policy: short password returns 400 weak_password."""
     monkeypatch.setattr(
-        "cubebox.auth.password_policy.get_password_policy",
+        "cubeplex.auth.password_policy.get_password_policy",
         lambda: PasswordPolicy.HIGH,
     )
     email = f"high-weak-{secrets.token_hex(4)}@example.com"
@@ -62,7 +62,7 @@ async def test_register_high_policy_no_symbol(
 ) -> None:
     """HIGH policy: password without symbol returns 400."""
     monkeypatch.setattr(
-        "cubebox.auth.password_policy.get_password_policy",
+        "cubeplex.auth.password_policy.get_password_policy",
         lambda: PasswordPolicy.HIGH,
     )
     email = f"high-nosym-{secrets.token_hex(4)}@example.com"
@@ -84,7 +84,7 @@ async def test_register_high_policy_strong(
 ) -> None:
     """HIGH policy: strong password succeeds."""
     monkeypatch.setattr(
-        "cubebox.auth.password_policy.get_password_policy",
+        "cubeplex.auth.password_policy.get_password_policy",
         lambda: PasswordPolicy.HIGH,
     )
     email = f"high-strong-{secrets.token_hex(4)}@example.com"
@@ -103,7 +103,7 @@ async def test_register_low_policy_weak(
 ) -> None:
     """LOW policy: 8-digit password succeeds (only length checked)."""
     monkeypatch.setattr(
-        "cubebox.auth.password_policy.get_password_policy",
+        "cubeplex.auth.password_policy.get_password_policy",
         lambda: PasswordPolicy.LOW,
     )
     email = f"low-weak-{secrets.token_hex(4)}@example.com"
@@ -122,7 +122,7 @@ async def test_change_password_high_policy(
 ) -> None:
     """Change-password enforces policy: weak fails, strong succeeds."""
     monkeypatch.setattr(
-        "cubebox.auth.password_policy.get_password_policy",
+        "cubeplex.auth.password_policy.get_password_policy",
         lambda: PasswordPolicy.HIGH,
     )
     email = f"changepw-{secrets.token_hex(4)}@example.com"

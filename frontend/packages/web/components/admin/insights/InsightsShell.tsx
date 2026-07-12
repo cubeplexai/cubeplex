@@ -10,7 +10,7 @@ import { StackedSection, defaultCostColumns, type SummaryRow } from './cost/Stac
 import { CacheSection } from './cost/CacheSection'
 import { PALETTE_WORKSPACE, PALETTE_MODEL, PALETTE_USER, PALETTE_CACHE } from './cost/palettes'
 import { capTimeseries } from '@/lib/cost/helpers'
-import type { CostAggregateRow } from '@cubebox/core'
+import type { CostAggregateRow } from '@cubeplex/core'
 
 function aggRowToSummaryRow(r: CostAggregateRow): SummaryRow {
   return {

@@ -34,14 +34,14 @@
     },
     "terminal.integrated.env.linux": {
         "ENV_FOR_DYNACONF": "development",
-        "CUBEBOX_DEBUG": "true"
+        "CUBEPLEX_DEBUG": "true"
     },
     "terminal.integrated.env.osx": {
         "ENV_FOR_DYNACONF": "development",
-        "CUBEBOX_DEBUG": "true"
+        "CUBEPLEX_DEBUG": "true"
     },
     "terminal.integrated.env.windows": {
         "ENV_FOR_DYNACONF": "development",
-        "CUBEBOX_DEBUG": "true"
+        "CUBEPLEX_DEBUG": "true"
     }
 }

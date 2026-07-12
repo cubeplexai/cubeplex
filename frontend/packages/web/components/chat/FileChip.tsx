@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { X } from 'lucide-react'
-import type { UploadingFile } from '@cubebox/core'
+import type { UploadingFile } from '@cubeplex/core'
 import { getFileVisual } from '@/lib/fileIcons'
 import { cn } from '@/lib/utils'
 

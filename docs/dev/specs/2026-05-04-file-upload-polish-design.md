@@ -379,10 +379,10 @@ Because `mapContentType` (§5.1) routes `file_read` to the `FileReadView`, and t
 ## Affected modules
 
 ### Backend
-- `cubebox/middleware/citations/config.py` — `discriminator_field`/`discriminator_values`; `load_builtin_citation_configs`.
-- `cubebox/middleware/sandbox.py` — citation metadata on `_create_file_read_tool`.
-- `cubebox/streams/run_manager.py` — merge builtin configs into `all_citation_configs`.
-- `cubebox/api/routes/v1/conversations.py` — list filter (`last_message_at IS NOT NULL`).
+- `cubeplex/middleware/citations/config.py` — `discriminator_field`/`discriminator_values`; `load_builtin_citation_configs`.
+- `cubeplex/middleware/sandbox.py` — citation metadata on `_create_file_read_tool`.
+- `cubeplex/streams/run_manager.py` — merge builtin configs into `all_citation_configs`.
+- `cubeplex/api/routes/v1/conversations.py` — list filter (`last_message_at IS NOT NULL`).
 
 ### Frontend (`packages/core`)
 - `src/api/attachments.ts` — `uploadAttachment(..., signal)`; switch to XHR for upload-progress events.

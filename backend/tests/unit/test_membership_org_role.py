@@ -7,13 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel
 
 # Ensure all tables are registered on SQLModel.metadata before create_all.
-from cubebox.models import (  # noqa: F401
+from cubeplex.models import (  # noqa: F401
     Membership,
     Organization,
     Role,
     Workspace,
 )
-from cubebox.repositories import (
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationRepository,
     WorkspaceRepository,

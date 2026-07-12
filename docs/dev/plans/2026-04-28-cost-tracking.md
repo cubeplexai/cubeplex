@@ -8,18 +8,18 @@
 
 **Tech Stack:** Python/SQLModel/SQLAlchemy async (backend), Next.js/shadcn/TypeScript (frontend), MySQL (DB), Alembic (migrations), Playwright (frontend E2E).
 
-**Worktree:** `/home/chris/cubebox/.worktrees/m1-e1-cost-tracking` — all shell commands run from there unless otherwise noted.
+**Worktree:** `/home/chris/cubeplex/.worktrees/m1-e1-cost-tracking` — all shell commands run from there unless otherwise noted.
 
 ---
 
 ## File Map
 
 **New files:**
-- `backend/cubebox/models/billing.py` — `BillingEvent`, `LlmBillingEvent` SQLModel tables
-- `backend/cubebox/repositories/billing.py` — `BillingRepository` (insert + aggregate queries)
-- `backend/cubebox/middleware/cost.py` — `CostMiddleware` + `_cost_helper.py` utilities
-- `backend/cubebox/api/schemas/billing.py` — Pydantic response schemas
-- `backend/cubebox/api/routes/v1/cost.py` — 4 admin cost endpoints
+- `backend/cubeplex/models/billing.py` — `BillingEvent`, `LlmBillingEvent` SQLModel tables
+- `backend/cubeplex/repositories/billing.py` — `BillingRepository` (insert + aggregate queries)
+- `backend/cubeplex/middleware/cost.py` — `CostMiddleware` + `_cost_helper.py` utilities
+- `backend/cubeplex/api/schemas/billing.py` — Pydantic response schemas
+- `backend/cubeplex/api/routes/v1/cost.py` — 4 admin cost endpoints
 - `backend/tests/test_billing_repository.py` — unit tests (real test DB)
 - `backend/tests/test_cost_middleware.py` — unit tests (mock LLM handler)
 - `backend/tests/e2e/test_billing.py` — E2E test (real LLM call → assert billing row)
@@ -29,14 +29,14 @@
 - `frontend/packages/web/__tests__/e2e/admin-cost.spec.ts` — Playwright E2E
 
 **Modified files:**
-- `backend/cubebox/llm/config.py` — add `currency: str = "USD"` to `ModelCost`
-- `backend/cubebox/llm/factory.py` — attach `_cubebox_provider` / `_cubebox_model_id` to LLM instances
-- `backend/cubebox/agents/graph.py` — accept `billing_repo` + `user_id`, mount `CostMiddleware`
-- `backend/cubebox/middleware/subagents.py` — clone `CostMiddleware` for child agents
-- `backend/cubebox/streams/run_manager.py` — create `BillingRepository`, pass to `create_cubebox_agent`
-- `backend/cubebox/api/routes/v1/admin.py` — `include_router(cost_router)`
-- `backend/cubebox/models/__init__.py` — export `BillingEvent`, `LlmBillingEvent`
-- `backend/cubebox/repositories/__init__.py` — export `BillingRepository`
+- `backend/cubeplex/llm/config.py` — add `currency: str = "USD"` to `ModelCost`
+- `backend/cubeplex/llm/factory.py` — attach `_cubeplex_provider` / `_cubeplex_model_id` to LLM instances
+- `backend/cubeplex/agents/graph.py` — accept `billing_repo` + `user_id`, mount `CostMiddleware`
+- `backend/cubeplex/middleware/subagents.py` — clone `CostMiddleware` for child agents
+- `backend/cubeplex/streams/run_manager.py` — create `BillingRepository`, pass to `create_cubeplex_agent`
+- `backend/cubeplex/api/routes/v1/admin.py` — `include_router(cost_router)`
+- `backend/cubeplex/models/__init__.py` — export `BillingEvent`, `LlmBillingEvent`
+- `backend/cubeplex/repositories/__init__.py` — export `BillingRepository`
 - `frontend/packages/web/components/admin/AdminSubNav.tsx` — add "成本" nav item
 - `frontend/packages/core/src/index.ts` — export billing types + API client
 
@@ -45,14 +45,14 @@
 ## Task 1: SQLModel Models + Alembic Migration
 
 **Files:**
-- Create: `backend/cubebox/models/billing.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/billing.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 - Create: `backend/alembic/versions/<hash>_add_billing_tables.py` (generated)
 
 - [ ] **Step 1: Create the model file**
 
 ```python
-# backend/cubebox/models/billing.py
+# backend/cubeplex/models/billing.py
 """Billing models — parent/child tables for cost tracking."""
 
 from datetime import UTC, datetime
@@ -61,7 +61,7 @@ from sqlalchemy import Index, text
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
-from cubebox.models.mixins import OrgScopedMixin
+from cubeplex.models.mixins import OrgScopedMixin
 
 
 class BillingEvent(SQLModel, OrgScopedMixin, table=True):
@@ -117,10 +117,10 @@ class LlmBillingEvent(SQLModel, table=True):
 
 - [ ] **Step 2: Export from models `__init__.py`**
 
-Open `backend/cubebox/models/__init__.py`. Add to imports and `__all__`:
+Open `backend/cubeplex/models/__init__.py`. Add to imports and `__all__`:
 
 ```python
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 ```
 
 Add `"BillingEvent"` and `"LlmBillingEvent"` to `__all__` if it exists.
@@ -143,7 +143,7 @@ uv run alembic upgrade head
 Then confirm:
 ```bash
 uv run python -c "
-from cubebox.db.engine import engine
+from cubeplex.db.engine import engine
 import asyncio
 from sqlalchemy import text
 
@@ -160,8 +160,8 @@ Expected: `[('billing_events',), ('billing_llm_events',)]`
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/models/billing.py backend/cubebox/models/__init__.py backend/alembic/versions/
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/models/billing.py backend/cubeplex/models/__init__.py backend/alembic/versions/
 git commit -m "feat(billing): add billing_events + billing_llm_events tables"
 ```
 
@@ -170,8 +170,8 @@ git commit -m "feat(billing): add billing_events + billing_llm_events tables"
 ## Task 2: BillingRepository — Insert
 
 **Files:**
-- Create: `backend/cubebox/repositories/billing.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/billing.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 - Create: `backend/tests/test_billing_repository.py` (partial — insert tests only)
 
 - [ ] **Step 1: Write failing tests for insert**
@@ -186,8 +186,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
-from cubebox.repositories.billing import BillingRepository
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.repositories.billing import BillingRepository
 
 
 @pytest.fixture()
@@ -288,7 +288,7 @@ Expected: `ImportError` or `ModuleNotFoundError` (BillingRepository not yet crea
 - [ ] **Step 3: Implement BillingRepository insert methods**
 
 ```python
-# backend/cubebox/repositories/billing.py
+# backend/cubeplex/repositories/billing.py
 """BillingRepository — insert and query billing_events + billing_llm_events."""
 
 from __future__ import annotations
@@ -301,7 +301,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 
 
 class BillingRepository:
@@ -374,10 +374,10 @@ Expected: `2 passed`.
 
 - [ ] **Step 5: Export from repositories `__init__.py`**
 
-Open `backend/cubebox/repositories/__init__.py` and add:
+Open `backend/cubeplex/repositories/__init__.py` and add:
 
 ```python
-from cubebox.repositories.billing import BillingRepository
+from cubeplex.repositories.billing import BillingRepository
 ```
 
 Add `"BillingRepository"` to `__all__` if it exists.
@@ -385,8 +385,8 @@ Add `"BillingRepository"` to `__all__` if it exists.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/repositories/billing.py backend/cubebox/repositories/__init__.py backend/tests/test_billing_repository.py
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/repositories/billing.py backend/cubeplex/repositories/__init__.py backend/tests/test_billing_repository.py
 git commit -m "feat(billing): BillingRepository insert + fallback failure recording"
 ```
 
@@ -395,7 +395,7 @@ git commit -m "feat(billing): BillingRepository insert + fallback failure record
 ## Task 3: BillingRepository — Aggregate Queries
 
 **Files:**
-- Modify: `backend/cubebox/repositories/billing.py` (add query methods)
+- Modify: `backend/cubeplex/repositories/billing.py` (add query methods)
 - Modify: `backend/tests/test_billing_repository.py` (add query tests)
 
 - [ ] **Step 1: Write failing tests for aggregation queries**
@@ -485,7 +485,7 @@ Expected: `AttributeError` (methods not defined yet).
 
 - [ ] **Step 3: Implement aggregate query methods**
 
-Append to `BillingRepository` class in `backend/cubebox/repositories/billing.py`:
+Append to `BillingRepository` class in `backend/cubeplex/repositories/billing.py`:
 
 ```python
     async def get_workspace_spend(
@@ -691,8 +691,8 @@ Expected: `5 passed`.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/repositories/billing.py backend/tests/test_billing_repository.py
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/repositories/billing.py backend/tests/test_billing_repository.py
 git commit -m "feat(billing): BillingRepository aggregate queries and export stream"
 ```
 
@@ -701,12 +701,12 @@ git commit -m "feat(billing): BillingRepository aggregate queries and export str
 ## Task 4: LLMFactory Changes
 
 **Files:**
-- Modify: `backend/cubebox/llm/config.py`
-- Modify: `backend/cubebox/llm/factory.py`
+- Modify: `backend/cubeplex/llm/config.py`
+- Modify: `backend/cubeplex/llm/factory.py`
 
 - [ ] **Step 1: Add `currency` to `ModelCost`**
 
-In `backend/cubebox/llm/config.py`, add `currency` field to `ModelCost`:
+In `backend/cubeplex/llm/config.py`, add `currency` field to `ModelCost`:
 
 ```python
 class ModelCost(BaseModel):
@@ -727,7 +727,7 @@ class ModelCost(BaseModel):
 
 - [ ] **Step 2: Attach provider/model metadata to LLM instances**
 
-In `backend/cubebox/llm/factory.py`, in the `create()` method, just before the `return` statements, add the attribute assignment.
+In `backend/cubeplex/llm/factory.py`, in the `create()` method, just before the `return` statements, add the attribute assignment.
 
 Find the two return sites (`return ChatOpenAI(...)` and `return ChatOpenAICompatible(...)`). Replace with:
 
@@ -741,10 +741,10 @@ Find the two return sites (`return ChatOpenAI(...)` and `return ChatOpenAICompat
         else:
             llm = ChatOpenAICompatible(**llm_kwargs)
 
-        # Attach cubebox metadata for CostMiddleware to read
-        llm._cubebox_provider = provider_name      # type: ignore[attr-defined]
-        llm._cubebox_model_id = model_config.id    # type: ignore[attr-defined]
-        llm._cubebox_model_cost = model_config.cost  # type: ignore[attr-defined]
+        # Attach cubeplex metadata for CostMiddleware to read
+        llm._cubeplex_provider = provider_name      # type: ignore[attr-defined]
+        llm._cubeplex_model_id = model_config.id    # type: ignore[attr-defined]
+        llm._cubeplex_model_cost = model_config.cost  # type: ignore[attr-defined]
         return llm
 ```
 
@@ -759,7 +759,7 @@ For the Anthropic path, add before the `raise NotImplementedError`:
 
 ```bash
 cd backend
-uv run mypy cubebox/llm/
+uv run mypy cubeplex/llm/
 ```
 
 Expected: `Success: no issues found`.
@@ -767,8 +767,8 @@ Expected: `Success: no issues found`.
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/llm/config.py backend/cubebox/llm/factory.py
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/llm/config.py backend/cubeplex/llm/factory.py
 git commit -m "feat(billing): attach provider/model/cost metadata to LLM instances"
 ```
 
@@ -777,7 +777,7 @@ git commit -m "feat(billing): attach provider/model/cost metadata to LLM instanc
 ## Task 5: CostMiddleware
 
 **Files:**
-- Create: `backend/cubebox/middleware/cost.py`
+- Create: `backend/cubeplex/middleware/cost.py`
 - Create: `backend/tests/test_cost_middleware.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -794,7 +794,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain.agents.middleware.types import ModelRequest, ModelResponse
 
-from cubebox.middleware.cost import CostMiddleware
+from cubeplex.middleware.cost import CostMiddleware
 
 
 def _make_ai_message(input_tokens: int = 100, output_tokens: int = 50) -> AIMessage:
@@ -820,9 +820,9 @@ def _make_model_cost(input: float = 0.15, output: float = 0.60) -> MagicMock:
 
 def _make_llm(provider: str = "openai", model_id: str = "gpt-4o-mini") -> MagicMock:
     llm = MagicMock()
-    llm._cubebox_provider = provider
-    llm._cubebox_model_id = model_id
-    llm._cubebox_model_cost = _make_model_cost()
+    llm._cubeplex_provider = provider
+    llm._cubeplex_model_id = model_id
+    llm._cubeplex_model_cost = _make_model_cost()
     return llm
 
 
@@ -915,7 +915,7 @@ async def test_cost_calculation_uses_snapshot_price() -> None:
         conversation_id="conv-1",
     )
     llm = _make_llm()
-    llm._cubebox_model_cost = _make_model_cost(input=0.15, output=0.60)
+    llm._cubeplex_model_cost = _make_model_cost(input=0.15, output=0.60)
 
     request = MagicMock()
     request.model = llm
@@ -945,7 +945,7 @@ Expected: `ImportError` (module not created yet).
 - [ ] **Step 3: Implement CostMiddleware**
 
 ```python
-# backend/cubebox/middleware/cost.py
+# backend/cubeplex/middleware/cost.py
 """CostMiddleware — records per-LLM-call billing events."""
 
 import asyncio
@@ -959,7 +959,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 from loguru import logger
 
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 
 
 class CostMiddleware(AgentMiddleware[Any, Any, Any]):
@@ -1022,8 +1022,8 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
         status: str,
         error_class: str | None,
     ) -> None:
-        from cubebox.db.engine import async_session_maker
-        from cubebox.repositories.billing import BillingRepository
+        from cubeplex.db.engine import async_session_maker
+        from cubeplex.repositories.billing import BillingRepository
 
         try:
             provider, model_id, model_cost = _extract_model_meta(request.model)
@@ -1077,9 +1077,9 @@ class CostMiddleware(AgentMiddleware[Any, Any, Any]):
 
 
 def _extract_model_meta(model: Any) -> tuple[str, str, Any]:
-    provider = getattr(model, "_cubebox_provider", "unknown")
-    model_id = getattr(model, "_cubebox_model_id", "unknown")
-    model_cost = getattr(model, "_cubebox_model_cost", None)
+    provider = getattr(model, "_cubeplex_provider", "unknown")
+    model_id = getattr(model, "_cubeplex_model_id", "unknown")
+    model_cost = getattr(model, "_cubeplex_model_cost", None)
     return provider, model_id, model_cost
 
 
@@ -1135,25 +1135,25 @@ Expected: all existing tests still pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/middleware/cost.py backend/tests/test_cost_middleware.py
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/middleware/cost.py backend/tests/test_cost_middleware.py
 git commit -m "feat(billing): CostMiddleware with fire-and-forget billing write"
 ```
 
 ---
 
-## Task 6: Wire create_cubebox_agent + RunManager
+## Task 6: Wire create_cubeplex_agent + RunManager
 
 **Files:**
-- Modify: `backend/cubebox/agents/graph.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/agents/graph.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
-- [ ] **Step 1: Add billing params to `create_cubebox_agent`**
+- [ ] **Step 1: Add billing params to `create_cubeplex_agent`**
 
-In `backend/cubebox/agents/graph.py`, update the function signature and body:
+In `backend/cubeplex/agents/graph.py`, update the function signature and body:
 
 ```python
-def create_cubebox_agent(
+def create_cubeplex_agent(
     llm: BaseChatModel,
     tools: list[BaseTool],
     *,
@@ -1176,7 +1176,7 @@ Inside the function body, after the existing middleware setup and before `create
 ```python
     # Mount CostMiddleware last in the chain so it wraps all model calls
     if billing_repo is not None and user_id is not None and conversation_id is not None:
-        from cubebox.middleware.cost import CostMiddleware
+        from cubeplex.middleware.cost import CostMiddleware
         cost_mw = CostMiddleware(
             repo=billing_repo,
             org_id=org_id or "",
@@ -1189,29 +1189,29 @@ Inside the function body, after the existing middleware setup and before `create
 
 - [ ] **Step 2: Wire billing in `run_manager.py`**
 
-In `backend/cubebox/streams/run_manager.py`, find the block around line 475 where `create_cubebox_agent` is called. Add billing repo creation just before the call:
+In `backend/cubeplex/streams/run_manager.py`, find the block around line 475 where `create_cubeplex_agent` is called. Add billing repo creation just before the call:
 
 ```python
-            from cubebox.agents.graph import create_cubebox_agent
-            from cubebox.llm.factory import LLMFactory
-            from cubebox.middleware.citations import CitationConfig, load_citation_configs
-            from cubebox.tools import get_registry
+            from cubeplex.agents.graph import create_cubeplex_agent
+            from cubeplex.llm.factory import LLMFactory
+            from cubeplex.middleware.citations import CitationConfig, load_citation_configs
+            from cubeplex.tools import get_registry
 
             # Create a billing repo for this run (owns its own DB session lifecycle)
             billing_repo = None
             try:
-                from cubebox.repositories.billing import BillingRepository
-                from cubebox.db.engine import async_session_maker as _asm
+                from cubeplex.repositories.billing import BillingRepository
+                from cubeplex.db.engine import async_session_maker as _asm
                 _billing_session = await _asm().__aenter__()
                 billing_repo = BillingRepository(_billing_session, org_id=ctx.org_id)
             except Exception as _be:
                 logger.warning("billing repo init failed, continuing without: {}", _be)
 ```
 
-Then update the `create_cubebox_agent(...)` call to pass the new params:
+Then update the `create_cubeplex_agent(...)` call to pass the new params:
 
 ```python
-            agent = create_cubebox_agent(
+            agent = create_cubeplex_agent(
                 llm=llm,
                 tools=tools,
                 sandbox=sandbox,
@@ -1242,7 +1242,7 @@ Also close the billing session when the run ends. Find the `finally:` block of t
 
 ```bash
 cd backend
-uv run mypy cubebox/agents/graph.py cubebox/streams/run_manager.py
+uv run mypy cubeplex/agents/graph.py cubeplex/streams/run_manager.py
 ```
 
 Expected: `Success: no issues found` (or only pre-existing errors).
@@ -1250,9 +1250,9 @@ Expected: `Success: no issues found` (or only pre-existing errors).
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/agents/graph.py backend/cubebox/streams/run_manager.py
-git commit -m "feat(billing): wire CostMiddleware into create_cubebox_agent + RunManager"
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/agents/graph.py backend/cubeplex/streams/run_manager.py
+git commit -m "feat(billing): wire CostMiddleware into create_cubeplex_agent + RunManager"
 ```
 
 ---
@@ -1260,15 +1260,15 @@ git commit -m "feat(billing): wire CostMiddleware into create_cubebox_agent + Ru
 ## Task 7: Subagent Clone
 
 **Files:**
-- Modify: `backend/cubebox/middleware/subagents.py`
+- Modify: `backend/cubeplex/middleware/subagents.py`
 
 - [ ] **Step 1: Find the subagent tool creation in `_create_subagent_tool`**
 
-Open `backend/cubebox/middleware/subagents.py`. In `_run_subagent`, after `spec = subagent_map.get(...)` and before `agent = create_agent(...)`, add:
+Open `backend/cubeplex/middleware/subagents.py`. In `_run_subagent`, after `spec = subagent_map.get(...)` and before `agent = create_agent(...)`, add:
 
 ```python
         # Inherit and deepen CostMiddleware for billing attribution
-        from cubebox.middleware.cost import CostMiddleware
+        from cubeplex.middleware.cost import CostMiddleware
         _cost_mw: CostMiddleware | None = None
         for mw in (inherited_middleware or []):
             if isinstance(mw, CostMiddleware):
@@ -1300,8 +1300,8 @@ Expected: all pass (or same pass/fail ratio as before this task).
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/middleware/subagents.py
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/middleware/subagents.py
 git commit -m "feat(billing): clone CostMiddleware for subagent depth tracking"
 ```
 
@@ -1310,14 +1310,14 @@ git commit -m "feat(billing): clone CostMiddleware for subagent depth tracking"
 ## Task 8: Admin API — Schemas + Routes
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/billing.py`
-- Create: `backend/cubebox/api/routes/v1/cost.py`
-- Modify: `backend/cubebox/api/routes/v1/admin.py`
+- Create: `backend/cubeplex/api/schemas/billing.py`
+- Create: `backend/cubeplex/api/routes/v1/cost.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin.py`
 
 - [ ] **Step 1: Create response schemas**
 
 ```python
-# backend/cubebox/api/schemas/billing.py
+# backend/cubeplex/api/schemas/billing.py
 """Pydantic schemas for billing/cost API responses."""
 
 from datetime import date
@@ -1350,7 +1350,7 @@ class CostSummaryResponse(BaseModel):
 - [ ] **Step 2: Create cost routes**
 
 ```python
-# backend/cubebox/api/routes/v1/cost.py
+# backend/cubeplex/api/routes/v1/cost.py
 """Admin cost/billing endpoints. All routes require org-admin access."""
 
 import csv
@@ -1363,11 +1363,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.billing import CostAggregateRow, CostSummaryResponse
-from cubebox.auth.dependencies import current_active_user, resolve_current_org_id
-from cubebox.db import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import BillingRepository, MembershipRepository
+from cubeplex.api.schemas.billing import CostAggregateRow, CostSummaryResponse
+from cubeplex.auth.dependencies import current_active_user, resolve_current_org_id
+from cubeplex.db import get_session
+from cubeplex.models import Role, User
+from cubeplex.repositories import BillingRepository, MembershipRepository
 
 router = APIRouter(prefix="/cost", tags=["cost"])
 
@@ -1523,10 +1523,10 @@ async def export_workspace_csv(
 
 - [ ] **Step 3: Include cost router in admin routes**
 
-Open `backend/cubebox/api/routes/v1/admin.py`. At the bottom, add:
+Open `backend/cubeplex/api/routes/v1/admin.py`. At the bottom, add:
 
 ```python
-from cubebox.api.routes.v1.cost import router as cost_router
+from cubeplex.api.routes.v1.cost import router as cost_router
 
 router.include_router(cost_router)
 ```
@@ -1535,7 +1535,7 @@ router.include_router(cost_router)
 
 ```bash
 cd backend
-uv run mypy cubebox/api/routes/v1/cost.py cubebox/api/schemas/billing.py
+uv run mypy cubeplex/api/routes/v1/cost.py cubeplex/api/schemas/billing.py
 ```
 
 Expected: `Success: no issues found`.
@@ -1544,7 +1544,7 @@ Expected: `Success: no issues found`.
 
 ```bash
 # Start server in background: cd backend && python main.py &
-curl -s -b "cubebox_auth=<token>" http://localhost:8000/api/v1/admin/cost/summary | python3 -m json.tool
+curl -s -b "cubeplex_auth=<token>" http://localhost:8000/api/v1/admin/cost/summary | python3 -m json.tool
 ```
 
 Expected: JSON with `from_date`, `to_date`, `total_calls: 0`, `by_workspace: []` (empty DB is fine).
@@ -1552,8 +1552,8 @@ Expected: JSON with `from_date`, `to_date`, `total_calls: 0`, `by_workspace: []`
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
-git add backend/cubebox/api/schemas/billing.py backend/cubebox/api/routes/v1/cost.py backend/cubebox/api/routes/v1/admin.py
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
+git add backend/cubeplex/api/schemas/billing.py backend/cubeplex/api/routes/v1/cost.py backend/cubeplex/api/routes/v1/admin.py
 git commit -m "feat(billing): admin cost API endpoints (summary, by-workspace, CSV export)"
 ```
 
@@ -1577,7 +1577,7 @@ import pytest
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
 
 
 async def _count_billing_rows(session: AsyncSession, conversation_id: str) -> int:
@@ -1680,7 +1680,7 @@ Expected: `2 passed`. If you see `total_calls: 0` but count passed, check that t
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
 git add backend/tests/e2e/test_billing.py
 git commit -m "test(billing): E2E tests for billing row creation and cost summary endpoint"
 ```
@@ -1788,7 +1788,7 @@ export { fetchCostSummary, fetchWorkspaceCost, buildExportUrl } from './api/bill
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 pnpm type-check
 ```
 
@@ -1797,7 +1797,7 @@ Expected: `0 errors`.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
 git add frontend/packages/core/src/types/billing.ts frontend/packages/core/src/api/billing.ts frontend/packages/core/src/index.ts
 git commit -m "feat(billing): frontend core types + billing API client"
 ```
@@ -1831,8 +1831,8 @@ import { Box, CircleDollarSign, Cpu, Globe, Plug, Sparkles } from 'lucide-react'
 'use client';
 
 import { useEffect, useState } from 'react';
-import { buildExportUrl, fetchCostSummary, formatCostUsd } from '@cubebox/core';
-import type { CostSummaryResponse } from '@cubebox/core';
+import { buildExportUrl, fetchCostSummary, formatCostUsd } from '@cubeplex/core';
+import type { CostSummaryResponse } from '@cubeplex/core';
 import {
   Table,
   TableBody,
@@ -1995,7 +1995,7 @@ Open `http://localhost:3000/admin/cost` (after logging in as admin). Confirm:
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
 git add frontend/packages/web/app/admin/cost/page.tsx frontend/packages/web/components/admin/AdminSubNav.tsx
 git commit -m "feat(billing): admin cost page + AdminSubNav 成本 nav item"
 ```
@@ -2063,7 +2063,7 @@ Expected: `3 passed`. If auth setup differs from other E2E tests, check `admin-c
 
 ```bash
 # Backend unit tests
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking/backend
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking/backend
 uv run pytest tests/ --ignore=tests/e2e -v 2>&1 | tail -10
 
 # Backend E2E
@@ -2080,7 +2080,7 @@ All should pass.
 - [ ] **Step 4: Final commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/m1-e1-cost-tracking
+cd /home/chris/cubeplex/.worktrees/m1-e1-cost-tracking
 git add frontend/packages/web/__tests__/e2e/admin-cost.spec.ts
 git commit -m "test(billing): Playwright E2E for admin cost page"
 ```

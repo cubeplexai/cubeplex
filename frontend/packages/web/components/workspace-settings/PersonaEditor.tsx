@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { createApiClient, useWorkspaceSettingsStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useWorkspaceSettingsStore, useWorkspaceStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 

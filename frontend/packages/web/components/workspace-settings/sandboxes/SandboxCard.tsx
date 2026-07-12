@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import type { MySandboxOut } from '@cubebox/core'
+import type { MySandboxOut } from '@cubeplex/core'
 import { deleteMySandbox, restartMySandbox, useMySandboxes } from '@/hooks/useMySandboxes'
 import { Button } from '@/components/ui/button'
 import {

@@ -11,13 +11,13 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
-from cubebox.models.conversation import Conversation
-from cubebox.models.organization import Organization
-from cubebox.models.user import User
-from cubebox.models.workspace import Workspace
-from cubebox.repositories import BillingRepository
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.organization import Organization
+from cubeplex.models.user import User
+from cubeplex.models.workspace import Workspace
+from cubeplex.repositories import BillingRepository
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 pytestmark = pytest.mark.e2e

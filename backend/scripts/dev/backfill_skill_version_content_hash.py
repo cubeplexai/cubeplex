@@ -18,11 +18,11 @@ from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.config import config as _config
-from cubebox.db.engine import async_session_maker
-from cubebox.models.skill import SkillVersion
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.content_hash import compute_skill_version_hash
+from cubeplex.config import config as _config
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.skill import SkillVersion
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.content_hash import compute_skill_version_hash
 
 
 async def main() -> None:

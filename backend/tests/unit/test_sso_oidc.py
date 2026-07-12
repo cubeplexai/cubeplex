@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.sso.oidc."""
+"""Unit tests for cubeplex.sso.oidc."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ import pytest
 from joserfc import jwt as jose_jwt
 from joserfc.jwk import RSAKey
 
-from cubebox.models.sso_connection import SSOConnection
-from cubebox.sso.oidc import (
+from cubeplex.models.sso_connection import SSOConnection
+from cubeplex.sso.oidc import (
     OIDCConfig,
     OIDCUserInfo,
     OIDCValidationError,
@@ -121,7 +121,7 @@ def patch_async_client(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
             kwargs["transport"] = transport
             return original(*args, **kwargs)
 
-        monkeypatch.setattr("cubebox.sso.oidc.httpx.AsyncClient", factory)
+        monkeypatch.setattr("cubeplex.sso.oidc.httpx.AsyncClient", factory)
 
     return _patch
 
@@ -437,7 +437,7 @@ def test_coerce_email_verified_normalizes_strings(raw: Any, expected: bool) -> N
     as a JSON string. ``bool("false")`` is ``True`` in Python — without
     explicit coercion an attacker-controlled IdP claiming
     ``email_verified: "false"`` would be treated as verified."""
-    from cubebox.sso.oidc import _coerce_email_verified
+    from cubeplex.sso.oidc import _coerce_email_verified
 
     assert _coerce_email_verified(raw) is expected
 
@@ -461,7 +461,7 @@ async def test_discover_oidc_endpoints_parses_json(
     }
     patch_async_client(_make_transport(rsa_key=rsa_key, discovery_body=body))
     # Bypass the SSRF guard's DNS lookup so the mock can answer.
-    monkeypatch.setattr("cubebox.sso.oidc._refuse_ssrf_target", lambda url: None)
+    monkeypatch.setattr("cubeplex.sso.oidc._refuse_ssrf_target", lambda url: None)
     out = await discover_oidc_endpoints(ISSUER + "/")
     assert out == body
     assert json.dumps(out)  # round-trippable

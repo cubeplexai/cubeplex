@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI + pydantic (backend), Next.js 14 App Router + React Server Components + shadcn (frontend), TypeScript strict, Playwright E2E.
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/preset-admin-and-workspace` — slot 17, port 8017/3017, DB `cubebox_feat_preset_admin_and_workspace`.
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/preset-admin-and-workspace` — slot 17, port 8017/3017, DB `cubeplex_feat_preset_admin_and_workspace`.
 
 **PR strategy:** Single PR. Backend + frontend changes are coupled (frontend depends on backend endpoints). Subagent-driven execution; `/code-review` after plan, after major milestones, and on the final PR until clean.
 
@@ -36,10 +36,10 @@
 ### New files
 
 **Backend:**
-- `backend/cubebox/api/routes/v1/admin_model_presets.py` — admin CRUD endpoints
-- `backend/cubebox/api/routes/v1/model_presets.py` — workspace listing endpoint
-- `backend/cubebox/api/schemas/model_presets.py` — request/response Pydantic
-- `backend/cubebox/services/model_presets.py` — service layer (read/write OrgSettings, ref-existence validation)
+- `backend/cubeplex/api/routes/v1/admin_model_presets.py` — admin CRUD endpoints
+- `backend/cubeplex/api/routes/v1/model_presets.py` — workspace listing endpoint
+- `backend/cubeplex/api/schemas/model_presets.py` — request/response Pydantic
+- `backend/cubeplex/services/model_presets.py` — service layer (read/write OrgSettings, ref-existence validation)
 - `backend/tests/unit/api/test_admin_model_presets_schemas.py`
 - `backend/tests/e2e/test_admin_model_presets_e2e.py`
 - `backend/tests/e2e/test_workspace_model_presets_e2e.py`
@@ -60,9 +60,9 @@
 ### Modified files
 
 **Backend:**
-- `backend/cubebox/api/app.py` — register `admin_model_presets.router` and `model_presets.router` alongside other `admin_*` / `ws_*` routers (see lines ~508-537)
-- `backend/cubebox/services/provider_service.py` — delete-model guard checks preset refs
-- `backend/cubebox/streams/run_manager.py` — Fix-6: subagent gets `replace(this_run_model, on_failover=None)`
+- `backend/cubeplex/api/app.py` — register `admin_model_presets.router` and `model_presets.router` alongside other `admin_*` / `ws_*` routers (see lines ~508-537)
+- `backend/cubeplex/services/provider_service.py` — delete-model guard checks preset refs
+- `backend/cubeplex/streams/run_manager.py` — Fix-6: subagent gets `replace(this_run_model, on_failover=None)`
 
 **Frontend:**
 - `frontend/packages/web/app/admin/layout.tsx` — add "Model Presets" to sidebar
@@ -78,7 +78,7 @@
 ### Task B1: schema module
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/model_presets.py`
+- Create: `backend/cubeplex/api/schemas/model_presets.py`
 - Test: `backend/tests/unit/api/test_admin_model_presets_schemas.py`
 
 - [ ] **Step 1: Write failing schema tests**
@@ -89,7 +89,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cubebox.api.schemas.model_presets import (
+from cubeplex.api.schemas.model_presets import (
     AdminModelPresetsBody,
     AdminPresetEntry,
     WorkspacePresetSummary,
@@ -151,9 +151,9 @@ def test_workspace_summary_excludes_chain():
 cd backend && uv run pytest tests/unit/api/test_admin_model_presets_schemas.py -v
 ```
 
-- [ ] **Step 3: Create `cubebox/api/schemas/model_presets.py`**
+- [ ] **Step 3: Create `cubeplex/api/schemas/model_presets.py`**
 
-Reuse `cubebox/llm/snapshot_schema.py`'s `ModelPresetsValue` validation — the admin body is structurally identical. Wrap it:
+Reuse `cubeplex/llm/snapshot_schema.py`'s `ModelPresetsValue` validation — the admin body is structurally identical. Wrap it:
 
 ```python
 """API schemas for model preset admin + workspace endpoints.
@@ -163,8 +163,8 @@ OrgSettings.model_presets value, so we re-export the existing schema
 under an API-namespaced name.
 """
 
-from cubebox.llm.snapshot_schema import LLMPresetSchema as AdminPresetEntry
-from cubebox.llm.snapshot_schema import ModelPresetsValue as AdminModelPresetsBody
+from cubeplex.llm.snapshot_schema import LLMPresetSchema as AdminPresetEntry
+from cubeplex.llm.snapshot_schema import ModelPresetsValue as AdminModelPresetsBody
 
 from pydantic import BaseModel
 
@@ -187,7 +187,7 @@ class WorkspacePresetsResponse(BaseModel):
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/model_presets.py backend/tests/unit/api/test_admin_model_presets_schemas.py
+git add backend/cubeplex/api/schemas/model_presets.py backend/tests/unit/api/test_admin_model_presets_schemas.py
 git commit -m "feat(api): add model_presets request/response schemas"
 ```
 
@@ -196,7 +196,7 @@ git commit -m "feat(api): add model_presets request/response schemas"
 ### Task B2: service layer
 
 **Files:**
-- Create: `backend/cubebox/services/model_presets.py`
+- Create: `backend/cubeplex/services/model_presets.py`
 - Test: `backend/tests/unit/test_model_presets_service.py`
 
 Service responsibilities:
@@ -216,11 +216,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.api.schemas.model_presets import AdminModelPresetsBody
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.llm.errors import BrokenPresetError
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.services.model_presets import (
+from cubeplex.api.schemas.model_presets import AdminModelPresetsBody
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.llm.errors import BrokenPresetError
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.services.model_presets import (
     find_preset_refs_to_model,
     read_org_presets,
     write_org_presets,
@@ -326,7 +326,7 @@ async def test_find_preset_refs_to_model(session):
 
 - [ ] **Step 2: Run, expect ImportError**
 
-- [ ] **Step 3: Create `cubebox/services/model_presets.py`**
+- [ ] **Step 3: Create `cubeplex/services/model_presets.py`**
 
 ```python
 """Service-layer for OrgSettings.model_presets read/write + delete guards."""
@@ -336,9 +336,9 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.model_presets import AdminModelPresetsBody
-from cubebox.llm.errors import BrokenPresetError
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.api.schemas.model_presets import AdminModelPresetsBody
+from cubeplex.llm.errors import BrokenPresetError
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 
 async def read_org_presets(
@@ -423,7 +423,7 @@ async def find_preset_refs_to_model(
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/model_presets.py backend/tests/unit/test_model_presets_service.py
+git add backend/cubeplex/services/model_presets.py backend/tests/unit/test_model_presets_service.py
 git commit -m "feat(services): add model_presets service (read/write/find_refs)"
 ```
 
@@ -432,8 +432,8 @@ git commit -m "feat(services): add model_presets service (read/write/find_refs)"
 ### Task B3: admin endpoints
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_model_presets.py`
-- Modify: `backend/cubebox/api/routes/v1/admin.py` (register router)
+- Create: `backend/cubeplex/api/routes/v1/admin_model_presets.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin.py` (register router)
 - E2E: `backend/tests/e2e/test_admin_model_presets_e2e.py`
 
 Endpoints:
@@ -453,12 +453,12 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.model_presets import AdminModelPresetsBody
-from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
-from cubebox.db import get_session
-from cubebox.llm.snapshot import load_llm_snapshot
-from cubebox.models import User
-from cubebox.services.model_presets import read_org_presets, write_org_presets
+from cubeplex.api.schemas.model_presets import AdminModelPresetsBody
+from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubeplex.db import get_session
+from cubeplex.llm.snapshot import load_llm_snapshot
+from cubeplex.models import User
+from cubeplex.services.model_presets import read_org_presets, write_org_presets
 
 router = APIRouter(prefix="/admin/model-presets", tags=["admin-model-presets"])
 
@@ -502,7 +502,7 @@ async def put_admin_model_presets(
     return AdminModelPresetsResponse(value=value, origin=origin)
 ```
 
-- [ ] **Step 2: Register router in `backend/cubebox/api/app.py`**
+- [ ] **Step 2: Register router in `backend/cubeplex/api/app.py`**
 
 The convention (see `app.py` ~lines 508-537) is to register each `admin_*` / `ws_*` router individually on the FastAPI app — **do NOT** nest into `admin.py`. Add an import alongside the existing `admin_llm`, `admin_providers`, etc. imports, then:
 
@@ -525,7 +525,7 @@ Reuse `tests/e2e/test_admin_providers_crud.py` as template. Cover:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_model_presets.py backend/cubebox/api/app.py backend/tests/e2e/test_admin_model_presets_e2e.py
+git add backend/cubeplex/api/routes/v1/admin_model_presets.py backend/cubeplex/api/app.py backend/tests/e2e/test_admin_model_presets_e2e.py
 git commit -m "feat(api): admin GET/PUT /model-presets endpoints"
 ```
 
@@ -534,13 +534,13 @@ git commit -m "feat(api): admin GET/PUT /model-presets endpoints"
 ### Task B4: workspace listing endpoint
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/model_presets.py`
+- Create: `backend/cubeplex/api/routes/v1/model_presets.py`
 - E2E: `backend/tests/e2e/test_workspace_model_presets_e2e.py`
 
 Endpoint:
 - `GET /api/v1/ws/{workspace_id}/model-presets` → `WorkspacePresetsResponse{presets: [{label, is_default}]}`
 
-Returns the effective preset list (org row if present, else system) — chain refs stripped (D3). Path param is **`workspace_id`** to match every other `/ws/{workspace_id}/...` route (verified by grepping `backend/cubebox/api/routes/v1/`).
+Returns the effective preset list (org row if present, else system) — chain refs stripped (D3). Path param is **`workspace_id`** to match every other `/ws/{workspace_id}/...` route (verified by grepping `backend/cubeplex/api/routes/v1/`).
 
 - [ ] **Step 1: Write router** — use `require_member` (defined in `auth/dependencies.py`), which returns a `RequestContext` carrying `org_id`, `workspace_id`, `role`. No need to fetch org_id separately. Inject `session` via `Depends(get_session)`.
 
@@ -554,14 +554,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.model_presets import (
+from cubeplex.api.schemas.model_presets import (
     WorkspacePresetSummary,
     WorkspacePresetsResponse,
 )
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.db import get_session
-from cubebox.llm.snapshot import load_llm_snapshot
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.db import get_session
+from cubeplex.llm.snapshot import load_llm_snapshot
 
 router = APIRouter(
     prefix="/ws/{workspace_id}/model-presets",
@@ -589,7 +589,7 @@ async def get_workspace_model_presets(
     )
 ```
 
-- [ ] **Step 2: Register router in `backend/cubebox/api/app.py`**
+- [ ] **Step 2: Register router in `backend/cubeplex/api/app.py`**
 
 Add the import alongside other `ws_*` imports and register on the app at the `/api/v1` prefix (matches lines ~527-536):
 
@@ -606,7 +606,7 @@ app.include_router(model_presets.router, prefix="/api/v1")
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/model_presets.py backend/cubebox/api/app.py backend/tests/e2e/test_workspace_model_presets_e2e.py
+git add backend/cubeplex/api/routes/v1/model_presets.py backend/cubeplex/api/app.py backend/tests/e2e/test_workspace_model_presets_e2e.py
 git commit -m "feat(api): GET /ws/{workspace_id}/model-presets workspace endpoint"
 ```
 
@@ -615,13 +615,13 @@ git commit -m "feat(api): GET /ws/{workspace_id}/model-presets workspace endpoin
 ### Task B5: delete-model guard
 
 **Files:**
-- Modify: `backend/cubebox/services/provider_service.py` (or wherever model-delete lives)
-- Modify: `backend/cubebox/api/exceptions.py` (add `ModelInUseByPresetError`)
+- Modify: `backend/cubeplex/services/provider_service.py` (or wherever model-delete lives)
+- Modify: `backend/cubeplex/api/exceptions.py` (add `ModelInUseByPresetError`)
 - Test: `backend/tests/unit/test_model_delete_guard.py`
 
 Before deleting a model, scan **only the caller's org row** of `OrgSettings.model_presets` and refuse if any preset references the ref. Return a 409 with the list of `{org_id, preset_label}` pairs from that org. Per D6: scan `org_id == caller.org_id` only; **do not block on the system row** (system presets are superseded on the first admin PUT — blocking on them is a chicken-and-egg trap). And **do not scan other orgs** — leaking other tenants' preset labels via a 409 body is a cross-tenant info leak in multi-tenant mode.
 
-- [ ] **Step 1: Add `ModelInUseByPresetError` to `cubebox/api/exceptions.py`**
+- [ ] **Step 1: Add `ModelInUseByPresetError` to `cubeplex/api/exceptions.py`**
 
 ```python
 class ModelInUseByPresetError(APIException):
@@ -638,18 +638,18 @@ class ModelInUseByPresetError(APIException):
 - [ ] **Step 2: Find delete-model endpoint**
 
 ```bash
-grep -rn "def delete_model\|delete_model_endpoint\|@router.delete.*models" backend/cubebox/
+grep -rn "def delete_model\|delete_model_endpoint\|@router.delete.*models" backend/cubeplex/
 ```
 
-Likely in `cubebox/api/routes/v1/admin_models.py` or `admin_providers.py`. Read the handler.
+Likely in `cubeplex/api/routes/v1/admin_models.py` or `admin_providers.py`. Read the handler.
 
 - [ ] **Step 3: Add the guard**
 
 Before performing the actual delete — reuse the existing `find_preset_refs_to_model(session, org_id, slug, model_id)` service (scoped to the caller's org by construction). The system row is intentionally excluded.
 
 ```python
-from cubebox.services.model_presets import find_preset_refs_to_model
-from cubebox.api.exceptions import ModelInUseByPresetError
+from cubeplex.services.model_presets import find_preset_refs_to_model
+from cubeplex.api.exceptions import ModelInUseByPresetError
 
 # caller_org_id is resolved via resolve_current_org_id(user, session) earlier
 # in the handler; do NOT scan other orgs (info leak) and do NOT include the
@@ -686,7 +686,7 @@ git commit -m "feat(admin): guard model delete with preset-reference check"
 ### Task B6: Fix-6 subagent failover attribution
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 Currently the subagent gets the SAME `FallbackBoundModel` instance as the main agent, so subagent failovers fire the main-agent `on_failover` closure and emit `model_failover` events misattributed to the top-level conversation.
 
@@ -772,7 +772,7 @@ Pick (1) when feasible, fall back to (2). Do not defer.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_subagent_failover_attribution.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_subagent_failover_attribution.py
 git commit -m "fix(run_manager): subagent gets chain model without on_failover (Fix-6)"
 ```
 

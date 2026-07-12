@@ -13,9 +13,9 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.skill import OrgSkillInstall, Skill, SkillVersion
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillPublishService
+from cubeplex.models.skill import OrgSkillInstall, Skill, SkillVersion
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillPublishService
 
 
 def _make_zip(name: str, version: str = "1.0.0") -> bytes:

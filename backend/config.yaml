@@ -1,4 +1,4 @@
-# Base Configuration for cubebox
+# Base Configuration for cubeplex
 default:
   env: default
   debug: false
@@ -56,17 +56,17 @@ default:
     # fallbacks tried in order when the primary fails (timeout/error).
     model_presets:
       tiers:
-        lite:  { enabled: true,  primary: "cubebox/doubao-seed-1.8-thinking", fallbacks: [] }
+        lite:  { enabled: true,  primary: "cubeplex/doubao-seed-1.8-thinking", fallbacks: [] }
         flash: { enabled: false, primary: null, fallbacks: [] }
-        pro:   { enabled: true,  primary: "cubebox/doubao-seed-1.8-thinking",
-                 fallbacks: ["cubebox/qwen3.5-plus-thinking"] }
+        pro:   { enabled: true,  primary: "cubeplex/doubao-seed-1.8-thinking",
+                 fallbacks: ["cubeplex/qwen3.5-plus-thinking"] }
         max:   { enabled: false, primary: null, fallbacks: [] }
       default_preset: pro
       task_routing: {}
 
     # Model Providers Configuration
     providers:
-      cubebox:
+      cubeplex:
         base_url: "USE ENV"
         api_key: "USE ENV"
         api: "openai-completions"
@@ -128,14 +128,14 @@ default:
             extra_headers: {}
 
   # Sandbox Configuration
-  # Note: Sandbox lifecycle is managed by cubebox's SandboxManager (cleanup_expired task).
-  # opensandbox timeout is set to None (disabled) — cubebox controls termination via TTL.
+  # Note: Sandbox lifecycle is managed by cubeplex's SandboxManager (cleanup_expired task).
+  # opensandbox timeout is set to None (disabled) — cubeplex controls termination via TTL.
   sandbox:
     enabled: true
     # domain: "localhost:8090"
-    domain: "@format {env[CUBEBOX_SANDBOX__DOMAIN]}"
-    image: "@format {env[CUBEBOX_SANDBOX__IMAGE]}"
-    api_key: "@format {env[CUBEBOX_SANDBOX__API_KEY]}"
+    domain: "@format {env[CUBEPLEX_SANDBOX__DOMAIN]}"
+    image: "@format {env[CUBEPLEX_SANDBOX__IMAGE]}"
+    api_key: "@format {env[CUBEPLEX_SANDBOX__API_KEY]}"
     # use_server_proxy: Use sandbox server as proxy for execd/endpoint requests
     #   Set to true when SDK cannot directly reach sandbox network/ports
     #   (e.g., Docker bridge deployments, network isolation)
@@ -195,7 +195,7 @@ default:
     volume:
       enabled: true
       mount_path: "/workspace"
-      pvc_prefix: "cubebox-user" # PVC naming: cubebox-user-{user_id[:8]}
+      pvc_prefix: "cubeplex-user" # PVC naming: cubeplex-user-{user_id[:8]}
 
   # Skill marketplace (M3) — catalog-driven; replaces filesystem-based skills loader.
   skills:
@@ -233,7 +233,7 @@ default:
   objectstore:
     provider: "oss" # "oss" or "s3"
     endpoint: "https://oss-cn-zhangjiakou.aliyuncs.com"
-    bucket: "cubebox-dev"
+    bucket: "cubeplex-dev"
     region: "cn-zhangjiakou"
     access_key: ""
     access_secret: ""
@@ -244,14 +244,14 @@ default:
     port: 5432
     user: "postgres"
     password: "postgres"
-    name: "cubebox"
+    name: "cubeplex"
     pool_size: 10
     max_overflow: 20
     echo: false
 
   redis:
-    url: "redis://:passwd@localhost:6379/0" # ENV: CUBEBOX_REDIS__URL
-    key_prefix: "cubebox" # effective prefix is "{key_prefix}:{env}" at runtime
+    url: "redis://:passwd@localhost:6379/0" # ENV: CUBEPLEX_REDIS__URL
+    key_prefix: "cubeplex" # effective prefix is "{key_prefix}:{env}" at runtime
     # Connection pool / socket options passed to redis.asyncio.Redis.from_url
     max_connections: 64
     socket_timeout_seconds: 10
@@ -279,22 +279,22 @@ default:
 
   # Public-facing URLs used by OAuth redirect handling and other features
   # that mint absolute URLs for browsers / external IdPs.
-  public_base_url: "http://localhost:8000" # ENV: CUBEBOX_PUBLIC_BASE_URL
-  frontend_base_url: "http://localhost:3000" # ENV: CUBEBOX_FRONTEND_BASE_URL
+  public_base_url: "http://localhost:8000" # ENV: CUBEPLEX_PUBLIC_BASE_URL
+  frontend_base_url: "http://localhost:3000" # ENV: CUBEPLEX_FRONTEND_BASE_URL
 
   # Auth Configuration (P1)
   auth:
-    jwt_secret: "CHANGE_ME_IN_PRODUCTION_NOT_SECURE" # ENV: CUBEBOX_AUTH__JWT_SECRET
+    jwt_secret: "CHANGE_ME_IN_PRODUCTION_NOT_SECURE" # ENV: CUBEPLEX_AUTH__JWT_SECRET
     jwt_lifetime_seconds: 86400 # 24h
-    cookie_name: "cubebox_auth"
-    csrf_cookie_name: "cubebox_csrf"
+    cookie_name: "cubeplex_auth"
+    csrf_cookie_name: "cubeplex_csrf"
     cookie_secure: false # production: true
     cookie_samesite: "lax"
-    csrf_secret: "CHANGE_ME_IN_PRODUCTION_NOT_SECURE" # ENV: CUBEBOX_AUTH__CSRF_SECRET
+    csrf_secret: "CHANGE_ME_IN_PRODUCTION_NOT_SECURE" # ENV: CUBEPLEX_AUTH__CSRF_SECRET
     rate_limit:
       login_per_minute: 5
       register_per_minute: 3
-    password_policy: "high"   # "high" | "low", default high. ENV: CUBEBOX_AUTH__PASSWORD_POLICY
+    password_policy: "high"   # "high" | "low", default high. ENV: CUBEPLEX_AUTH__PASSWORD_POLICY
     email_verification:
       enabled: "auto"   # auto|true|false; auto = enabled iff email.backend == "smtp"
       code_length: 6          # OTP digit count
@@ -306,14 +306,14 @@ default:
   # Email (verification + password reset). `log` backend just prints the
   # rendered email to stdout (dev); `smtp` actually sends via aiosmtplib.
   # Put real credentials in gitignored config.*.local.yaml or env, not here.
-  #   CUBEBOX_EMAIL__SMTP_PASSWORD / CUBEBOX_EMAIL__SMTP_USER / ...
+  #   CUBEPLEX_EMAIL__SMTP_PASSWORD / CUBEPLEX_EMAIL__SMTP_USER / ...
   # TLS: leave `smtp_tls` unset for the common case — port 465 auto-uses
   # implicit TLS, anything else (e.g. 587) uses STARTTLS. Set `smtp_tls: true`
   # to force implicit TLS, or `smtp_tls: false` to disable it entirely
   # (plaintext relay, no STARTTLS).
   email:
     backend: "log" # "log" | "smtp"
-    from_address: "noreply@cubebox.local"
+    from_address: "noreply@cubeplex.local"
     smtp_host: "localhost"
     smtp_port: 587
     # smtp_tls: true    # uncomment to force implicit TLS (port 465)
@@ -323,19 +323,19 @@ default:
   # Social login (Google OAuth2/OIDC). Put real client_id / client_secret in
   # gitignored config.*.local.yaml or env, not here — same convention as LLM
   # provider api_key / sandbox api_key / smtp_password.
-  #   CUBEBOX_SOCIAL_LOGIN__GOOGLE__CLIENT_ID
-  #   CUBEBOX_SOCIAL_LOGIN__GOOGLE__CLIENT_SECRET
+  #   CUBEPLEX_SOCIAL_LOGIN__GOOGLE__CLIENT_ID
+  #   CUBEPLEX_SOCIAL_LOGIN__GOOGLE__CLIENT_SECRET
   social_login:
     google:
-      enabled: false # ENV: CUBEBOX_SOCIAL_LOGIN__GOOGLE__ENABLED
-      client_id: "" # ENV: CUBEBOX_SOCIAL_LOGIN__GOOGLE__CLIENT_ID
-      client_secret: "" # ENV: CUBEBOX_SOCIAL_LOGIN__GOOGLE__CLIENT_SECRET
+      enabled: false # ENV: CUBEPLEX_SOCIAL_LOGIN__GOOGLE__ENABLED
+      client_id: "" # ENV: CUBEPLEX_SOCIAL_LOGIN__GOOGLE__CLIENT_ID
+      client_secret: "" # ENV: CUBEPLEX_SOCIAL_LOGIN__GOOGLE__CLIENT_SECRET
 
   # File parsers (M6 file_read tool)
   parsers:
     docling_serve:
-      base_url: "http://docling-serve:5001" # ENV: CUBEBOX_PARSERS__DOCLING_SERVE__BASE_URL
-      api_key: "" # ENV: CUBEBOX_PARSERS__DOCLING_SERVE__API_KEY
+      base_url: "http://docling-serve:5001" # ENV: CUBEPLEX_PARSERS__DOCLING_SERVE__BASE_URL
+      api_key: "" # ENV: CUBEPLEX_PARSERS__DOCLING_SERVE__API_KEY
       timeout_sync_seconds: 30
       timeout_async_minutes: 10
       async_threshold_mb: 3
@@ -417,7 +417,7 @@ default:
 
   # Image generation (generate_image tool, sandbox-gated).
   # Set enabled: true and supply a real api_key in config.*.local.yaml or via env
-  # (CUBEBOX_IMAGE_GENERATION__API_KEY) to activate.  Never commit real keys here.
+  # (CUBEPLEX_IMAGE_GENERATION__API_KEY) to activate.  Never commit real keys here.
   image_generation:
     enabled: false
     api: "openai-images"
@@ -464,13 +464,13 @@ default:
       # the OpenAI embeddings protocol works (DashScope compatible-mode,
       # local vLLM/Ollama, etc.). Override per-deployment.
       base_url: "https://api.openai.com/v1"
-      # Leave empty here; supply via env (`CUBEBOX_SEARCH__EMBEDDING__API_KEY`)
+      # Leave empty here; supply via env (`CUBEPLEX_SEARCH__EMBEDDING__API_KEY`)
       # or a gitignored .secrets.yaml. Dynaconf merges env over yaml.
       api_key: ""
       model: "text-embedding-3-small"
       # Vector column width in conversation_chunks.embedding. Frozen at
       # `alembic upgrade head` time — to change later, drop the table and
-      # re-migrate. The startup three-way check (cubebox.services.
+      # re-migrate. The startup three-way check (cubeplex.services.
       # conversation_search.startup) catches drift between this, the live
       # schema, and the provider's actual output dim.
       vector_dim: 1024

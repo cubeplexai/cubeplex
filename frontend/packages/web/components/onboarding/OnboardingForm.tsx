@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { completeOnboarding, createApiClient, useAuthStore } from '@cubebox/core'
+import { completeOnboarding, createApiClient, useAuthStore } from '@cubeplex/core'
 import {
   SLUG_MAX,
   SLUG_MIN,

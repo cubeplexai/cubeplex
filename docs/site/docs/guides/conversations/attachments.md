@@ -9,7 +9,7 @@ You can attach files to your messages so the agent can read, analyze, or referen
 
 ## Supported file types
 
-CubeBox classifies attachments into three kinds:
+CubePlex classifies attachments into three kinds:
 
 | Kind | Examples |
 |---|---|
@@ -42,7 +42,7 @@ While files are still uploading or staged (before you send the message), click t
 
 When you send a message with attachments, the files are:
 
-1. **Stored** in CubeBox's object store.
+1. **Stored** in CubePlex's object store.
 2. **Injected** into the agent's sandbox at a known path so it can access them with code execution tools.
 3. **Referenced** in the message context so the agent knows what files are available and their types.
 

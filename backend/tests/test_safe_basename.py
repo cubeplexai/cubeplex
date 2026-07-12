@@ -1,6 +1,6 @@
 """Unit tests for filename sanitization in the attachment service."""
 
-from cubebox.services.attachments import _safe_basename
+from cubeplex.services.attachments import _safe_basename
 
 
 def test_strips_posix_path_traversal() -> None:

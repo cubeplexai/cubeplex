@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { Provider } from '@cubebox/core'
+import type { Provider } from '@cubeplex/core'
 import { ProviderCard } from './ProviderCard'
 
 interface ProviderListProps {

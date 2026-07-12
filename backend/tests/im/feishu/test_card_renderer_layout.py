@@ -1,16 +1,16 @@
 """Tests for the whole-card render() — skeleton + element conditional inclusion."""
 
-from cubebox.im.feishu.card_model import (
+from cubeplex.im.feishu.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
     ToolStep,
 )
-from cubebox.im.feishu.card_renderer import render
+from cubeplex.im.feishu.card_renderer import render
 
 
 def _empty_state() -> CardState:
-    return CardState(bot_name="cubebox", run_id="run_1")
+    return CardState(bot_name="cubeplex", run_id="run_1")
 
 
 def test_empty_card_has_skeleton_and_no_panels() -> None:
@@ -227,7 +227,7 @@ def test_status_element_renders_before_other_body_elements() -> None:
 
 
 def test_sub_agent_row_rendered_above_tool_steps() -> None:
-    from cubebox.im.feishu.card_model import SubAgentRow
+    from cubeplex.im.feishu.card_model import SubAgentRow
 
     state = _empty_state()
     state.sub_agents.append(SubAgentRow(agent_id="subagent:tc_x", name="researcher", tool_count=3))

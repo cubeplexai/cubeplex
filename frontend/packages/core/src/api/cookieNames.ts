@@ -16,10 +16,10 @@ function pick(value: string | undefined, fallback: string): string {
 
 export const AUTH_COOKIE_NAME: string =
   typeof process !== 'undefined' && process.env
-    ? pick(process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME, 'cubebox_auth')
-    : 'cubebox_auth'
+    ? pick(process.env.NEXT_PUBLIC_AUTH_COOKIE_NAME, 'cubeplex_auth')
+    : 'cubeplex_auth'
 
 export const CSRF_COOKIE_NAME: string =
   typeof process !== 'undefined' && process.env
-    ? pick(process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME, 'cubebox_csrf')
-    : 'cubebox_csrf'
+    ? pick(process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME, 'cubeplex_csrf')
+    : 'cubeplex_csrf'

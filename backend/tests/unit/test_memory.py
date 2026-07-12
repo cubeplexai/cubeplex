@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 from cubepi.agent.types import AgentTool
 
-from cubebox.models.memory import MemoryScope, MemoryStatus, MemoryType
-from cubebox.services.memory import MemoryPermissionError
-from cubebox.services.memory_screen import MemoryScreenError
-from cubebox.tools.builtin.memory import (
+from cubeplex.models.memory import MemoryScope, MemoryStatus, MemoryType
+from cubeplex.services.memory import MemoryPermissionError
+from cubeplex.services.memory_screen import MemoryScreenError
+from cubeplex.tools.builtin.memory import (
     MemorySaveArgs,
     MemorySearchArgs,
     MemoryUpdateArgs,

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubeplex/core'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

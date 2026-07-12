@@ -17,12 +17,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.agents.actions.builder import build_capability_tools
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import AgentCapability
-from cubebox.agents.checkpointer import init_checkpointer
-from cubebox.db.engine import _build_database_url
-from cubebox.models.membership import Role
+from cubeplex.agents.actions.builder import build_capability_tools
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import AgentCapability
+from cubeplex.agents.checkpointer import init_checkpointer
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.membership import Role
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 
@@ -235,7 +235,7 @@ async def _invoke(
 
 @pytest.mark.asyncio
 async def test_history_read_rejects_a_conversation_outside_the_caller_scope(seed: Seed) -> None:
-    from cubebox.agents.actions.capabilities.conversation_history import (
+    from cubeplex.agents.actions.capabilities.conversation_history import (
         ConversationHistoryDeps,
         build_conversation_history_capability,
     )
@@ -253,7 +253,7 @@ async def test_history_read_rejects_a_conversation_outside_the_caller_scope(seed
 
 @pytest.mark.asyncio
 async def test_history_tools_return_formatted_visible_checkpoint_data(seed: Seed) -> None:
-    from cubebox.agents.actions.capabilities.conversation_history import (
+    from cubeplex.agents.actions.capabilities.conversation_history import (
         ConversationHistoryDeps,
         build_conversation_history_capability,
     )
@@ -281,7 +281,7 @@ async def test_history_tools_return_formatted_visible_checkpoint_data(seed: Seed
 
 @pytest.mark.asyncio
 async def test_history_tools_page_older_turns_and_find_old_tool_results(seed: Seed) -> None:
-    from cubebox.agents.actions.capabilities.conversation_history import (
+    from cubeplex.agents.actions.capabilities.conversation_history import (
         ConversationHistoryDeps,
         build_conversation_history_capability,
     )
@@ -321,13 +321,13 @@ async def test_history_tools_page_older_turns_and_find_old_tool_results(seed: Se
 
 @pytest.mark.asyncio
 async def test_history_search_returns_only_visible_conversation_context_ids(seed: Seed) -> None:
-    from cubebox.agents.actions.capabilities.conversation_history import (
+    from cubeplex.agents.actions.capabilities.conversation_history import (
         ConversationHistoryDeps,
         build_conversation_history_capability,
     )
-    from cubebox.db.engine import async_session_maker
-    from cubebox.repositories.embedding_job import EmbeddingJobRepository
-    from cubebox.services.conversation_search.worker import EmbeddingWorker
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+    from cubeplex.services.conversation_search.worker import EmbeddingWorker
 
     async with async_session_maker() as session:
         await EmbeddingJobRepository(
@@ -361,8 +361,8 @@ async def test_history_search_returns_only_visible_conversation_context_ids(seed
 
 @pytest.mark.asyncio
 async def test_artifact_list_excludes_inaccessible_conversation_artifacts(seed: Seed) -> None:
-    from cubebox.agents.actions.capabilities.artifacts import ARTIFACTS_CAPABILITY, ListInput
-    from cubebox.agents.actions.capabilities.conversation_history import (
+    from cubeplex.agents.actions.capabilities.artifacts import ARTIFACTS_CAPABILITY, ListInput
+    from cubeplex.agents.actions.capabilities.conversation_history import (
         ReadInput,
         SearchInput,
         ToolResultInput,

@@ -1,6 +1,6 @@
 """Connector retains a single emergency text path; old text streaming gone."""
 
-from cubebox.im.feishu import connector
+from cubeplex.im.feishu import connector
 
 
 def test_connector_module_does_not_export_build_payload() -> None:

@@ -99,7 +99,7 @@ and timestamps. It does not read sandbox files or object-store content.
 
 The capability handlers call services and repositories, never FastAPI route
 functions. The conversation-history formatter lives in
-`cubebox.services.conversation_search.history`, alongside the existing
+`cubeplex.services.conversation_search.history`, alongside the existing
 checkpointer-to-message sequence and searchable-text logic. It reuses that
 package's message/sequence semantics but adds the distinct agent-facing work of
 turn grouping, tool-call/result correlation, and bounded rendering.

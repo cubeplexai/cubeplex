@@ -9,14 +9,14 @@ import {
   createScheduledTask,
   patchScheduledTask,
   retargetScheduledTaskDestination,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import type {
   ScheduledTaskCreate,
   ScheduledTaskOut,
   ScheduledTaskPatch,
   ScheduledTaskRetarget,
   TargetMode,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

@@ -17,7 +17,7 @@
 - 不留 backwards-compat shim（CLAUDE.md 项目未公开发布规则）
 - 测试：unit 在 `backend/tests/unit/`，e2e 在 `backend/tests/e2e/`；e2e 必须用真 Postgres / Redis / rustfs / opensandbox（不 mock 内部边界）；opensandbox 不可达 → `pytest.skip(reason=...)`（G11 模式）
 - 不写 `await asyncio.sleep(0.5)` 的 fire-and-forget 等待；用 bounded poll loop
-- 工作目录：`/home/chris/cubebox/.worktrees/feat/2026-06-26-sandbox-observability`
+- 工作目录：`/home/chris/cubeplex/.worktrees/feat/2026-06-26-sandbox-observability`
 - 分支：`feat/2026-06-26-sandbox-observability`（**多任务执行期间不切回 main**）
 - 测试日志：`tee tmp/<task>.log | tail -N`
 - 中间产出脚本：`backend/scripts/dev/`
@@ -31,11 +31,11 @@
 
 | 路径 | 责任 |
 |---|---|
-| `backend/cubebox/sandbox/sync_result.py` | `SyncResult` frozen dataclass |
-| `backend/cubebox/sandbox/sync_events.py` | `UserSandboxSyncEventService.record` |
-| `backend/cubebox/models/user_sandbox_sync_event.py` | `UserSandboxSyncEvent` SQLModel |
-| `backend/cubebox/repositories/user_sandbox_sync_event.py` | repo（仅 insert + 按 sandbox / 跨 sandbox 查询）|
-| `backend/cubebox/api/routes/v1/admin_sandboxes.py` | admin API 4 路由 |
+| `backend/cubeplex/sandbox/sync_result.py` | `SyncResult` frozen dataclass |
+| `backend/cubeplex/sandbox/sync_events.py` | `UserSandboxSyncEventService.record` |
+| `backend/cubeplex/models/user_sandbox_sync_event.py` | `UserSandboxSyncEvent` SQLModel |
+| `backend/cubeplex/repositories/user_sandbox_sync_event.py` | repo（仅 insert + 按 sandbox / 跨 sandbox 查询）|
+| `backend/cubeplex/api/routes/v1/admin_sandboxes.py` | admin API 4 路由 |
 | `backend/alembic/versions/XXXX_add_sandbox_sync_observability.py` | autogen migration |
 | `backend/tests/unit/test_sync_result.py` | SyncResult 单测 |
 | `backend/tests/unit/test_hash_manifest.py` | `_hash_manifest` 单测 |
@@ -47,11 +47,11 @@
 
 | 路径 | 修改要点 |
 |---|---|
-| `backend/cubebox/models/user_sandbox.py` | 加 4 列（`skills_manifest_hash`, `skills_count`, `last_skill_sync_at`, `last_skill_sync_event_id`）|
-| `backend/cubebox/skills/sync_manifest.py` | 加 `hash_manifest(manifest)` helper |
-| `backend/cubebox/sandbox/manager.py` | `SandboxAttachment` dataclass + `get_or_create` 返回类型从 `Sandbox` 改为 `SandboxAttachment` |
-| `backend/cubebox/sandbox/lazy.py` | `_sync_skills` 返回 `SyncResult`；`LazySandbox` 加 `_user_sandbox_id` + `_event_service`；`_ensure_skills_synced` 按 result.status 分支写事件 |
-| `backend/cubebox/api/routes/v1/__init__.py`（或 router 装配处）| 挂载 admin_sandboxes 路由 |
+| `backend/cubeplex/models/user_sandbox.py` | 加 4 列（`skills_manifest_hash`, `skills_count`, `last_skill_sync_at`, `last_skill_sync_event_id`）|
+| `backend/cubeplex/skills/sync_manifest.py` | 加 `hash_manifest(manifest)` helper |
+| `backend/cubeplex/sandbox/manager.py` | `SandboxAttachment` dataclass + `get_or_create` 返回类型从 `Sandbox` 改为 `SandboxAttachment` |
+| `backend/cubeplex/sandbox/lazy.py` | `_sync_skills` 返回 `SyncResult`；`LazySandbox` 加 `_user_sandbox_id` + `_event_service`；`_ensure_skills_synced` 按 result.status 分支写事件 |
+| `backend/cubeplex/api/routes/v1/__init__.py`（或 router 装配处）| 挂载 admin_sandboxes 路由 |
 
 ### 删除
 
@@ -66,9 +66,9 @@
 ## Task 1.1: 加 `UserSandboxSyncEvent` 模型 + UserSandbox 4 列
 
 **Files:**
-- Create: `backend/cubebox/models/user_sandbox_sync_event.py`
-- Modify: `backend/cubebox/models/user_sandbox.py`（追加 4 列）
-- Modify: `backend/cubebox/models/__init__.py`（export 新模型）
+- Create: `backend/cubeplex/models/user_sandbox_sync_event.py`
+- Modify: `backend/cubeplex/models/user_sandbox.py`（追加 4 列）
+- Modify: `backend/cubeplex/models/__init__.py`（export 新模型）
 
 **Interfaces:**
 - Consumes: 无（首个 task）
@@ -81,7 +81,7 @@
 
 - [ ] **Step 1: 创建 `UserSandboxSyncEvent` 模型文件**
 
-`backend/cubebox/models/user_sandbox_sync_event.py`:
+`backend/cubeplex/models/user_sandbox_sync_event.py`:
 
 ```python
 """Append-only audit log of skill sync attempts on user sandboxes.
@@ -99,10 +99,10 @@ from typing import Any, ClassVar
 from sqlalchemy import JSON, Column, DateTime, Index
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
 
 
-class UserSandboxSyncEvent(CubeboxBase, OrgScopedMixin, table=True):
+class UserSandboxSyncEvent(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = "uss"
     __tablename__ = "user_sandbox_sync_events"
 
@@ -133,7 +133,7 @@ class UserSandboxSyncEvent(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: 在 `UserSandbox` 模型加 4 列**
 
-打开 `backend/cubebox/models/user_sandbox.py`，找到 `class UserSandbox(...)` 的字段块。在 `last_provider_check` / `volumes_config` 等已有字段之后、`__table_args__` 之前插入：
+打开 `backend/cubeplex/models/user_sandbox.py`，找到 `class UserSandbox(...)` 的字段块。在 `last_provider_check` / `volumes_config` 等已有字段之后、`__table_args__` 之前插入：
 
 ```python
     # Skill sync observability (see docs/dev/specs/2026-06-26-sandbox-observability-design.md).
@@ -157,10 +157,10 @@ class UserSandboxSyncEvent(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 3: Export 新模型**
 
-打开 `backend/cubebox/models/__init__.py`。找到 `UserSandbox` 的 import / 重新 export 行，在附近加：
+打开 `backend/cubeplex/models/__init__.py`。找到 `UserSandbox` 的 import / 重新 export 行，在附近加：
 
 ```python
-from cubebox.models.user_sandbox_sync_event import UserSandboxSyncEvent
+from cubeplex.models.user_sandbox_sync_event import UserSandboxSyncEvent
 ```
 
 再把 `UserSandboxSyncEvent` 加进 `__all__` 列表（如果文件维护了 `__all__`）。
@@ -168,7 +168,7 @@ from cubebox.models.user_sandbox_sync_event import UserSandboxSyncEvent
 - [ ] **Step 4: mypy 验证**
 
 ```bash
-cd backend && uv run mypy cubebox/models/user_sandbox.py cubebox/models/user_sandbox_sync_event.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/models/user_sandbox.py cubeplex/models/user_sandbox_sync_event.py 2>&1 | tail -3
 ```
 
 期望：`Success: no issues found`。
@@ -176,9 +176,9 @@ cd backend && uv run mypy cubebox/models/user_sandbox.py cubebox/models/user_san
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/user_sandbox.py \
-        backend/cubebox/models/user_sandbox_sync_event.py \
-        backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/user_sandbox.py \
+        backend/cubeplex/models/user_sandbox_sync_event.py \
+        backend/cubeplex/models/__init__.py
 git commit -m "feat(sandbox): UserSandbox snapshot cols + UserSandboxSyncEvent model"
 ```
 
@@ -228,7 +228,7 @@ cd backend && uv run alembic upgrade head 2>&1 | tee ../tmp/task-1.2-upgrade.log
 ```bash
 cd backend && uv run python -c "
 import asyncio
-from cubebox.db.engine import get_async_engine
+from cubeplex.db.engine import get_async_engine
 from sqlalchemy import text
 
 async def main():
@@ -271,7 +271,7 @@ git commit -m "feat(sandbox): alembic migration for sync observability"
 ## Task 1.3: `SyncResult` dataclass + 单测
 
 **Files:**
-- Create: `backend/cubebox/sandbox/sync_result.py`
+- Create: `backend/cubeplex/sandbox/sync_result.py`
 - Create: `backend/tests/unit/test_sync_result.py`
 
 **Interfaces:**
@@ -291,7 +291,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cubebox.sandbox.sync_result import SyncResult
+from cubeplex.sandbox.sync_result import SyncResult
 
 
 def test_noop_default_values():
@@ -346,11 +346,11 @@ def test_frozen():
 cd backend && uv run pytest tests/unit/test_sync_result.py -v --no-cov 2>&1 | tee ../tmp/task-1.3-fail.log | tail -10
 ```
 
-期望：`ModuleNotFoundError: No module named 'cubebox.sandbox.sync_result'`。
+期望：`ModuleNotFoundError: No module named 'cubeplex.sandbox.sync_result'`。
 
 - [ ] **Step 3: 写实现**
 
-`backend/cubebox/sandbox/sync_result.py`:
+`backend/cubeplex/sandbox/sync_result.py`:
 
 ```python
 """Outcome of one ``_sync_skills`` invocation.
@@ -392,7 +392,7 @@ cd backend && uv run pytest tests/unit/test_sync_result.py -v --no-cov 2>&1 | te
 - [ ] **Step 5: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/sandbox/sync_result.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/sandbox/sync_result.py 2>&1 | tail -3
 ```
 
 期望：clean。
@@ -400,7 +400,7 @@ cd backend && uv run mypy cubebox/sandbox/sync_result.py 2>&1 | tail -3
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/sync_result.py backend/tests/unit/test_sync_result.py
+git add backend/cubeplex/sandbox/sync_result.py backend/tests/unit/test_sync_result.py
 git commit -m "feat(sandbox): SyncResult dataclass for _sync_skills outcome"
 ```
 
@@ -409,7 +409,7 @@ git commit -m "feat(sandbox): SyncResult dataclass for _sync_skills outcome"
 ## Task 1.4: `hash_manifest` helper + 单测
 
 **Files:**
-- Modify: `backend/cubebox/skills/sync_manifest.py`（追加 `hash_manifest`）
+- Modify: `backend/cubeplex/skills/sync_manifest.py`（追加 `hash_manifest`）
 - Create: `backend/tests/unit/test_hash_manifest.py`
 
 **Interfaces:**
@@ -426,7 +426,7 @@ git commit -m "feat(sandbox): SyncResult dataclass for _sync_skills outcome"
 
 import pytest
 
-from cubebox.skills.sync_manifest import hash_manifest
+from cubeplex.skills.sync_manifest import hash_manifest
 
 
 def test_empty_manifest_stable():
@@ -477,7 +477,7 @@ cd backend && uv run pytest tests/unit/test_hash_manifest.py -v --no-cov 2>&1 | 
 
 - [ ] **Step 3: 实现**
 
-打开 `backend/cubebox/skills/sync_manifest.py`。在文件末尾追加：
+打开 `backend/cubeplex/skills/sync_manifest.py`。在文件末尾追加：
 
 ```python
 def hash_manifest(manifest: dict[str, Any]) -> str:
@@ -504,13 +504,13 @@ cd backend && uv run pytest tests/unit/test_hash_manifest.py -v --no-cov 2>&1 | 
 - [ ] **Step 5: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/skills/sync_manifest.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/skills/sync_manifest.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/sync_manifest.py backend/tests/unit/test_hash_manifest.py
+git add backend/cubeplex/skills/sync_manifest.py backend/tests/unit/test_hash_manifest.py
 git commit -m "feat(skills): hash_manifest helper for canonical manifest sha256"
 ```
 
@@ -519,7 +519,7 @@ git commit -m "feat(skills): hash_manifest helper for canonical manifest sha256"
 ## Task 1.5: `UserSandboxSyncEventRepository`
 
 **Files:**
-- Create: `backend/cubebox/repositories/user_sandbox_sync_event.py`
+- Create: `backend/cubeplex/repositories/user_sandbox_sync_event.py`
 
 **Interfaces:**
 - Consumes: `UserSandboxSyncEvent` from Task 1.1
@@ -531,7 +531,7 @@ git commit -m "feat(skills): hash_manifest helper for canonical manifest sha256"
 
 - [ ] **Step 1: 写 repository**
 
-`backend/cubebox/repositories/user_sandbox_sync_event.py`:
+`backend/cubeplex/repositories/user_sandbox_sync_event.py`:
 
 ```python
 """Repository for UserSandboxSyncEvent — insert + read queries.
@@ -547,8 +547,8 @@ from datetime import datetime
 
 from sqlalchemy import desc, select
 
-from cubebox.models import UserSandboxSyncEvent
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models import UserSandboxSyncEvent
+from cubeplex.repositories.base import ScopedRepository
 
 
 class UserSandboxSyncEventRepository(ScopedRepository[UserSandboxSyncEvent]):
@@ -591,12 +591,12 @@ class UserSandboxSyncEventRepository(ScopedRepository[UserSandboxSyncEvent]):
         return list(result.scalars().all())
 ```
 
-**注意**：`ScopedRepository` 已经提供 `_scoped_select()`（按 `(org_id, workspace_id)` 过滤）和 `create()` 等基础方法 —— 看 `backend/cubebox/repositories/base.py` 现有 repo 的写法对齐。如果实际签名跟例子有出入（如 `_scoped_select` 名字不同），按现有 repo 同步调整。
+**注意**：`ScopedRepository` 已经提供 `_scoped_select()`（按 `(org_id, workspace_id)` 过滤）和 `create()` 等基础方法 —— 看 `backend/cubeplex/repositories/base.py` 现有 repo 的写法对齐。如果实际签名跟例子有出入（如 `_scoped_select` 名字不同），按现有 repo 同步调整。
 
 - [ ] **Step 2: mypy 验证**
 
 ```bash
-cd backend && uv run mypy cubebox/repositories/user_sandbox_sync_event.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/repositories/user_sandbox_sync_event.py 2>&1 | tail -3
 ```
 
 期望：clean。
@@ -604,7 +604,7 @@ cd backend && uv run mypy cubebox/repositories/user_sandbox_sync_event.py 2>&1 |
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/repositories/user_sandbox_sync_event.py
+git add backend/cubeplex/repositories/user_sandbox_sync_event.py
 git commit -m "feat(sandbox): UserSandboxSyncEventRepository"
 ```
 
@@ -613,7 +613,7 @@ git commit -m "feat(sandbox): UserSandboxSyncEventRepository"
 ## Task 1.6: `UserSandboxSyncEventService`
 
 **Files:**
-- Create: `backend/cubebox/sandbox/sync_events.py`
+- Create: `backend/cubeplex/sandbox/sync_events.py`
 - Create: `backend/tests/unit/test_sync_event_writer.py`
 
 **Interfaces:**
@@ -649,10 +649,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlmodel import SQLModel, select
 
 # Import to register all models on SQLModel.metadata BEFORE create_all.
-from cubebox.models import UserSandbox, UserSandboxSyncEvent
-from cubebox.models.public_id import generate_public_id
-from cubebox.sandbox.sync_events import UserSandboxSyncEventService
-from cubebox.sandbox.sync_result import SyncResult
+from cubeplex.models import UserSandbox, UserSandboxSyncEvent
+from cubeplex.models.public_id import generate_public_id
+from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+from cubeplex.sandbox.sync_result import SyncResult
 
 
 @pytest_asyncio.fixture
@@ -748,11 +748,11 @@ async def test_record_failed_inserts_event_but_not_snapshot(session_factory):
 cd backend && uv run pytest tests/unit/test_sync_event_writer.py -v --no-cov 2>&1 | tee ../tmp/task-1.6-fail.log | tail -15
 ```
 
-期望：`ModuleNotFoundError: No module named 'cubebox.sandbox.sync_events'`。
+期望：`ModuleNotFoundError: No module named 'cubeplex.sandbox.sync_events'`。
 
 - [ ] **Step 3: 写实现**
 
-`backend/cubebox/sandbox/sync_events.py`:
+`backend/cubeplex/sandbox/sync_events.py`:
 
 ```python
 """Persist a SyncResult: write one event row + on success, update the
@@ -767,8 +767,8 @@ from __future__ import annotations
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from cubebox.models import UserSandbox, UserSandboxSyncEvent
-from cubebox.sandbox.sync_result import SyncResult
+from cubeplex.models import UserSandbox, UserSandboxSyncEvent
+from cubeplex.sandbox.sync_result import SyncResult
 
 
 class UserSandboxSyncEventService:
@@ -831,13 +831,13 @@ cd backend && uv run pytest tests/unit/test_sync_event_writer.py -v --no-cov 2>&
 - [ ] **Step 5: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/sandbox/sync_events.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/sandbox/sync_events.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/sync_events.py backend/tests/unit/test_sync_event_writer.py
+git add backend/cubeplex/sandbox/sync_events.py backend/tests/unit/test_sync_event_writer.py
 git commit -m "feat(sandbox): UserSandboxSyncEventService — persist event + snapshot atomic"
 ```
 
@@ -846,7 +846,7 @@ git commit -m "feat(sandbox): UserSandboxSyncEventService — persist event + sn
 ## Task 1.7: `SandboxAttachment` + `SandboxManager.get_or_create` 返回类型变更
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/manager.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
 
 **Interfaces:**
 - Consumes: 无
@@ -857,14 +857,14 @@ git commit -m "feat(sandbox): UserSandboxSyncEventService — persist event + sn
 - [ ] **Step 1: 找到 `get_or_create` 的返回点**
 
 ```bash
-grep -n "async def get_or_create\|return.*sandbox\b\|return self._" backend/cubebox/sandbox/manager.py | head -20
+grep -n "async def get_or_create\|return.*sandbox\b\|return self._" backend/cubeplex/sandbox/manager.py | head -20
 ```
 
 记下 `async def get_or_create` 的签名行号和所有 `return` 语句的位置。`get_or_create` 在 `manager.py:338-714` 之间。
 
 - [ ] **Step 2: 加 `SandboxAttachment` dataclass + 改返回类型**
 
-在 `backend/cubebox/sandbox/manager.py` 的 imports 后、`class SandboxManager` 之前插入：
+在 `backend/cubeplex/sandbox/manager.py` 的 imports 后、`class SandboxManager` 之前插入：
 
 ```python
 from dataclasses import dataclass
@@ -896,17 +896,17 @@ async def get_or_create(
 - [ ] **Step 3: 找所有调用方**
 
 ```bash
-grep -rn "\.get_or_create(" backend/cubebox/ 2>&1 | grep -v __pycache__ | head -20
+grep -rn "\.get_or_create(" backend/cubeplex/ 2>&1 | grep -v __pycache__ | head -20
 ```
 
-预期调用方：`backend/cubebox/sandbox/lazy.py` 里的 `LazySandbox._ensure`（Task 1.9 会改）；可能还有 `backend/cubebox/api/routes/v1/ws_sandbox.py` 或 `streams/run_manager.py` 等。
+预期调用方：`backend/cubeplex/sandbox/lazy.py` 里的 `LazySandbox._ensure`（Task 1.9 会改）；可能还有 `backend/cubeplex/api/routes/v1/ws_sandbox.py` 或 `streams/run_manager.py` 等。
 
 **这一 task 只改 manager**。下游调用方在 Task 1.9 / 1.10 接收新返回类型时调整。如果有调用方现在解构 `sandbox = await mgr.get_or_create(...)`，先标记，让 Task 1.9 一并改。如果不能等（mypy 报错阻塞）：在调用方就地写 `attachment = await mgr.get_or_create(...); sandbox = attachment.sandbox`，把它当临时桥接。
 
 - [ ] **Step 4: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/sandbox/manager.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/sandbox/manager.py 2>&1 | tail -3
 ```
 
 期望：clean（manager 自己 clean；调用方在后续 task 处理）。
@@ -922,7 +922,7 @@ cd backend && uv run pytest tests/unit/test_lazy_sandbox_download.py tests/unit/
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/manager.py
+git add backend/cubeplex/sandbox/manager.py
 git commit -m "feat(sandbox): SandboxAttachment return from get_or_create"
 ```
 
@@ -931,7 +931,7 @@ git commit -m "feat(sandbox): SandboxAttachment return from get_or_create"
 ## Task 1.8: `_sync_skills` 改返回 `SyncResult`
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/lazy.py`
+- Modify: `backend/cubeplex/sandbox/lazy.py`
 
 **Interfaces:**
 - Consumes:
@@ -944,13 +944,13 @@ git commit -m "feat(sandbox): SandboxAttachment return from get_or_create"
 
 - [ ] **Step 1: 重写 `_sync_skills`**
 
-在 `backend/cubebox/sandbox/lazy.py` 顶部 import 区加：
+在 `backend/cubeplex/sandbox/lazy.py` 顶部 import 区加：
 
 ```python
 from datetime import UTC, datetime
 
-from cubebox.sandbox.sync_result import SyncResult
-from cubebox.skills.sync_manifest import hash_manifest
+from cubeplex.sandbox.sync_result import SyncResult
+from cubeplex.skills.sync_manifest import hash_manifest
 ```
 
 打开当前 `_sync_skills` 函数（PR2 merge 后的版本，约 lazy.py:65-140 范围），整段替换：
@@ -1057,7 +1057,7 @@ async def _sync_skills(
 - [ ] **Step 2: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/sandbox/lazy.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/sandbox/lazy.py 2>&1 | tail -3
 ```
 
 期望：clean。
@@ -1070,8 +1070,8 @@ LazySandbox 的 `_ensure_skills_synced` 还在调用旧 signature 的 `_sync_ski
 
 ```bash
 cd backend && uv run python -c "
-from cubebox.sandbox.lazy import _sync_skills
-from cubebox.sandbox.sync_result import SyncResult
+from cubeplex.sandbox.lazy import _sync_skills
+from cubeplex.sandbox.sync_result import SyncResult
 import inspect
 sig = inspect.signature(_sync_skills)
 assert sig.return_annotation is SyncResult, f'got {sig.return_annotation!r}'
@@ -1084,7 +1084,7 @@ print('OK: _sync_skills returns SyncResult')
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/lazy.py
+git add backend/cubeplex/sandbox/lazy.py
 git commit -m "refactor(sandbox): _sync_skills returns SyncResult"
 ```
 
@@ -1093,7 +1093,7 @@ git commit -m "refactor(sandbox): _sync_skills returns SyncResult"
 ## Task 1.9: `LazySandbox` 接 `SandboxAttachment` + 控制器写事件
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/lazy.py`（`LazySandbox` 类）
+- Modify: `backend/cubeplex/sandbox/lazy.py`（`LazySandbox` 类）
 - Modify: `backend/tests/unit/test_lazy_sandbox_sync_lifecycle.py`（更新 mock 期望 + 加新断言）
 
 **Interfaces:**
@@ -1110,7 +1110,7 @@ git commit -m "refactor(sandbox): _sync_skills returns SyncResult"
 
 - [ ] **Step 1: 改 `LazySandbox.__init__`**
 
-打开 `backend/cubebox/sandbox/lazy.py`，找到 `LazySandbox.__init__`。在参数列表末尾追加：
+打开 `backend/cubeplex/sandbox/lazy.py`，找到 `LazySandbox.__init__`。在参数列表末尾追加：
 
 ```python
 event_service: UserSandboxSyncEventService | None = None,
@@ -1126,7 +1126,7 @@ self._user_sandbox_id: str | None = None
 文件顶部 import 区加：
 
 ```python
-from cubebox.sandbox.sync_events import UserSandboxSyncEventService
+from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
 ```
 
 - [ ] **Step 2: 改 `_ensure` 接 `SandboxAttachment`**
@@ -1201,7 +1201,7 @@ async with self._lock:
 打开 `backend/tests/unit/test_lazy_sandbox_sync_lifecycle.py`。原 `_make_lazy` 设置 `manager.get_or_create = AsyncMock(return_value=sandbox)` —— 这现在是 SandboxAttachment 不是 Sandbox。改成：
 
 ```python
-from cubebox.sandbox.manager import SandboxAttachment
+from cubeplex.sandbox.manager import SandboxAttachment
 
 def _make_lazy(catalog, sandbox, event_service=None):
     manager = MagicMock()
@@ -1331,7 +1331,7 @@ cd backend && uv run pytest tests/unit/test_lazy_sandbox_sync_lifecycle.py tests
 - [ ] **Step 8: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/sandbox/lazy.py cubebox/sandbox/manager.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/sandbox/lazy.py cubeplex/sandbox/manager.py 2>&1 | tail -3
 ```
 
 期望：clean。
@@ -1339,7 +1339,7 @@ cd backend && uv run mypy cubebox/sandbox/lazy.py cubebox/sandbox/manager.py 2>&
 - [ ] **Step 9: 找其它调用 `get_or_create` 的地方 + 修复**
 
 ```bash
-grep -rn "\.get_or_create(" backend/cubebox/ 2>&1 | grep -v __pycache__
+grep -rn "\.get_or_create(" backend/cubeplex/ 2>&1 | grep -v __pycache__
 ```
 
 每处把 `sandbox = await mgr.get_or_create(...)` 改成 `attachment = await mgr.get_or_create(...)` + 用 `attachment.sandbox`。如果调用方需要 `user_sandbox_id`，直接用 `attachment.user_sandbox_id`。
@@ -1347,17 +1347,17 @@ grep -rn "\.get_or_create(" backend/cubebox/ 2>&1 | grep -v __pycache__
 - [ ] **Step 10: mypy 全 backend**
 
 ```bash
-cd backend && uv run mypy cubebox/ 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/ 2>&1 | tail -3
 ```
 
 期望：`Success: no issues found in N source files`。
 
 - [ ] **Step 11: 实例化 `event_service` 并注入 LazySandbox**
 
-LazySandbox 的实例化点在 `backend/cubebox/streams/run_manager.py`（grep `LazySandbox(`）。每处构造 LazySandbox 时加：
+LazySandbox 的实例化点在 `backend/cubeplex/streams/run_manager.py`（grep `LazySandbox(`）。每处构造 LazySandbox 时加：
 
 ```python
-from cubebox.sandbox.sync_events import UserSandboxSyncEventService
+from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
 
 # Within run_manager or wherever LazySandbox is built:
 event_service = UserSandboxSyncEventService(session_factory)
@@ -1374,9 +1374,9 @@ lazy = LazySandbox(
 - [ ] **Step 12: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/lazy.py \
+git add backend/cubeplex/sandbox/lazy.py \
         backend/tests/unit/test_lazy_sandbox_sync_lifecycle.py \
-        backend/cubebox/streams/run_manager.py
+        backend/cubeplex/streams/run_manager.py
 # 加上其它你改的调用方文件
 git commit -m "feat(sandbox): LazySandbox writes sync events via UserSandboxSyncEventService"
 ```
@@ -1408,10 +1408,10 @@ import json
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import UserSandbox, UserSandboxSyncEvent
-from cubebox.sandbox.lazy import _sync_skills
-from cubebox.sandbox.sync_events import UserSandboxSyncEventService
-from cubebox.skills.sync_manifest import MANIFEST_PATH
+from cubeplex.models import UserSandbox, UserSandboxSyncEvent
+from cubeplex.sandbox.lazy import _sync_skills
+from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+from cubeplex.skills.sync_manifest import MANIFEST_PATH
 
 
 @pytest.mark.asyncio
@@ -1437,7 +1437,7 @@ async def test_cold_start_writes_success_event_and_updates_snapshot(
 
     # Drive sync via _sync_skills + event service (mirrors LazySandbox flow)
     mem = MemSandbox()
-    from cubebox.skills.service import SkillCatalogService
+    from cubeplex.skills.service import SkillCatalogService
     async with session_factory() as s:
         catalog = SkillCatalogService(session=s, cache=skill_cache)
         result = await _sync_skills(
@@ -1480,7 +1480,7 @@ async def test_failed_writes_failed_event_without_snapshot_bump(
 ):
     """Force tar -xzf to raise → status='failed' → event written, snapshot unchanged."""
     from tests.e2e.conftest import MemSandbox
-    from cubebox.skills.service import SkillCatalogService
+    from cubeplex.skills.service import SkillCatalogService
 
     ns = fresh_workspace_and_sandbox
 
@@ -1544,7 +1544,7 @@ async def test_hot_path_noop_writes_no_event(
     """Two consecutive syncs on the same MemSandbox: 1st = success, 2nd = noop.
     Verify the 2nd sync writes NO new event row."""
     from tests.e2e.conftest import install_skill_for_workspace, MemSandbox
-    from cubebox.skills.service import SkillCatalogService
+    from cubeplex.skills.service import SkillCatalogService
 
     ns = fresh_workspace_and_sandbox
 
@@ -1640,7 +1640,7 @@ git commit -m "test(sandbox): e2e cold/failed/noop write paths for sync events"
 ## Task 2.1: 写入路径之外的 pydantic 模型 + repo 读方法已就绪
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/admin_sandbox.py`
+- Create: `backend/cubeplex/api/schemas/admin_sandbox.py`
 
 **Interfaces:**
 - Consumes: 无（pure pydantic）
@@ -1651,7 +1651,7 @@ git commit -m "test(sandbox): e2e cold/failed/noop write paths for sync events"
 
 - [ ] **Step 1: 写 schemas**
 
-`backend/cubebox/api/schemas/admin_sandbox.py`:
+`backend/cubeplex/api/schemas/admin_sandbox.py`:
 
 ```python
 """Admin API response models for /api/v1/admin/sandboxes/*."""
@@ -1704,13 +1704,13 @@ class PaginationParams(BaseModel):
 - [ ] **Step 2: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/api/schemas/admin_sandbox.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/api/schemas/admin_sandbox.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/admin_sandbox.py
+git add backend/cubeplex/api/schemas/admin_sandbox.py
 git commit -m "feat(api): admin sandbox response schemas"
 ```
 
@@ -1719,8 +1719,8 @@ git commit -m "feat(api): admin sandbox response schemas"
 ## Task 2.2: Admin 路由实现
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_sandboxes.py`
-- Modify: API router 装配（`backend/cubebox/api/routes/v1/__init__.py` 或主 router 文件）
+- Create: `backend/cubeplex/api/routes/v1/admin_sandboxes.py`
+- Modify: API router 装配（`backend/cubeplex/api/routes/v1/__init__.py` 或主 router 文件）
 
 **Interfaces:**
 - Consumes:
@@ -1735,7 +1735,7 @@ git commit -m "feat(api): admin sandbox response schemas"
 
 - [ ] **Step 1: 写路由**
 
-`backend/cubebox/api/routes/v1/admin_sandboxes.py`:
+`backend/cubeplex/api/routes/v1/admin_sandboxes.py`:
 
 ```python
 """Admin sandbox observability routes.
@@ -1753,14 +1753,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.admin_sandbox import (
+from cubeplex.api.schemas.admin_sandbox import (
     SyncEventOut,
     UserSandboxSnapshotOut,
 )
-from cubebox.auth.deps import require_org_admin
-from cubebox.db.deps import get_async_session
-from cubebox.models import UserSandbox, UserSandboxSyncEvent
-from cubebox.repositories.user_sandbox_sync_event import UserSandboxSyncEventRepository
+from cubeplex.auth.deps import require_org_admin
+from cubeplex.db.deps import get_async_session
+from cubeplex.models import UserSandbox, UserSandboxSyncEvent
+from cubeplex.repositories.user_sandbox_sync_event import UserSandboxSyncEventRepository
 
 router = APIRouter(prefix="/admin", tags=["admin-sandboxes"])
 
@@ -1851,14 +1851,14 @@ async def list_sync_events_scoped(
     return [SyncEventOut.model_validate(e, from_attributes=True) for e in events]
 ```
 
-**注意**：fastapi DI 签名（`actor=Depends(...)`, `session=Depends(...)`) 用项目实际现有模式对齐。`require_org_admin` 在 `backend/cubebox/auth/deps.py` 或类似位置（grep 看准确名字）。`get_async_session` 同理。
+**注意**：fastapi DI 签名（`actor=Depends(...)`, `session=Depends(...)`) 用项目实际现有模式对齐。`require_org_admin` 在 `backend/cubeplex/auth/deps.py` 或类似位置（grep 看准确名字）。`get_async_session` 同理。
 
 - [ ] **Step 2: 挂载到主 router**
 
-打开 `backend/cubebox/api/routes/v1/__init__.py`（或主 router 装配文件，grep `include_router` 看实际入口）。加：
+打开 `backend/cubeplex/api/routes/v1/__init__.py`（或主 router 装配文件，grep `include_router` 看实际入口）。加：
 
 ```python
-from cubebox.api.routes.v1 import admin_sandboxes
+from cubeplex.api.routes.v1 import admin_sandboxes
 
 router.include_router(admin_sandboxes.router)
 ```
@@ -1866,7 +1866,7 @@ router.include_router(admin_sandboxes.router)
 - [ ] **Step 3: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/api/routes/v1/admin_sandboxes.py 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/api/routes/v1/admin_sandboxes.py 2>&1 | tail -3
 ```
 
 期望：clean。
@@ -1874,8 +1874,8 @@ cd backend && uv run mypy cubebox/api/routes/v1/admin_sandboxes.py 2>&1 | tail -
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_sandboxes.py \
-        backend/cubebox/api/routes/v1/__init__.py
+git add backend/cubeplex/api/routes/v1/admin_sandboxes.py \
+        backend/cubeplex/api/routes/v1/__init__.py
 git commit -m "feat(api): admin sandbox observability routes"
 ```
 
@@ -1906,8 +1906,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from httpx import AsyncClient
 
-from cubebox.sandbox.sync_events import UserSandboxSyncEventService
-from cubebox.sandbox.sync_result import SyncResult
+from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+from cubeplex.sandbox.sync_result import SyncResult
 
 
 async def _seed_success_event(
@@ -2042,7 +2042,7 @@ git commit -m "test(admin): e2e admin sandbox observability routes"
 - [ ] **Step 1: mypy 全 backend**
 
 ```bash
-cd backend && uv run mypy cubebox/ 2>&1 | tail -3
+cd backend && uv run mypy cubeplex/ 2>&1 | tail -3
 ```
 
 期望：clean。

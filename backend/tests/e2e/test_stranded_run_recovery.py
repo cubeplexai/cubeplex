@@ -15,12 +15,12 @@ import asyncpg
 import pytest
 from redis.asyncio import Redis
 
-from cubebox.agents.checkpointer import _build_dsn
-from cubebox.streams.recovery import recover_stranded_runs
+from cubeplex.agents.checkpointer import _build_dsn
+from cubeplex.streams.recovery import recover_stranded_runs
 
 
 def _test_prefix() -> str:
-    base = "cubebox"
+    base = "cubeplex"
     env = os.getenv("ENV_FOR_DYNACONF", "development")
     return f"{base}:{env}"
 
@@ -87,7 +87,7 @@ async def _cleanup_thread(conv_id: str, run_id: str, prefix: str, redis: Redis) 
 
 @pytest.mark.asyncio
 async def test_recover_stranded_runs_clears_redis_and_stamps_db() -> None:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     prefix = _test_prefix()
     redis = Redis.from_url(
@@ -128,7 +128,7 @@ async def test_recover_stranded_runs_clears_redis_and_stamps_db() -> None:
 
 @pytest.mark.asyncio
 async def test_recover_noop_when_no_stranded_runs() -> None:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     prefix = _test_prefix()
     redis = Redis.from_url(

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 
 const mockUrl = (file: string) => `/preview/${file}`
 vi.mock('@/components/panel/artifact/previewUtils', () => ({

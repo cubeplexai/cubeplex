@@ -6,11 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.agents.hydrator import (
+from cubeplex.agents.hydrator import (
     AttachmentHydrationError,
     AttachmentHydrator,
 )
-from cubebox.models import Attachment
+from cubeplex.models import Attachment
 
 
 def _att(**kwargs: object) -> Attachment:

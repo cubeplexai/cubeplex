@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Search, Upload } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import type { SkillFilters, SkillSource } from '@cubebox/core'
+import type { SkillFilters, SkillSource } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'

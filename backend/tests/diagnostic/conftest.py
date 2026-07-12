@@ -27,7 +27,7 @@ def _read_env_or_skip(var: str, provider: str) -> str:
 @pytest.fixture
 def deepseek_api_key() -> str:
     """Return the DeepSeek API key or skip."""
-    return _read_env_or_skip("CUBEBOX_LLM__PROVIDERS__DEEPSEEK__API_KEY", "DeepSeek")
+    return _read_env_or_skip("CUBEPLEX_LLM__PROVIDERS__DEEPSEEK__API_KEY", "DeepSeek")
 
 
 def _load_dev_config_key(dotted_path: str) -> str:
@@ -55,7 +55,7 @@ def _load_dev_config_key(dotted_path: str) -> str:
         # overriding the explicit env="development" here. We use a dummy env_switcher
         # var name so the global pytest-session environment doesn't bleed in.
         env_switcher="DIAG_ENV_FOR_DYNACONF",
-        env_prefix="CUBEBOX",
+        env_prefix="CUBEPLEX",
         load_dotenv=True,
         dotenv_path=str(backend_root / ".env"),
     )
@@ -67,17 +67,17 @@ def alicode_api_key() -> str:
     """Return the alicode (DashScope coding) API key or skip.
 
     alicode stores the key directly in config.development.local.yaml (not via env var),
-    so we load it from the development config. Accepts CUBEBOX_ALICODE_API_KEY env
+    so we load it from the development config. Accepts CUBEPLEX_ALICODE_API_KEY env
     override for CI injection.
     """
-    env_val = os.environ.get("CUBEBOX_ALICODE_API_KEY", "").strip()
+    env_val = os.environ.get("CUBEPLEX_ALICODE_API_KEY", "").strip()
     if env_val:
         return env_val
     key = _load_dev_config_key("llm.providers.alicode.api_key")
     if key and key != "key-in-env":
         return key
     pytest.skip(
-        "alicode credentials not available — set CUBEBOX_ALICODE_API_KEY or ensure "
+        "alicode credentials not available — set CUBEPLEX_ALICODE_API_KEY or ensure "
         "config.development.local.yaml is present with alicode.api_key"
     )
 
@@ -88,13 +88,13 @@ def arkcode_api_key() -> str:
 
     Like alicode, arkcode stores the key in local yaml config.
     """
-    env_val = os.environ.get("CUBEBOX_ARKCODE_API_KEY", "").strip()
+    env_val = os.environ.get("CUBEPLEX_ARKCODE_API_KEY", "").strip()
     if env_val:
         return env_val
     key = _load_dev_config_key("llm.providers.arkcode.api_key")
     if key and key != "key-in-env":
         return key
     pytest.skip(
-        "arkcode credentials not available — set CUBEBOX_ARKCODE_API_KEY or ensure "
+        "arkcode credentials not available — set CUBEPLEX_ARKCODE_API_KEY or ensure "
         "config.development.local.yaml is present with arkcode.api_key"
     )

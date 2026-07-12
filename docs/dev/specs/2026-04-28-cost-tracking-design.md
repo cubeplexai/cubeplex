@@ -14,7 +14,7 @@
 ### 1.1 现状
 
 - 无任何 token / cost 记录机制；LLM 调用完成后 `usage_metadata` 数据随 SSE 流流走，不落库
-- `ModelConfig.cost`（`backend/cubebox/llm/config.py`）已有 input/output/cache_read/cache_write 单价（USD/百万 token）
+- `ModelConfig.cost`（`backend/cubeplex/llm/config.py`）已有 input/output/cache_read/cache_write 单价（USD/百万 token）
 - 每次 LLM 调用完成时，`usage_metadata.input_tokens / output_tokens` 已在 `AIMessage` 上现成可读（`stream.py:96-110`）
 
 ### 1.2 目标
@@ -127,7 +127,7 @@ billing_storage_events  (billing_event_id FK, storage_path, size_bytes, period_d
 
 ### 4.1 新增文件
 
-`backend/cubebox/middleware/cost.py`
+`backend/cubeplex/middleware/cost.py`
 
 ```python
 class CostMiddleware(AgentMiddleware):
@@ -169,8 +169,8 @@ class CostMiddleware(AgentMiddleware):
 `LLMFactory.create()` 在返回 LLM 实例前赋两个属性：
 
 ```python
-llm._cubebox_provider = provider_name    # e.g. "openai"
-llm._cubebox_model_id = model_config.id  # e.g. "gpt-4o-mini"
+llm._cubeplex_provider = provider_name    # e.g. "openai"
+llm._cubeplex_model_id = model_config.id  # e.g. "gpt-4o-mini"
 ```
 
 `CostMiddleware._record` 从 `request.model` 读取这两个属性。
@@ -224,10 +224,10 @@ child_cost_mw = CostMiddleware(
 - `on_llm_error` → `recorder.record_fallback_failure(provider, model_id, input_tokens_estimate=0, status="fallback_failed")`
 - 只记失败路径，成功路径由 middleware 记，**不双写**
 
-### 4.7 挂载到 `create_cubebox_agent`
+### 4.7 挂载到 `create_cubeplex_agent`
 
 ```python
-# backend/cubebox/agents/graph.py
+# backend/cubeplex/agents/graph.py
 if billing_recorder is not None:
     middleware.append(
         CostMiddleware(
@@ -248,7 +248,7 @@ if billing_recorder is not None:
 
 ### 5.1 `BillingRepository`
 
-`backend/cubebox/repositories/billing.py`（继承 `ScopedRepository`，自动 `(org_id, workspace_id)` 过滤）：
+`backend/cubeplex/repositories/billing.py`（继承 `ScopedRepository`，自动 `(org_id, workspace_id)` 过滤）：
 
 ```python
 class BillingRepository(ScopedRepository[BillingEvent]):
@@ -305,7 +305,7 @@ class BillingRepository(ScopedRepository[BillingEvent]):
 
 ### 5.2 Admin API 端点
 
-挂在 `backend/cubebox/api/routes/v1/admin.py`（已有 admin router，全部 `require_org_admin`）：
+挂在 `backend/cubeplex/api/routes/v1/admin.py`（已有 admin router，全部 `require_org_admin`）：
 
 | Method | Path | 说明 |
 |---|---|---|
@@ -446,11 +446,11 @@ status, subagent_depth, duration_ms
 ### 10.1 新增文件
 
 **Backend**
-- `backend/cubebox/middleware/cost.py` — `CostMiddleware` + `BillingRecorder`
-- `backend/cubebox/models/billing.py` — `BillingEvent` + `LlmBillingEvent` SQLModel
-- `backend/cubebox/repositories/billing.py` — `BillingRepository`
-- `backend/cubebox/api/schemas/billing.py` — `CostAggregateRow` / `CostSummaryResponse`
-- `backend/cubebox/api/routes/v1/cost.py` — 4 个 admin cost 端点
+- `backend/cubeplex/middleware/cost.py` — `CostMiddleware` + `BillingRecorder`
+- `backend/cubeplex/models/billing.py` — `BillingEvent` + `LlmBillingEvent` SQLModel
+- `backend/cubeplex/repositories/billing.py` — `BillingRepository`
+- `backend/cubeplex/api/schemas/billing.py` — `CostAggregateRow` / `CostSummaryResponse`
+- `backend/cubeplex/api/routes/v1/cost.py` — 4 个 admin cost 端点
 - `backend/alembic/versions/<hash>_billing_tables.py` — `billing_events` + `billing_llm_events`
 - `backend/tests/test_billing_repository.py`
 - `backend/tests/test_cost_middleware.py`
@@ -465,12 +465,12 @@ status, subagent_depth, duration_ms
 ### 10.2 修改文件
 
 **Backend**
-- `backend/cubebox/llm/factory.py` — `create()` / `create_default()` 赋 `_cubebox_provider` / `_cubebox_model_id`；fallback chain 挂 `LightweightFallbackCallback`
-- `backend/cubebox/llm/config.py` — `ModelCost` 加 `currency: str = "USD"`
-- `backend/cubebox/agents/graph.py` — `create_cubebox_agent()` 新增 `billing_recorder` / `user_id` 参数，条件挂 `CostMiddleware`
-- `backend/cubebox/middleware/subagents.py` — `_create_subagent_tool` 透传 `CostMiddleware` clone
-- `backend/cubebox/api/routes/v1/admin.py` — include cost router
-- `backend/cubebox/api/routes/v1/conversations.py`（或 messages route）— 注入 `BillingRecorder` + `user_id` 传给 `create_cubebox_agent`
+- `backend/cubeplex/llm/factory.py` — `create()` / `create_default()` 赋 `_cubeplex_provider` / `_cubeplex_model_id`；fallback chain 挂 `LightweightFallbackCallback`
+- `backend/cubeplex/llm/config.py` — `ModelCost` 加 `currency: str = "USD"`
+- `backend/cubeplex/agents/graph.py` — `create_cubeplex_agent()` 新增 `billing_recorder` / `user_id` 参数，条件挂 `CostMiddleware`
+- `backend/cubeplex/middleware/subagents.py` — `_create_subagent_tool` 透传 `CostMiddleware` clone
+- `backend/cubeplex/api/routes/v1/admin.py` — include cost router
+- `backend/cubeplex/api/routes/v1/conversations.py`（或 messages route）— 注入 `BillingRecorder` + `user_id` 传给 `create_cubeplex_agent`
 
 **Frontend**
 - `frontend/packages/web/components/admin/AdminSubNav.tsx` — 加"成本"nav item

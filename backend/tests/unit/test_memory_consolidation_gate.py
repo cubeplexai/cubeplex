@@ -1,7 +1,7 @@
 import fakeredis.aioredis
 import pytest
 
-from cubebox.services import memory_consolidation as mc
+from cubeplex.services import memory_consolidation as mc
 
 
 @pytest.fixture

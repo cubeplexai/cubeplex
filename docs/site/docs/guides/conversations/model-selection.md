@@ -5,7 +5,7 @@ title: Model Selection
 
 # Model Selection
 
-CubeBox lets you choose which AI model powers each message. Different models have different strengths — cost, speed, reasoning depth, vision support, and more. You pick the model from the input bar before sending a message.
+CubePlex lets you choose which AI model powers each message. Different models have different strengths — cost, speed, reasoning depth, vision support, and more. You pick the model from the input bar before sending a message.
 
 ## Presets
 
@@ -27,7 +27,7 @@ The preset marked as the workspace default shows a small "Default" badge in the 
 
 ## Thinking (extended reasoning)
 
-Some models support **extended thinking** — a mode where the agent reasons step-by-step before producing its final answer. CubeBox exposes this as a separate **Effort** control (a "Faster → Smarter" slider) next to the preset picker.
+Some models support **extended thinking** — a mode where the agent reasons step-by-step before producing its final answer. CubePlex exposes this as a separate **Effort** control (a "Faster → Smarter" slider) next to the preset picker.
 
 ### Thinking levels
 
@@ -41,7 +41,7 @@ Some models support **extended thinking** — a mode where the agent reasons ste
 
 Higher thinking levels consume more tokens and take longer, but produce more thorough analysis for complex questions. For simple questions ("What is the capital of France?"), thinking adds cost without benefit.
 
-The thinking level is sticky across messages, like the preset. CubeBox stores it as a standard reasoning setting (`mode`, `effort`, and `summary`) and maps it to each provider's API. A **thinking badge** appears next to the control when an elevated level is active, so you do not accidentally leave it on high for routine questions.
+The thinking level is sticky across messages, like the preset. CubePlex stores it as a standard reasoning setting (`mode`, `effort`, and `summary`) and maps it to each provider's API. A **thinking badge** appears next to the control when an elevated level is active, so you do not accidentally leave it on high for routine questions.
 
 ### Viewing thinking output
 
@@ -53,11 +53,11 @@ When thinking is enabled, the agent's response includes a collapsible **Thinking
 
 ## Model failover
 
-If the selected model is temporarily unavailable (provider outage, rate limit, network issue), CubeBox can automatically fail over to a backup model in the same preset's fallback chain. When this happens, a small banner appears in the chat naming the model it switched from and the one it switched to:
+If the selected model is temporarily unavailable (provider outage, rate limit, network issue), CubePlex can automatically fail over to a backup model in the same preset's fallback chain. When this happens, a small banner appears in the chat naming the model it switched from and the one it switched to:
 
 > Switched from `<provider>/<model>` to `<fallback-provider>/<fallback-model>`
 
-Click the banner to expand it and see the reason for the failover. The conversation continues on the backup model until the next message, at which point CubeBox tries the primary model again.
+Click the banner to expand it and see the reason for the failover. The conversation continues on the backup model until the next message, at which point CubePlex tries the primary model again.
 
 If the entire fallback chain is exhausted (all models in the preset are unavailable), the banner instead reads **"Failover exhausted on `<provider>/<model>`"** and the run stops. Wait and try again, or switch to a different preset.
 

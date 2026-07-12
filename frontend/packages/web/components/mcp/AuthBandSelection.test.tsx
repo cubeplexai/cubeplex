@@ -10,8 +10,8 @@ const coreMocks = vi.hoisted(() => ({
   runOAuthFlow: vi.fn(),
 }))
 
-vi.mock('@cubebox/core', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@cubebox/core')>()
+vi.mock('@cubeplex/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@cubeplex/core')>()
   return {
     ...actual,
     runOAuthFlow: coreMocks.runOAuthFlow,

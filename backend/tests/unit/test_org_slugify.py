@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.auth.users import _slugify_org_name
+from cubeplex.auth.users import _slugify_org_name
 
 
 @pytest.mark.parametrize(

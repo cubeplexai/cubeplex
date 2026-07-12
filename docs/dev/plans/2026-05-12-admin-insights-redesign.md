@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-05-12-admin-insights-redesign-design.md`
 
-**Worktree:** `feat/admin-cost-redesign` at `/home/chris/cubebox/.worktrees/feat/admin-cost-redesign`. Allocated ports `8027` / `3027`. All paths below are relative to the worktree root unless otherwise noted.
+**Worktree:** `feat/admin-cost-redesign` at `/home/chris/cubeplex/.worktrees/feat/admin-cost-redesign`. Allocated ports `8027` / `3027`. All paths below are relative to the worktree root unless otherwise noted.
 
 ---
 
@@ -18,12 +18,12 @@
 
 ### Backend
 
-- **Modify** `backend/cubebox/repositories/billing.py`
+- **Modify** `backend/cubeplex/repositories/billing.py`
   - Add `get_timeseries(dimension, since, until, granularity, workspace_ids, models)` method that does 2D aggregation `(bucket × time_bucket)`.
-- **Modify** `backend/cubebox/api/schemas/billing.py`
+- **Modify** `backend/cubeplex/api/schemas/billing.py`
   - Add `by_user` field to `CostSummaryResponse`.
   - Add `TimeseriesPoint`, `TimeseriesSeries`, `TimeseriesResponse`.
-- **Modify** `backend/cubebox/api/routes/v1/cost.py`
+- **Modify** `backend/cubeplex/api/routes/v1/cost.py`
   - Add `by_user` to `/summary` route handler.
   - Add new `GET /timeseries` route handler.
 - **Modify / create** `backend/tests/e2e/test_billing_cost_api.py` (extend existing or create alongside `test_billing.py`)
@@ -69,12 +69,12 @@
 - [ ] **Step P1: Confirm worktree env**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/admin-cost-redesign
+cd /home/chris/cubeplex/.worktrees/feat/admin-cost-redesign
 cat .worktree.env
 git rev-parse --abbrev-ref HEAD
 ```
 
-Expected: branch `feat/admin-cost-redesign`, `CUBEBOX_API__PORT=8027`, `PORT=3027`. Never substitute 8000/3000 — they belong to the main worktree.
+Expected: branch `feat/admin-cost-redesign`, `CUBEPLEX_API__PORT=8027`, `PORT=3027`. Never substitute 8000/3000 — they belong to the main worktree.
 
 - [ ] **Step P2: Confirm dev deps are installed**
 
@@ -86,8 +86,8 @@ cd ../frontend && pnpm install
 - [ ] **Step P3: Confirm backend E2E env files are present**
 
 ```bash
-ls /home/chris/cubebox/.worktrees/feat/admin-cost-redesign/backend/.env \
-   /home/chris/cubebox/.worktrees/feat/admin-cost-redesign/backend/config.development.local.yaml
+ls /home/chris/cubeplex/.worktrees/feat/admin-cost-redesign/backend/.env \
+   /home/chris/cubeplex/.worktrees/feat/admin-cost-redesign/backend/config.development.local.yaml
 ```
 
 If either is missing, copy from main per the worktree CLAUDE.md.
@@ -99,7 +99,7 @@ If either is missing, copy from main per the worktree CLAUDE.md.
 ### Task 1: `BillingRepository.get_timeseries`
 
 **Files:**
-- Modify: `backend/cubebox/repositories/billing.py`
+- Modify: `backend/cubeplex/repositories/billing.py`
 - Test: `backend/tests/e2e/test_billing_cost_api.py` (new file)
 
 - [ ] **Step 1.1: Write failing E2E that calls the repo directly**
@@ -115,9 +115,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models.billing import BillingEvent, LlmBillingEvent
-from cubebox.repositories import BillingRepository
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.billing import BillingEvent, LlmBillingEvent
+from cubeplex.repositories import BillingRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -214,7 +214,7 @@ Expected: `AttributeError: 'BillingRepository' object has no attribute 'get_time
 
 - [ ] **Step 1.3: Implement `get_timeseries`**
 
-Add to `backend/cubebox/repositories/billing.py` (after `get_org_spend`):
+Add to `backend/cubeplex/repositories/billing.py` (after `get_org_spend`):
 
 ```python
     async def get_timeseries(
@@ -432,7 +432,7 @@ Fix any complaints before committing.
 - [ ] **Step 1.8: Commit**
 
 ```bash
-git add backend/cubebox/repositories/billing.py backend/tests/e2e/test_billing_cost_api.py
+git add backend/cubeplex/repositories/billing.py backend/tests/e2e/test_billing_cost_api.py
 git commit -m "feat(billing): add get_timeseries with zero-padding and top-N collapse"
 ```
 
@@ -441,8 +441,8 @@ git commit -m "feat(billing): add get_timeseries with zero-padding and top-N col
 ### Task 2: `/admin/cost/summary` returns `by_user`
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/billing.py`
-- Modify: `backend/cubebox/api/routes/v1/cost.py:75-103`
+- Modify: `backend/cubeplex/api/schemas/billing.py`
+- Modify: `backend/cubeplex/api/routes/v1/cost.py:75-103`
 - Test: `backend/tests/e2e/test_billing_cost_api.py`
 
 - [ ] **Step 2.1: Write failing E2E test**
@@ -484,7 +484,7 @@ Expected: `KeyError: 'by_user'` or assertion failure on missing field.
 
 - [ ] **Step 2.3: Add field to the pydantic schema**
 
-In `backend/cubebox/api/schemas/billing.py`, replace `CostSummaryResponse`:
+In `backend/cubeplex/api/schemas/billing.py`, replace `CostSummaryResponse`:
 
 ```python
 class CostSummaryResponse(BaseModel):
@@ -501,7 +501,7 @@ class CostSummaryResponse(BaseModel):
 
 - [ ] **Step 2.4: Populate `by_user` in the route**
 
-In `backend/cubebox/api/routes/v1/cost.py`, inside `get_cost_summary`, after the `by_day` line add:
+In `backend/cubeplex/api/routes/v1/cost.py`, inside `get_cost_summary`, after the `by_day` line add:
 
 ```python
     by_user = await repo.get_org_spend(since=since, until=until, group_by="user")
@@ -534,7 +534,7 @@ Expected: PASS.
 - [ ] **Step 2.6: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/billing.py backend/cubebox/api/routes/v1/cost.py backend/tests/e2e/test_billing_cost_api.py
+git add backend/cubeplex/api/schemas/billing.py backend/cubeplex/api/routes/v1/cost.py backend/tests/e2e/test_billing_cost_api.py
 git commit -m "feat(api): add by_user to /admin/cost/summary"
 ```
 
@@ -543,8 +543,8 @@ git commit -m "feat(api): add by_user to /admin/cost/summary"
 ### Task 3: `/admin/cost/timeseries` endpoint
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/billing.py`
-- Modify: `backend/cubebox/api/routes/v1/cost.py`
+- Modify: `backend/cubeplex/api/schemas/billing.py`
+- Modify: `backend/cubeplex/api/routes/v1/cost.py`
 - Test: `backend/tests/e2e/test_billing_cost_api.py`
 
 - [ ] **Step 3.1: Write failing test**
@@ -592,7 +592,7 @@ Expected: 404 (route doesn't exist yet).
 
 - [ ] **Step 3.3: Add response schemas**
 
-In `backend/cubebox/api/schemas/billing.py` append:
+In `backend/cubeplex/api/schemas/billing.py` append:
 
 ```python
 class TimeseriesPoint(BaseModel):
@@ -622,7 +622,7 @@ class TimeseriesResponse(BaseModel):
 
 - [ ] **Step 3.4: Add route**
 
-In `backend/cubebox/api/routes/v1/cost.py`, add after the `/by-workspace/{ws_id}` handler:
+In `backend/cubeplex/api/routes/v1/cost.py`, add after the `/by-workspace/{ws_id}` handler:
 
 ```python
 @router.get("/timeseries", response_model=TimeseriesResponse)
@@ -671,7 +671,7 @@ Imports at top of `cost.py`:
 
 ```python
 from typing import Annotated, Literal
-from cubebox.api.schemas.billing import (
+from cubeplex.api.schemas.billing import (
     CostAggregateRow,
     CostSummaryResponse,
     TimeseriesResponse,
@@ -697,7 +697,7 @@ cd backend && make check
 - [ ] **Step 3.7: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/billing.py backend/cubebox/api/routes/v1/cost.py backend/tests/e2e/test_billing_cost_api.py
+git add backend/cubeplex/api/schemas/billing.py backend/cubeplex/api/routes/v1/cost.py backend/tests/e2e/test_billing_cost_api.py
 git commit -m "feat(api): add /admin/cost/timeseries endpoint"
 ```
 
@@ -849,7 +849,7 @@ export type {
 - [ ] **Step 4.4: Build core**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build
+cd frontend && pnpm --filter @cubeplex/core build
 ```
 
 Expected: clean tsc output, `dist/` updated.
@@ -1228,7 +1228,7 @@ import {
   fetchCostTimeseries,
   type CostSummaryResponse,
   type TimeseriesResponse,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 export type RangePreset = '7d' | '30d' | '90d'
 export type Granularity = 'day' | 'week'
@@ -1381,7 +1381,7 @@ import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer,
   Tooltip, XAxis, YAxis,
 } from 'recharts'
-import type { TimeseriesResponse } from '@cubebox/core'
+import type { TimeseriesResponse } from '@cubeplex/core'
 
 interface Props {
   data: TimeseriesResponse
@@ -1570,7 +1570,7 @@ component in this plan.
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { buildExportUrl } from '@cubebox/core'
+import { buildExportUrl } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { buttonVariants } from '@/components/ui/button'
@@ -1755,7 +1755,7 @@ This task is largest. Implement, type-check, commit at the end.
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { CostSummaryResponse } from '@cubebox/core'
+import type { CostSummaryResponse } from '@cubeplex/core'
 import { formatPercent, percentDelta } from '@/lib/cost/helpers'
 import { cn } from '@/lib/utils'
 
@@ -1858,7 +1858,7 @@ export function KpiRow({ summary, priorSummary, rangeDays }: Props) {
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import type { TimeseriesResponse } from '@cubebox/core'
+import type { TimeseriesResponse } from '@cubeplex/core'
 import { StackedChart } from './StackedChart'
 import { topNWithOther } from '@/lib/cost/helpers'
 
@@ -1979,7 +1979,7 @@ export function StackedSection({
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { CostSummaryResponse, TimeseriesResponse } from '@cubebox/core'
+import type { CostSummaryResponse, TimeseriesResponse } from '@cubeplex/core'
 import { RateChart, type RateSeries } from './RateChart'
 import { computeCacheHitRate, formatPercent } from '@/lib/cost/helpers'
 
@@ -2077,7 +2077,7 @@ import { InsightsFilterSidebar } from './InsightsFilterSidebar'
 import { KpiRow } from './cost/KpiRow'
 import { StackedSection, type Column, type SummaryRow } from './cost/StackedSection'
 import { CacheSection } from './cost/CacheSection'
-import type { CostAggregateRow, TimeseriesResponse } from '@cubebox/core'
+import type { CostAggregateRow, TimeseriesResponse } from '@cubeplex/core'
 
 const PALETTE_WORKSPACE = ['#1e40af', '#1d4ed8', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe']
 const PALETTE_MODEL = ['#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0']
@@ -2262,7 +2262,7 @@ function defaultCostColumns(
 cd frontend && pnpm type-check
 ```
 
-Fix any complaints. Common issues: imports that should come from `@cubebox/core`, missing `'use client'` directive, `useTranslations` return type inference.
+Fix any complaints. Common issues: imports that should come from `@cubeplex/core`, missing `'use client'` directive, `useTranslations` return type inference.
 
 - [ ] **Step 13.6: Boot dev server and smoke-test**
 

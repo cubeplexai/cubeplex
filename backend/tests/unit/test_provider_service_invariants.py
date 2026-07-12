@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.api.schemas.provider import ProviderCreate, ProviderUpdate
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.services.credential import CredentialService
-from cubebox.services.provider_service import (
+from cubeplex.api.schemas.provider import ProviderCreate, ProviderUpdate
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.provider_service import (
     ProviderNameConflictError,
     ProviderOAuthNotImplementedError,
     ProviderService,
@@ -36,9 +36,9 @@ async def db_session():
 
 
 def _make_svc(session: AsyncSession, org_id: str = "org-1") -> ProviderService:
-    from cubebox.repositories.model import ModelRepository
-    from cubebox.repositories.org_provider_override import OrgProviderOverrideRepository
-    from cubebox.repositories.provider import ProviderRepository
+    from cubeplex.repositories.model import ModelRepository
+    from cubeplex.repositories.org_provider_override import OrgProviderOverrideRepository
+    from cubeplex.repositories.provider import ProviderRepository
 
     backend = FernetBackend([Fernet.generate_key()])
     cred_service = CredentialService(
@@ -101,7 +101,7 @@ async def test_name_conflict_raises(db_session: AsyncSession) -> None:
 
 async def test_system_provider_readonly_on_update(db_session: AsyncSession) -> None:
     """Updating a system provider (org_id=None) must raise."""
-    from cubebox.models.provider import Provider
+    from cubeplex.models.provider import Provider
 
     p = Provider(
         org_id=None,
@@ -121,7 +121,7 @@ async def test_system_provider_readonly_on_update(db_session: AsyncSession) -> N
 
 async def test_system_provider_readonly_on_delete(db_session: AsyncSession) -> None:
     """Deleting a system provider (org_id=None) must raise."""
-    from cubebox.models.provider import Provider
+    from cubeplex.models.provider import Provider
 
     p = Provider(
         org_id=None,

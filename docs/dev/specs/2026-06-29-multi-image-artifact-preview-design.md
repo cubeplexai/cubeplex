@@ -50,7 +50,7 @@ run 把 6 张 PNG 存成了**一个目录型 image artifact**（`path=/workspace
 
 ### 后端：文件列表接口
 
-新路由 `backend/cubebox/api/routes/v1/artifacts.py`：
+新路由 `backend/cubeplex/api/routes/v1/artifacts.py`：
 
 ```
 GET /api/v1/ws/{ws}/conversations/{conv}/artifacts/{artifact_id}/files?version=N&filter=image
@@ -111,7 +111,7 @@ loading 用 `PreviewLoading`；错误/空用 `FallbackPreview`。
 
 ### Prompt 引导
 
-`backend/cubebox/prompts/artifacts.py` 的 `ARTIFACT_PROMPT`，`image` 条目改为：
+`backend/cubeplex/prompts/artifacts.py` 的 `ARTIFACT_PROMPT`，`image` 条目改为：
 
 > - "image" — PNG, SVG, JPG images (e.g. matplotlib output). Point `path` at a single
 >   image file. If you produce multiple images as one deliverable, save them in a

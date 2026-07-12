@@ -1,6 +1,6 @@
-# cubebox on Kubernetes — Install Guide
+# cubeplex on Kubernetes — Install Guide
 
-A single `helm upgrade --install` deploys cubebox (backend + frontend +
+A single `helm upgrade --install` deploys cubeplex (backend + frontend +
 Postgres + Redis + MinIO, optionally the alibaba OpenSandbox umbrella) to
 an existing Kubernetes cluster.
 
@@ -27,7 +27,7 @@ Design notes: [docs/dev/specs/2026-06-10-helm-deploy-design.md](../../docs/dev/s
 |---|---|---|
 | Kubernetes | ≥ 1.21 | kubeadm / k3s / managed clusters all fine |
 | Ingress controller | ingress-nginx recommended | chart uses `ingressClassName: nginx` |
-| StorageClass | a dynamic provisioner | chart can create `cubebox-work-hostpath` on top of openebs hostpath, or you can point at an existing one |
+| StorageClass | a dynamic provisioner | chart can create `cubeplex-work-hostpath` on top of openebs hostpath, or you can point at an existing one |
 | Docker registry | writable + pullable from cluster nodes | default `192.168.1.101:8050/library` — override per your env |
 | Helm | ≥ 3.9 | dep update + install |
 | LLM provider credentials | at least one | api_key or base_url + api_key, see §4.4 |
@@ -43,15 +43,15 @@ Design notes: [docs/dev/specs/2026-06-10-helm-deploy-design.md](../../docs/dev/s
 ## 2. Architecture
 
 ```
-Namespace: cubebox
+Namespace: cubeplex
 ┌───────────────────────────────────────────────────────────────┐
-│  Ingress (cubebox.local)                                      │
+│  Ingress (cubeplex.local)                                      │
 │    /api/*, /health/* → backend  Service:8000                 │
 │    /*                → frontend Service:3000                 │
 ├───────────────────────────────────────────────────────────────┤
 │  backend Deployment (1 replica)                               │
 │    initContainer: wait for postgres, run `alembic upgrade`    │
-│    container:     uvicorn (cubebox.api.app:create_app)        │
+│    container:     uvicorn (cubeplex.api.app:create_app)        │
 │    mounts: ConfigMap (non-secret) + Secret (secret)           │
 ├───────────────────────────────────────────────────────────────┤
 │  frontend Deployment (1 replica)                              │
@@ -65,7 +65,7 @@ Namespace: cubebox
                                             └── LLM providers (external)
 ```
 
-All PVCs default to the `cubebox-work-hostpath` StorageClass that the
+All PVCs default to the `cubeplex-work-hostpath` StorageClass that the
 chart creates. Override `storageClass.basePath` for a different node path,
 or set `storageClass.create: false` and point each StatefulSet at an
 existing class.
@@ -84,7 +84,7 @@ The script:
    `backend/requirements-frozen.txt` (gitignored — `uv.lock` stays the
    source of truth).
 2. `docker build` for backend and frontend, tagging
-   `<REGISTRY>/<REPO>/cubebox-<target>:<git-sha>` and `…:latest`.
+   `<REGISTRY>/<REPO>/cubeplex-<target>:<git-sha>` and `…:latest`.
 3. `docker push` both tags.
 
 ### Common variables
@@ -119,9 +119,9 @@ Empty / unset → upstream.
 template:
 
 ```bash
-cp deploy/kubernetes/charts/cubebox/values.local.yaml.example \
-   deploy/kubernetes/charts/cubebox/values.local.yaml
-$EDITOR deploy/kubernetes/charts/cubebox/values.local.yaml
+cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
+   deploy/kubernetes/charts/cubeplex/values.local.yaml
+$EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 ```
 
 Each section below is documented in the order you fill it in.
@@ -141,7 +141,7 @@ If you push to a non-default registry, also override:
 ```yaml
 image:
   registry: "harbor.example.com"
-  repository: "cubebox"
+  repository: "cubeplex"
   backend:
     name: "backend"
     tag: "v1.0.0"
@@ -153,9 +153,9 @@ image:
 backend:
   configOverrides:
     api:
-      public_url: "http://cubebox.example.com"
-    public_base_url: "http://cubebox.example.com"
-    frontend_base_url: "http://cubebox.example.com"
+      public_url: "http://cubeplex.example.com"
+    public_base_url: "http://cubeplex.example.com"
+    frontend_base_url: "http://cubeplex.example.com"
     deployment:
       mode: single_tenant       # single_tenant | multi_tenant
     auth:
@@ -164,7 +164,7 @@ backend:
 
 | Field | Default | Notes |
 |---|---|---|
-| `api.public_url` | `http://cubebox.local` | absolute URL the backend hands out (OAuth redirects, etc.) |
+| `api.public_url` | `http://cubeplex.local` | absolute URL the backend hands out (OAuth redirects, etc.) |
 | `public_base_url` | same | used by the backend for absolute URL construction |
 | `frontend_base_url` | same | where the backend redirects browsers |
 | `deployment.mode` | `single_tenant` | single-tenant auto-creates the org on first user registration |
@@ -213,7 +213,7 @@ backend:
     llm:
       default_model: "deepseek/deepseek-v4-flash"
       fallback_models:
-        - "cubebox/qwen3.5-plus-thinking"
+        - "cubeplex/qwen3.5-plus-thinking"
       providers:
         # Mode A — use a cubepi built-in preset (simplest)
         deepseek:
@@ -221,7 +221,7 @@ backend:
           api_key: "sk-..."
 
         # Mode B — fully custom (private gateway / self-hosted)
-        cubebox:
+        cubeplex:
           base_url: "https://gateway.example.com/v1"
           api_key: "..."
           api: "openai-completions"
@@ -273,7 +273,7 @@ backend:
   secrets:
     sandbox:
       domain: "39.99.248.80:18080"     # OpenSandbox API host:port (no scheme)
-      image: "hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260531"
+      image: "hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260531"
       api_key: "..."
   sandbox:
     enabled: true                       # ★ flip this on if using an external sandbox
@@ -284,7 +284,7 @@ Three typical layouts:
 
 | Layout | values.local.yaml |
 |---|---|
-| Bundled OpenSandbox subchart | `opensandbox.enabled: true`; `backend.secrets.sandbox.domain` points at `cubebox-opensandbox-server.cubebox.svc.cluster.local:8090` |
+| Bundled OpenSandbox subchart | `opensandbox.enabled: true`; `backend.secrets.sandbox.domain` points at `cubeplex-opensandbox-server.cubeplex.svc.cluster.local:8090` |
 | External OpenSandbox | `opensandbox.enabled: false`; `backend.sandbox.enabled: true`; `backend.secrets.sandbox.domain` points at the external host |
 | No sandbox (chat-only) | `opensandbox.enabled: false`; leave `backend.sandbox.enabled` unset (it follows `opensandbox.enabled` → false) |
 
@@ -315,8 +315,8 @@ backend:
     database:
       host: "external-pg.example.com"
       port: 5432
-      user: cubebox
-      name: cubebox
+      user: cubeplex
+      name: cubeplex
   secrets:
     database:
       password: "..."
@@ -330,7 +330,7 @@ backend:
 ingress:
   enabled: true
   className: "nginx"
-  host: "cubebox.example.com"
+  host: "cubeplex.example.com"
   tls:
     enabled: false
 ```
@@ -346,9 +346,9 @@ ingress:
 backend:
   configOverrides:
     api:
-      public_url: "https://cubebox.example.com"
-    public_base_url: "https://cubebox.example.com"
-    frontend_base_url: "https://cubebox.example.com"
+      public_url: "https://cubeplex.example.com"
+    public_base_url: "https://cubeplex.example.com"
+    frontend_base_url: "https://cubeplex.example.com"
     auth:
       cookie_secure: true
 ```
@@ -358,8 +358,8 @@ backend:
 ```yaml
 storageClass:
   create: true                  # set false to use an existing class
-  name: cubebox-work-hostpath
-  basePath: /work/cubebox       # node directory to back the PVCs
+  name: cubeplex-work-hostpath
+  basePath: /work/cubeplex       # node directory to back the PVCs
 ```
 
 Using an existing class instead:
@@ -393,7 +393,7 @@ opensandbox:
 
 ### 4.10 Egress secret-injection (optional)
 
-When enabled, the chart deploys cubebox's secret-injection feature: a
+When enabled, the chart deploys cubeplex's secret-injection feature: a
 mitmproxy addon inside each sandbox container intercepts outbound HTTP,
 swaps `cbxref_<id>` placeholders for real secret values fetched from the
 backend over mTLS. End result: agent tool calls can reference
@@ -405,12 +405,12 @@ Moving pieces the chart wires up:
 
 | Component | Location |
 |---|---|
-| Mutating admission webhook (Deployment + Service + SA + RBAC) | cubebox namespace |
+| Mutating admission webhook (Deployment + Service + SA + RBAC) | cubeplex namespace |
 | `MutatingWebhookConfiguration` matching sandbox pods | cluster |
-| Long-lived MITM CA Secret (`helm.sh/resource-policy: keep`) | cubebox ns + mirrored into sandbox ns |
+| Long-lived MITM CA Secret (`helm.sh/resource-policy: keep`) | cubeplex ns + mirrored into sandbox ns |
 | `inject.py` mitmproxy addon ConfigMap | sandbox ns (hardcoded name `egress-inject-addon`) |
-| Backend mTLS server cert + mTLS listener on `:8443` | cubebox ns |
-| Updated backend Service exposing `:8443` | cubebox ns |
+| Backend mTLS server cert + mTLS listener on `:8443` | cubeplex ns |
+| Updated backend Service exposing `:8443` | cubeplex ns |
 
 Build the extra image:
 
@@ -448,7 +448,7 @@ Notes:
   webhook health separately.
 - Source code for the webhook + addon lives under
   `deploy/kubernetes/egress-bundle/`. The canonical `inject.py` is at
-  `deploy/kubernetes/charts/cubebox/files/egress/inject.py` (so the
+  `deploy/kubernetes/charts/cubeplex/files/egress/inject.py` (so the
   chart can read it via `Files.Get`);
   `deploy/kubernetes/egress-bundle/addon/inject.py` is a symlink to it.
 
@@ -463,11 +463,11 @@ deploy/kubernetes/scripts/helm-install.sh
 equivalent to:
 
 ```bash
-helm dependency update deploy/kubernetes/charts/cubebox
-helm upgrade --install cubebox deploy/kubernetes/charts/cubebox \
-  --namespace cubebox --create-namespace \
-  -f deploy/kubernetes/charts/cubebox/values.yaml \
-  -f deploy/kubernetes/charts/cubebox/values.local.yaml \
+helm dependency update deploy/kubernetes/charts/cubeplex
+helm upgrade --install cubeplex deploy/kubernetes/charts/cubeplex \
+  --namespace cubeplex --create-namespace \
+  -f deploy/kubernetes/charts/cubeplex/values.yaml \
+  -f deploy/kubernetes/charts/cubeplex/values.local.yaml \
   --wait --timeout 10m
 ```
 
@@ -480,9 +480,9 @@ new version).
 ### Uninstall
 
 ```bash
-helm uninstall cubebox -n cubebox
+helm uninstall cubeplex -n cubeplex
 # StatefulSet PVCs are not auto-deleted:
-kubectl delete pvc -n cubebox -l app.kubernetes.io/name=cubebox
+kubectl delete pvc -n cubeplex -l app.kubernetes.io/name=cubeplex
 ```
 
 ---
@@ -492,13 +492,13 @@ kubectl delete pvc -n cubebox -l app.kubernetes.io/name=cubebox
 ### 6.1 Pods
 
 ```bash
-kubectl -n cubebox get pods
+kubectl -n cubeplex get pods
 # Expected:
-#   cubebox-backend-...     1/1  Running
-#   cubebox-frontend-...    1/1  Running
-#   cubebox-postgresql-0    1/1  Running
-#   cubebox-redis-master-0  1/1  Running
-#   cubebox-minio-0         1/1  Running
+#   cubeplex-backend-...     1/1  Running
+#   cubeplex-frontend-...    1/1  Running
+#   cubeplex-postgresql-0    1/1  Running
+#   cubeplex-redis-master-0  1/1  Running
+#   cubeplex-minio-0         1/1  Running
 ```
 
 ### 6.2 Smoke test (deployment correctness)
@@ -513,7 +513,7 @@ backend + frontend, Next.js renders HTML. Does **not** hit the LLM.
 ### 6.3 End-to-end test (LLM round-trip)
 
 ```bash
-HOST=cubebox.local IP=<your node IP> PORT=30019 \
+HOST=cubeplex.local IP=<your node IP> PORT=30019 \
 PROMPT="Say the word hello and nothing else." \
   deploy/kubernetes/scripts/e2e.sh
 ```
@@ -542,8 +542,8 @@ PROMPT='List the contents of /workspace (run `ls -la /workspace`).' \
 
 ```bash
 # On the operator workstation
-echo "<node IP> cubebox.local" | sudo tee -a /etc/hosts
-# Then visit http://cubebox.local:<ingress NodePort>/
+echo "<node IP> cubeplex.local" | sudo tee -a /etc/hosts
+# Then visit http://cubeplex.local:<ingress NodePort>/
 ```
 
 Find the ingress NodePort with
@@ -556,14 +556,14 @@ Find the ingress NodePort with
 ### Backend CrashLoopBackOff
 
 ```bash
-kubectl -n cubebox logs deploy/cubebox-backend -c backend --previous
+kubectl -n cubeplex logs deploy/cubeplex-backend -c backend --previous
 ```
 
 | Symptom | Fix |
 |---|---|
 | `PermissionError: '/app/logs'` | image is older than `75da36fb`; rebuild |
-| `CUBEBOX_AUTH__VAULT_KEY is required` | add `backend.secrets.auth.vault_key` to values.local.yaml |
-| `Could not connect to 'cubebox-postgresql:5432'` | postgres still starting; usually self-heals |
+| `CUBEPLEX_AUTH__VAULT_KEY is required` | add `backend.secrets.auth.vault_key` to values.local.yaml |
+| `Could not connect to 'cubeplex-postgresql:5432'` | postgres still starting; usually self-heals |
 | `Provider 'X' not found` | `default_model: "X/..."` references a provider not in `providers` |
 
 ### PVC stays `Pending`
@@ -579,7 +579,7 @@ docker pull openebs/linux-utils:3.5.0
 
 - HTTP installs need `backend.configOverrides.auth.cookie_secure: false`.
 - 403 on mutating endpoints = CSRF: send any GET first to receive
-  `cubebox_csrf`, then pass it as `X-CSRF-Token` header on POST/PUT/PATCH/DELETE.
+  `cubeplex_csrf`, then pass it as `X-CSRF-Token` header on POST/PUT/PATCH/DELETE.
 
 ### Ingress 502
 
@@ -590,7 +590,7 @@ docker pull openebs/linux-utils:3.5.0
 ### LLM responses empty / errors
 
 - Watch the backend log:
-  `kubectl -n cubebox logs deploy/cubebox-backend -c backend -f`
+  `kubectl -n cubeplex logs deploy/cubeplex-backend -c backend -f`
 - Typical causes: invalid `api_key`, wrong `preset` name, model retired.
 - Validate the provider out-of-band:
   `curl https://<base_url>/v1/models -H "Authorization: Bearer <key>"`.
@@ -606,8 +606,8 @@ image:
   registry: "192.168.1.101:8050"
   repository: "library"
   pullPolicy: "IfNotPresent"
-  backend:  { name: "cubebox-backend",  tag: "" }     # tag required
-  frontend: { name: "cubebox-frontend", tag: "" }     # tag required
+  backend:  { name: "cubeplex-backend",  tag: "" }     # tag required
+  frontend: { name: "cubeplex-frontend", tag: "" }     # tag required
 
 backend:
   replicaCount: 1
@@ -637,14 +637,14 @@ frontend:
 ingress:
   enabled: true
   className: "nginx"
-  host: "cubebox.local"
+  host: "cubeplex.local"
   tls: { enabled: false }
   annotations: { ... }              # SSE-friendly defaults included
 
 storageClass:
   create: true
-  name: "cubebox-work-hostpath"
-  basePath: "/work/cubebox"
+  name: "cubeplex-work-hostpath"
+  basePath: "/work/cubeplex"
 
 postgres:
   enabled: true
@@ -665,7 +665,7 @@ rustfs:
   image: "rustfs/rustfs:1.0.0-beta.4"
   mcImage: "minio/mc:..."
   auth: { accessKey, secretKey }
-  defaultBucket: "cubebox"
+  defaultBucket: "cubeplex"
   persistence: { storageClass, size }
   resources: { ... }
 
@@ -685,9 +685,9 @@ image:
 backend:
   configOverrides:
     api:
-      public_url: "http://cubebox.local"
-    public_base_url: "http://cubebox.local"
-    frontend_base_url: "http://cubebox.local"
+      public_url: "http://cubeplex.local"
+    public_base_url: "http://cubeplex.local"
+    frontend_base_url: "http://cubeplex.local"
     auth:
       cookie_secure: false
   secrets:
@@ -711,4 +711,4 @@ opensandbox:
 ```
 
 A fuller annotated template lives at
-`deploy/kubernetes/charts/cubebox/values.local.yaml.example`.
+`deploy/kubernetes/charts/cubeplex/values.local.yaml.example`.

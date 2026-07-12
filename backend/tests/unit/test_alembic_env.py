@@ -13,7 +13,7 @@ def test_env_module_references_cubepi_metadata() -> None:
         "alembic env.py must import from cubepi.checkpointer.postgres"
     )
     assert "cubepi_metadata" in text, "alembic env.py must reference cubepi_metadata"
-    # target_metadata must be a list to combine cubebox + cubepi metadata
+    # target_metadata must be a list to combine cubeplex + cubepi metadata
     assert "target_metadata = [" in text, (
-        "target_metadata must be a list to combine cubebox + cubepi metadata"
+        "target_metadata must be a list to combine cubeplex + cubepi metadata"
     )

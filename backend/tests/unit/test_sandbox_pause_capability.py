@@ -2,8 +2,8 @@
 
 import pytest
 
-from cubebox.sandbox.base import Sandbox
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.sandbox.base import Sandbox
+from cubeplex.sandbox.local import LocalSandbox
 
 
 def test_local_sandbox_does_not_support_pause() -> None:

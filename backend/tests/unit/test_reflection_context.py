@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cubebox.models.memory import MemoryScope, MemorySourceType, MemoryType
-from cubebox.services.reflection_context import (
+from cubeplex.models.memory import MemoryScope, MemorySourceType, MemoryType
+from cubeplex.services.reflection_context import (
     reflection_source_active,
     set_reflection_source,
 )
@@ -28,7 +28,7 @@ def test_reflection_enum_value() -> None:
 
 @pytest.mark.asyncio
 async def test_memory_save_uses_reflection_source_when_active() -> None:
-    from cubebox.tools.builtin.memory import create_memory_tools
+    from cubeplex.tools.builtin.memory import create_memory_tools
 
     created_inputs: list[Any] = []
 
@@ -70,7 +70,7 @@ async def test_memory_save_uses_reflection_source_when_active() -> None:
 
 @pytest.mark.asyncio
 async def test_memory_save_uses_conversation_source_when_inactive() -> None:
-    from cubebox.tools.builtin.memory import create_memory_tools
+    from cubeplex.tools.builtin.memory import create_memory_tools
 
     created_inputs: list[Any] = []
 

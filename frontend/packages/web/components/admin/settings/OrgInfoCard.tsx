@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { createApiClient, toApiError } from '@cubebox/core'
+import { createApiClient, toApiError } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
 

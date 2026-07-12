@@ -9,7 +9,7 @@ Conversations are where you interact with the AI agent. Each conversation is a p
 
 ## Starting a conversation
 
-When you open a workspace, you land on the home page with an empty input bar. Type a message and press **Enter** (or click the send button) to start a new conversation. CubeBox creates the conversation automatically and routes you to it.
+When you open a workspace, you land on the home page with an empty input bar. Type a message and press **Enter** (or click the send button) to start a new conversation. CubePlex creates the conversation automatically and routes you to it.
 
 You can also click **New Chat** in the sidebar to start fresh at any time.
 
@@ -58,14 +58,14 @@ When the agent needs your input (e.g., a confirmation before proceeding), the in
 
 Right-click (or click the three-dot menu) on any conversation in the sidebar to access these actions:
 
-- **Rename** — give the conversation a descriptive title. By default, CubeBox auto-generates a title from your first message.
+- **Rename** — give the conversation a descriptive title. By default, CubePlex auto-generates a title from your first message.
 - **Pin** — pinned conversations stick to the top of the sidebar list so you can find them quickly.
 - **Unpin** — remove a conversation from the pinned section.
 - **Delete** — soft-deletes the conversation. It disappears from the sidebar but its data (messages, artifacts, cost records) is preserved internally.
 
 ## Auto-generated titles
 
-When you send the first message in a conversation, CubeBox uses the LLM to generate a short title summarizing the topic. If you prefer a custom title, rename the conversation from the sidebar menu.
+When you send the first message in a conversation, CubePlex uses the LLM to generate a short title summarizing the topic. If you prefer a custom title, rename the conversation from the sidebar menu.
 
 ## Using prior work
 

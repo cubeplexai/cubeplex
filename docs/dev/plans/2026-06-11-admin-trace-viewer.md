@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Org admins can list and inspect their org's cubebox agent traces (stored in Grafana Tempo) inside the admin console, with workspace/user/conversation filters and LLM-aware span detail rendering.
+**Goal:** Org admins can list and inspect their org's cubeplex agent traces (stored in Grafana Tempo) inside the admin console, with workspace/user/conversation filters and LLM-aware span detail rendering.
 
 **Architecture:** Thin proxy in front of Tempo's HTTP query API. Backend has one service (`TempoClient`) that builds TraceQL + parses OTLP JSON into Pydantic models, and one router (`admin_traces.py`) that injects the session org's `org_id` predicate. No new database table — Tempo's TraceQL is the index. Frontend has one list page and one detail page under `app/admin/traces/`, both pure assemblies of small components.
 
-**Tech Stack:** Python 3.13, FastAPI, httpx, Pydantic v2, pytest (backend). Next 15, React 19, Tailwind, `@cubebox/core` api client, Lucide icons, Vitest (frontend). Grafana Tempo 2.8 over HTTP.
+**Tech Stack:** Python 3.13, FastAPI, httpx, Pydantic v2, pytest (backend). Next 15, React 19, Tailwind, `@cubeplex/core` api client, Lucide icons, Vitest (frontend). Grafana Tempo 2.8 over HTTP.
 
 **Reference:** Spec at `docs/dev/specs/2026-06-11-admin-trace-viewer-design.md`. The visual reference (not code) is `~/cubetrace`'s `TraceDetail.tsx` and `TraceList.tsx`.
 
@@ -16,9 +16,9 @@
 
 **Backend (new files):**
 
-- `backend/cubebox/api/schemas/trace.py` — Pydantic response models.
-- `backend/cubebox/services/tempo_client.py` — httpx client + OTLP→model parser. **This file is the only schema mapping.**
-- `backend/cubebox/api/routes/v1/admin_traces.py` — three routes.
+- `backend/cubeplex/api/schemas/trace.py` — Pydantic response models.
+- `backend/cubeplex/services/tempo_client.py` — httpx client + OTLP→model parser. **This file is the only schema mapping.**
+- `backend/cubeplex/api/routes/v1/admin_traces.py` — three routes.
 - `backend/tests/fixtures/tempo/sample_search.json` — captured Tempo `/api/search` response.
 - `backend/tests/fixtures/tempo/sample_trace_multi_turn.json` — captured Tempo `/api/traces/{id}` response with multi-turn agent + tool calls.
 - `backend/tests/unit/test_tempo_parser.py` — pure-function parser tests.
@@ -28,7 +28,7 @@
 **Backend (modified):**
 
 - `backend/config.yaml` — add `tracing.tempo` block (commented stub).
-- `backend/cubebox/api/app.py:475-505` — register `admin_traces.router`.
+- `backend/cubeplex/api/app.py:475-505` — register `admin_traces.router`.
 
 **Frontend (new files):**
 
@@ -77,11 +77,11 @@ Note the `0.0.0.0:NNNN->3200/tcp` mapping; export it: `TEMPO=http://localhost:NN
 ```bash
 END=$(date -u +%s); START=$((END - 7*86400))
 mkdir -p backend/tests/fixtures/tempo
-curl -sS "$TEMPO/api/search?q=%7B%20resource.service.name%3D%22cubebox%22%20%26%26%20span.cubepi.metadata.conversation_id%21%3D%22%22%20%7D&limit=5&start=${START}&end=${END}" \
+curl -sS "$TEMPO/api/search?q=%7B%20resource.service.name%3D%22cubeplex%22%20%26%26%20span.cubepi.metadata.conversation_id%21%3D%22%22%20%7D&limit=5&start=${START}&end=${END}" \
   | python3 -m json.tool > backend/tests/fixtures/tempo/sample_search.json
 ```
 
-Verify: file contains `"traces":` and at least one trace with `"rootServiceName": "cubebox"`.
+Verify: file contains `"traces":` and at least one trace with `"rootServiceName": "cubeplex"`.
 
 - [ ] **Step 3: Capture a multi-turn trace (≥3 turns, ≥1 tool call)**
 
@@ -148,7 +148,7 @@ git commit -m "config(tracing): add tempo.query_endpoint stub"
 ## Task 3: Pydantic schemas for trace responses
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/trace.py`
+- Create: `backend/cubeplex/api/schemas/trace.py`
 - Test: `backend/tests/unit/test_trace_schema.py`
 
 - [ ] **Step 1: Write the failing schema test**
@@ -157,7 +157,7 @@ git commit -m "config(tracing): add tempo.query_endpoint stub"
 
 ```python
 """Shape contract for admin trace API responses."""
-from cubebox.api.schemas.trace import (
+from cubeplex.api.schemas.trace import (
     LlmCallPayload,
     SpanNode,
     SpanKind,
@@ -241,11 +241,11 @@ def test_trace_detail_carries_tree() -> None:
 ```bash
 cd backend && uv run pytest tests/unit/test_trace_schema.py -v
 ```
-Expected: ImportError on `cubebox.api.schemas.trace`.
+Expected: ImportError on `cubeplex.api.schemas.trace`.
 
 - [ ] **Step 3: Implement schemas**
 
-`backend/cubebox/api/schemas/trace.py`:
+`backend/cubeplex/api/schemas/trace.py`:
 
 ```python
 """Pydantic models for /api/v1/admin/traces responses.
@@ -384,7 +384,7 @@ Expected: 3 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/trace.py backend/tests/unit/test_trace_schema.py
+git add backend/cubeplex/api/schemas/trace.py backend/tests/unit/test_trace_schema.py
 git commit -m "feat(admin-traces): pydantic schemas for trace responses"
 ```
 
@@ -393,7 +393,7 @@ git commit -m "feat(admin-traces): pydantic schemas for trace responses"
 ## Task 4: OTLP→SpanNode parser (kind + tree shape)
 
 **Files:**
-- Create: `backend/cubebox/services/tempo_client.py` (parser portion first)
+- Create: `backend/cubeplex/services/tempo_client.py` (parser portion first)
 - Test: `backend/tests/unit/test_tempo_parser.py`
 
 The parser is a pure function that takes Tempo's `/api/traces/{id}` JSON and returns a `TraceDetail`. Building the tree before extracting LLM detail lets us iterate on payload extraction separately.
@@ -409,8 +409,8 @@ from pathlib import Path
 
 import pytest
 
-from cubebox.api.schemas.trace import SpanKind
-from cubebox.services.tempo_client import parse_trace_detail
+from cubeplex.api.schemas.trace import SpanKind
+from cubeplex.services.tempo_client import parse_trace_detail
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tempo"
 
@@ -479,7 +479,7 @@ cd backend && uv run pytest tests/unit/test_tempo_parser.py -v
 
 - [ ] **Step 3: Implement parser (full)**
 
-`backend/cubebox/services/tempo_client.py` — write the complete parser. The
+`backend/cubeplex/services/tempo_client.py` — write the complete parser. The
 client class lands in Tasks 7–8; the LLM/tool extractors get fleshed out in
 Tasks 5–6.
 
@@ -502,7 +502,7 @@ Three classification + summary decisions worth calling out:
 """Tempo HTTP query client + OTLP→view-model parser.
 
 This module is the single point where cubepi span attribute names are
-translated into the API contract (cubebox.api.schemas.trace). Update both
+translated into the API contract (cubeplex.api.schemas.trace). Update both
 in lockstep when cubepi semantic conventions change.
 """
 from __future__ import annotations
@@ -510,7 +510,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from cubebox.api.schemas.trace import (
+from cubeplex.api.schemas.trace import (
     LlmCallPayload,
     SpanKind,
     SpanNode,
@@ -702,7 +702,7 @@ Expected: 3 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/tempo_client.py backend/tests/unit/test_tempo_parser.py
+git add backend/cubeplex/services/tempo_client.py backend/tests/unit/test_tempo_parser.py
 git commit -m "feat(admin-traces): OTLP→SpanNode parser (tree + summary)"
 ```
 
@@ -711,7 +711,7 @@ git commit -m "feat(admin-traces): OTLP→SpanNode parser (tree + summary)"
 ## Task 5: Flesh out LLM payload extractor
 
 **Files:**
-- Modify: `backend/cubebox/services/tempo_client.py` (`_extract_llm`)
+- Modify: `backend/cubeplex/services/tempo_client.py` (`_extract_llm`)
 - Test: `backend/tests/unit/test_tempo_parser.py` (add)
 
 - [ ] **Step 1: Add failing test for LLM extraction**
@@ -830,7 +830,7 @@ def _safe_float(v: Any) -> float | None:
 Also add the import at the top of the file:
 
 ```python
-from cubebox.api.schemas.trace import (
+from cubeplex.api.schemas.trace import (
     ChatMessage,
     LlmCallPayload,
     SpanKind,
@@ -853,7 +853,7 @@ cd backend && uv run pytest tests/unit/test_tempo_parser.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/tempo_client.py backend/tests/unit/test_tempo_parser.py
+git add backend/cubeplex/services/tempo_client.py backend/tests/unit/test_tempo_parser.py
 git commit -m "feat(admin-traces): extract LLM call payload from chat spans"
 ```
 
@@ -862,7 +862,7 @@ git commit -m "feat(admin-traces): extract LLM call payload from chat spans"
 ## Task 6: Flesh out tool payload extractor
 
 **Files:**
-- Modify: `backend/cubebox/services/tempo_client.py` (`_extract_tool`)
+- Modify: `backend/cubeplex/services/tempo_client.py` (`_extract_tool`)
 - Test: `backend/tests/unit/test_tempo_parser.py` (add)
 
 - [ ] **Step 1: Add failing test**
@@ -911,7 +911,7 @@ cd backend && uv run pytest tests/unit/test_tempo_parser.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/tempo_client.py backend/tests/unit/test_tempo_parser.py
+git add backend/cubeplex/services/tempo_client.py backend/tests/unit/test_tempo_parser.py
 git commit -m "feat(admin-traces): extract tool call payload from execute_tool spans"
 ```
 
@@ -920,7 +920,7 @@ git commit -m "feat(admin-traces): extract tool call payload from execute_tool s
 ## Task 7: TempoClient — search
 
 **Files:**
-- Modify: `backend/cubebox/services/tempo_client.py` (add class)
+- Modify: `backend/cubeplex/services/tempo_client.py` (add class)
 - Test: `backend/tests/unit/test_tempo_client.py`
 
 - [ ] **Step 1: Write the failing client test using captured fixture**
@@ -937,7 +937,7 @@ import httpx
 import pytest
 import respx
 
-from cubebox.services.tempo_client import TempoClient, TempoQueryError
+from cubeplex.services.tempo_client import TempoClient, TempoQueryError
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "tempo"
 
@@ -966,7 +966,7 @@ async def test_search_builds_traceql_with_filters(search_json: dict) -> None:
     )
     assert route.called
     q = route.calls.last.request.url.params["q"]
-    assert 'resource.service.name="cubebox"' in q
+    assert 'resource.service.name="cubeplex"' in q
     assert 'cubepi.metadata.org_id="org-1"' in q
     assert 'cubepi.metadata.workspace_id="ws-1"' in q
     assert 'cubepi.metadata.conversation_id="conv-9"' in q
@@ -997,7 +997,7 @@ cd backend && uv run pytest tests/unit/test_tempo_client.py -v
 
 - [ ] **Step 4: Implement TempoClient.search**
 
-Append to `backend/cubebox/services/tempo_client.py`. Note three things:
+Append to `backend/cubeplex/services/tempo_client.py`. Note three things:
 
 - **TraceQL value escaping.** Every interpolated value goes through
   `_quote_traceql`, which rejects any string containing characters that
@@ -1035,7 +1035,7 @@ def _quote_traceql(value: str) -> str:
 
     Rejects values containing the small set of characters that could break
     out of the surrounding double-quote pair. We reject rather than
-    backslash-escape because cubebox business identifiers (workspace_id,
+    backslash-escape because cubeplex business identifiers (workspace_id,
     user_id, conv_id, run_id, model) are well-formed slugs; any value
     outside that shape is either user error or an injection attempt.
     """
@@ -1075,7 +1075,7 @@ class TempoClient:
         limit: int = 20,
     ) -> list[TraceSummary]:
         clauses = [
-            'resource.service.name="cubebox"',
+            'resource.service.name="cubeplex"',
             f"span.cubepi.metadata.org_id={_quote_traceql(org_id)}",
         ]
         if workspace_id:
@@ -1131,7 +1131,7 @@ Add a third unit test asserting the escape rejects forbidden values:
 
 ```python
 async def test_search_rejects_injection_attempts() -> None:
-    from cubebox.services.tempo_client import TempoQueryValueError
+    from cubeplex.services.tempo_client import TempoQueryValueError
     client = TempoClient(endpoint="http://tempo.local", timeout_seconds=5)
     with pytest.raises(TempoQueryValueError):
         await client.search(
@@ -1148,7 +1148,7 @@ cd backend && uv run pytest tests/unit/test_tempo_client.py -v
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/services/tempo_client.py backend/tests/unit/test_tempo_client.py backend/pyproject.toml backend/uv.lock
+git add backend/cubeplex/services/tempo_client.py backend/tests/unit/test_tempo_client.py backend/pyproject.toml backend/uv.lock
 git commit -m "feat(admin-traces): TempoClient.search with TraceQL builder"
 ```
 
@@ -1157,7 +1157,7 @@ git commit -m "feat(admin-traces): TempoClient.search with TraceQL builder"
 ## Task 8: TempoClient — get_trace and tag_values
 
 **Files:**
-- Modify: `backend/cubebox/services/tempo_client.py`
+- Modify: `backend/cubeplex/services/tempo_client.py`
 - Test: `backend/tests/unit/test_tempo_client.py` (append)
 
 - [ ] **Step 1: Add failing tests**
@@ -1219,7 +1219,7 @@ cd backend && uv run pytest tests/unit/test_tempo_client.py -v
         # Verified against Tempo 2.8: there is no server-side prefix filter
         # — the typeahead component does its own client-side narrowing.
         params: dict[str, Any] = {
-            "q": "{ resource.service.name=\"cubebox\" "
+            "q": "{ resource.service.name=\"cubeplex\" "
                  f"&& span.cubepi.metadata.org_id={_quote_traceql(org_id)} }}",
         }
         async with httpx.AsyncClient(timeout=self._timeout) as http:
@@ -1244,7 +1244,7 @@ cd backend && uv run pytest tests/unit/test_tempo_client.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/tempo_client.py backend/tests/unit/test_tempo_client.py
+git add backend/cubeplex/services/tempo_client.py backend/tests/unit/test_tempo_client.py
 git commit -m "feat(admin-traces): TempoClient.get_trace and tag_values"
 ```
 
@@ -1253,7 +1253,7 @@ git commit -m "feat(admin-traces): TempoClient.get_trace and tag_values"
 ## Task 9: TempoClient factory + DI hook
 
 **Files:**
-- Modify: `backend/cubebox/services/tempo_client.py`
+- Modify: `backend/cubeplex/services/tempo_client.py`
 
 The routes need a way to obtain a `TempoClient` keyed off config, with `None` returned (→ 503) when the endpoint is unset. The factory also exists so E2E tests can override it.
 
@@ -1262,7 +1262,7 @@ The routes need a way to obtain a `TempoClient` keyed off config, with `None` re
 ```python
 def get_tempo_client() -> TempoClient | None:
     """FastAPI dependency. Returns None when the admin trace viewer is disabled."""
-    from cubebox.config import config
+    from cubeplex.config import config
 
     endpoint = config.get("tracing.tempo.query_endpoint", None)
     if not endpoint:
@@ -1274,7 +1274,7 @@ def get_tempo_client() -> TempoClient | None:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/services/tempo_client.py
+git add backend/cubeplex/services/tempo_client.py
 git commit -m "feat(admin-traces): TempoClient factory honoring tracing.tempo config"
 ```
 
@@ -1283,8 +1283,8 @@ git commit -m "feat(admin-traces): TempoClient factory honoring tracing.tempo co
 ## Task 10: Admin traces routes — list + tag-values
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_traces.py`
-- Modify: `backend/cubebox/api/app.py` (register router)
+- Create: `backend/cubeplex/api/routes/v1/admin_traces.py`
+- Modify: `backend/cubeplex/api/app.py` (register router)
 - Test: `backend/tests/e2e/test_admin_traces.py`
 
 - [ ] **Step 1: Write the failing E2E test (list)**
@@ -1298,8 +1298,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from cubebox.api.routes.v1 import admin_traces
-from cubebox.api.schemas.trace import TraceSummary
+from cubeplex.api.routes.v1 import admin_traces
+from cubeplex.api.schemas.trace import TraceSummary
 
 pytestmark = pytest.mark.e2e
 
@@ -1364,7 +1364,7 @@ cd backend && uv run pytest tests/e2e/test_admin_traces.py -v
 
 - [ ] **Step 3: Implement the router**
 
-`backend/cubebox/api/routes/v1/admin_traces.py`:
+`backend/cubeplex/api/routes/v1/admin_traces.py`:
 
 ```python
 """Admin trace viewer routes. Gated by require_org_admin.
@@ -1384,15 +1384,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.trace import (
+from cubeplex.api.schemas.trace import (
     TagValuesResponse,
     TraceDetail,
     TraceListResponse,
 )
-from cubebox.auth.dependencies import require_org_admin, resolve_current_org_id
-from cubebox.db import get_session
-from cubebox.models import User
-from cubebox.services.tempo_client import (
+from cubeplex.auth.dependencies import require_org_admin, resolve_current_org_id
+from cubeplex.db import get_session
+from cubeplex.models import User
+from cubeplex.services.tempo_client import (
     TempoClient,
     TempoQueryError,
     TempoQueryValueError,
@@ -1492,7 +1492,7 @@ matches the pattern used by `admin_skills` and other existing admin routers.
 
 - [ ] **Step 4: Register router in app.py**
 
-Edit `backend/cubebox/api/app.py:475-510`. Add `admin_traces` to the import block:
+Edit `backend/cubeplex/api/app.py:475-510`. Add `admin_traces` to the import block:
 
 ```python
         admin_traces,
@@ -1504,8 +1504,8 @@ And add the include line near the other `admin_*`:
     app.include_router(admin_traces.router, prefix="/api/v1")
 ```
 
-Also add `admin_traces` to `backend/cubebox/api/routes/v1/__init__.py` in
-both the `from cubebox.api.routes.v1 import (...)` block and the `__all__`
+Also add `admin_traces` to `backend/cubeplex/api/routes/v1/__init__.py` in
+both the `from cubeplex.api.routes.v1 import (...)` block and the `__all__`
 list, matching the convention used by `admin_skills`, `admin_mcp`, etc.
 The package import isn't strictly required by the FastAPI registration,
 but keeping `__all__` in sync is the project convention.
@@ -1521,7 +1521,7 @@ Expected: `test_list_traces_requires_admin`, `test_list_injects_org_id`,
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_traces.py backend/cubebox/api/app.py backend/cubebox/api/routes/v1/__init__.py backend/tests/e2e/test_admin_traces.py
+git add backend/cubeplex/api/routes/v1/admin_traces.py backend/cubeplex/api/app.py backend/cubeplex/api/routes/v1/__init__.py backend/tests/e2e/test_admin_traces.py
 git commit -m "feat(admin-traces): list and tag-values routes with org_id injection"
 ```
 
@@ -1530,7 +1530,7 @@ git commit -m "feat(admin-traces): list and tag-values routes with org_id inject
 ## Task 11: Admin traces detail route with org double-check
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin_traces.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_traces.py`
 - Modify: `backend/tests/e2e/test_admin_traces.py` (append)
 
 - [ ] **Step 1: Add failing detail tests**
@@ -1539,7 +1539,7 @@ git commit -m "feat(admin-traces): list and tag-values routes with org_id inject
 @pytest.fixture
 def fake_resolve_org(monkeypatch):
     """Pin resolve_current_org_id to a known org id, auto-restored after the test."""
-    from cubebox.api.routes.v1 import admin_traces as mod
+    from cubeplex.api.routes.v1 import admin_traces as mod
     async def _fake(*_a, **_kw):
         return "org-MATCH"
     monkeypatch.setattr(mod, "resolve_current_org_id", _fake)
@@ -1547,7 +1547,7 @@ def fake_resolve_org(monkeypatch):
 
 
 async def test_detail_returns_trace(admin_client, fake_tempo, fake_resolve_org) -> None:
-    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+    from cubeplex.api.schemas.trace import SpanKind, SpanNode, TraceDetail
     fake_tempo.get_trace.return_value = TraceDetail(
         summary=TraceSummary(
             trace_id="t1",
@@ -1574,7 +1574,7 @@ async def test_detail_returns_trace(admin_client, fake_tempo, fake_resolve_org) 
 
 
 async def test_detail_404_on_org_mismatch(admin_client, fake_tempo, fake_resolve_org) -> None:
-    from cubebox.api.schemas.trace import SpanKind, SpanNode, TraceDetail
+    from cubeplex.api.schemas.trace import SpanKind, SpanNode, TraceDetail
     fake_tempo.get_trace.return_value = TraceDetail(
         summary=TraceSummary(
             trace_id="t1",
@@ -1646,7 +1646,7 @@ cd backend && uv run pytest tests/e2e/test_admin_traces.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_traces.py backend/tests/e2e/test_admin_traces.py
+git add backend/cubeplex/api/routes/v1/admin_traces.py backend/tests/e2e/test_admin_traces.py
 git commit -m "feat(admin-traces): detail route with org double-check"
 ```
 
@@ -2117,7 +2117,7 @@ cd frontend && pnpm --filter web typecheck
 Smoke (in a separate terminal in the worktree):
 
 ```bash
-cd backend && CUBEBOX_TRACING__TEMPO__QUERY_ENDPOINT=http://localhost:32770 \
+cd backend && CUBEPLEX_TRACING__TEMPO__QUERY_ENDPOINT=http://localhost:32770 \
   uv run python main.py    # uses PORT from .worktree.env
 
 # in another shell:
@@ -2748,14 +2748,14 @@ Expected: all pass.
 - [ ] **Step 2: mypy on the new files**
 
 ```bash
-cd backend && uv run mypy cubebox/api/schemas/trace.py cubebox/services/tempo_client.py cubebox/api/routes/v1/admin_traces.py
+cd backend && uv run mypy cubeplex/api/schemas/trace.py cubeplex/services/tempo_client.py cubeplex/api/routes/v1/admin_traces.py
 ```
 Expected: Success.
 
 - [ ] **Step 3: ruff**
 
 ```bash
-cd backend && uv run ruff check cubebox/api/schemas/trace.py cubebox/services/tempo_client.py cubebox/api/routes/v1/admin_traces.py tests/unit/test_tempo_parser.py tests/unit/test_tempo_client.py tests/e2e/test_admin_traces.py
+cd backend && uv run ruff check cubeplex/api/schemas/trace.py cubeplex/services/tempo_client.py cubeplex/api/routes/v1/admin_traces.py tests/unit/test_tempo_parser.py tests/unit/test_tempo_client.py tests/e2e/test_admin_traces.py
 ```
 
 - [ ] **Step 4: Frontend lint + typecheck**
@@ -2770,7 +2770,7 @@ cd frontend && pnpm --filter web lint && pnpm --filter web typecheck
 git push -u origin feat/admin-trace-viewer
 gh pr create --title "feat: admin trace viewer" --body "$(cat <<'EOF'
 ## Summary
-- Org admins can list and inspect their org's cubebox agent traces stored in Grafana Tempo.
+- Org admins can list and inspect their org's cubeplex agent traces stored in Grafana Tempo.
 - Backend proxies Tempo's HTTP query API; org_id predicate is injected into every TraceQL.
 - Frontend renders a span tree + LLM-aware detail cards.
 

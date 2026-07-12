@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, Usage
 
-from cubebox.llm.config import ModelCost
-from cubebox.middleware.cost import CostMiddleware, _compute_cost_micro, _extract_usage
+from cubeplex.llm.config import ModelCost
+from cubeplex.middleware.cost import CostMiddleware, _compute_cost_micro, _extract_usage
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -120,7 +120,7 @@ async def test_after_model_response_returns_none() -> None:
     response = _make_response()
     ctx = MagicMock()
 
-    with patch("cubebox.middleware.cost.asyncio.create_task"):
+    with patch("cubeplex.middleware.cost.asyncio.create_task"):
         result = await mw.after_model_response(response, ctx)
 
     assert result is None
@@ -140,7 +140,7 @@ async def test_after_model_response_updates_last_billing_id() -> None:
     response = _make_response()
     ctx = MagicMock()
 
-    with patch("cubebox.middleware.cost.asyncio.create_task"):
+    with patch("cubeplex.middleware.cost.asyncio.create_task"):
         await mw.after_model_response(response, ctx)
 
     assert mw._last_billing_id is not None
@@ -154,7 +154,7 @@ async def test_after_model_response_advances_billing_id_each_call() -> None:
     ctx = MagicMock()
     response = _make_response()
 
-    with patch("cubebox.middleware.cost.asyncio.create_task"):
+    with patch("cubeplex.middleware.cost.asyncio.create_task"):
         await mw.after_model_response(response, ctx)
         first_id = mw._last_billing_id
 
@@ -206,8 +206,8 @@ async def test_after_model_response_writes_billing_record_with_correct_attributi
     fake_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
-        patch("cubebox.middleware.cost.BillingRepository", _FakeRepo),
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _FakeRepo),
     ):
         await mw.after_model_response(response, ctx)
         # Allow the fire-and-forget task to complete
@@ -261,8 +261,8 @@ async def test_after_model_response_billing_event_id_matches_llm_event() -> None
     fake_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
-        patch("cubebox.middleware.cost.BillingRepository", _FakeRepo),
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _FakeRepo),
     ):
         await mw.after_model_response(response, ctx)
         await asyncio.sleep(0)
@@ -291,8 +291,8 @@ async def test_after_model_response_id_matches_last_billing_id() -> None:
     fake_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
-        patch("cubebox.middleware.cost.BillingRepository", _FakeRepo),
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _FakeRepo),
     ):
         await mw.after_model_response(response, ctx)
         await asyncio.sleep(0)
@@ -423,8 +423,8 @@ async def test_after_model_response_writes_computed_cost() -> None:
     fake_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
-        patch("cubebox.middleware.cost.BillingRepository", _FakeRepo),
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _FakeRepo),
     ):
         await mw.after_model_response(response, ctx)
         await asyncio.sleep(0)
@@ -453,8 +453,8 @@ async def test_after_model_response_without_lookup_still_writes_row_with_zero_co
     fake_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
-        patch("cubebox.middleware.cost.BillingRepository", _FakeRepo),
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _FakeRepo),
     ):
         await mw.after_model_response(response, ctx)
         await asyncio.sleep(0)
@@ -499,8 +499,8 @@ async def test_billing_write_failure_does_not_raise() -> None:
     fake_session.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("cubebox.middleware.cost.async_session_maker", return_value=fake_session),
-        patch("cubebox.middleware.cost.BillingRepository", _BrokenRepo),
+        patch("cubeplex.middleware.cost.async_session_maker", return_value=fake_session),
+        patch("cubeplex.middleware.cost.BillingRepository", _BrokenRepo),
     ):
         result = await mw.after_model_response(response, ctx)
         await asyncio.sleep(0)

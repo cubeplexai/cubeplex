@@ -3,7 +3,7 @@
 Allow artifact preview of Office files (docx, xlsx, pptx) by embedding
 Microsoft Office Online Viewer in an iframe. A one-time-use, unsigned
 public download endpoint serves the file to Microsoft's servers without
-requiring cubebox authentication.
+requiring cubeplex authentication.
 
 ## Problem
 
@@ -54,10 +54,10 @@ New config key `api.public_url`:
 
 ```yaml
 api:
-  public_url: ""  # e.g. "https://app.cubebox.com"
+  public_url: ""  # e.g. "https://app.cubeplex.com"
 ```
 
-- Overridable via `CUBEBOX_API__PUBLIC_URL`.
+- Overridable via `CUBEPLEX_API__PUBLIC_URL`.
 - When set, OTK download URLs use this as the base:
   `{public_url}/api/v1/public/artifacts/dl/{nonce}/report.docx`
 - When empty (default), the backend derives the base from the incoming
@@ -70,7 +70,7 @@ api:
 
 ### 1. New endpoint: issue OTK (authenticated)
 
-Add to `cubebox/api/routes/v1/artifacts.py`:
+Add to `cubeplex/api/routes/v1/artifacts.py`:
 
 ```
 POST /ws/{workspace_id}/conversations/{conversation_id}/artifacts/{artifact_id}/preview-token
@@ -93,7 +93,7 @@ POST /ws/{workspace_id}/conversations/{conversation_id}/artifacts/{artifact_id}/
 
 ### 2. New endpoint: public file download (no auth)
 
-New router file `cubebox/api/routes/v1/public_artifacts.py`:
+New router file `cubeplex/api/routes/v1/public_artifacts.py`:
 
 ```
 GET /public/artifacts/dl/{token}/{filename}
@@ -114,10 +114,10 @@ GET /public/artifacts/dl/{token}/{filename}
 
 ### 3. Router registration
 
-In `cubebox/api/app.py`, register the public router:
+In `cubeplex/api/app.py`, register the public router:
 
 ```python
-from cubebox.api.routes.v1 import public_artifacts
+from cubeplex.api.routes.v1 import public_artifacts
 app.include_router(public_artifacts.router, prefix="/api/v1")
 ```
 

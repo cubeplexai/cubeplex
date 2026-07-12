@@ -12,10 +12,10 @@ from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.auth.users import UserManager
-from cubebox.db.engine import _build_database_url
-from cubebox.models import OrgRole, Role, User, Workspace
-from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
+from cubeplex.auth.users import UserManager
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import OrgRole, Role, User, Workspace
+from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -60,7 +60,7 @@ async def _add_extra_workspace_member(workspace_id: str) -> tuple[str, str, str]
 
 
 async def _make_non_workspace_user() -> str:
-    """Create a user with no membership in any cubebox workspace.
+    """Create a user with no membership in any cubeplex workspace.
 
     Returns the user_id. Used to verify the topic invite path rejects
     user_ids that aren't workspace members.
@@ -88,7 +88,7 @@ async def _insert_scheduled_task_binding(
     Used to verify upgrade-to-topic rejects conversations bound to a
     scheduler target (the external binding guard).
     """
-    from cubebox.models.scheduled_task import ScheduledTask
+    from cubeplex.models.scheduled_task import ScheduledTask
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
@@ -122,7 +122,7 @@ async def _login_extra(app: Any, email: str, password: str) -> httpx.AsyncClient
     assert login.status_code in (200, 204), login.text
     me = await c.get("/api/v1/auth/me")
     assert me.status_code == 200, me.text
-    csrf = c.cookies.get("cubebox_csrf_50") or c.cookies.get("cubebox_csrf")
+    csrf = c.cookies.get("cubeplex_csrf_50") or c.cookies.get("cubeplex_csrf")
     if csrf:
         c.headers["X-CSRF-Token"] = csrf
     return c
@@ -669,7 +669,7 @@ class TestUpgradeToTopic:
         # Get the admin's org_id via /auth/me-style lookup through a topic
         # create — the topic response is workspace-scoped so we can recover
         # org_id from the DB. Easier: use a tiny helper that loads it.
-        from cubebox.models import Workspace as _Workspace
+        from cubeplex.models import Workspace as _Workspace
 
         engine = create_async_engine(_build_database_url(), poolclass=NullPool)
         try:

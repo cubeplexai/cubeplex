@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.triggers.filter import matches
+from cubeplex.triggers.filter import matches
 
 
 class TestFilterMatcher:

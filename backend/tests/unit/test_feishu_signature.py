@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from cubebox.im.feishu.signature import (
+from cubeplex.im.feishu.signature import (
     FeishuSignatureError,
     decrypt_feishu_payload,
     verify_feishu_signature,

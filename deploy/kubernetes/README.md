@@ -1,6 +1,6 @@
-# cubebox on Kubernetes (Helm)
+# cubeplex on Kubernetes (Helm)
 
-One `helm upgrade --install` deploys the cubebox backend, frontend, and
+One `helm upgrade --install` deploys the cubeplex backend, frontend, and
 the infrastructure they need (Postgres, Redis, MinIO, optionally the
 alibaba OpenSandbox umbrella) into a single namespace.
 
@@ -14,7 +14,7 @@ kubernetes/
 ├── README.md                  # this file
 ├── INSTALL.md                 # English install guide
 ├── INSTALL.zh.md              # Chinese install guide
-├── charts/cubebox/            # umbrella Helm chart
+├── charts/cubeplex/            # umbrella Helm chart
 │   ├── Chart.yaml
 │   ├── values.yaml            # safe defaults, no secrets
 │   ├── values.local.yaml.example
@@ -36,9 +36,9 @@ kubernetes/
 deploy/kubernetes/scripts/build-and-push.sh
 
 # 2. Author values.local.yaml (gitignored)
-cp deploy/kubernetes/charts/cubebox/values.local.yaml.example \
-   deploy/kubernetes/charts/cubebox/values.local.yaml
-$EDITOR deploy/kubernetes/charts/cubebox/values.local.yaml
+cp deploy/kubernetes/charts/cubeplex/values.local.yaml.example \
+   deploy/kubernetes/charts/cubeplex/values.local.yaml
+$EDITOR deploy/kubernetes/charts/cubeplex/values.local.yaml
 
 # 3. Install
 deploy/kubernetes/scripts/helm-install.sh

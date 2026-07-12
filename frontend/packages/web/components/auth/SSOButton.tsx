@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { createApiClient, initiateSsoLogin } from '@cubebox/core'
+import { createApiClient, initiateSsoLogin } from '@cubeplex/core'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

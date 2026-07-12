@@ -13,7 +13,7 @@ help:
 	@echo "  make backend-test-contracts     - Run plugin contract tests (EE compat)"
 	@echo "  make backend-start              - Start backend server"
 	@echo "  make backend-cleanup-sandboxes  - Cleanup leftover test sandboxes"
-	@echo "  make frontend-build-core        - Build @cubebox/core"
+	@echo "  make frontend-build-core        - Build @cubeplex/core"
 	@echo "  make frontend-install-browsers  - Install Playwright Chromium browser"
 	@echo "  make frontend-test-e2e          - Run frontend Playwright tests"
 	@echo "  make frontend-test-e2e-ci       - Run frontend Playwright tests with CI output"

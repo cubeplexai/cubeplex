@@ -1,6 +1,6 @@
 # Testing Principles & Layout
 
-Cross-cutting testing rules for cubebox — backend (pytest) and frontend
+Cross-cutting testing rules for cubeplex — backend (pytest) and frontend
 (Playwright). The one-paragraph summary lives in [AGENTS.md](../AGENTS.md);
 this is the full discipline.
 
@@ -59,7 +59,7 @@ Makefile filters know which suite each command targets.
   function or class boundary. Runs in seconds; runs on every commit
   via pre-commit / CI.
 - **`backend/tests/integration/`** — in-process integration of multiple
-  cubebox modules through their real public APIs, but still no external
+  cubeplex modules through their real public APIs, but still no external
   systems. Compose services together with fakes between them.
 - **`backend/tests/e2e/`** — anything that touches a real backing store
   (Postgres, Redis, rustfs S3, OpenSandbox, or the FastAPI app via

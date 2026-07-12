@@ -17,18 +17,18 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select, text
 
-import cubebox.db as _db
-from cubebox.models import IMConnectorAccount, Workspace
-from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.im_connector import (
+import cubeplex.db as _db
+from cubeplex.models import IMConnectorAccount, Workspace
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_participant import ConversationParticipant
+from cubeplex.models.im_connector import (
     IMRunQueueItem,
     IMThreadLink,
     IMWebhookReceipt,
 )
-from cubebox.models.public_id import generate_public_id
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.schedules.dispatch import dispatch_scheduled_run
+from cubeplex.models.public_id import generate_public_id
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.schedules.dispatch import dispatch_scheduled_run
 
 pytestmark = pytest.mark.e2e
 
@@ -109,7 +109,7 @@ async def _seed_im_account(
 
 async def _set_routing_mode(*, account_id: str, mode: str = "isolated") -> None:
     """Set the bot's account-level routing mode (replaces per-channel binding)."""
-    from cubebox.im.bot_settings import IMBotSettings, store_bot_settings
+    from cubeplex.im.bot_settings import IMBotSettings, store_bot_settings
 
     async with _db.async_session_maker() as session:
         account = await session.get(IMConnectorAccount, account_id)
@@ -1041,8 +1041,8 @@ async def _seed_topic_in_other_workspace(*, org_id: str, creator_user_id: str) -
     to ``users.id``. We reuse the test's logged-in user id since users are
     org-scoped only via memberships, not by workspace.
     """
-    from cubebox.models import Workspace as WorkspaceModel
-    from cubebox.models.topic import Topic
+    from cubeplex.models import Workspace as WorkspaceModel
+    from cubeplex.models.topic import Topic
 
     async with _db.async_session_maker() as session:
         other_ws = WorkspaceModel(org_id=org_id, name=f"other-{secrets.token_hex(4)}")
@@ -1068,7 +1068,7 @@ async def _seed_im_account_in_other_workspace(
 
     Returns ``(other_workspace_id, im_account_id)``.
     """
-    from cubebox.models import Workspace as WorkspaceModel
+    from cubeplex.models import Workspace as WorkspaceModel
 
     cred_id = generate_public_id("cred")
     async with _db.async_session_maker() as session:
@@ -1171,10 +1171,10 @@ async def test_update_rejects_destination_field_changes(
     destination fields, letting an agent path mutate target_mode after the
     HTTP layer's lock — would either skew dispatch or trip the DB CHECK
     constraint and 500."""
-    from cubebox.agents.actions.context import ScopeContext
-    from cubebox.agents.actions.types import ActionInvalidInput
-    from cubebox.models import Role
-    from cubebox.services.scheduled_task import ScheduledTaskService
+    from cubeplex.agents.actions.context import ScopeContext
+    from cubeplex.agents.actions.types import ActionInvalidInput
+    from cubeplex.models import Role
+    from cubeplex.services.scheduled_task import ScheduledTaskService
 
     client, ws_id = cleanup_destinations
     org_id = await _resolve_org_id(ws_id)
@@ -1215,10 +1215,10 @@ async def test_update_rejects_topic_id_from_other_workspace(
     """Bug it catches: service.update lets the caller patch topic_id with a
     topic that lives in another workspace; the FK passes but dispatch
     routes new conversations under a foreign workspace's topic."""
-    from cubebox.agents.actions.context import ScopeContext
-    from cubebox.agents.actions.types import ActionInvalidInput
-    from cubebox.models import Role
-    from cubebox.services.scheduled_task import ScheduledTaskService
+    from cubeplex.agents.actions.context import ScopeContext
+    from cubeplex.agents.actions.types import ActionInvalidInput
+    from cubeplex.models import Role
+    from cubeplex.services.scheduled_task import ScheduledTaskService
 
     client, ws_id = cleanup_destinations
     org_id = await _resolve_org_id(ws_id)

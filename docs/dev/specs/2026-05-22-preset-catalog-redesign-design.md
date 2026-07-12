@@ -71,7 +71,7 @@ denormalizes all of it.
   host and an endpoint may override host and/or path. Full-URL override remains
   as an escape hatch.
 - Carry **pricing on each model** so the wizard can prefill cost.
-- **Move the catalog data + loader to cubebox** (product/business data). Keep
+- **Move the catalog data + loader to cubeplex** (product/business data). Keep
   the **capability descriptor mechanism in cubepi** (protocol runtime contract),
   and **delete the catalog package from cubepi**.
 - Clean cutover — no back-compat shim (project hasn't shipped publicly).
@@ -87,38 +87,38 @@ denormalizes all of it.
 
 ---
 
-## 3. Ownership split: cubepi mechanism vs cubebox data
+## 3. Ownership split: cubepi mechanism vs cubeplex data
 
-cubebox touches the cubepi catalog at only three sites, and **cubepi never loads
-the catalog at runtime** — capability descriptors flow cubebox→cubepi when a
+cubeplex touches the cubepi catalog at only three sites, and **cubepi never loads
+the catalog at runtime** — capability descriptors flow cubeplex→cubepi when a
 provider is constructed. So the split is clean:
 
 | Concern | Owner after | Rationale |
 |---|---|---|
-| `CapabilityDescriptor` type + the wire runtime that applies it (`reasoning`, `temperature`, `max_tokens_field`, …) | **cubepi** | Protocol mechanism. cubebox imports the type to validate/construct. |
+| `CapabilityDescriptor` type + the wire runtime that applies it (`reasoning`, `temperature`, `max_tokens_field`, …) | **cubepi** | Protocol mechanism. cubeplex imports the type to validate/construct. |
 | `WireApi` literal (`anthropic-messages`/`openai-completions`/`openai-responses`) | **cubepi** | Names of protocols cubepi implements. |
-| Catalog **data** (vendors, regions, endpoints, models, pricing, the capability *values* per endpoint) | **cubebox** | Product/business data. |
-| Catalog **loader / types** (`ProviderPreset` equivalent, `ModelPreset`, YAML readers) | **cubebox** | Moves with the data. |
+| Catalog **data** (vendors, regions, endpoints, models, pricing, the capability *values* per endpoint) | **cubeplex** | Product/business data. |
+| Catalog **loader / types** (`ProviderPreset` equivalent, `ModelPreset`, YAML readers) | **cubeplex** | Moves with the data. |
 
 **Decision:** cubepi's `cubepi/providers/catalog/` package (loader + types +
-`providers.yaml` + tests) is **deleted**. Nothing outside cubebox consumes it.
-cubebox keeps its dependency on cubepi for `CapabilityDescriptor` (the stable,
+`providers.yaml` + tests) is **deleted**. Nothing outside cubeplex consumes it.
+cubeplex keeps its dependency on cubepi for `CapabilityDescriptor` (the stable,
 non-catalog `cubepi.providers.capability` module).
 
 **`WireApi` decoupling (settled):** `WireApi` is just the 3-string protocol
-literal. To avoid a cubebox→cubepi-catalog import (the catalog package is being
-deleted) and to keep the cubebox work independent of the cubepi release,
-**cubebox declares its own `WireApi` literal** in `cubebox/llm/catalog/types.py`.
+literal. To avoid a cubeplex→cubepi-catalog import (the catalog package is being
+deleted) and to keep the cubeplex work independent of the cubepi release,
+**cubeplex declares its own `WireApi` literal** in `cubeplex/llm/catalog/types.py`.
 cubepi keeps its own `WireApi` for its runtime; the two are intentionally
 parallel 3-value literals, not a shared import. (cubepi may relocate its
-`WireApi` out of the deleted catalog package — see plan Phase G — but cubebox
+`WireApi` out of the deleted catalog package — see plan Phase G — but cubeplex
 does not depend on that.)
 
 ---
 
 ## 4. New catalog schema
 
-Lives in cubebox: `cubebox/llm/catalog/` with `data/vendors.yaml`,
+Lives in cubeplex: `cubeplex/llm/catalog/` with `data/vendors.yaml`,
 `data/capabilities.yaml`, `types.py`, `loader.py`.
 
 Three nested levels: **Vendor** → **Endpoint** (region × protocol × plan) →
@@ -129,7 +129,7 @@ list model ids; models never list endpoints/regions/protocols. (Untagged
 vendors — §4.2 — every endpoint serves every model.)
 
 ```yaml
-# cubebox/llm/catalog/data/vendors.yaml
+# cubeplex/llm/catalog/data/vendors.yaml
 - vendor: zhipu
   display_name: Zhipu / GLM
   short_name: Zhipu
@@ -221,7 +221,7 @@ Most `openai-completions` vendors share an identical capability block. Instead o
 inlining it per endpoint, define **named profiles** referenced by name.
 
 ```yaml
-# cubebox/llm/catalog/data/capabilities.yaml
+# cubeplex/llm/catalog/data/capabilities.yaml
 openai-compat-basic:                 # covers ~20 vendors (moonshot, minimax, xai, mistral, groq, …)
   temperature: { mode: free, min: 0.0, max: 2.0, default: 1.0 }
   max_tokens_field: max_tokens
@@ -278,16 +278,16 @@ composed key is used.
 
 Clean cutover, no shim. Ordered so each step is independently reviewable.
 
-1. **cubebox: new catalog package.** Create `cubebox/llm/catalog/`
+1. **cubeplex: new catalog package.** Create `cubeplex/llm/catalog/`
    (`types.py`, `loader.py`, `data/vendors.yaml`, `data/capabilities.yaml`).
    Port the loader; import `CapabilityDescriptor`/`WireApi` from cubepi. Unit
    tests: base_url composition (incl. host override + full override), flattening
    to `preset_key`, capability profile resolution, model→plan membership,
    pricing parse.
-2. **cubebox: port the data** to vendors/regions/endpoints/models+pricing +
+2. **cubeplex: port the data** to vendors/regions/endpoints/models+pricing +
    `capabilities.yaml`. Add the §4.1 parity test against a frozen snapshot of
    today's flat URLs.
-3. **cubebox: repoint the 3 consumers**:
+3. **cubeplex: repoint the 3 consumers**:
    - `admin_llm.py:list_provider_presets` → return the **nested vendor list**
      (new shape; §5.1).
    - `admin_providers.py` logo lookup → resolve via vendor.
@@ -307,9 +307,9 @@ Clean cutover, no shim. Ordered so each step is independently reviewable.
      Choosing them selects the endpoint, which drives the composed `base_url`
      and filters the model list. Existing configure fields (name, slug, key)
      stay. This matches the already-multi-step wizard — it only enriches step 2.
-   - `@cubebox/core` preset types update in lockstep.
+   - `@cubeplex/core` preset types update in lockstep.
 5. **cubepi: delete `providers/catalog/`** + tests; bump cubepi; switch
-   cubebox's dependency.
+   cubeplex's dependency.
 
 ### 5.1 API contract change
 
@@ -340,7 +340,7 @@ step 2 reads `vendor.endpoints`. Concrete shape:
 
 `base_url` is composed server-side (the frontend never composes). The loader
 also exposes a flat `preset_key → endpoint` lookup **in-process** for the
-seeder and logo paths (not a separate HTTP shape). The `@cubebox/core` types
+seeder and logo paths (not a separate HTTP shape). The `@cubeplex/core` types
 mirror this nested structure.
 
 ---
@@ -471,7 +471,7 @@ To prevent that, the migration is **exhaustive, not illustrative**:
 
 ## 8. Decisions (settled)
 
-1. **cubepi catalog removed entirely** — data + loader move to cubebox; cubepi
+1. **cubepi catalog removed entirely** — data + loader move to cubeplex; cubepi
    keeps only `CapabilityDescriptor` + `WireApi`.
 2. **`plan` dimension** — all-or-nothing per vendor (untagged vs tiered); the
    model `plan` tag is the *sole* membership mechanism; display label +

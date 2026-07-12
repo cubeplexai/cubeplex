@@ -21,9 +21,9 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from cubebox.config import Settings
-from cubebox.sandbox.models import UserSandbox
-from cubebox.sandbox.provider import SandboxProvider
+from cubeplex.config import Settings
+from cubeplex.sandbox.models import UserSandbox
+from cubeplex.sandbox.provider import SandboxProvider
 
 logger = logging.getLogger("cull_dedicated_sandboxes")
 

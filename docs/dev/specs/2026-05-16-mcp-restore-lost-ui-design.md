@@ -36,7 +36,7 @@ User-visible regressions:
   reachable before saving.
 - **No citation mapping editor.** `install.tool_citations` JSON
   is on the model and `tool_citations` is wired into the agent
-  runtime (see `cubebox.middleware.citation`), but the UI to
+  runtime (see `cubeplex.middleware.citation`), but the UI to
   set it has been gone since `243e6396`.
 - **No custom connector creation.** Catalog-installs require a
   `template_id`, but the data model has always allowed
@@ -93,7 +93,7 @@ state** (e.g. promote = update `install.install_scope`).
  │ └────────────────────┘ │                                          │
  │                        │  ┌─[Schema]─[Raw JSON]──────────────┐    │
  │  ▸ search_repos        │  │ query: string  *required          │    │
- │    Search repos…       │  │   Query string. Example: cubebox  │    │
+ │    Search repos…       │  │   Query string. Example: cubeplex  │    │
  │    2 args · 1 required │  │ sort: enum  optional              │    │
  │  ▸ create_issue        │  │   Sort order. One of "stars",     │    │
  │    Create a new issue. │  │   "forks", "updated".             │    │
@@ -498,7 +498,7 @@ UX rules:
  │  ────────────────────                                            │
  │                                                                  │
  │  Arguments                                                       │
- │  query   * [ cubebox                                          ]  │
+ │  query   * [ cubeplex                                          ]  │
  │  sort      [ stars ▼ ]                                           │
  │  per_page  [ 10                                                ] │
  │                                                                  │
@@ -506,7 +506,7 @@ UX rules:
  │                                                                  │
  │  Result · 320 ms                                                 │
  │  ┌──────────────────────────────────────────────────────────┐    │
- │  │ { "items": [ { "name": "xfgong/cubebox", "stargazers": …│    │
+ │  │ { "items": [ { "name": "xfgong/cubeplex", "stargazers": …│    │
  │  │ ...                                                       │    │
  │  └──────────────────────────────────────────────────────────┘    │
  │                                                                  │

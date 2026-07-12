@@ -23,7 +23,7 @@ const jetBrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'cubebox',
+  title: 'cubeplex',
   description: 'AI Agent System',
   icons: {
     icon: '/icon.svg',

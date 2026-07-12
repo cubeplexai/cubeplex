@@ -9,8 +9,8 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models.sandbox_policy import SandboxPolicy
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.sandbox_policy import SandboxPolicy
 
 
 @pytest_asyncio.fixture(autouse=True)

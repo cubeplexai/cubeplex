@@ -12,7 +12,7 @@ pytestmark = pytest.mark.e2e
 async def test_save_avatar_png_returns_url_and_stores():
     """save_avatar_png stores bytes and returns a public URL."""
     # Try reaching rustfs; skip with a named reason if unavailable.
-    from cubebox.objectstore.client import get_objectstore_client
+    from cubeplex.objectstore.client import get_objectstore_client
 
     c = get_objectstore_client()
     try:
@@ -20,7 +20,7 @@ async def test_save_avatar_png_returns_url_and_stores():
     except Exception:
         pytest.skip("rustfs not available — run locally with ~/infra/rustfs up")
 
-    from cubebox.services.avatar_store import save_avatar_png
+    from cubeplex.services.avatar_store import save_avatar_png
 
     url = await save_avatar_png("usr_test123", b"\x89PNG\r\n\x1a\nfakepng")
 

@@ -7,19 +7,19 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid_utils import uuid7
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.credentials.exceptions import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.credentials.exceptions import (
     CredentialInUseError,
     CredentialKindMismatch,
     CredentialNotFound,
 )
-from cubebox.models.mcp import MCPConnector, MCPConnectorTemplate, MCPCredentialGrant
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.mcp import (
+from cubeplex.models.mcp import MCPConnector, MCPConnectorTemplate, MCPCredentialGrant
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
     MCPCredentialGrantRepository,
 )
-from cubebox.services.credential import CredentialService
+from cubeplex.services.credential import CredentialService
 
 # All org IDs used across vault tests. Each needs an organizations row so the
 # credentials.org_id FK is satisfied. user-1/user-2 need users rows.

@@ -33,10 +33,10 @@ httpbin sees: "X-Egress-Test": "s3cr3t-REAL-VALUE-42"
 system dependency"): a NODE INFRASTRUCTURE problem on `k8s-test-207`.** Pods
 scheduled there have broken pod networking — even a *plain, non-egress* pod on
 207 cannot reach cluster DNS (`10.2.0.10`) or the internet, while all working
-sandboxes run on `k8s-test-217`. My egress test pods (and the cubebox-created
+sandboxes run on `k8s-test-217`. My egress test pods (and the cubeplex-created
 one) happened to land on 207, so they couldn't do DNS → the egress looked
 broken. It is **not** an egress bug and **not** a config issue: plain
-OpenSandbox egress (allow-list + DNS proxy) and the full cubebox MITM
+OpenSandbox egress (allow-list + DNS proxy) and the full cubeplex MITM
 substitution both work correctly once the pod is on a healthy node.
 
 Action for the cluster: fix/cordon `k8s-test-207` (or pin sandboxes to healthy
@@ -48,13 +48,13 @@ nodes) — pods there have no working dataplane.
 |---|---|---|
 | Egress MITM CA (dual-purpose) | `secret/egress-mitm-ca` | ✅ |
 | Webhook serving cert | `secret/egress-webhook-tls` | ✅ |
-| Webhook image | `hub.sensedeal.vip/library/cubebox-egress-webhook:20260526e` | ✅ pushed |
+| Webhook image | `hub.sensedeal.vip/library/cubeplex-egress-webhook:20260526e` | ✅ pushed |
 | Webhook | `deploy/svc/egress-webhook` + SA/Role/RoleBinding | ✅ Running, healthz 200 |
 | Admission webhook | `mutatingwebhookconfiguration/egress-inject` (ns-scoped, failurePolicy Ignore) | ✅ |
 | Addon | `configmap/egress-inject-addon` | ✅ |
 | Exchange listener | in-process mTLS uvicorn on `192.168.1.150:9443` | ✅ |
 
-cubebox config: `egress_exchange.auth.mode=mtls`, `listener.enabled=true` (cert/key
+cubeplex config: `egress_exchange.auth.mode=mtls`, `listener.enabled=true` (cert/key
 + egress CA), `sandbox.egress_exchange_host=192.168.1.150`,
 `sandbox.use_server_proxy=false`. Worktree DB was reset (it was stamped at a
 since-removed merge revision) and re-migrated cleanly to head `6c69cc288404`.
@@ -121,14 +121,14 @@ httpbin, which looked like an egress dataplane bug. The decisive isolation:
 - A **plain, non-egress pod pinned to `k8s-test-207`** also cannot reach cluster
   DNS (`10.2.0.10`) or the internet — both time out.
 - All healthy sandboxes run on **`k8s-test-217`**; the test pods (and the
-  cubebox-created egress sandbox) were scheduled on **207**.
+  cubeplex-created egress sandbox) were scheduled on **207**.
 - Pinning the egress sandbox to **217** → plain egress passes (allowed
   `httpbin=200`, denied `example.com` blocked) and the full MITM substitution
   succeeds (§2).
 
 So the "egress is broken" symptom was entirely **`k8s-test-207`'s broken pod
 networking** — a node/infra issue, independent of the egress feature and of
-cubebox. (Side note explored along the way: the egress DNS proxy sets `SO_MARK`
+cubeplex. (Side note explored along the way: the egress DNS proxy sets `SO_MARK`
 on upstream queries; for clusters whose resolver is a ClusterIP needing
 kube-proxy DNAT, `OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT=<dns-clusterip>` exists to
 dial it without the mark. It was **not** needed on the healthy node here, but
@@ -137,7 +137,7 @@ it's the right knob if a future cluster's DNS is a DNAT-only ClusterIP.)
 ## 7. Recommendations
 
 1. Fix the OpenSandbox egress sidecar outbound/DNS in this cluster (egress
-   component), then re-run the live substitution (all cubebox pieces are ready).
+   component), then re-run the live substitution (all cubeplex pieces are ready).
 2. Bake the egress-bundle bug fixes (§5) — they are real and were committed.
 3. Add to bundle docs: apply the addon ConfigMap; pre-pull the sandbox image (or
    raise the create timeout); the exchange server cert needs an IP/DNS SAN

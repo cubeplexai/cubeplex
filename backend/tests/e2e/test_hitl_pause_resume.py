@@ -39,8 +39,8 @@ from cubepi.hitl.types import (
     Question,
 )
 
-from cubebox.agents.checkpointer import init_checkpointer
-from cubebox.streams.run_events import _active_run_key, _run_meta_key, create_run
+from cubeplex.agents.checkpointer import init_checkpointer
+from cubeplex.streams.run_events import _active_run_key, _run_meta_key, create_run
 
 
 def _ask_pending(question_id: str = "q-ask") -> HitlRequest:

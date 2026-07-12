@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import type { Artifact } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
 import type { IconType } from 'react-icons'
 import { FaCode, FaDatabase, FaFile, FaFileLines, FaGlobe, FaImage } from 'react-icons/fa6'
 import { Sparkles } from 'lucide-react'

@@ -1,5 +1,5 @@
-from cubebox.services.conversation_search.lexical.pg_bigm import PgBigmBackend
-from cubebox.services.conversation_search.lexical.pgroonga import PgroongaBackend
+from cubeplex.services.conversation_search.lexical.pg_bigm import PgBigmBackend
+from cubeplex.services.conversation_search.lexical.pgroonga import PgroongaBackend
 
 
 def test_pgroonga_strips_disallowed_chars() -> None:

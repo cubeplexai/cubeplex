@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useTranslations } from 'next-intl'
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, Loader2, ListChecks } from 'lucide-react'
-import type { TodoItem } from '@cubebox/core'
+import type { TodoItem } from '@cubeplex/core'
 
 interface TaskProgressCardProps {
   todos: TodoItem[]

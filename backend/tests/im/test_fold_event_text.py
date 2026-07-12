@@ -1,11 +1,11 @@
 """Tests for fold_event handling text_delta events on the new CardState path."""
 
-from cubebox.im.outbound import OutboundOp, fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import OutboundOp, fold_event
+from cubeplex.im.types import RenderState
 
 
 def _state() -> RenderState:
-    return RenderState(bot_name="cubebox", run_id="run_1")
+    return RenderState(bot_name="cubeplex", run_id="run_1")
 
 
 def test_first_text_delta_emits_card_create() -> None:

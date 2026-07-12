@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import type { AskQuestion, ContentBlock, PendingConfirm, ToolCallRef } from '@cubebox/core'
+import type { AskQuestion, ContentBlock, PendingConfirm, ToolCallRef } from '@cubeplex/core'
 import { AskUserResolvedCard } from './AskUserResolvedCard'
 import { ToolCallItem } from './ToolCallItem'
 

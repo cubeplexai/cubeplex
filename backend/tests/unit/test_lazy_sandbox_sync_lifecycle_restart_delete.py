@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.sandbox.lazy import LazySandbox
-from cubebox.sandbox.manager import SandboxAttachment
+from cubeplex.sandbox.lazy import LazySandbox
+from cubeplex.sandbox.manager import SandboxAttachment
 
 
 def _make_lazy(catalog, sandbox, event_service=None):

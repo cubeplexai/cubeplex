@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development.
 
 **Goal:** Land the three test tiers that gate M6 cleanup:
-1. **Tier 1 unit**: byte-stability of cubepi.Message → API conversion + cubebox cache marker policy
+1. **Tier 1 unit**: byte-stability of cubepi.Message → API conversion + cubeplex cache marker policy
 2. **Tier 2 E2E**: `test_prompt_cache.py` passes under cubepi runtime with the SAME bar as langgraph (turn 2 cache_read ≥50%, final ≥85%)
 3. **Tier 3 byte-parity**: fixed conversation scenarios produce byte-identical Anthropic API request bodies through langgraph and cubepi paths
 
@@ -24,11 +24,11 @@ After M5, **M6 default-flag-flip is unblocked**.
 - `cubepi.Message → OpenAI API dict` byte-stable
 - Tool definition serialization order deterministic
 - `transform_system_prompt` chain output deterministic
-- `Message.metadata` msgpack round-trip byte-identical (already covered by cubepi PR's E2E but verify in cubebox)
+- `Message.metadata` msgpack round-trip byte-identical (already covered by cubepi PR's E2E but verify in cubeplex)
 
 Reuse pattern: load deterministic fixtures (e.g. a UserMessage with specific content), call `cubepi.AnthropicProvider._convert_message(msg)`, json.dumps with sort_keys=True, compare against checked-in golden fixtures.
 
-`backend/tests/unit/test_cache_markers_pi.py` (M1.1 already created — extend if needed): ensure `CubeboxCacheMarkerPolicy.message_breakpoint_indices` is byte-stable for the same input (call twice, get identical indices).
+`backend/tests/unit/test_cache_markers_pi.py` (M1.1 already created — extend if needed): ensure `CubeplexCacheMarkerPolicy.message_breakpoint_indices` is byte-stable for the same input (call twice, get identical indices).
 
 ### M5.2: Run existing E2E under cubepi + fix anything broken
 
@@ -47,10 +47,10 @@ Land fixes incrementally. Expect 1-3 fixes; this is the "shake out the bugs" mil
 
 ### M5.3: Tier 2 cache E2E under cubepi
 
-The existing `tests/e2e/memory/test_prompt_cache.py` (gated by `CUBEBOX_E2E_LLM_CACHE_CAPABLE`) runs at the SSE level so it's runtime-agnostic. Just verify it passes under `agents.runtime=cubepi`:
+The existing `tests/e2e/memory/test_prompt_cache.py` (gated by `CUBEPLEX_E2E_LLM_CACHE_CAPABLE`) runs at the SSE level so it's runtime-agnostic. Just verify it passes under `agents.runtime=cubepi`:
 
 ```bash
-CUBEBOX_E2E_LLM_CACHE_CAPABLE=true uv run pytest tests/e2e/memory/test_prompt_cache.py -v -m real_llm --tb=short
+CUBEPLEX_E2E_LLM_CACHE_CAPABLE=true uv run pytest tests/e2e/memory/test_prompt_cache.py -v -m real_llm --tb=short
 ```
 
 If it fails, debug. Likely culprits:
@@ -126,7 +126,7 @@ def _canonical(d: dict) -> str:
 - 2-turn with memory snapshot
 - 3-turn with cache markers expected
 
-**Stub Anthropic response**: a deterministic SSE stream that's compatible with both langgraph + cubepi Anthropic clients. Use the existing cubebox E2E LLM endpoint OR write a hand-crafted SSE response.
+**Stub Anthropic response**: a deterministic SSE stream that's compatible with both langgraph + cubepi Anthropic clients. Use the existing cubeplex E2E LLM endpoint OR write a hand-crafted SSE response.
 
 **Difficulty**: HTTP interception of langgraph's anthropic call path requires understanding where langchain-anthropic makes requests (it's via the httpx layer most likely, so respx should work). Cubepi.AnthropicProvider uses `anthropic.AsyncAnthropic` which also goes through httpx. Both should be interceptable.
 

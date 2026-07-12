@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useAuthStore } from '@cubebox/core'
+import { createApiClient, useAuthStore } from '@cubeplex/core'
 import { OnboardingForm } from '@/components/onboarding/OnboardingForm'
 
 export default function OnboardingPage() {

@@ -3,7 +3,7 @@
 **Date:** 2026-06-14
 **Status:** Design, awaiting implementation
 **Related:** [2026-06-13 investigation note](../notes/2026-06-13-feishu-richer-output-borrow-from-openclaw.md)
-**Touches:** `backend/cubebox/im/feishu/`, `backend/cubebox/im/{outbound,types,artifacts}.py`, `backend/cubebox/api/routes/v1/im_feishu_events.py`
+**Touches:** `backend/cubeplex/im/feishu/`, `backend/cubeplex/im/{outbound,types,artifacts}.py`, `backend/cubeplex/api/routes/v1/im_feishu_events.py`
 **Out of repo:** Feishu app permission scope `cardkit:card:write` must be applied for the bot app before release
 
 ---
@@ -17,14 +17,14 @@ shows rich widgets (markdown, collapsible tool calls, artifact cards,
 ask-user prompts, sandbox-confirm prompts, sub-agent clusters, task
 progress) that have no Feishu counterpart.
 
-The 2026-06-13 investigation note compared cubebox to `~/openclaw-lark`
+The 2026-06-13 investigation note compared cubeplex to `~/openclaw-lark`
 and concluded:
 
 1. Markdown must be rendered via Feishu's **interactive card** with a
    `markdown` element, not via the `post` message type (which silently
    blanks tables).
 2. Widgets must be cards or card sub-elements, not text.
-3. `~/openclaw-lark`'s overall pattern is sound; cubebox should borrow
+3. `~/openclaw-lark`'s overall pattern is sound; cubeplex should borrow
    the schema and rate-limit handling but keep its own tailer/state seam.
 
 This spec lands v1.
@@ -64,7 +64,7 @@ inbound card.action  ←── feishu webhook / long-conn ───────�
                          agent_runtime.resume(answer)
 ```
 
-Four new modules, all under `backend/cubebox/im/feishu/`:
+Four new modules, all under `backend/cubeplex/im/feishu/`:
 
 1. **`card_model.py`** — typed Pydantic `CardState`
    (`header`, `streaming_text_id`, `tool_panel`, `artifacts`, `sources`,
@@ -485,12 +485,12 @@ Hard cutover (CLAUDE.md "no backward-compat shim"; project pre-public).
 
 ### 8.3 Add
 
-- `backend/cubebox/im/feishu/card_model.py`
-- `backend/cubebox/im/feishu/card_renderer.py`
-- `backend/cubebox/im/feishu/cardkit_client.py`
-- `backend/cubebox/im/feishu/card_action_router.py`
+- `backend/cubeplex/im/feishu/card_model.py`
+- `backend/cubeplex/im/feishu/card_renderer.py`
+- `backend/cubeplex/im/feishu/cardkit_client.py`
+- `backend/cubeplex/im/feishu/card_action_router.py`
 - `card.action.trigger` branch in
-  `backend/cubebox/api/routes/v1/im_feishu_events.py`
+  `backend/cubeplex/api/routes/v1/im_feishu_events.py`
 - Out-of-repo: `cardkit:card:write` scope on the Feishu app (operator
   step, before release)
 
@@ -554,7 +554,7 @@ text X`. Shared helper `assert_card_contains(text)` to be added in
    `args`, `result`, `elapsed_ms`, `error` on tool events, plus a
    `citation` event carrying `(index, url, title)` for §4.2 step 5.
    Verify cubepi is already emitting these; missing fields become
-   `cubepi-upstream-first` changes ahead of the cubebox PR.
+   `cubepi-upstream-first` changes ahead of the cubeplex PR.
 4. **Sub-agent event shape.** Today's `sub_agent_*` events should
    already carry `name` + tool count; if not, gate v1 SubAgent line on
    the cubepi event payload landing first.

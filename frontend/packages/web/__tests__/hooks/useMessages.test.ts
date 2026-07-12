@@ -1,5 +1,5 @@
 import { act } from '@testing-library/react'
-import { useMessageStore, getTextContent } from '@cubebox/core'
+import { useMessageStore, getTextContent } from '@cubeplex/core'
 
 const CONV_ID = 'conv-1'
 

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { Check, Copy, X } from 'lucide-react'
-import { createApiClient, createOrgInvite } from '@cubebox/core'
+import { createApiClient, createOrgInvite } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {

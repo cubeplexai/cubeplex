@@ -13,11 +13,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from cubebox.models import UserSandbox, UserSandboxSyncEvent
-from cubebox.sandbox.lazy import _sync_skills
-from cubebox.sandbox.sync_events import UserSandboxSyncEventService
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
+from cubeplex.models import UserSandbox, UserSandboxSyncEvent
+from cubeplex.sandbox.lazy import _sync_skills
+from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
 
 
 @pytest.mark.asyncio

@@ -1,8 +1,8 @@
-// Web-package SSE event types not yet declared in `@cubebox/core`.
+// Web-package SSE event types not yet declared in `@cubeplex/core`.
 //
 // `FailoverEvent` mirrors the backend `FailoverEvent` Pydantic schema in
-// `backend/cubebox/agents/schemas.py` and the SSE envelope emitted by
-// `cubebox.streams.run_manager` when a `FallbackBoundModel` chain leg fails
+// `backend/cubeplex/agents/schemas.py` and the SSE envelope emitted by
+// `cubeplex.streams.run_manager` when a `FallbackBoundModel` chain leg fails
 // and the next leg takes over. `next_ref === null` signals chain exhaustion
 // (no further leg to fail over to); UI must avoid rendering the literal
 // string "null" in that case.

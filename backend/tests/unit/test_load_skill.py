@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from cubebox.tools.builtin.load_skill import create_load_skill_tool
+from cubeplex.tools.builtin.load_skill import create_load_skill_tool
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -14,7 +14,7 @@ from cubebox.tools.builtin.load_skill import create_load_skill_tool
 
 
 class _FakeResolvedSkill:
-    """Minimal stand-in for cubebox.skills.service.ResolvedSkill."""
+    """Minimal stand-in for cubeplex.skills.service.ResolvedSkill."""
 
     def __init__(self, name: str, version: str, skill_version_id: str, content: str) -> None:
         self.name = name
@@ -169,7 +169,7 @@ def test_load_skill_tool_metadata() -> None:
 def test_load_skill_tool_parameters_schema() -> None:
     from pydantic import BaseModel
 
-    from cubebox.tools.builtin.load_skill import LoadSkillInput
+    from cubeplex.tools.builtin.load_skill import LoadSkillInput
 
     tool = create_load_skill_tool(catalog=_FakeCatalog({}), workspace_id="ws-1", org_id="org-1")
     assert issubclass(tool.parameters, BaseModel)

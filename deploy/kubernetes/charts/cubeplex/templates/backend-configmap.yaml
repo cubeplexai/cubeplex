@@ -1,0 +1,45 @@
+{{- $pgHost := include "cubeplex.postgresql.host" . -}}
+{{- $redisHost := include "cubeplex.redis.host" . -}}
+{{- $rustfsHost := include "cubeplex.rustfs.host" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cubeplex.backend.fullname" . }}-config
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+data:
+  config.production.local.yaml: |
+    dynaconf_merge: true
+    production:
+      {{- with .Values.backend.configOverrides }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      database:
+        host: {{ $pgHost | quote }}
+        port: 5432
+        user: {{ .Values.postgres.auth.username | quote }}
+        name: {{ .Values.postgres.auth.database | quote }}
+      objectstore:
+        provider: "s3"
+        endpoint: {{ printf "http://%s:9000" $rustfsHost | quote }}
+        bucket: {{ .Values.rustfs.defaultBucket | quote }}
+        region: "us-east-1"
+      sandbox:
+        # Decoupled from the opensandbox subchart toggle so operators can
+        # point at an external sandbox endpoint (set backend.sandbox.enabled
+        # explicitly) without deploying the alibaba umbrella chart.
+        # Defaults to .Values.opensandbox.enabled for the common case.
+        enabled: {{ dig "sandbox" "enabled" .Values.opensandbox.enabled .Values.backend }}
+        use_server_proxy: {{ dig "sandbox" "use_server_proxy" false .Values.backend }}
+      {{- if .Values.egress.enabled }}
+      egress_exchange:
+        auth:
+          mode: mtls
+        listener:
+          enabled: true
+          host: "0.0.0.0"
+          port: 8443
+          certfile: "/etc/egress-mtls/tls.crt"
+          keyfile:  "/etc/egress-mtls/tls.key"
+          ca_certs: "/etc/egress-mtls/ca.crt"
+      {{- end }}

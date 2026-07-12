@@ -15,11 +15,11 @@
 ### Task 1: Reset migrations, public-id prefix, model changes
 
 **Files:**
-- Modify: `backend/cubebox/models/public_id.py`
-- Modify: `backend/cubebox/models/conversation.py`
-- Modify: `backend/cubebox/models/user_sandbox.py`
-- Create: `backend/cubebox/models/conversation_participant.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Modify: `backend/cubeplex/models/public_id.py`
+- Modify: `backend/cubeplex/models/conversation.py`
+- Modify: `backend/cubeplex/models/user_sandbox.py`
+- Create: `backend/cubeplex/models/conversation_participant.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 - Delete: `backend/alembic/versions/7b81f04dce1f_add_topics_and_topic_participants_.py`
 - Delete: `backend/alembic/versions/2b6db4bfe7ac_user_sandbox_topic_id_partial_unique_.py`
 - Create: `backend/alembic/versions/<new>_group_chat_and_conversation_participants.py`
@@ -69,7 +69,7 @@ Index(
 
 - [ ] **Step 4: Create the `ConversationParticipant` model**
 
-New file `backend/cubebox/models/conversation_participant.py`:
+New file `backend/cubeplex/models/conversation_participant.py`:
 
 ```python
 """Conversation participant — per-conversation actor list."""
@@ -80,10 +80,10 @@ from typing import ClassVar
 from sqlalchemy import Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
 
 
-class ConversationParticipant(CubeboxBase, OrgScopedMixin, table=True):
+class ConversationParticipant(CubeplexBase, OrgScopedMixin, table=True):
     """A user who has actively participated in a conversation.
 
     Append-only: rows are created on first send and never removed. SSE
@@ -112,10 +112,10 @@ class ConversationParticipant(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 5: Export the model**
 
-In `backend/cubebox/models/__init__.py`:
+In `backend/cubeplex/models/__init__.py`:
 
 ```python
-from cubebox.models.conversation_participant import ConversationParticipant
+from cubeplex.models.conversation_participant import ConversationParticipant
 ```
 
 Add `"ConversationParticipant"` to `__all__`.
@@ -176,9 +176,9 @@ polymorphic (scope_type, scope_id)."
 ### Task 2: ConversationParticipantRepository + is_group_chat maintenance
 
 **Files:**
-- Create: `backend/cubebox/repositories/conversation_participant.py`
-- Modify: `backend/cubebox/repositories/conversation.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/conversation_participant.py`
+- Modify: `backend/cubeplex/repositories/conversation.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: Create the repository**
 
@@ -194,9 +194,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import update
 
-from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.repositories.base import ScopedRepository
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_participant import ConversationParticipant
+from cubeplex.repositories.base import ScopedRepository
 
 
 class ConversationParticipantRepository(ScopedRepository[ConversationParticipant]):
@@ -279,7 +279,7 @@ class ConversationParticipantRepository(ScopedRepository[ConversationParticipant
 In `repositories/__init__.py`:
 
 ```python
-from cubebox.repositories.conversation_participant import (
+from cubeplex.repositories.conversation_participant import (
     ConversationParticipantRepository,
 )
 ```
@@ -302,7 +302,7 @@ transaction so the hot path can read a single bool."
 ### Task 3: ConversationRepository._scoped_select rewrite
 
 **Files:**
-- Modify: `backend/cubebox/repositories/conversation.py`
+- Modify: `backend/cubeplex/repositories/conversation.py`
 
 - [ ] **Step 1: Write the failing E2E test**
 
@@ -353,8 +353,8 @@ The new OR clause has three branches:
 
 ```python
 def _scoped_select(self) -> Any:
-    from cubebox.models.conversation_participant import ConversationParticipant
-    from cubebox.models.topic import Topic, TopicParticipant
+    from cubeplex.models.conversation_participant import ConversationParticipant
+    from cubeplex.models.topic import Topic, TopicParticipant
 
     return (
         super()
@@ -457,9 +457,9 @@ same OR logic."
 ### Task 4: UserSandbox polymorphic scope refactor
 
 **Files:**
-- Modify: `backend/cubebox/repositories/user_sandbox.py`
-- Modify: `backend/cubebox/sandbox/manager.py`
-- Modify: `backend/cubebox/sandbox/lazy.py`
+- Modify: `backend/cubeplex/repositories/user_sandbox.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
+- Modify: `backend/cubeplex/sandbox/lazy.py`
 
 - [ ] **Step 1: Replace by_user / by_topic lookups with by_scope**
 
@@ -556,7 +556,7 @@ In `sandbox/manager.py`, `get_or_create_for` and all the callsites change signat
 
 - [ ] **Step 4: Update ws_sandbox route helper**
 
-In `backend/cubebox/api/routes/v1/ws_sandbox.py`, rewrite `_resolve_sandbox_scope` to return `(scope_type, scope_id)`:
+In `backend/cubeplex/api/routes/v1/ws_sandbox.py`, rewrite `_resolve_sandbox_scope` to return `(scope_type, scope_id)`:
 
 ```python
 async def _resolve_sandbox_scope(
@@ -659,8 +659,8 @@ UPDATE without file movement."
 ### Task 5: API — invite-to-group + list participants + upgrade refactor
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
-- Modify: `backend/cubebox/api/schemas/` (new request models)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/api/schemas/` (new request models)
 
 - [ ] **Step 1: Add request schemas**
 
@@ -829,8 +829,8 @@ conv creation seeds the creator as a participant."
 ### Task 6: send_message + steer + HITL — auto-join + is_group_chat-driven
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 - [ ] **Step 1: Auto-join in send_message**
 
@@ -1058,7 +1058,7 @@ true` from the response.
 - [ ] **Step 4: Build + Commit**
 
 ```bash
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 git add -A
 git commit -m "feat(core): conversation_participants types + store actions"
 ```
@@ -1247,7 +1247,7 @@ Triage failures: regressions (must fix), pre-existing on main (document).
 - [ ] **Step 3: Frontend build + lint**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build && pnpm --filter web build && pnpm --filter web lint
+cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter web build && pnpm --filter web lint
 ```
 
 - [ ] **Step 4: Push + update PR description**

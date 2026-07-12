@@ -15,7 +15,7 @@ vi.mock('next/navigation', () => ({
 import { NextIntlClientProvider } from 'next-intl'
 import en from '../../messages/en.json'
 import { MessageList } from '@/components/chat/MessageList'
-import { useMessageStore, type Message } from '@cubebox/core'
+import { useMessageStore, type Message } from '@cubeplex/core'
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return (

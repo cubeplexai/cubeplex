@@ -2,7 +2,7 @@
 
 import { use, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { createApiClient, useSkillsStore } from '@cubebox/core'
+import { createApiClient, useSkillsStore } from '@cubeplex/core'
 import { useWorkspaceSkillsCatalog } from '@/hooks/useWorkspaceSkillsCatalog'
 import type { WorkspaceSkillEntry, WorkspaceSkillFilters } from '@/hooks/useWorkspaceSkillsCatalog'
 import { WorkspaceSkillCard } from '@/components/workspace-settings/skills/WorkspaceSkillCard'

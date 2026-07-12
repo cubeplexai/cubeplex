@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubebox.im.feishu.reset_command import parse_reset_command
+from cubeplex.im.feishu.reset_command import parse_reset_command
 
 
 class TestFeishuParseResetCommand:

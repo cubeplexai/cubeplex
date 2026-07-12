@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cubebox.auth.email_otp import VerifyResult, verify_otp
+from cubeplex.auth.email_otp import VerifyResult, verify_otp
 
 
 class FakeRedis:
@@ -50,7 +50,7 @@ class FakeRedis:
 async def test_verify_success_deletes_key():
     fake = FakeRedis()
     await fake.hset("email_otp:a@b.com", mapping={"code": "123456", "attempts": "0"})
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "123456")
     assert isinstance(res, VerifyResult)
     assert res.ok is True
@@ -61,7 +61,7 @@ async def test_verify_success_deletes_key():
 async def test_verify_wrong_code_increments_attempts():
     fake = FakeRedis()
     await fake.hset("email_otp:a@b.com", mapping={"code": "123456", "attempts": "0"})
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "000000")
     assert res.ok is False
     assert res.reason == "invalid_otp"
@@ -71,7 +71,7 @@ async def test_verify_wrong_code_increments_attempts():
 @pytest.mark.asyncio
 async def test_verify_missing_key_expired():
     fake = FakeRedis()
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "123456")
     assert res.ok is False
     assert res.reason == "expired_or_unknown"
@@ -81,7 +81,7 @@ async def test_verify_missing_key_expired():
 async def test_verify_max_attempts_invalidates():
     fake = FakeRedis()
     await fake.hset("email_otp:a@b.com", mapping={"code": "123456", "attempts": "4"})
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "000000")
     assert res.ok is False
     assert res.reason == "max_attempts_reached"

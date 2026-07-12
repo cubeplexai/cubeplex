@@ -17,7 +17,7 @@ physically distinct per AGENTS.md's scope-isolation rule, sharing only
 
 **Tech Stack:** FastAPI + SQLModel backend (async), Pydantic v2 schemas, Pytest
 unit tests; Next 16 + React 19 + TS strict frontend, Vitest for unit tests,
-@cubebox/core for the typed API client.
+@cubeplex/core for the typed API client.
 
 **Spec:** `docs/dev/specs/2026-05-17-mcp-admin-vs-workspace-views-design.md`
 
@@ -28,33 +28,33 @@ unit tests; Next 16 + React 19 + TS strict frontend, Vitest for unit tests,
 ### Backend
 
 - **Create:**
-  - `backend/cubebox/api/schemas/mcp_admin_connector.py` — output DTOs for the
+  - `backend/cubeplex/api/schemas/mcp_admin_connector.py` — output DTOs for the
     new `/admin/mcp/connectors` endpoint (`AdminOrgConnectorOut`,
     `AdminOrgEffectiveOut`, `WorkspaceDistributionOut`,
     `AdminOrgConnectorListOut`). Living in its own file keeps the existing
     1200-line `schemas/mcp.py` from growing.
-  - `backend/cubebox/api/schemas/mcp_ws_available.py` — output DTOs for
+  - `backend/cubeplex/api/schemas/mcp_ws_available.py` — output DTOs for
     `/ws/{ws}/mcp/available` (`WsAvailableOut`, `WsAvailableListOut`,
     `WsAvailableSource`, `WsAvailableReason`).
-  - `backend/cubebox/services/mcp_admin_connectors.py` — derivation for the
+  - `backend/cubeplex/services/mcp_admin_connectors.py` — derivation for the
     admin row's `org_effective` + `workspace_distribution`. Single file so
     the route handler stays thin.
-  - `backend/cubebox/services/mcp_ws_available.py` — derivation for the
+  - `backend/cubeplex/services/mcp_ws_available.py` — derivation for the
     workspace "available" list.
   - `backend/tests/unit/test_mcp_admin_connectors_endpoint.py`
   - `backend/tests/unit/test_mcp_ws_available_endpoint.py`
 - **Modify:**
-  - `backend/cubebox/api/routes/v1/admin_mcp.py` — add `GET /connectors`
+  - `backend/cubeplex/api/routes/v1/admin_mcp.py` — add `GET /connectors`
     (alongside the existing `GET /installs`; the old route stays one release
     for the frontend swap, then removes in Task 11).
-  - `backend/cubebox/api/routes/v1/ws_mcp.py` — add `GET /available`; tighten
+  - `backend/cubeplex/api/routes/v1/ws_mcp.py` — add `GET /available`; tighten
     `GET /connectors` by passing a new `include_disabled_org_installs=False`
     flag through to the service.
-  - `backend/cubebox/mcp/effective.py` — add the `include_disabled_org_installs`
+  - `backend/cubeplex/mcp/effective.py` — add the `include_disabled_org_installs`
     parameter to `MCPEffectiveConnectorService.list_for_workspace_user`
     (default `True` for backwards compat; the workspace `/connectors` route
     passes `False`). Pure `compute_effective_state` untouched.
-  - `backend/cubebox/repositories/mcp.py` — add
+  - `backend/cubeplex/repositories/mcp.py` — add
     `MCPWorkspaceConnectorStateRepository.list_for_install` (every state row
     pointing at one install) so the distribution aggregate can count without
     a full table scan per install.
@@ -121,7 +121,7 @@ unit tests; Next 16 + React 19 + TS strict frontend, Vitest for unit tests,
 ## Task 1: Repo helper — list workspace state rows by install
 
 **Files:**
-- Modify: `backend/cubebox/repositories/mcp.py`
+- Modify: `backend/cubeplex/repositories/mcp.py`
 - Test: `backend/tests/unit/test_mcp_state_repo.py` (new file, or extend
   `test_mcp_four_layer_handlers.py` if a state-repo test already lives there)
 
@@ -140,8 +140,8 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.models.mcp import MCPWorkspaceConnectorState
-from cubebox.repositories.mcp import MCPWorkspaceConnectorStateRepository
+from cubeplex.models.mcp import MCPWorkspaceConnectorState
+from cubeplex.repositories.mcp import MCPWorkspaceConnectorStateRepository
 
 
 @pytest.mark.asyncio
@@ -188,7 +188,7 @@ Expected: FAIL with `AttributeError: 'MCPWorkspaceConnectorStateRepository' obje
 
 - [ ] **Step 3: Add `list_for_install` to the state repo**
 
-Insert into `backend/cubebox/repositories/mcp.py` right after the existing
+Insert into `backend/cubeplex/repositories/mcp.py` right after the existing
 `list_for_workspace` method (search for `async def list_for_workspace`):
 
 ```python
@@ -216,7 +216,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/repositories/mcp.py backend/tests/unit/test_mcp_state_repo_list_for_install.py
+git add backend/cubeplex/repositories/mcp.py backend/tests/unit/test_mcp_state_repo_list_for_install.py
 git commit -m "feat(mcp/repo): list_for_install for workspace-distribution aggregation"
 ```
 
@@ -225,7 +225,7 @@ git commit -m "feat(mcp/repo): list_for_install for workspace-distribution aggre
 ## Task 2: Schemas — `AdminOrgConnectorOut`
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/mcp_admin_connector.py`
+- Create: `backend/cubeplex/api/schemas/mcp_admin_connector.py`
 - Test: `backend/tests/unit/test_admin_org_connector_schema.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -233,7 +233,7 @@ git commit -m "feat(mcp/repo): list_for_install for workspace-distribution aggre
 Create `backend/tests/unit/test_admin_org_connector_schema.py`:
 
 ```python
-from cubebox.api.schemas.mcp_admin_connector import (
+from cubeplex.api.schemas.mcp_admin_connector import (
     AdminOrgConnectorOut,
     AdminOrgEffectiveOut,
     WorkspaceDistributionOut,
@@ -294,11 +294,11 @@ def test_admin_org_connector_allows_null_credential_availability():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd backend && .venv/bin/python -m pytest tests/unit/test_admin_org_connector_schema.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.api.schemas.mcp_admin_connector'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.api.schemas.mcp_admin_connector'`.
 
 - [ ] **Step 3: Create the schema file**
 
-`backend/cubebox/api/schemas/mcp_admin_connector.py`:
+`backend/cubeplex/api/schemas/mcp_admin_connector.py`:
 
 ```python
 """Admin connector list response shapes (GET /admin/mcp/connectors).
@@ -314,7 +314,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from cubebox.api.schemas.mcp import MCPConnectorInstallOut, MCPConnectorTemplateOut
+from cubeplex.api.schemas.mcp import MCPConnectorInstallOut, MCPConnectorTemplateOut
 
 AdminOrgReason = Literal[
     "usable",
@@ -371,13 +371,13 @@ Expected: PASS (both tests).
 
 - [ ] **Step 5: mypy check**
 
-Run: `cd backend && .venv/bin/python -m mypy cubebox/api/schemas/mcp_admin_connector.py`
+Run: `cd backend && .venv/bin/python -m mypy cubeplex/api/schemas/mcp_admin_connector.py`
 Expected: `Success: no issues found in 1 source file`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/mcp_admin_connector.py backend/tests/unit/test_admin_org_connector_schema.py
+git add backend/cubeplex/api/schemas/mcp_admin_connector.py backend/tests/unit/test_admin_org_connector_schema.py
 git commit -m "feat(mcp/schema): AdminOrgConnectorOut + sub-DTOs for admin connectors endpoint"
 ```
 
@@ -386,7 +386,7 @@ git commit -m "feat(mcp/schema): AdminOrgConnectorOut + sub-DTOs for admin conne
 ## Task 3: Schemas — `WsAvailableOut`
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/mcp_ws_available.py`
+- Create: `backend/cubeplex/api/schemas/mcp_ws_available.py`
 - Test: `backend/tests/unit/test_ws_available_schema.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -396,7 +396,7 @@ Create `backend/tests/unit/test_ws_available_schema.py`:
 ```python
 import pytest
 
-from cubebox.api.schemas.mcp_ws_available import WsAvailableOut
+from cubeplex.api.schemas.mcp_ws_available import WsAvailableOut
 
 
 def test_ws_available_org_install_row():
@@ -462,7 +462,7 @@ Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Create the schema file**
 
-`backend/cubebox/api/schemas/mcp_ws_available.py`:
+`backend/cubeplex/api/schemas/mcp_ws_available.py`:
 
 ```python
 """Workspace 'available connectors' response shape.
@@ -478,7 +478,7 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-from cubebox.api.schemas.mcp import MCPConnectorInstallOut, MCPConnectorTemplateOut
+from cubeplex.api.schemas.mcp import MCPConnectorInstallOut, MCPConnectorTemplateOut
 
 WsAvailableSource = Literal["org_install", "template"]
 WsAvailableReason = Literal[
@@ -530,11 +530,11 @@ Expected: PASS (both tests).
 
 - [ ] **Step 5: mypy check + commit**
 
-Run: `cd backend && .venv/bin/python -m mypy cubebox/api/schemas/mcp_ws_available.py`
+Run: `cd backend && .venv/bin/python -m mypy cubeplex/api/schemas/mcp_ws_available.py`
 Expected: `Success: no issues found`.
 
 ```bash
-git add backend/cubebox/api/schemas/mcp_ws_available.py backend/tests/unit/test_ws_available_schema.py
+git add backend/cubeplex/api/schemas/mcp_ws_available.py backend/tests/unit/test_ws_available_schema.py
 git commit -m "feat(mcp/schema): WsAvailableOut for workspace available-connectors endpoint"
 ```
 
@@ -543,7 +543,7 @@ git commit -m "feat(mcp/schema): WsAvailableOut for workspace available-connecto
 ## Task 4: Service — admin connectors derivation
 
 **Files:**
-- Create: `backend/cubebox/services/mcp_admin_connectors.py`
+- Create: `backend/cubeplex/services/mcp_admin_connectors.py`
 - Test: `backend/tests/unit/test_mcp_admin_connectors_service.py`
 
 This service composes existing repo methods into the new admin row. The
@@ -559,7 +559,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from cubebox.services.mcp_admin_connectors import derive_admin_org_effective
+from cubeplex.services.mcp_admin_connectors import derive_admin_org_effective
 
 
 @dataclass
@@ -657,7 +657,7 @@ Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Create the service module**
 
-`backend/cubebox/services/mcp_admin_connectors.py`:
+`backend/cubeplex/services/mcp_admin_connectors.py`:
 
 ```python
 """Derivation helpers for GET /admin/mcp/connectors.
@@ -671,11 +671,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from cubebox.api.schemas.mcp_admin_connector import (
+from cubeplex.api.schemas.mcp_admin_connector import (
     AdminOrgEffectiveOut,
     WorkspaceDistributionOut,
 )
-from cubebox.models.mcp import (
+from cubeplex.models.mcp import (
     MCPConnectorInstall,
     MCPCredentialGrant,
     MCPWorkspaceConnectorState,
@@ -776,11 +776,11 @@ Expected: PASS (9 tests).
 
 - [ ] **Step 5: mypy check + commit**
 
-Run: `cd backend && .venv/bin/python -m mypy cubebox/services/mcp_admin_connectors.py`
+Run: `cd backend && .venv/bin/python -m mypy cubeplex/services/mcp_admin_connectors.py`
 Expected: `Success`.
 
 ```bash
-git add backend/cubebox/services/mcp_admin_connectors.py backend/tests/unit/test_mcp_admin_connectors_service.py
+git add backend/cubeplex/services/mcp_admin_connectors.py backend/tests/unit/test_mcp_admin_connectors_service.py
 git commit -m "feat(mcp): admin connectors derivation service"
 ```
 
@@ -789,7 +789,7 @@ git commit -m "feat(mcp): admin connectors derivation service"
 ## Task 5: Route — `GET /admin/mcp/connectors`
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 - Test: `backend/tests/unit/test_admin_connectors_endpoint.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -801,16 +801,16 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from cubebox.api.app import create_app
-from cubebox.auth.context import RequestContext
-from cubebox.audit.sink import NoOpAuditSink
-from cubebox.mcp.dependencies import (
+from cubeplex.api.app import create_app
+from cubeplex.auth.context import RequestContext
+from cubeplex.audit.sink import NoOpAuditSink
+from cubeplex.mcp.dependencies import (
     get_admin_install_service,
     get_admin_request_context,
     get_audit_sink,
     get_grant_repo,
 )
-from cubebox.models import Role, User
+from cubeplex.models import Role, User
 
 
 async def _fake_audit_sink() -> Any:
@@ -893,16 +893,16 @@ Expected: FAIL with `404` (route doesn't exist yet).
 
 - [ ] **Step 3: Add the route handler**
 
-Append to `backend/cubebox/api/routes/v1/admin_mcp.py` (just before the
+Append to `backend/cubeplex/api/routes/v1/admin_mcp.py` (just before the
 `# Admin install effective` section header near the end of the file):
 
 ```python
-from cubebox.api.schemas.mcp_admin_connector import (
+from cubeplex.api.schemas.mcp_admin_connector import (
     AdminOrgConnectorListOut,
     AdminOrgConnectorOut,
 )
-from cubebox.repositories.workspace import WorkspaceRepository
-from cubebox.services.mcp_admin_connectors import (
+from cubeplex.repositories.workspace import WorkspaceRepository
+from cubeplex.services.mcp_admin_connectors import (
     build_workspace_distribution,
     derive_admin_org_effective,
 )
@@ -955,15 +955,15 @@ async def list_admin_connectors(
 ```
 
 Imports at the top of the file: add
-`from cubebox.repositories.mcp import MCPWorkspaceConnectorStateRepository`
-to the existing `from cubebox.repositories.mcp import (...)` block if not
+`from cubeplex.repositories.mcp import MCPWorkspaceConnectorStateRepository`
+to the existing `from cubeplex.repositories.mcp import (...)` block if not
 already present.
 
 If `MCPConnectorInstallService` does not expose `_template_repo` today,
 fall back to constructing it inline:
 
 ```python
-from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
 # inside the function:
 template_repo = MCPConnectorTemplateRepository(svc._install_repo.session)
@@ -979,13 +979,13 @@ Expected: PASS.
 
 - [ ] **Step 5: Spot-check ruff + mypy**
 
-Run: `cd backend && .venv/bin/python -m ruff check cubebox/api/routes/v1/admin_mcp.py && .venv/bin/python -m mypy cubebox/api/routes/v1/admin_mcp.py`
+Run: `cd backend && .venv/bin/python -m ruff check cubeplex/api/routes/v1/admin_mcp.py && .venv/bin/python -m mypy cubeplex/api/routes/v1/admin_mcp.py`
 Expected: both green.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_mcp.py backend/tests/unit/test_admin_connectors_endpoint.py
+git add backend/cubeplex/api/routes/v1/admin_mcp.py backend/tests/unit/test_admin_connectors_endpoint.py
 git commit -m "feat(mcp): GET /admin/mcp/connectors — admin-scope list, no workspace lens"
 ```
 
@@ -994,7 +994,7 @@ git commit -m "feat(mcp): GET /admin/mcp/connectors — admin-scope list, no wor
 ## Task 6: Service — workspace `available` derivation
 
 **Files:**
-- Create: `backend/cubebox/services/mcp_ws_available.py`
+- Create: `backend/cubeplex/services/mcp_ws_available.py`
 - Test: `backend/tests/unit/test_mcp_ws_available_service.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1006,7 +1006,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from cubebox.services.mcp_ws_available import compute_available_rows
+from cubeplex.services.mcp_ws_available import compute_available_rows
 
 
 @dataclass
@@ -1115,7 +1115,7 @@ Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Create the service**
 
-`backend/cubebox/services/mcp_ws_available.py`:
+`backend/cubeplex/services/mcp_ws_available.py`:
 
 ```python
 """Workspace 'available connectors' computation.
@@ -1130,7 +1130,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from cubebox.api.schemas.mcp_ws_available import WsAvailableReason, WsAvailableSource
+from cubeplex.api.schemas.mcp_ws_available import WsAvailableReason, WsAvailableSource
 
 
 @dataclass(frozen=True)
@@ -1222,7 +1222,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/mcp_ws_available.py backend/tests/unit/test_mcp_ws_available_service.py
+git add backend/cubeplex/services/mcp_ws_available.py backend/tests/unit/test_mcp_ws_available_service.py
 git commit -m "feat(mcp): workspace 'available connectors' derivation service"
 ```
 
@@ -1231,7 +1231,7 @@ git commit -m "feat(mcp): workspace 'available connectors' derivation service"
 ## Task 7: Route — `GET /ws/{ws}/mcp/available`
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py`
 - Test: `backend/tests/unit/test_ws_available_endpoint.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1246,17 +1246,17 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from cubebox.api.app import create_app
-from cubebox.audit.sink import NoOpAuditSink
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.mcp.dependencies import (
+from cubeplex.api.app import create_app
+from cubeplex.audit.sink import NoOpAuditSink
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.mcp.dependencies import (
     get_audit_sink,
     get_ws_effective_service,
     get_ws_install_service,
     get_connector_template_service,
 )
-from cubebox.models import Role, User
+from cubeplex.models import Role, User
 
 
 async def _fake_audit() -> Any:
@@ -1279,7 +1279,7 @@ def test_ws_available_lists_org_install_without_state_row() -> None:
     async def _fake_eff() -> Any:
         class _Stub:
             async def list_available_for_workspace(self, ws_id: str) -> list[Any]:
-                from cubebox.services.mcp_ws_available import WsAvailableRow
+                from cubeplex.services.mcp_ws_available import WsAvailableRow
 
                 return [
                     WsAvailableRow(
@@ -1340,11 +1340,11 @@ Expected: FAIL — 404.
 
 - [ ] **Step 3: Add the route handler**
 
-Append to `backend/cubebox/api/routes/v1/ws_mcp.py` (after
+Append to `backend/cubeplex/api/routes/v1/ws_mcp.py` (after
 `list_workspace_connectors` and before `create_workspace_install`):
 
 ```python
-from cubebox.api.schemas.mcp_ws_available import (
+from cubeplex.api.schemas.mcp_ws_available import (
     WsAvailableListOut,
     WsAvailableOut,
 )
@@ -1364,7 +1364,7 @@ async def list_workspace_available(
     Includes org installs not yet enabled in this workspace + templates
     the workspace doesn't already have. Spec §3.2.
     """
-    from cubebox.services.mcp_ws_available import compute_available_rows
+    from cubeplex.services.mcp_ws_available import compute_available_rows
 
     org_installs = await install_svc._install_repo.list_org_installs()
     ws_installs = await install_svc._install_repo.list_workspace_installs(workspace_id)
@@ -1413,8 +1413,8 @@ Expected: PASS.
 - [ ] **Step 5: ruff + mypy + commit**
 
 ```bash
-cd backend && .venv/bin/python -m ruff check cubebox/api/routes/v1/ws_mcp.py && .venv/bin/python -m mypy cubebox/api/routes/v1/ws_mcp.py
-git add backend/cubebox/api/routes/v1/ws_mcp.py backend/tests/unit/test_ws_available_endpoint.py
+cd backend && .venv/bin/python -m ruff check cubeplex/api/routes/v1/ws_mcp.py && .venv/bin/python -m mypy cubeplex/api/routes/v1/ws_mcp.py
+git add backend/cubeplex/api/routes/v1/ws_mcp.py backend/tests/unit/test_ws_available_endpoint.py
 git commit -m "feat(mcp): GET /ws/{ws}/mcp/available for workspace-side opt-in list"
 ```
 
@@ -1423,8 +1423,8 @@ git commit -m "feat(mcp): GET /ws/{ws}/mcp/available for workspace-side opt-in l
 ## Task 8: Tighten `list_for_workspace_user` filter
 
 **Files:**
-- Modify: `backend/cubebox/mcp/effective.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_mcp.py` (route passes
+- Modify: `backend/cubeplex/mcp/effective.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_mcp.py` (route passes
   `include_disabled_org_installs=False`)
 - Modify: `backend/tests/unit/test_mcp_four_layer_handlers.py` (adjust the
   ws-connectors test to assert disabled-org rows no longer come back)
@@ -1479,7 +1479,7 @@ Expected: FAIL — parameter not recognised.
 
 - [ ] **Step 3: Add the filter parameter**
 
-Edit `backend/cubebox/mcp/effective.py` `list_for_workspace_user`. Change
+Edit `backend/cubeplex/mcp/effective.py` `list_for_workspace_user`. Change
 signature:
 
 ```python
@@ -1517,7 +1517,7 @@ Plumb the new flag into the call from `list_for_workspace_user` →
 
 - [ ] **Step 4: Wire the route**
 
-Edit `backend/cubebox/api/routes/v1/ws_mcp.py` `list_workspace_connectors`
+Edit `backend/cubeplex/api/routes/v1/ws_mcp.py` `list_workspace_connectors`
 to pass the new flag:
 
 ```python
@@ -1539,7 +1539,7 @@ update it inline if it fires).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/mcp/effective.py backend/cubebox/api/routes/v1/ws_mcp.py backend/tests/unit/
+git add backend/cubeplex/mcp/effective.py backend/cubeplex/api/routes/v1/ws_mcp.py backend/tests/unit/
 git commit -m "feat(mcp): /ws/{ws}/mcp/connectors filters disabled org installs"
 ```
 
@@ -1593,7 +1593,7 @@ describe('wsListAvailable', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test -- --run`
+Run: `cd frontend && pnpm --filter @cubeplex/core test -- --run`
 Expected: FAIL — undefined imports.
 
 - [ ] **Step 3: Add the type files**
@@ -1695,8 +1695,8 @@ export * from './mcp_ws_available'
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core test -- --run
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core test -- --run
+pnpm --filter @cubeplex/core build
 ```
 
 Expected: tests PASS, `tsc` clean.
@@ -1831,7 +1831,7 @@ git commit -m "refactor(web/mcp): extract TryItForm with onRun callback"
 'use client'
 
 import { useTranslations } from 'next-intl'
-import { adminInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubebox/core'
+import { adminInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubeplex/core'
 
 import { TryItForm } from './TryItForm'
 import { Label } from '@/components/ui/label'
@@ -1917,7 +1917,7 @@ export function AdminTryItView(props: AdminTryItViewProps): JSX.Element {
 ```tsx
 'use client'
 
-import { wsInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubebox/core'
+import { wsInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubeplex/core'
 
 import { TryItForm } from './TryItForm'
 
@@ -1952,7 +1952,7 @@ AdminTryItView or list + WsTryItView".
 
 import { useState, useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import type { ApiClient, MCPToolEntry } from '@cubebox/core'
+import type { ApiClient, MCPToolEntry } from '@cubeplex/core'
 
 import { ToolList } from './ToolList'
 import { AdminTryItView } from './AdminTryItView'
@@ -2057,7 +2057,7 @@ through (search `surface` in `detail/tools/`).
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 pnpm --filter web type-check
 pnpm --filter web lint
 ```
@@ -2173,7 +2173,7 @@ import {
   runOAuthFlow,
   type ApiClient,
   type MCPEffectiveConnector,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { AuthBandFrame } from './AuthBandFrame'
 import { computeAuthBandState } from './effectiveAuthState'
@@ -2215,7 +2215,7 @@ import {
   runOAuthFlow,
   type ApiClient,
   type MCPEffectiveConnector,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { AuthBandFrame } from './AuthBandFrame'
 import { computeAuthBandState } from './effectiveAuthState'
@@ -2298,7 +2298,7 @@ import {
   type AdminOrgConnector,
   type MCPConnectorFilter,
   type MCPConnectorTemplate,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { MCPToolbar } from '@/components/mcp/MCPToolbar'
 import { MCPConnectorList } from '@/components/mcp/MCPConnectorList'
 import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'
@@ -2395,9 +2395,9 @@ props + internal `connector` shape in the same commit.)
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 pnpm --filter web type-check
-PORT=3079 HOSTNAME=0.0.0.0 CUBEBOX_API_URL=http://192.168.1.111:8079 \
+PORT=3079 HOSTNAME=0.0.0.0 CUBEPLEX_API_URL=http://192.168.1.111:8079 \
   BASE_URL=http://192.168.1.111:3079 \
   pnpm --filter web exec next dev --hostname 0.0.0.0 --port 3079
 ```
@@ -2439,7 +2439,7 @@ import {
   wsCreateInstall,
   type ApiClient,
   type WsAvailable,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 
@@ -2649,7 +2649,7 @@ git commit -m "feat(web/ws/mcp): Installed + Available sections with Connect but
 ## Task 16: Drop the deprecated `GET /admin/mcp/installs` route
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin_mcp.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_mcp.py`
 - Modify: any callers (search the repo).
 - Modify: tests that exercise the old route.
 
@@ -2673,7 +2673,7 @@ references it, fix in this step.
 - [ ] **Step 2: Remove the route handler**
 
 Delete `list_admin_installs` and its decorator from
-`backend/cubebox/api/routes/v1/admin_mcp.py`. Also remove
+`backend/cubeplex/api/routes/v1/admin_mcp.py`. Also remove
 `adminListInstalls` from `frontend/packages/core/src/api/mcp.ts`.
 
 - [ ] **Step 3: Run backend tests**
@@ -2687,7 +2687,7 @@ Expected: PASS. Any remaining failure points at a missed caller.
 - [ ] **Step 4: Run frontend tests**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core test -- --run && pnpm --filter web type-check
+cd frontend && pnpm --filter @cubeplex/core test -- --run && pnpm --filter web type-check
 ```
 
 - [ ] **Step 5: Commit**
@@ -2714,7 +2714,7 @@ Expected: ruff + mypy + pytest unit all green.
 
 ```bash
 cd frontend
-pnpm --filter @cubebox/core build
+pnpm --filter @cubeplex/core build
 pnpm --filter web type-check
 pnpm --filter web test -- --run
 pnpm --filter web format:check
@@ -2785,7 +2785,7 @@ during execution:
   back to constructing the template repo inline if `_template_repo`
   doesn't exist.
 - The existing `adminListTemplates` API helper exists in
-  `@cubebox/core`. Task 14 imports it; if the name differs in the
+  `@cubeplex/core`. Task 14 imports it; if the name differs in the
   current tree, adjust without changing the spec semantics.
 - Pre-commit hooks (ruff, mypy, vitest, eslint) run on each commit and
   gate the push. The plan does NOT include `--no-verify` anywhere.

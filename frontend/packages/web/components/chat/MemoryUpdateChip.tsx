@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, listMemory, type MemoryItem } from '@cubebox/core'
+import { createApiClient, listMemory, type MemoryItem } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ArrowUpRight, Sparkle } from 'lucide-react'

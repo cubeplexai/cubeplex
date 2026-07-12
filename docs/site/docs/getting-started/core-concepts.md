@@ -5,11 +5,11 @@ title: Core Concepts
 
 # Core Concepts
 
-This page explains the building blocks of CubeBox. Understanding these will help you get the most out of the platform.
+This page explains the building blocks of CubePlex. Understanding these will help you get the most out of the platform.
 
 ## Organizations and workspaces
 
-CubeBox uses a hierarchical structure:
+CubePlex uses a hierarchical structure:
 
 **Organization** is the top-level account. It owns billing, provider API keys, and org-wide policies. Every user belongs to exactly one organization.
 
@@ -39,7 +39,7 @@ Skills are packaged capabilities you install to extend what the agent can do. Th
 
 **Three sources of skills:**
 
-- **Built-in** — ship with CubeBox.
+- **Built-in** — ship with CubePlex.
 - **Org-uploaded** — your organization creates and shares custom skills.
 - **Remote registries** — community skills hosted on registries like [skills.sh](https://skills.sh).
 
@@ -49,7 +49,7 @@ See the [Skills guide](../guides/skills/overview.md) for details.
 
 ## Memory
 
-Memory lets the agent remember information across conversations. CubeBox uses a three-tier system:
+Memory lets the agent remember information across conversations. CubePlex uses a three-tier system:
 
 | Tier | Visibility | Example use |
 |---|---|---|

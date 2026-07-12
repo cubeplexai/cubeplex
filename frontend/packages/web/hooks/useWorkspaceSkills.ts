@@ -1,7 +1,7 @@
 'use client'
 
 import useSWR from 'swr'
-import type { SkillSummary } from '@cubebox/core'
+import type { SkillSummary } from '@cubeplex/core'
 
 async function fetcher(url: string): Promise<SkillSummary[]> {
   const res = await fetch(url, { credentials: 'include' })

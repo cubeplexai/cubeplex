@@ -4,7 +4,7 @@
 
 **Goal:** Add org-level and workspace-level member management (list, add, change role, remove) via API endpoints and frontend UI.
 
-**Architecture:** New backend route modules (`admin_members.py`, `ws_members.py`) mounted alongside existing admin/workspace-scoped routers. New Zustand store + API module in `@cubebox/core`. New admin page at `/admin/members` and new workspace settings tab `members`. No new models or migrations — all operations use existing `OrganizationMembership` and `Membership` tables.
+**Architecture:** New backend route modules (`admin_members.py`, `ws_members.py`) mounted alongside existing admin/workspace-scoped routers. New Zustand store + API module in `@cubeplex/core`. New admin page at `/admin/members` and new workspace settings tab `members`. No new models or migrations — all operations use existing `OrganizationMembership` and `Membership` tables.
 
 **Tech Stack:** FastAPI, SQLAlchemy async, Zustand, React, shadcn/ui table + badge + select + combobox, `@base-ui/react/dialog`, next-intl i18n.
 
@@ -13,15 +13,15 @@
 ## File Structure
 
 ### Backend — new files
-- `backend/cubebox/api/routes/v1/admin_members.py` — org member CRUD routes (4 endpoints)
-- `backend/cubebox/api/routes/v1/ws_members.py` — workspace member CRUD routes (5 endpoints)
+- `backend/cubeplex/api/routes/v1/admin_members.py` — org member CRUD routes (4 endpoints)
+- `backend/cubeplex/api/routes/v1/ws_members.py` — workspace member CRUD routes (5 endpoints)
 - `backend/tests/e2e/test_admin_members.py` — E2E tests for org member routes
 - `backend/tests/e2e/test_ws_members.py` — E2E tests for workspace member routes
 
 ### Backend — modified files
-- `backend/cubebox/api/routes/v1/__init__.py` — export new routers
-- `backend/cubebox/api/app.py` — register new routers
-- `backend/cubebox/repositories/membership.py` — add `remove_user_from_org_workspaces` method
+- `backend/cubeplex/api/routes/v1/__init__.py` — export new routers
+- `backend/cubeplex/api/app.py` — register new routers
+- `backend/cubeplex/repositories/membership.py` — add `remove_user_from_org_workspaces` method
 
 ### Frontend — new files
 - `frontend/packages/core/src/api/members.ts` — API client functions for both scopes
@@ -47,7 +47,7 @@
 ## Task 1: Repository — add cascade remove helper
 
 **Files:**
-- Modify: `backend/cubebox/repositories/membership.py`
+- Modify: `backend/cubeplex/repositories/membership.py`
 
 - [ ] **Step 1: Add `remove_user_from_org_workspaces` method**
 
@@ -58,7 +58,7 @@ async def remove_user_from_org_workspaces(self, *, user_id: str, org_id: str) ->
     """Delete all workspace memberships for a user within an org. Returns count deleted."""
     from sqlalchemy import delete
 
-    from cubebox.models import Workspace
+    from cubeplex.models import Workspace
 
     ws_ids_subq = select(Workspace.id).where(Workspace.org_id == org_id).scalar_subquery()
     stmt = delete(Membership).where(
@@ -71,13 +71,13 @@ async def remove_user_from_org_workspaces(self, *, user_id: str, org_id: str) ->
 
 - [ ] **Step 2: Verify type-check passes**
 
-Run: `cd /home/chris/cubebox/backend && make type-check`
+Run: `cd /home/chris/cubeplex/backend && make type-check`
 Expected: `Success: no issues found`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/repositories/membership.py
+git add backend/cubeplex/repositories/membership.py
 git commit -m "feat(members): add cascade remove helper to MembershipRepository"
 ```
 
@@ -86,13 +86,13 @@ git commit -m "feat(members): add cascade remove helper to MembershipRepository"
 ## Task 2: Backend — org member admin routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_members.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/api/routes/v1/admin_members.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Create the admin_members route module**
 
-Create `backend/cubebox/api/routes/v1/admin_members.py`:
+Create `backend/cubeplex/api/routes/v1/admin_members.py`:
 
 ```python
 """Org member management routes: list / add / change-role / remove."""
@@ -103,11 +103,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.dependencies import current_active_user, require_org_admin, resolve_current_org_id
-from cubebox.db import get_session
-from cubebox.models import OrgRole, User
-from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
-from cubebox.utils.time import utc_isoformat
+from cubeplex.auth.dependencies import current_active_user, require_org_admin, resolve_current_org_id
+from cubeplex.db import get_session
+from cubeplex.models import OrgRole, User
+from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
+from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/admin/members", tags=["admin-members"])
 
@@ -233,27 +233,27 @@ async def remove_org_member(
 
 - [ ] **Step 2: Register the router in `__init__.py`**
 
-In `backend/cubebox/api/routes/v1/__init__.py`, add:
-- Import: `from cubebox.api.routes.v1 import admin_members`
+In `backend/cubeplex/api/routes/v1/__init__.py`, add:
+- Import: `from cubeplex.api.routes.v1 import admin_members`
 - Add `"admin_members"` to `__all__`
 
 - [ ] **Step 3: Mount the router in `app.py`**
 
-In `backend/cubebox/api/app.py`, within the router registration block:
+In `backend/cubeplex/api/app.py`, within the router registration block:
 - Import `admin_members`
 - Add: `app.include_router(admin_members.router, prefix="/api/v1")`
 
 - [ ] **Step 4: Verify type-check and lint pass**
 
-Run: `cd /home/chris/cubebox/backend && make type-check && make lint`
+Run: `cd /home/chris/cubeplex/backend && make type-check && make lint`
 Expected: Both pass clean.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_members.py \
-       backend/cubebox/api/routes/v1/__init__.py \
-       backend/cubebox/api/app.py
+git add backend/cubeplex/api/routes/v1/admin_members.py \
+       backend/cubeplex/api/routes/v1/__init__.py \
+       backend/cubeplex/api/app.py
 git commit -m "feat(members): add org member management admin routes"
 ```
 
@@ -262,13 +262,13 @@ git commit -m "feat(members): add org member management admin routes"
 ## Task 3: Backend — workspace member routes
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/ws_members.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/api/routes/v1/ws_members.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Create the ws_members route module**
 
-Create `backend/cubebox/api/routes/v1/ws_members.py`:
+Create `backend/cubeplex/api/routes/v1/ws_members.py`:
 
 ```python
 """Workspace member management routes: list / available / add / change-role / remove."""
@@ -280,12 +280,12 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_admin
-from cubebox.db import get_session
-from cubebox.models import Membership, Role, User
-from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
-from cubebox.utils.time import utc_isoformat
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_admin
+from cubeplex.db import get_session
+from cubeplex.models import Membership, Role, User
+from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
+from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(prefix="/ws/{workspace_id}/members", tags=["workspace-members"])
 
@@ -441,25 +441,25 @@ async def remove_workspace_member(
 
 - [ ] **Step 2: Register the router**
 
-In `backend/cubebox/api/routes/v1/__init__.py`:
-- Import: `from cubebox.api.routes.v1 import ws_members`
+In `backend/cubeplex/api/routes/v1/__init__.py`:
+- Import: `from cubeplex.api.routes.v1 import ws_members`
 - Add `"ws_members"` to `__all__`
 
-In `backend/cubebox/api/app.py`:
+In `backend/cubeplex/api/app.py`:
 - Import `ws_members`
 - Add: `app.include_router(ws_members.router, prefix="/api/v1")`
 
 - [ ] **Step 3: Verify type-check and lint pass**
 
-Run: `cd /home/chris/cubebox/backend && make type-check && make lint`
+Run: `cd /home/chris/cubeplex/backend && make type-check && make lint`
 Expected: Both pass clean.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_members.py \
-       backend/cubebox/api/routes/v1/__init__.py \
-       backend/cubebox/api/app.py
+git add backend/cubeplex/api/routes/v1/ws_members.py \
+       backend/cubeplex/api/routes/v1/__init__.py \
+       backend/cubeplex/api/app.py
 git commit -m "feat(members): add workspace member management routes"
 ```
 
@@ -485,9 +485,9 @@ from fastapi_users.schemas import BaseUserCreate
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.users import UserManager
-from cubebox.models import OrgRole, User
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.auth.users import UserManager
+from cubeplex.models import OrgRole, User
+from cubeplex.repositories import OrganizationMembershipRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -659,7 +659,7 @@ async def test_remove_cascades_workspace_memberships(admin_client, session_facto
 
 - [ ] **Step 2: Run the tests**
 
-Run: `cd /home/chris/cubebox/backend && uv run pytest tests/e2e/test_admin_members.py -v`
+Run: `cd /home/chris/cubeplex/backend && uv run pytest tests/e2e/test_admin_members.py -v`
 Expected: All tests pass.
 
 - [ ] **Step 3: Commit**
@@ -690,9 +690,9 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from fastapi_users.schemas import BaseUserCreate
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.users import UserManager
-from cubebox.models import OrgRole, User
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.auth.users import UserManager
+from cubeplex.models import OrgRole, User
+from cubeplex.repositories import OrganizationMembershipRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -844,7 +844,7 @@ async def test_member_cannot_manage_workspace_members(member_client):
 
 - [ ] **Step 2: Run the tests**
 
-Run: `cd /home/chris/cubebox/backend && uv run pytest tests/e2e/test_ws_members.py -v`
+Run: `cd /home/chris/cubeplex/backend && uv run pytest tests/e2e/test_ws_members.py -v`
 Expected: All tests pass.
 
 - [ ] **Step 3: Commit**
@@ -1103,7 +1103,7 @@ export { useMemberStore } from './memberStore'
 
 - [ ] **Step 4: Build core and verify**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm --filter @cubebox/core build`
+Run: `cd /home/chris/cubeplex/frontend && pnpm --filter @cubeplex/core build`
 Expected: Build succeeds.
 
 - [ ] **Step 5: Commit**
@@ -1113,7 +1113,7 @@ git add frontend/packages/core/src/api/members.ts \
        frontend/packages/core/src/stores/memberStore.ts \
        frontend/packages/core/src/api/index.ts \
        frontend/packages/core/src/stores/index.ts
-git commit -m "feat(members): add member API module and Zustand store in @cubebox/core"
+git commit -m "feat(members): add member API module and Zustand store in @cubeplex/core"
 ```
 
 ---
@@ -1401,7 +1401,7 @@ Create `frontend/packages/web/components/admin/members/OrgMembersTable.tsx`:
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { createApiClient, useMemberStore } from '@cubebox/core'
+import { createApiClient, useMemberStore } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -1584,7 +1584,7 @@ export default function AdminMembersPage() {
 
 - [ ] **Step 5: Build frontend and verify**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm build`
+Run: `cd /home/chris/cubeplex/frontend && pnpm build`
 Expected: Build succeeds.
 
 - [ ] **Step 6: Commit**
@@ -1629,7 +1629,7 @@ import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'
 import { X } from 'lucide-react'
-import type { AvailableMember } from '@cubebox/core'
+import type { AvailableMember } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import {
@@ -1761,7 +1761,7 @@ Create `frontend/packages/web/components/workspace-settings/members/WsMembersTab
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { createApiClient, useMemberStore, useAuthStore } from '@cubebox/core'
+import { createApiClient, useMemberStore, useAuthStore } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -1968,7 +1968,7 @@ In `frontend/packages/web/app/(app)/w/[wsId]/settings/page.tsx`:
 
 - [ ] **Step 6: Build and verify**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm build`
+Run: `cd /home/chris/cubeplex/frontend && pnpm build`
 Expected: Build succeeds.
 
 - [ ] **Step 7: Commit**
@@ -1988,11 +1988,11 @@ git commit -m "feat(members): add workspace members settings tab and components"
 
 - [ ] **Step 1: Start backend**
 
-Run: `cd /home/chris/cubebox/backend && python main.py`
+Run: `cd /home/chris/cubeplex/backend && python main.py`
 
 - [ ] **Step 2: Start frontend**
 
-Run: `cd /home/chris/cubebox/frontend && pnpm dev`
+Run: `cd /home/chris/cubeplex/frontend && pnpm dev`
 
 - [ ] **Step 3: Verify admin members page**
 
@@ -2011,5 +2011,5 @@ Run: `cd /home/chris/cubebox/frontend && pnpm dev`
 
 - [ ] **Step 5: Run full E2E suite**
 
-Run: `cd /home/chris/cubebox/backend && uv run pytest tests/e2e/test_admin_members.py tests/e2e/test_ws_members.py -v`
+Run: `cd /home/chris/cubeplex/backend && uv run pytest tests/e2e/test_admin_members.py tests/e2e/test_ws_members.py -v`
 Expected: All tests pass.

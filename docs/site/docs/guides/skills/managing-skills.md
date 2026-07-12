@@ -46,7 +46,7 @@ You can upload a skill directly to your workspace:
 
 1. On the workspace **Skills** page, click the **Add** button (or the upload action in the toolbar).
 2. Select a `.zip` file containing your skill. The zip must include a `SKILL.md` at the root with valid frontmatter (name, version, description).
-3. CubeBox validates the bundle and publishes it. The skill appears immediately in your workspace.
+3. CubePlex validates the bundle and publishes it. The skill appears immediately in your workspace.
 
 Custom skills uploaded at the workspace level are workspace-private. To make a skill available org-wide, ask your org admin to upload it from the admin panel (**Admin > Skills**).
 
@@ -73,11 +73,11 @@ To remove a skill from your workspace, open its detail panel and use the uninsta
 
 For org-wide skills, only an admin can fully uninstall them. See [Administration > Skills Management](../../admin/skills-management.md) for details.
 
-**Built-in skills** have special handling: if an admin uninstalls a preinstalled skill for the org, CubeBox records that decision so the skill is not automatically restored on the next system update.
+**Built-in skills** have special handling: if an admin uninstalls a preinstalled skill for the org, CubePlex records that decision so the skill is not automatically restored on the next system update.
 
 ## How skills reach the agent
 
-When a conversation starts, CubeBox assembles the list of skills the agent can see:
+When a conversation starts, CubePlex assembles the list of skills the agent can see:
 
 1. All **org-wide installed** skills that are **enabled** for the workspace.
 2. All **workspace-private** installed skills.

@@ -1,6 +1,6 @@
 """Unit tests for hash_manifest."""
 
-from cubebox.skills.sync_manifest import hash_manifest
+from cubeplex.skills.sync_manifest import hash_manifest
 
 
 def test_empty_manifest_stable():

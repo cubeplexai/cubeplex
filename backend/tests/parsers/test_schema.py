@@ -3,7 +3,7 @@
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from cubebox.parsers.schema import (
+from cubeplex.parsers.schema import (
     ErrorOutput,
     FileReadOutput,
     NotebookCell,

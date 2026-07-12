@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from httpx import MockTransport, Request, Response
 
-from cubebox.im.feishu.cardkit_client import (
+from cubeplex.im.feishu.cardkit_client import (
     CardKitClient,
     CardKitCreateError,
 )
@@ -44,7 +44,7 @@ async def test_create_entity_retries_on_5xx() -> None:
 
     client = _build_client(MockTransport(handler))
     # Bypass backoff sleep for the test by setting tiny delays.
-    from cubebox.im.feishu import cardkit_client as mod
+    from cubeplex.im.feishu import cardkit_client as mod
 
     orig = mod._CREATE_RETRY_DELAYS
     mod._CREATE_RETRY_DELAYS = (0.0, 0.0, 0.0)  # type: ignore[misc]
@@ -62,7 +62,7 @@ async def test_create_entity_raises_after_max_retries() -> None:
         return Response(500, json={"code": 99999, "msg": "boom"})
 
     client = _build_client(MockTransport(handler))
-    from cubebox.im.feishu import cardkit_client as mod
+    from cubeplex.im.feishu import cardkit_client as mod
 
     orig = mod._CREATE_RETRY_DELAYS
     mod._CREATE_RETRY_DELAYS = (0.0, 0.0, 0.0)  # type: ignore[misc]
@@ -102,7 +102,7 @@ async def test_stream_text_raises_ratelimit_on_230020() -> None:
         return Response(200, json={"code": 230020, "msg": "too fast"})
 
     client = _build_client(MockTransport(handler))
-    from cubebox.im.feishu.cardkit_client import CardKitRateLimit
+    from cubeplex.im.feishu.cardkit_client import CardKitRateLimit
 
     with pytest.raises(CardKitRateLimit):
         await client.stream_text(
@@ -142,7 +142,7 @@ async def test_finalize_retries_up_to_cap() -> None:
             return Response(500, json={"code": 99999, "msg": "boom"})
         return Response(200, json={"code": 0, "msg": "success"})
 
-    from cubebox.im.feishu import cardkit_client as mod
+    from cubeplex.im.feishu import cardkit_client as mod
 
     orig = mod._FINALIZE_RETRY_DELAYS
     mod._FINALIZE_RETRY_DELAYS = (0.0, 0.0, 0.0, 0.0, 0.0)  # type: ignore[misc]
@@ -164,7 +164,7 @@ async def test_finalize_gives_up_after_max_attempts() -> None:
     def handler(_: Request) -> Response:
         return Response(500, json={"code": 99999, "msg": "down"})
 
-    from cubebox.im.feishu import cardkit_client as mod
+    from cubeplex.im.feishu import cardkit_client as mod
 
     orig = mod._FINALIZE_RETRY_DELAYS
     mod._FINALIZE_RETRY_DELAYS = (0.0, 0.0)  # type: ignore[misc]

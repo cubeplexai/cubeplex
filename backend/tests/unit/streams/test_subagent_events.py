@@ -1,4 +1,4 @@
-"""Subagent event bridge between cubepi middleware and cubebox SSE queues."""
+"""Subagent event bridge between cubepi middleware and cubeplex SSE queues."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ import pytest
 from cubepi.agent.types import MessageUpdateEvent
 from cubepi.providers.base import AssistantMessage, StreamEvent, TextContent
 
-from cubebox.streams.subagent_events import (
+from cubeplex.streams.subagent_events import (
     forward_subagent_event,
     map_subagent_event,
     subagent_event_queue,
 )
 
 
-def test_map_subagent_event_uses_cubebox_sse_translation() -> None:
+def test_map_subagent_event_uses_cubeplex_sse_translation() -> None:
     event = MessageUpdateEvent(
         message=AssistantMessage(content=[TextContent(text="")]),
         stream_event=StreamEvent(type="text_delta", delta="hello"),

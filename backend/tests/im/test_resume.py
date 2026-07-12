@@ -15,7 +15,7 @@ import pytest
 async def test_resume_paused_run_sandbox_confirm_calls_run_manager(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im import resume as resume_mod
+    from cubeplex.im import resume as resume_mod
 
     seen: list[dict[str, Any]] = []
 
@@ -53,7 +53,7 @@ async def test_resume_paused_run_sandbox_confirm_calls_run_manager(
 async def test_resume_paused_run_sandbox_confirm_deny(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im import resume as resume_mod
+    from cubeplex.im import resume as resume_mod
 
     seen: list[dict[str, Any]] = []
 
@@ -84,7 +84,7 @@ async def test_resume_paused_run_sandbox_confirm_deny(
 async def test_resume_paused_run_ask_user_passes_choice_dict(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im import resume as resume_mod
+    from cubeplex.im import resume as resume_mod
 
     seen: list[dict[str, Any]] = []
 
@@ -119,7 +119,7 @@ async def test_resume_paused_run_ask_user_falls_back_to_choice_key_when_no_answe
     """When the card payload didn't carry answer_key (legacy / defensive),
     the answer falls back to ``{"choice": choice}`` so cubepi at least gets a
     syntactically valid dict — schema mismatch is then cubepi's to report."""
-    from cubebox.im import resume as resume_mod
+    from cubeplex.im import resume as resume_mod
 
     seen: list[dict[str, Any]] = []
 
@@ -148,7 +148,7 @@ async def test_resume_paused_run_ask_user_falls_back_to_choice_key_when_no_answe
 async def test_resume_paused_run_returns_false_when_run_not_resolvable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im import resume as resume_mod
+    from cubeplex.im import resume as resume_mod
 
     class _FakeRunManager:
         async def resume_run_with_answer(self, **_: Any) -> str:
@@ -174,8 +174,8 @@ async def test_resume_paused_run_returns_false_when_run_not_resolvable(
 async def test_resume_paused_run_returns_false_on_resume_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im import resume as resume_mod
-    from cubebox.streams.run_manager import ResumeNoPending
+    from cubeplex.im import resume as resume_mod
+    from cubeplex.streams.run_manager import ResumeNoPending
 
     class _FakeRunManager:
         async def resume_run_with_answer(self, **_: Any) -> str:
@@ -201,7 +201,7 @@ async def test_resume_paused_run_returns_false_on_resume_exception(
 async def test_resume_paused_run_returns_false_on_unknown_input_kind(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im import resume as resume_mod
+    from cubeplex.im import resume as resume_mod
 
     class _FakeRunManager:
         async def resume_run_with_answer(self, **_: Any) -> str:

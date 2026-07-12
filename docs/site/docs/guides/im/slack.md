@@ -5,7 +5,7 @@ title: Slack Setup
 
 # Slack setup
 
-Slack runs over **Socket Mode** — CubeBox opens a persistent outbound socket to Slack and receives events over it, so nothing on your CubeBox host needs to be reachable from the internet. This guide walks you through creating the Slack app, enabling Socket Mode, granting the bot the scopes and event subscriptions the connector needs, installing the app to your Slack workspace, and binding it to your CubeBox workspace.
+Slack runs over **Socket Mode** — CubePlex opens a persistent outbound socket to Slack and receives events over it, so nothing on your CubePlex host needs to be reachable from the internet. This guide walks you through creating the Slack app, enabling Socket Mode, granting the bot the scopes and event subscriptions the connector needs, installing the app to your Slack workspace, and binding it to your CubePlex workspace.
 
 Binding takes **two tokens**: a **bot token** (`xoxb-…`) and an **app-level token** (`xapp-…`). The bot token authenticates API calls; the app-level token opens the Socket Mode connection.
 
@@ -13,7 +13,7 @@ Binding takes **two tokens**: a **bot token** (`xoxb-…`) and an **app-level to
 
 You need:
 
-- A **workspace admin** or member account in CubeBox (a plain member can bind a bot that runs as themselves; impersonating another user requires the workspace admin role).
+- A **workspace admin** or member account in CubePlex (a plain member can bind a bot that runs as themselves; impersonating another user requires the workspace admin role).
 - Permission to create and install a Slack app in your Slack workspace (workspace owners/admins, or a workspace that allows member app installs).
 
 ## Step 1 — Create a Slack app
@@ -27,7 +27,7 @@ Go to the [Slack API apps page](https://api.slack.com/apps) and create a new app
 
 ## Step 2 — Enable Socket Mode
 
-In the app settings, open **Socket Mode** and turn it on. Socket Mode is what lets CubeBox receive events over an outbound socket instead of a public webhook URL — it is the only delivery mode the Slack connector supports.
+In the app settings, open **Socket Mode** and turn it on. Socket Mode is what lets CubePlex receive events over an outbound socket instead of a public webhook URL — it is the only delivery mode the Slack connector supports.
 
 :::info 📸 Screenshot placeholder
 **Capture:** The Socket Mode settings page with the "Enable Socket Mode" toggle switched on.
@@ -36,7 +36,7 @@ In the app settings, open **Socket Mode** and turn it on. Socket Mode is what le
 
 ## Step 3 — Generate the app-level token
 
-Enabling Socket Mode prompts you to create an **app-level token**. Generate one (Slack calls this an "App-Level Token") and grant it the connections scope that Socket Mode requires. Copy the token — it starts with `xapp-`. You'll paste it into CubeBox in Step 7.
+Enabling Socket Mode prompts you to create an **app-level token**. Generate one (Slack calls this an "App-Level Token") and grant it the connections scope that Socket Mode requires. Copy the token — it starts with `xapp-`. You'll paste it into CubePlex in Step 7.
 
 :::tip
 App-level tokens are shown **once**. If you lose it, generate a new one — you can't reveal an existing token after leaving the page.
@@ -54,10 +54,10 @@ Open **OAuth & Permissions** and add the **Bot Token Scopes** the connector need
 - Read messages where it's mentioned and read direct messages sent to it.
 - Post and edit messages in channels and DMs (replies stream in as live-updating messages).
 - Add and remove emoji reactions (the bot reacts to acknowledge a message it's working on).
-- Look up a user's profile to read their email — this is how CubeBox auto-resolves a sender's CubeBox identity without a manual `/link` (see [Step 8](#step-8--link-your-identity)).
+- Look up a user's profile to read their email — this is how CubePlex auto-resolves a sender's CubePlex identity without a manual `/link` (see [Step 8](#step-8--link-your-identity)).
 
 :::caution Confirm the exact scope strings in Slack's console
-The capabilities above are confirmed from the connector code (it calls `auth.test`, `users.info`, `chat.postMessage`, `chat.update`, and the reactions API, and listens for `app_mention` + `message` events). The exact Slack scope **names** that grant each capability are defined by Slack, not CubeBox, and Slack occasionally renames or splits them — add the scopes Slack's OAuth & Permissions page lists for "read mentions," "read DMs," "post/edit messages," "manage reactions," and "read user email," and verify against Slack's current scope reference rather than copying a fixed list here.
+The capabilities above are confirmed from the connector code (it calls `auth.test`, `users.info`, `chat.postMessage`, `chat.update`, and the reactions API, and listens for `app_mention` + `message` events). The exact Slack scope **names** that grant each capability are defined by Slack, not CubePlex, and Slack occasionally renames or splits them — add the scopes Slack's OAuth & Permissions page lists for "read mentions," "read DMs," "post/edit messages," "manage reactions," and "read user email," and verify against Slack's current scope reference rather than copying a fixed list here.
 :::
 
 :::info 📸 Screenshot placeholder
@@ -81,7 +81,7 @@ Without these subscriptions the bot never sees any messages. After adding events
 
 ## Step 6 — Install the app and grab the bot token
 
-Back on **OAuth & Permissions** (or **Install App**), click **Install to Workspace** and approve the requested scopes. After installing, Slack shows the **Bot User OAuth Token** — it starts with `xoxb-`. Copy it; this is the bot token you'll paste into CubeBox.
+Back on **OAuth & Permissions** (or **Install App**), click **Install to Workspace** and approve the requested scopes. After installing, Slack shows the **Bot User OAuth Token** — it starts with `xoxb-`. Copy it; this is the bot token you'll paste into CubePlex.
 
 If you change scopes or event subscriptions later, **reinstall** the app so the changes take effect, and grab the bot token again if Slack rotates it.
 
@@ -90,35 +90,35 @@ If you change scopes or event subscriptions later, **reinstall** the app so the 
 **Asset:** `/img/im/slack-install-token.png`
 :::
 
-## Step 7 — Bind the bot in CubeBox
+## Step 7 — Bind the bot in CubePlex
 
-In your CubeBox workspace, open the **IM connectors** settings and connect a new Slack account. Provide:
+In your CubePlex workspace, open the **IM connectors** settings and connect a new Slack account. Provide:
 
 | Field | Required | Notes |
 |---|---|---|
-| **Bot token** | Yes | The `xoxb-…` token from Step 6. CubeBox uses it to call Slack and to read the bot's identity. |
+| **Bot token** | Yes | The `xoxb-…` token from Step 6. CubePlex uses it to call Slack and to read the bot's identity. |
 | **App-level token** | Yes | The `xapp-…` token from Step 3. Opens the Socket Mode connection. |
 | **Run identity** | Yes | `self` (the bot runs as you) by default. Binding it to run as another user requires the **workspace admin** role. |
 
-On binding, CubeBox validates the bot token against Slack (`auth.test`) and reads the bot's identity and the Slack team it belongs to; the Slack **team ID** becomes the account's external identifier, so you can only bind one CubeBox account per Slack team. Both tokens are stored encrypted. If the bot token is invalid, binding fails — fix it in the Slack console and retry. Delivery mode is fixed to **gateway** (Socket Mode); there is no webhook option for Slack.
+On binding, CubePlex validates the bot token against Slack (`auth.test`) and reads the bot's identity and the Slack team it belongs to; the Slack **team ID** becomes the account's external identifier, so you can only bind one CubePlex account per Slack team. Both tokens are stored encrypted. If the bot token is invalid, binding fails — fix it in the Slack console and retry. Delivery mode is fixed to **gateway** (Socket Mode); there is no webhook option for Slack.
 
 :::info 📸 Screenshot placeholder
-**Capture:** The CubeBox "Connect Slack account" form with the Bot token and App-level token fields and the Run identity selector.
-**Asset:** `/img/im/slack-cubebox-connect-form.png`
+**Capture:** The CubePlex "Connect Slack account" form with the Bot token and App-level token fields and the Run identity selector.
+**Asset:** `/img/im/slack-cubeplex-connect-form.png`
 :::
 
 ## Step 8 — Link your identity
 
-Add the bot to a channel (or DM it directly) and @-mention it. The first time, CubeBox needs to know which CubeBox user you are:
+Add the bot to a channel (or DM it directly) and @-mention it. The first time, CubePlex needs to know which CubePlex user you are:
 
-- If you granted the read-email scope (Step 4), CubeBox resolves your Slack email via `users.info` and — if that email matches a CubeBox account in this workspace — runs your message immediately, no manual linking needed.
-- Otherwise (no email scope, or your Slack email doesn't match a CubeBox account), link manually. Run the `/link` slash command:
+- If you granted the read-email scope (Step 4), CubePlex resolves your Slack email via `users.info` and — if that email matches a CubePlex account in this workspace — runs your message immediately, no manual linking needed.
+- Otherwise (no email scope, or your Slack email doesn't match a CubePlex account), link manually. Run the `/link` slash command:
 
   ```
-  /link your-cubebox-email@example.com
+  /link your-cubeplex-email@example.com
   ```
 
-  The bot replies (privately, only you see it) with a confirmation URL of the form `https://<your-cubebox-host>/im-link?token=…`. Open it **while logged in to CubeBox** and confirm. The email must belong to an existing CubeBox account that is already a member of this workspace — linking connects an existing account, it doesn't create one or grant membership. See [Identity linking](./overview.md#identity-linking).
+  The bot replies (privately, only you see it) with a confirmation URL of the form `https://<your-cubeplex-host>/im-link?token=…`. Open it **while logged in to CubePlex** and confirm. The email must belong to an existing CubePlex account that is already a member of this workspace — linking connects an existing account, it doesn't create one or grant membership. See [Identity linking](./overview.md#identity-linking).
 
 Once linked (or auto-resolved), the bot replies in-channel and edits its message in place as the agent streams its response.
 
@@ -128,7 +128,7 @@ Slack registers these native slash commands (create matching slash commands in t
 
 | Command | Effect |
 |---|---|
-| `/link <email>` | Link your Slack identity to your CubeBox account (see [Step 8](#step-8--link-your-identity)). Replies privately. |
+| `/link <email>` | Link your Slack identity to your CubePlex account (see [Step 8](#step-8--link-your-identity)). Replies privately. |
 | `/new` | Start a fresh conversation; your next message begins a new one. Replies privately for the slash form. |
 | `/reset` | Same as `/new`. |
 
@@ -136,4 +136,4 @@ You can also type `/new`, `/reset`, or `新对话` as a normal message (in a cha
 
 ## Rotating credentials
 
-There is no in-place secret edit. To rotate the bot token or app-level token, **delete** the Slack account in CubeBox and bind it again with the new values. If you regenerate the app-level token or reinstall the app in Slack (which can rotate the bot token), update CubeBox by re-binding.
+There is no in-place secret edit. To rotate the bot token or app-level token, **delete** the Slack account in CubePlex and bind it again with the new values. If you regenerate the app-level token or reinstall the app in Slack (which can rotate the bot token), update CubePlex by re-binding.

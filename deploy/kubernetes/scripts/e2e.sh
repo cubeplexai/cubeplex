@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Live e2e test against a deployed cubebox. Exercises the auth + chat path:
+# Live e2e test against a deployed cubeplex. Exercises the auth + chat path:
 # register → singleton-org auto-setup (single_tenant) → create conversation
 # → send message → consume SSE → assert assistant text_delta arrived.
 #
 # Usage:
-#   HOST=cubebox.local IP=192.168.1.101 PORT=30019 deploy/scripts/e2e.sh
+#   HOST=cubeplex.local IP=192.168.1.101 PORT=30019 deploy/scripts/e2e.sh
 #
 # Requires `auth.cookie_secure: false` in backend.configOverrides (HTTP only)
 # and a working LLM provider configured under backend.secrets.llm.
 set -euo pipefail
 
-HOST="${HOST:-cubebox.local}"
+HOST="${HOST:-cubeplex.local}"
 IP="${IP:-192.168.1.101}"
 PORT="${PORT:-30019}"
 BASE="http://${HOST}:${PORT}"
@@ -50,15 +50,15 @@ curl -fsS "${CURL_OPTS[@]}" -c "$CK" -b "$CK" \
   --data-urlencode "username=$EMAIL" --data-urlencode "password=$PASS" \
   --data-urlencode "grant_type=password" \
   "$BASE/api/v1/auth/login" >/dev/null
-grep -q "cubebox_auth" "$CK" \
-  || fail "no cubebox_auth in jar (check backend.configOverrides.auth.cookie_secure=false for HTTP)"
+grep -q "cubeplex_auth" "$CK" \
+  || fail "no cubeplex_auth in jar (check backend.configOverrides.auth.cookie_secure=false for HTTP)"
 echo "  ok"
 
 step "4. GET /auth/me — receive csrf cookie (issued only on safe methods)"
 curl -fsS "${CURL_OPTS[@]}" -c "$CK" -b "$CK" "$BASE/api/v1/auth/me" >/dev/null
-grep -q "cubebox_csrf" "$CK" || fail "no cubebox_csrf in jar"
+grep -q "cubeplex_csrf" "$CK" || fail "no cubeplex_csrf in jar"
 # Cookie jar fields: domain TAB tailmatch TAB path TAB secure TAB expires TAB name TAB value
-CSRF=$(awk -F'\t' '$6=="cubebox_csrf"{print $7}' "$CK" | tail -1)
+CSRF=$(awk -F'\t' '$6=="cubeplex_csrf"{print $7}' "$CK" | tail -1)
 [[ -n "$CSRF" ]] || fail "csrf cookie present but empty"
 echo "  ok"
 

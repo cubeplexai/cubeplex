@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel, select
 
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
 
 
 @pytest_asyncio.fixture

@@ -5,11 +5,11 @@ title: Memory Overview
 
 # Memory Overview
 
-Memory lets the CubeBox agent remember information across conversations. Instead of repeating yourself every time you start a new chat, the agent recalls your preferences, project facts, and team conventions automatically.
+Memory lets the CubePlex agent remember information across conversations. Instead of repeating yourself every time you start a new chat, the agent recalls your preferences, project facts, and team conventions automatically.
 
 ## Three tiers of memory
 
-CubeBox organizes memory into three scopes. Each scope controls who can see and benefit from a memory item.
+CubePlex organizes memory into three scopes. Each scope controls who can see and benefit from a memory item.
 
 | Tier | Who sees it | Best for |
 |---|---|---|

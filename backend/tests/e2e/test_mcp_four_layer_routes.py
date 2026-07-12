@@ -23,7 +23,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 pytestmark = pytest.mark.usefixtures("stub_discover_tools")
 
@@ -88,7 +88,7 @@ async def test_distribute_to_selected_workspace_creates_state_row(
     # DB invariant: state rows exist for both workspaces
     from sqlalchemy import select
 
-    from cubebox.models import MCPConnector, MCPWorkspaceConnectorState
+    from cubeplex.models import MCPConnector, MCPWorkspaceConnectorState
 
     async with db_maker() as session:
         connector_row = await session.get(MCPConnector, connector_id)
@@ -290,7 +290,7 @@ async def test_disconnect_keeps_connector_and_state(
     # DB invariants: connector + state rows survive disconnect
     from sqlalchemy import select
 
-    from cubebox.models import MCPConnector, MCPWorkspaceConnectorState
+    from cubeplex.models import MCPConnector, MCPWorkspaceConnectorState
 
     async with db_maker() as session:
         connector_row = await session.get(MCPConnector, connector_id)
@@ -386,7 +386,7 @@ async def test_purge_then_redistribute_same_template(
     purge = await client.post(f"/api/v1/admin/mcp/templates/{noauth_template_id}/purge")
     assert purge.status_code == 204, purge.text
 
-    from cubebox.models import MCPConnector
+    from cubeplex.models import MCPConnector
 
     async with db_maker() as session:
         row = await session.get(MCPConnector, first_connector_id)
@@ -484,7 +484,7 @@ async def test_patch_state_upserts_for_org_install_with_no_state_row(
     """
     from sqlalchemy import select
 
-    from cubebox.models import MCPWorkspaceConnectorState
+    from cubeplex.models import MCPWorkspaceConnectorState
 
     client, workspace_id = admin_client
 
@@ -541,7 +541,7 @@ async def test_selected_distribution_does_not_auto_enroll_new_workspace(
 
     from sqlalchemy import select
 
-    from cubebox.models import MCPConnector, MCPWorkspaceConnectorState
+    from cubeplex.models import MCPConnector, MCPWorkspaceConnectorState
 
     client, workspace_id = admin_client
     org_id = await _get_org_id(client)

@@ -5,7 +5,7 @@
 **Worktree:** `feat/im-frontend`
 **Owner:** xfgong
 **Implementation:** sequel to `docs/dev/plans/2026-06-11-im-connectors-feishu.md`
-(backend) — this doc covers the cubebox web UI for that connector.
+(backend) — this doc covers the cubeplex web UI for that connector.
 
 ## Goal
 
@@ -23,7 +23,7 @@ The backend (`feat/im-connectors`) already ships:
 - `POST   /api/v1/admin/im/accounts/{id}/disable`
 - `POST   /api/v1/admin/im/accounts/{id}/enable`
 
-…and a per-sender identity gate that resolves Feishu sender → cubebox
+…and a per-sender identity gate that resolves Feishu sender → cubeplex
 user → workspace membership. The frontend exposes binding + observation
 of all of the above.
 
@@ -73,7 +73,7 @@ frontend/packages/web/
           slack.stub.ts                           ✚ coming-soon stub
         useConnectMutation.ts                     ✚ POST + classify err
   i18n/messages/{en,zh}.json                      ★ add im.* namespace
-backend/cubebox/
+backend/cubeplex/
   api/schemas/im_connector.py                    ★ add ImRuntimeStatus
   api/routes/v1/ws_im.py                          ★ list returns runtime
   api/routes/v1/admin_im.py                       ★ same
@@ -370,9 +370,9 @@ Full-bleed CTA replaces the list+detail two-pane layout:
 
 ```
               [MessageSquare icon]
-         Connect your team's IM to cubebox
+         Connect your team's IM to cubeplex
    Bot replies in your chat, runs agents on @mentions,
-   auto-routes to the right cubebox user by email.
+   auto-routes to the right cubeplex user by email.
               [+ Connect a Feishu bot]
       Slack · Teams · DingTalk — coming later
       📖 Setup guide → /docs/im-feishu-setup.md
@@ -480,7 +480,7 @@ All keys under `im.*`. Sample slice:
 ```
 im.nav.workspaceTab               "IM"
 im.nav.adminItem                  "IM connectors"
-im.empty.workspace.headline       "Connect your team's IM to cubebox"
+im.empty.workspace.headline       "Connect your team's IM to cubeplex"
 im.empty.workspace.description    "Bot replies in your chat..."
 im.platform.feishu.label          "Feishu"
 im.platform.slack.coming          "Coming soon"
@@ -595,7 +595,7 @@ Frontend smoke:
 - Activity time series / charts (7d trend, hour-of-day) — wait for
   signal that users want it
 - Multi-bot search / global filter across orgs
-- Bot rename / icon upload in cubebox (Feishu owns these)
+- Bot rename / icon upload in cubeplex (Feishu owns these)
 - SSE / WebSocket push for runtime updates
 - HITL card-button flows on the Feishu side (separate spec; not UI-side)
 

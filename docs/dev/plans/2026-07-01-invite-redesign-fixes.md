@@ -39,14 +39,14 @@ first.
 ### Task A: Remove workspace invites (backend)
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py` — delete `create_invite`
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py` — delete `create_invite`
   (POST `/{ws}/invites`), `list_invites` (GET), `revoke_invite` (DELETE),
   `accept_invite` (POST `/invites/accept`).
-- Modify: `backend/cubebox/repositories/__init__.py` — drop `InviteTokenRepository` export.
-- Delete: `backend/cubebox/repositories/invite_token.py`.
-- Modify: `backend/cubebox/models/__init__.py` — drop `InviteToken` export.
-- Delete: `backend/cubebox/models/invite_token.py`.
-- Delete: `backend/cubebox/templates/email/workspace_invite.{html,txt}`.
+- Modify: `backend/cubeplex/repositories/__init__.py` — drop `InviteTokenRepository` export.
+- Delete: `backend/cubeplex/repositories/invite_token.py`.
+- Modify: `backend/cubeplex/models/__init__.py` — drop `InviteToken` export.
+- Delete: `backend/cubeplex/models/invite_token.py`.
+- Delete: `backend/cubeplex/templates/email/workspace_invite.{html,txt}`.
 - Migration: `alembic revision --autogenerate -m "drop invite_tokens table"` →
   drops `invite_tokens`. (No `postgresql_using` needed — it's a drop, not an
   alter of an existing tz column.)
@@ -114,13 +114,13 @@ useEffect(() => {
 
 ### Task E: `frontend_base_url` for LAN access (local config)
 
-The worktree `.worktree.env` sets `CUBEBOX_FRONTEND_BASE_URL=http://localhost:3001`.
+The worktree `.worktree.env` sets `CUBEPLEX_FRONTEND_BASE_URL=http://localhost:3001`.
 When testing from another machine on the LAN, set it to the reachable address
 (`http://192.168.1.215:3001`) so emailed/displayed links work. This is a
 per-machine test setting, not a code change — document in the test note.
 
 - [ ] For this test session: restart backend with
-      `CUBEBOX_FRONTEND_BASE_URL=http://192.168.1.215:3001`.
+      `CUBEPLEX_FRONTEND_BASE_URL=http://192.168.1.215:3001`.
 
 ## Testing
 

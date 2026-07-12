@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.sandbox.lazy import LazySandbox
-from cubebox.sandbox.manager import SandboxAttachment
+from cubeplex.sandbox.lazy import LazySandbox
+from cubeplex.sandbox.manager import SandboxAttachment
 
 
 def _make_lazy(catalog: object, sandbox: object, event_service: object = None) -> LazySandbox:
@@ -126,8 +126,8 @@ async def test_no_manifest_write_when_collect_files_empty() -> None:
     _sync_skills must NOT write the manifest — leaving it stale so the next
     sync retries the push (Finding 3 guard).
     """
-    from cubebox.sandbox.lazy import _sync_skills
-    from cubebox.skills.sync_manifest import MANIFEST_PATH
+    from cubeplex.sandbox.lazy import _sync_skills
+    from cubeplex.skills.sync_manifest import MANIFEST_PATH
 
     # Build a minimal ResolvedSkill-like stub that satisfies ResolvedLike.
     skill_stub = MagicMock()

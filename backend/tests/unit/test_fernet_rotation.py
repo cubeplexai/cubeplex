@@ -3,7 +3,7 @@
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
-from cubebox.credentials.encryption import FernetBackend
+from cubeplex.credentials.encryption import FernetBackend
 
 
 @pytest.fixture

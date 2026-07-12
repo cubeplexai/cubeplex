@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from cubebox.mcp.cubepi_runtime import _build_tools_from_cache
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubeplex.mcp.cubepi_runtime import _build_tools_from_cache
+from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 _WEATHER_SCHEMA: dict[str, Any] = {
     "type": "object",

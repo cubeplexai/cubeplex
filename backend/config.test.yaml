@@ -1,4 +1,4 @@
-# Test Configuration for cubebox
+# Test Configuration for cubeplex
 # Used by CI e2e and local e2e dev.
 # All endpoints, keys, model ids are injected via environment variables.
 # Real values are kept in GitHub Secrets (CI) or local .env (dev).
@@ -28,9 +28,9 @@ test:
   llm:
     model_presets:
       tiers:
-        lite:  { enabled: true,  primary: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}", fallbacks: [] }
+        lite:  { enabled: true,  primary: "@format e2e/{env[CUBEPLEX_E2E_LLM_MODEL_ID]}", fallbacks: [] }
         flash: { enabled: false, primary: null, fallbacks: [] }
-        pro:   { enabled: true,  primary: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}", fallbacks: [] }
+        pro:   { enabled: true,  primary: "@format e2e/{env[CUBEPLEX_E2E_LLM_MODEL_ID]}", fallbacks: [] }
         max:   { enabled: false, primary: null, fallbacks: [] }
       default_preset: pro
       task_routing: {}
@@ -48,21 +48,21 @@ test:
             reasoning: true
 
       e2e:
-        base_url: "@format {env[CUBEBOX_E2E_LLM_BASE_URL]}"
-        api_key: "@format {env[CUBEBOX_E2E_LLM_API_KEY]}"
+        base_url: "@format {env[CUBEPLEX_E2E_LLM_BASE_URL]}"
+        api_key: "@format {env[CUBEPLEX_E2E_LLM_API_KEY]}"
         api: openai-completions
         extra_body:
-          user: "cubebox-e2e"
+          user: "cubeplex-e2e"
         extra_headers: {}
         models:
-          - id: "@format {env[CUBEBOX_E2E_LLM_MODEL_ID]}"
+          - id: "@format {env[CUBEPLEX_E2E_LLM_MODEL_ID]}"
             name: "E2E Model"
             input: [ "text", "image" ]
             context_window: 128000
             max_tokens: 32000
             reasoning: true
 
-  # Sandbox 复用 base config.yaml 的 @format {env[CUBEBOX_SANDBOX__*]} 模式
+  # Sandbox 复用 base config.yaml 的 @format {env[CUBEPLEX_SANDBOX__*]} 模式
   sandbox:
     enabled: true
 
@@ -72,7 +72,7 @@ test:
     port: 5432
     user: "postgres"
     password: "testpass"
-    name: "cubebox_test"
+    name: "cubeplex_test"
 
   # CI 启动的 redis:7-alpine 无密码，走 127.0.0.1。
   # 覆盖 base config.yaml 里带密码的本地 dev URL。
@@ -90,7 +90,7 @@ test:
   objectstore:
     provider: "s3"
     endpoint: "http://127.0.0.1:9000"
-    bucket: "cubebox-test"
+    bucket: "cubeplex-test"
     region: "us-east-1"
     access_key: "rustfsadmin"
     access_secret: "rustfsadmin"

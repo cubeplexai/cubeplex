@@ -18,11 +18,11 @@ SDK files referenced (paths relative to installed SDK):
 - `api/lifecycle/models/sandbox_status.py` — wire `SandboxStatus`: `state: str`
   + optional `reason`, `message`, `last_transition_at`.
 - `models/sandboxes.py::SandboxState` — local string constants.
-- `manager.py` — wraps `Sandbox.{pause,resume}_sandbox`; cubebox uses
+- `manager.py` — wraps `Sandbox.{pause,resume}_sandbox`; cubeplex uses
   `Sandbox.pause()` / `Sandbox.resume(id)` directly, not `Manager`.
-- Sync mirror under `opensandbox/sync/…` — cubebox uses async only.
+- Sync mirror under `opensandbox/sync/…` — cubeplex uses async only.
 
-## Gotchas to respect in the cubebox implementation
+## Gotchas to respect in the cubeplex implementation
 
 ### G1. ✅ Pause is asynchronous on the server (HTTP 202 Accepted)
 
@@ -101,7 +101,7 @@ Documented responses (both endpoints): `202 / 401 / 403 / 404 / 409 / 500`.
 
 The SDK wraps these into `SandboxApiException` (a subclass of `SandboxException`)
 with the message embedded — we **don't** get a structured `code` back from the
-SDK exception. To distinguish "wrong state" from other failures, cubebox can
+SDK exception. To distinguish "wrong state" from other failures, cubeplex can
 match the substring `INVALID_STATE` / `SANDBOX_NOT_FOUND` in the exception's
 `.message`, or just treat both as benign (already-paused / already-gone).
 
@@ -147,7 +147,7 @@ A 5-min-TTL sandbox transitioned to `Succeed` (terminal) within ~5 minutes of
 creation **regardless of pause attempts**. So the server-side TTL is *not*
 paused-aware.
 
-**Implication:** cubebox MUST:
+**Implication:** cubeplex MUST:
 
 - Enforce our `paused_ttl` from our own DB clock (`paused_at` stamp + reaper).
 - On pause, optionally also call `renew_sandbox_expiration` to extend the
@@ -173,7 +173,7 @@ when we adopt one.)
 `Sandbox.pause()` only initiates the server-side pause. The httpx transport,
 the connection config, and any locally cached service adapters are **not**
 torn down (verified by reading `sandbox.py:313-324` and `close():342-361`).
-If cubebox drops the in-process `Sandbox` handle once paused, it must:
+If cubeplex drops the in-process `Sandbox` handle once paused, it must:
 
 - Either call `await sandbox.close()` after `pause()` to free the transport,
 - Or keep the handle alive and reuse `resume(...)` semantics (which returns a
@@ -189,14 +189,14 @@ path. We have explicitly **scoped this out** of #145 (per OQ-6 decision).
 
 ### G10. ✅ Sync and async APIs both exist
 
-Sync mirror under `opensandbox/sync/`. cubebox uses the **async** API
+Sync mirror under `opensandbox/sync/`. cubeplex uses the **async** API
 (`opensandbox.Sandbox` from `opensandbox/sandbox.py`). Don't accidentally import
 from `opensandbox.sync`.
 
 ### G11. 🔴 (NEW) The probed OpenSandbox silently no-ops pause for our default image
 
 **Empirical** (`39.99.248.80:18080` with image
-`hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260525`):
+`hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260525`):
 
 - `POST /sandboxes/{id}/pause` returns 202 with empty body — as documented.
 - The sandbox status stays at `Running` for the full 90 s polling window —
@@ -228,7 +228,7 @@ the API contract but never actually pauses.
 ## Open follow-ups (empirical findings appended 2026-05-28)
 
 OpenSandbox endpoint: `http://39.99.248.80:18080`, API key from
-`backend/.env CUBEBOX_SANDBOX__API_KEY`. Reachable (HTTP 200 on
+`backend/.env CUBEPLEX_SANDBOX__API_KEY`. Reachable (HTTP 200 on
 `GET /sandboxes`).
 
 ### Pause/resume latency (measured)

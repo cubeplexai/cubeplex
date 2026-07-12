@@ -18,18 +18,18 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import (
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import (
     ActionInvalidInput,
     ActionNotFound,
     ActionPermissionDenied,
 )
-from cubebox.db.engine import _build_database_url
-from cubebox.models.membership import Role
-from cubebox.models.organization import Organization
-from cubebox.models.user import User
-from cubebox.models.workspace import Workspace
-from cubebox.services.scheduled_task import ScheduledTaskService
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.membership import Role
+from cubeplex.models.organization import Organization
+from cubeplex.models.user import User
+from cubeplex.models.workspace import Workspace
+from cubeplex.services.scheduled_task import ScheduledTaskService
 
 pytestmark = pytest.mark.e2e
 

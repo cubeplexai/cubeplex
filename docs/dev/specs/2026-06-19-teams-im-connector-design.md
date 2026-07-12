@@ -5,7 +5,7 @@ Date: 2026-06-19
 
 ## Overview
 
-Add Microsoft Teams as the fourth IM connector platform in cubebox,
+Add Microsoft Teams as the fourth IM connector platform in cubeplex,
 alongside Slack, Discord, and Feishu. Follows the existing
 `PlatformConnector` registry pattern. Messages arrive via webhook
 (HTTP POST from Azure Bot Service), rendering uses Markdown for
@@ -16,7 +16,7 @@ SandboxConfirm).
 
 - Python SDK: `microsoft-teams-apps` (same as hermes-agent).
 - Delivery mode: `"webhook"`. Azure Bot Service POSTs activities to
-  cubebox. No WebSocket gateway needed.
+  cubeplex. No WebSocket gateway needed.
 - One `microsoft_teams.apps.App` instance per enabled
   `IMConnectorAccount`, cached in memory. The App instance handles JWT
   validation and provides the send/update API.
@@ -24,7 +24,7 @@ SandboxConfirm).
 ## Webhook Ingress
 
 New FastAPI route: `POST /api/v1/im/teams/messages`
-(in `backend/cubebox/api/routes/v1/im_ingress.py`, alongside the
+(in `backend/cubeplex/api/routes/v1/im_ingress.py`, alongside the
 existing Feishu ingress).
 
 Flow:
@@ -73,7 +73,7 @@ Same auto-resolution flow as Slack:
    Re-verify workspace membership on every hit.
 2. Microsoft Graph API `GET /users/{aad_object_id}` to get `mail` or
    `userPrincipalName`.
-3. Case-insensitive email match against cubebox `User.email`.
+3. Case-insensitive email match against cubeplex `User.email`.
 4. Insert `IMIdentityLink` cache row.
 5. Fallback: send rejection notice telling the user to use `/link`.
 
@@ -181,7 +181,7 @@ Activate `teams.stub.ts` → full `teams.ts` `PlatformDescriptor`:
 
 ### im/runtime.py Changes
 
-- Import `cubebox.im.teams` at startup to trigger
+- Import `cubeplex.im.teams` at startup to trigger
   `register_platform("teams", TeamsPlatform())`.
 - Webhook-mode accounts do not need startup connection (same as Feishu
   webhook), but App instances must be initialized so the ingress route
@@ -190,7 +190,7 @@ Activate `teams.stub.ts` → full `teams.ts` `PlatformDescriptor`:
 ### File Structure
 
 ```
-backend/cubebox/im/teams/
+backend/cubeplex/im/teams/
 ├── __init__.py          # register_platform("teams", TeamsPlatform())
 ├── _platform.py         # TeamsPlatform(PlatformConnector)
 ├── connector.py         # TeamsConnector: parse_inbound, send_message, resolve_email

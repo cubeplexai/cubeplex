@@ -8,14 +8,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-import cubebox.agents.actions.capabilities.skills as _skills_mod
-from cubebox.agents.actions.capabilities.skills import (
+import cubeplex.agents.actions.capabilities.skills as _skills_mod
+from cubeplex.agents.actions.capabilities.skills import (
     FindInput,
     SkillDeps,
     _handle_find_impl,
 )
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.models.membership import Role
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.models.membership import Role
 
 
 def _make_deps(
@@ -105,11 +105,11 @@ async def test_find_returns_candidates_payload(monkeypatch: pytest.MonkeyPatch) 
 
 # --- preview tests ---
 
-from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+from cubeplex.agents.actions.capabilities.skills import (  # noqa: E402
     PreviewInput,
     _handle_preview_impl,
 )
-from cubebox.agents.actions.types import ActionInvalidInput  # noqa: E402
+from cubeplex.agents.actions.types import ActionInvalidInput  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -126,7 +126,7 @@ async def test_preview_bad_candidate_id_raises_invalid_input() -> None:
 
 @pytest.mark.asyncio
 async def test_preview_local_returns_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     fake_skill = MagicMock(
         id="skl-1",
@@ -174,7 +174,7 @@ async def test_preview_local_returns_content(monkeypatch: pytest.MonkeyPatch) ->
 
 @pytest.mark.asyncio
 async def test_preview_remote_missing_source_raises() -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     registry = MagicMock()
     registry.adapter_by_id = MagicMock(return_value=None)
@@ -192,11 +192,11 @@ async def test_preview_remote_missing_source_raises() -> None:
 
 # --- install tests ---
 
-from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+from cubeplex.agents.actions.capabilities.skills import (  # noqa: E402
     InstallInput,
     _handle_install_impl,
 )
-from cubebox.skills.discovery import InstallResult, SkillInstallError  # noqa: E402
+from cubeplex.skills.discovery import InstallResult, SkillInstallError  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ async def test_install_bad_candidate_id_raises_invalid_input() -> None:
 
 @pytest.mark.asyncio
 async def test_install_success_returns_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     fake_svc = MagicMock()
     fake_svc.install = AsyncMock(
@@ -246,7 +246,7 @@ async def test_install_success_returns_payload(monkeypatch: pytest.MonkeyPatch) 
 
 @pytest.mark.asyncio
 async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.skills.sources.base import encode_candidate_id
+    from cubeplex.skills.sources.base import encode_candidate_id
 
     fake_svc = MagicMock()
     fake_svc.install = AsyncMock(side_effect=SkillInstallError("trust tier too low"))
@@ -270,8 +270,8 @@ async def test_install_error_raises_invalid_input(monkeypatch: pytest.MonkeyPatc
 from collections.abc import AsyncIterator  # noqa: E402
 from contextlib import asynccontextmanager  # noqa: E402
 
-from cubebox.agents.actions.builder import build_capability_tools  # noqa: E402
-from cubebox.agents.actions.capabilities.skills import build_skills_capability  # noqa: E402
+from cubeplex.agents.actions.builder import build_capability_tools  # noqa: E402
+from cubeplex.agents.actions.capabilities.skills import build_skills_capability  # noqa: E402
 
 
 @asynccontextmanager
@@ -312,11 +312,11 @@ def test_skills_capability_mutation_gate() -> None:
 
 # --- publish_artifact tests ---
 
-from cubebox.agents.actions.capabilities.skills import (  # noqa: E402
+from cubeplex.agents.actions.capabilities.skills import (  # noqa: E402
     PublishSkillInput,
     _handle_publish_skill_impl,
 )
-from cubebox.skills.service import SkillMdMissingError, VersionCollisionError  # noqa: E402
+from cubeplex.skills.service import SkillMdMissingError, VersionCollisionError  # noqa: E402
 
 
 @pytest.mark.asyncio

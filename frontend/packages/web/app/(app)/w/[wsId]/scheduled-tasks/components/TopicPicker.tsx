@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Check, ChevronDown, MessageSquare, X } from 'lucide-react'
-import { createApiClient, listTopics } from '@cubebox/core'
-import type { Topic } from '@cubebox/core'
+import { createApiClient, listTopics } from '@cubeplex/core'
+import type { Topic } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { topicDisplayTitle } from '@/lib/topicTitle'
 

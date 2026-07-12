@@ -12,13 +12,13 @@ path moved from ``messages/create`` text payloads to the cardkit op-set.
 
 import pytest
 
-from cubebox.im.feishu.connector import (
+from cubeplex.im.feishu.connector import (
     _FLOOD_CONTROL_CODES,
     FeishuConnector,
     FeishuRateLimitError,
 )
-from cubebox.im.outbound import _FloodSignal
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import _FloodSignal
+from cubeplex.im.types import RenderState
 
 # ----------------------------------------------------------------------
 # Flood-code recognition
@@ -90,7 +90,7 @@ pytestmark = pytest.mark.asyncio
 
 async def test_processing_start_adds_reaction_to_inbound_message_id() -> None:
     c = _ReactionStub()
-    st = RenderState(bot_name="cubebox", run_id="r1", inbound_message_id="om_user_msg")
+    st = RenderState(bot_name="cubeplex", run_id="r1", inbound_message_id="om_user_msg")
     await c.on_processing_start(st)
     assert c.added == [("om_user_msg", "THUMBSUP")]
     assert st.reaction_in_progress_id == "r-1"
@@ -98,7 +98,7 @@ async def test_processing_start_adds_reaction_to_inbound_message_id() -> None:
 
 async def test_processing_start_noop_without_inbound_message_id() -> None:
     c = _ReactionStub()
-    st = RenderState(bot_name="cubebox", run_id="r1", inbound_message_id=None)
+    st = RenderState(bot_name="cubeplex", run_id="r1", inbound_message_id=None)
     await c.on_processing_start(st)
     assert c.added == []
     assert st.reaction_in_progress_id is None
@@ -106,7 +106,7 @@ async def test_processing_start_noop_without_inbound_message_id() -> None:
 
 async def test_processing_complete_removes_reaction() -> None:
     c = _ReactionStub()
-    st = RenderState(bot_name="cubebox", run_id="r1", inbound_message_id="om_user_msg")
+    st = RenderState(bot_name="cubeplex", run_id="r1", inbound_message_id="om_user_msg")
     await c.on_processing_start(st)
     assert st.reaction_in_progress_id == "r-1"
     await c.on_processing_complete(st)
@@ -116,7 +116,7 @@ async def test_processing_complete_removes_reaction() -> None:
 
 async def test_processing_failed_removes_then_marks_failure() -> None:
     c = _ReactionStub()
-    st = RenderState(bot_name="cubebox", run_id="r1", inbound_message_id="om_user_msg")
+    st = RenderState(bot_name="cubeplex", run_id="r1", inbound_message_id="om_user_msg")
     await c.on_processing_start(st)
     await c.on_processing_failed(st)
     assert c.removed == [("om_user_msg", "r-1")]
@@ -131,7 +131,7 @@ async def test_processing_failed_safe_when_initial_add_returned_none() -> None:
     real run error in older drafts."""
     c = _ReactionStub()
     c.add_should_fail = True
-    st = RenderState(bot_name="cubebox", run_id="r1", inbound_message_id="om_user_msg")
+    st = RenderState(bot_name="cubeplex", run_id="r1", inbound_message_id="om_user_msg")
     await c.on_processing_start(st)
     assert st.reaction_in_progress_id is None
     # Must not raise — remove_reaction with reaction_id=None no-ops.
@@ -140,7 +140,7 @@ async def test_processing_failed_safe_when_initial_add_returned_none() -> None:
 
 async def test_processing_complete_safe_when_inbound_missing() -> None:
     c = _ReactionStub()
-    st = RenderState(bot_name="cubebox", run_id="r1", inbound_message_id=None)
+    st = RenderState(bot_name="cubeplex", run_id="r1", inbound_message_id=None)
     # No exception expected; no SDK calls.
     await c.on_processing_complete(st)
     assert c.removed == []

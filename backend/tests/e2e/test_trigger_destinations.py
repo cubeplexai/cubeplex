@@ -19,21 +19,21 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select, text
 
-import cubebox.db as _db
-from cubebox.models import IMConnectorAccount, Workspace
-from cubebox.models.conversation import Conversation
-from cubebox.models.conversation_participant import ConversationParticipant
-from cubebox.models.credential import Credential
-from cubebox.models.im_connector import (
+import cubeplex.db as _db
+from cubeplex.models import IMConnectorAccount, Workspace
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.conversation_participant import ConversationParticipant
+from cubeplex.models.credential import Credential
+from cubeplex.models.im_connector import (
     IMRunQueueItem,
     IMThreadLink,
     IMWebhookReceipt,
 )
-from cubebox.models.public_id import generate_public_id
-from cubebox.models.trigger import Trigger, TriggerEvent
-from cubebox.repositories import TriggerEventRepository, TriggerRepository
-from cubebox.triggers.events import NormalizedEvent
-from cubebox.triggers.pipeline import TriggerPipeline
+from cubeplex.models.public_id import generate_public_id
+from cubeplex.models.trigger import Trigger, TriggerEvent
+from cubeplex.repositories import TriggerEventRepository, TriggerRepository
+from cubeplex.triggers.events import NormalizedEvent
+from cubeplex.triggers.pipeline import TriggerPipeline
 
 pytestmark = pytest.mark.e2e
 
@@ -111,7 +111,7 @@ async def _seed_im_account(
 
 async def _set_routing_mode(*, account_id: str, mode: str) -> None:
     """Set the bot's account-level routing mode (replaces per-channel binding)."""
-    from cubebox.im.bot_settings import IMBotSettings, store_bot_settings
+    from cubeplex.im.bot_settings import IMBotSettings, store_bot_settings
 
     async with _db.async_session_maker() as session:
         account = await session.get(IMConnectorAccount, account_id)
@@ -834,8 +834,8 @@ async def _seed_trigger_topic_in_other_workspace(
 
     Returns ``(other_workspace_id, other_topic_id)``.
     """
-    from cubebox.models import Workspace as WorkspaceModel
-    from cubebox.models.topic import Topic
+    from cubeplex.models import Workspace as WorkspaceModel
+    from cubeplex.models.topic import Topic
 
     async with _db.async_session_maker() as session:
         other_ws = WorkspaceModel(org_id=org_id, name=f"other-{secrets.token_hex(4)}")
@@ -858,7 +858,7 @@ async def _seed_trigger_im_account_in_other_workspace(
     *, org_id: str, owner_user_id: str
 ) -> tuple[str, str]:
     """Sibling-workspace IM account; returns ``(other_ws_id, im_account_id)``."""
-    from cubebox.models import Workspace as WorkspaceModel
+    from cubeplex.models import Workspace as WorkspaceModel
 
     cred_id = generate_public_id("cred")
     async with _db.async_session_maker() as session:
@@ -963,8 +963,8 @@ async def test_create_trigger_tool_ingest_path_is_workspace_scoped(
     publisher yields 404, the trigger silently never fires."""
     import json
 
-    from cubebox.models.conversation import Conversation
-    from cubebox.tools.builtin.create_trigger import (
+    from cubeplex.models.conversation import Conversation
+    from cubeplex.tools.builtin.create_trigger import (
         CreateTriggerArgs,
         make_create_trigger_tool,
     )

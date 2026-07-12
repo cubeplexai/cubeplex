@@ -2,8 +2,8 @@
 
 - **Date:** 2026-06-02
 - **Status:** Design, pending review.
-- **Area:** `cubebox/streams/run_manager.py`, `cubebox/middleware/sandbox.py`,
-  `cubebox/streams/run_events.py`, `cubebox/api/routes/v1/conversations.py`,
+- **Area:** `cubeplex/streams/run_manager.py`, `cubeplex/middleware/sandbox.py`,
+  `cubeplex/streams/run_events.py`, `cubeplex/api/routes/v1/conversations.py`,
   frontend `paused_hitl` UX.
 - **Related:**
   [backend/docs/agent-system-design.md](../../../backend/docs/agent-system-design.md)
@@ -142,7 +142,7 @@ The `except HitlTimedOut` branch in that function stays — it's cheap defence
 and keeps the policy-deny path testable — but with no caller passing a
 timeout it becomes effectively dead code. We document this in a comment.
 
-The two ban points checked above are the only places in cubebox that pass a
+The two ban points checked above are the only places in cubeplex that pass a
 timeout to HITL today; grep confirms.
 
 **SandboxMiddleware's confirm/deny/allow logic itself does not change.**
@@ -276,7 +276,7 @@ async def resume_run_with_answer(
 
 **Resume claim — single-flight guarantee**
 
-Redis layout (existing, see `backend/cubebox/streams/run_events.py`):
+Redis layout (existing, see `backend/cubeplex/streams/run_events.py`):
 
 - `conversation_active_run:{cid}` — string whose VALUE is the currently
   active run_id for the conversation. The key existing AND pointing at a
@@ -621,7 +621,7 @@ E2E:
   shipping the backend alone with the frontend unaware of `paused_hitl`
   would leave the composer in a broken "send another message" state during
   a paused conversation.
-- No feature flag; the cubebox project hasn't shipped publicly and we
+- No feature flag; the cubeplex project hasn't shipped publicly and we
   generally cut over cleanly (per CLAUDE.md).
 - Code-level migration: no DB DDL. Existing in-flight runs at deploy time
   are not specifically migrated; the running worker finishes them under the

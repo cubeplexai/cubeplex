@@ -29,7 +29,7 @@ async def test_org_invite_role_owner_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Org-invite with role=owner returns 400 role_not_assignable."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
     email = f"admin-{secrets.token_hex(4)}@example.com"
     slug = f"admin-{secrets.token_hex(4)}"
 
@@ -73,7 +73,7 @@ async def test_org_invite_accept_then_onboarding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Org-invite accept -> needs_onboarding true -> workspace-only onboarding -> done."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
 
     # ---- Admin user: register + onboard ----
     admin_email = f"admin2-{secrets.token_hex(4)}@example.com"
@@ -150,7 +150,7 @@ async def test_org_invite_reuse_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reusing an org-invite token returns 400 invite_invalid_or_expired."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: False)
 
     # ---- Admin: register + onboard ----
     admin_email = f"reuse-admin-{secrets.token_hex(4)}@example.com"

@@ -5,7 +5,7 @@ from datetime import timedelta
 import jwt
 import pytest
 
-from cubebox.mcp.user_token import HS256Signer
+from cubeplex.mcp.user_token import HS256Signer
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ async def test_sign_returns_decodable_jwt(signer: HS256Signer) -> None:
     assert decoded["org"] == "o1"
     assert decoded["ws"] == "w1"
     assert decoded["mcp"] == "m1"
-    assert decoded["iss"] == "cubebox"
+    assert decoded["iss"] == "cubeplex"
     assert "exp" in decoded
 
 

@@ -9,8 +9,8 @@ from sqlmodel import SQLModel
 from alembic import context
 
 # Import models and config
-from cubebox.config import config as app_config
-from cubebox.models import (  # noqa: F401
+from cubeplex.config import config as app_config
+from cubeplex.models import (  # noqa: F401
     AgentConfig,
     Artifact,
     ArtifactVersion,
@@ -107,7 +107,7 @@ def get_url() -> str:
     port = app_config.get("database.port", 5432)
     user = app_config.get("database.user", "postgres")
     password = app_config.get("database.password", "")
-    name = app_config.get("database.name", "cubebox")
+    name = app_config.get("database.name", "cubeplex")
     encoded_password = quote_plus(password)
     url = f"postgresql+psycopg://{user}:{encoded_password}@{host}:{port}/{name}"
     # Escape % for ConfigParser (% -> %%)

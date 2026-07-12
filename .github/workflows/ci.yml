@@ -82,12 +82,12 @@ jobs:
           # which loads config.test.yaml, and that file uses @format {env[...]} for secrets.
           # Without these, dynaconf raises DynaconfFormatError during test collection.
           # Real e2e job (Task 9) overrides these with GitHub Secrets.
-          CUBEBOX_E2E_LLM_BASE_URL: http://dummy
-          CUBEBOX_E2E_LLM_API_KEY: dummy
-          CUBEBOX_E2E_LLM_MODEL_ID: dummy
-          CUBEBOX_SANDBOX__DOMAIN: dummy:9000
-          CUBEBOX_SANDBOX__IMAGE: dummy:image
-          CUBEBOX_SANDBOX__API_KEY: dummy
+          CUBEPLEX_E2E_LLM_BASE_URL: http://dummy
+          CUBEPLEX_E2E_LLM_API_KEY: dummy
+          CUBEPLEX_E2E_LLM_MODEL_ID: dummy
+          CUBEPLEX_SANDBOX__DOMAIN: dummy:9000
+          CUBEPLEX_SANDBOX__IMAGE: dummy:image
+          CUBEPLEX_SANDBOX__API_KEY: dummy
         run: make backend-check-ci
       - name: Upload coverage
         uses: actions/upload-artifact@v4
@@ -137,25 +137,25 @@ jobs:
     timeout-minutes: 30
     env:
       ENV_FOR_DYNACONF: test
-      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
-      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
-      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
-      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
-      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
-      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
       # Optional: gates the conversation-search E2E test. The test skips
       # cleanly when this secret isn't set in the repo, so PRs from forks
       # without the secret stay green; the real-network path runs in main.
       DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
       # Test-only Fernet key for CI startup and vault E2E. Production must set its own key.
-      CUBEBOX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
+      CUBEPLEX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
     services:
       postgres:
         image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: cubebox_test
+          POSTGRES_DB: cubeplex_test
         ports: ['5432:5432']
         options: >-
           --health-cmd="pg_isready -U postgres"
@@ -213,7 +213,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: rustfsadmin
         run: |
           aws --endpoint-url http://127.0.0.1:9000 \
-            s3 mb s3://cubebox-test --region us-east-1
+            s3 mb s3://cubeplex-test --region us-east-1
 
       - name: Alembic migrate
         run: make backend-migrate
@@ -237,23 +237,23 @@ jobs:
     timeout-minutes: 20
     env:
       ENV_FOR_DYNACONF: test
-      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
-      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
-      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
-      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
-      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
-      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
       # Test-only Fernet key for CI startup and vault E2E. Production must set its own key.
-      CUBEBOX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
+      CUBEPLEX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
       # Frontend proxies to local backend:8001 (matches config.test.yaml)
-      CUBEBOX_API_URL: http://127.0.0.1:8001
+      CUBEPLEX_API_URL: http://127.0.0.1:8001
     services:
       postgres:
         image: cubeplex/postgresql-pgroonga-pgvector:18.2-pgroonga4.0.6-pgvector0.8.2
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: cubebox_test
+          POSTGRES_DB: cubeplex_test
         ports: ['5432:5432']
         options: >-
           --health-cmd="pg_isready -U postgres"
@@ -294,7 +294,7 @@ jobs:
       - name: Install frontend
         run: make frontend-install
 
-      - name: Build @cubebox/core
+      - name: Build @cubeplex/core
         run: make frontend-build-core
 
       - name: Prepare RustFS data dirs
@@ -325,7 +325,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: rustfsadmin
         run: |
           aws --endpoint-url http://127.0.0.1:9000 \
-            s3 mb s3://cubebox-test --region us-east-1
+            s3 mb s3://cubeplex-test --region us-east-1
 
       - name: Alembic migrate
         run: make backend-migrate
@@ -387,17 +387,17 @@ jobs:
         env:
           # Contract tests don't touch LLM/sandbox/DB but tests/conftest.py
           # loads the full config which requires these env vars (see backend-check).
-          CUBEBOX_E2E_LLM_BASE_URL: http://dummy
-          CUBEBOX_E2E_LLM_API_KEY: dummy
-          CUBEBOX_E2E_LLM_MODEL_ID: dummy
-          CUBEBOX_SANDBOX__DOMAIN: dummy:9000
-          CUBEBOX_SANDBOX__IMAGE: dummy:image
-          CUBEBOX_SANDBOX__API_KEY: dummy
+          CUBEPLEX_E2E_LLM_BASE_URL: http://dummy
+          CUBEPLEX_E2E_LLM_API_KEY: dummy
+          CUBEPLEX_E2E_LLM_MODEL_ID: dummy
+          CUBEPLEX_SANDBOX__DOMAIN: dummy:9000
+          CUBEPLEX_SANDBOX__IMAGE: dummy:image
+          CUBEPLEX_SANDBOX__API_KEY: dummy
         run: make backend-test-contracts
 
   test-ee-compat-cross-repo:
     name: EE Compat Cross-Repo (Layer 2 placeholder)
-    # Enable once cubebox-ee repo exists and has integration tests.
+    # Enable once cubeplex-ee repo exists and has integration tests.
     if: false
     needs: gate
     runs-on: ubuntu-latest
@@ -405,21 +405,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          path: cubebox
+          path: cubeplex
           ref: ${{ needs.gate.outputs.sha }}
       - uses: actions/checkout@v5
         with:
-          repository: cubebox/cubebox-ee
-          path: cubebox-ee
+          repository: cubeplex/cubeplex-ee
+          path: cubeplex-ee
           token: ${{ secrets.EE_REPO_READ_TOKEN }}
       - uses: astral-sh/setup-uv@v6
       - name: Install CE from working tree + EE
         run: |
-          cd cubebox-ee
-          uv pip install -e ../cubebox/backend
+          cd cubeplex-ee
+          uv pip install -e ../cubeplex/backend
           uv pip install -e .
       - name: Run EE smoke tests
-        working-directory: cubebox-ee
+        working-directory: cubeplex-ee
         run: uv run pytest
 
   report:

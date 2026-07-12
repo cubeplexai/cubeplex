@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from cubebox.sandbox_env.exchange_auth import MtlsAuthenticator
-from cubebox.sandbox_env.exchange_listener import (
+from cubeplex.sandbox_env.exchange_auth import MtlsAuthenticator
+from cubeplex.sandbox_env.exchange_listener import (
     PeercertHttpToolsProtocol,
     build_exchange_app,
 )
@@ -22,7 +22,7 @@ def test_protocol_injects_transport_into_scope(monkeypatch) -> None:  # type: ig
     """on_message_begin must place self.transport into the scope so
     _peercert_from_scope can read the verified client cert. uvicorn does not do
     this on its own."""
-    import cubebox.sandbox_env.exchange_listener as mod
+    import cubeplex.sandbox_env.exchange_listener as mod
 
     proto = PeercertHttpToolsProtocol.__new__(PeercertHttpToolsProtocol)
     sentinel_transport = object()

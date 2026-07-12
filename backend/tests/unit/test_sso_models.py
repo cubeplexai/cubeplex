@@ -1,5 +1,5 @@
-from cubebox.models.external_identity import ExternalIdentity
-from cubebox.models.sso_connection import SSOConnection
+from cubeplex.models.external_identity import ExternalIdentity
+from cubeplex.models.sso_connection import SSOConnection
 
 
 def test_sso_connection_id_prefix() -> None:

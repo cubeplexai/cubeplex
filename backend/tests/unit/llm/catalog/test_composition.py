@@ -1,7 +1,7 @@
 import pytest
 
-from cubebox.llm.catalog.loader import compose_base_url
-from cubebox.llm.catalog.types import Endpoint, Region
+from cubeplex.llm.catalog.loader import compose_base_url
+from cubeplex.llm.catalog.types import Endpoint, Region
 
 
 @pytest.mark.parametrize(
@@ -80,7 +80,7 @@ def test_every_flat_base_url_is_reproduced():
 
     import yaml
 
-    from cubebox.llm.catalog import load_catalog
+    from cubeplex.llm.catalog import load_catalog
 
     # flat slug -> reason. The consolidated catalog folds coding plans into their
     # parent vendor and uses the real coding host; these flat URLs were placeholders.

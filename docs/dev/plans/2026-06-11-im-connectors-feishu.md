@@ -11,7 +11,7 @@ a worktree without setting up a tunnel. Slack remains a follow-up plan that
 reuses the same neutral data model and connector protocol shipped here.
 
 **Goal:** Let a workspace bind a Feishu bot so an `@mention` / DM starts an agent
-run on a cubebox conversation and the run's streamed output flows back as a
+run on a cubeplex conversation and the run's streamed output flows back as a
 live-updating Feishu reply — with processing reactions (⏱️ on start, removed
 on success, ❌ on failure) and artifact share-links — reusing the existing run
 path, never forking it.
@@ -55,9 +55,9 @@ handlers sharing one `IMConnectorService`.
 
 ### Connector-neutral session boundary: `scope_key`
 
-The `IMThreadLink` table — the durable map from "IM session" → cubebox
+The `IMThreadLink` table — the durable map from "IM session" → cubeplex
 `Conversation` — keys on `(account_id, channel_id, scope_key)`. **`scope_key`
-is an opaque non-NULL string the connector owns**: cubebox guarantees its
+is an opaque non-NULL string the connector owns**: cubeplex guarantees its
 uniqueness within `(account_id, channel_id)` but does not interpret its
 contents. The connector encodes whatever boundary makes sense for its
 platform. A separate `scope_kind` column (`'dm' | 'participant' | 'thread' |
@@ -116,7 +116,7 @@ rely on for signature algorithm, three-tier identity model, `/bot/v3/info`
 bot-identity hydration, edit-debounce + adaptive backoff (0.8s default, doubles
 on flood control to 10s cap), reaction-as-status UX, markdown-table → text
 fallback, and the `lark_oapi` event dispatcher shape. Hermes is single-tenant
-and persists dedup state to a JSON file; cubebox's multi-tenant
+and persists dedup state to a JSON file; cubeplex's multi-tenant
 `IMWebhookReceipt` + Postgres outbox replaces that.
 
 ---
@@ -125,58 +125,58 @@ and persists dedup state to a JSON file; cubebox's multi-tenant
 
 New files (all paths under `backend/`):
 
-- `cubebox/models/im_connector.py` — `IMConnectorAccount`, `IMThreadLink`,
+- `cubeplex/models/im_connector.py` — `IMConnectorAccount`, `IMThreadLink`,
   `IMIdentityLink`, `IMWebhookReceipt`, `IMRunQueueItem` SQLModel tables.
   **Schema is connector-neutral** — `channel_id`, `scope_key` (opaque
   connector-owned session boundary), `scope_kind` (observability label),
   `reply_to_id` (real platform reply target). No `slack_*` / `feishu_*` /
   `thread_*` columns; the per-platform mapping is documented in the design
   intro above.
-- `cubebox/repositories/im_connector.py` — scoped repos for the IM tables +
+- `cubeplex/repositories/im_connector.py` — scoped repos for the IM tables +
   the queue claim/complete primitives.
-- `cubebox/services/im_connector.py` — `IMConnectorService` (CRUD shared by ws +
+- `cubeplex/services/im_connector.py` — `IMConnectorService` (CRUD shared by ws +
   admin routes).
-- `cubebox/im/__init__.py`, `cubebox/im/types.py` — `InboundEvent`,
+- `cubeplex/im/__init__.py`, `cubeplex/im/types.py` — `InboundEvent`,
   `OutboundOp`, `RenderState`, `IMConnector` protocol.
-- `cubebox/im/feishu/__init__.py`
-- `cubebox/im/feishu/signature.py` — webhook HMAC verification.
-- `cubebox/im/feishu/connector.py` — `FeishuConnector`: `parse_inbound`,
+- `cubeplex/im/feishu/__init__.py`
+- `cubeplex/im/feishu/signature.py` — webhook HMAC verification.
+- `cubeplex/im/feishu/connector.py` — `FeishuConnector`: `parse_inbound`,
   `send`, `edit`, `add_reaction`, `remove_reaction`, image upload.
-- `cubebox/im/feishu/long_connection.py` — `FeishuLongConnection`: `lark_oapi`
+- `cubeplex/im/feishu/long_connection.py` — `FeishuLongConnection`: `lark_oapi`
   WebSocket lifecycle (connect, hydrate bot identity, dispatch, reconnect).
-- `cubebox/im/inbound.py` — `ingest_inbound_event(...)`: transactional receipt
+- `cubeplex/im/inbound.py` — `ingest_inbound_event(...)`: transactional receipt
   + conversation/thread + enqueue core.
-- `cubebox/im/worker.py` — `IMRunQueueWorker`: drains the queue → `start_run` →
+- `cubeplex/im/worker.py` — `IMRunQueueWorker`: drains the queue → `start_run` →
   spawns the outbound tailer.
-- `cubebox/im/outbound.py` — `OutboundRunTailer`: Redis tail → render fold →
+- `cubeplex/im/outbound.py` — `OutboundRunTailer`: Redis tail → render fold →
   Feishu edits + reactions + artifact dispatch.
-- `cubebox/im/artifacts.py` — IM-side artifact dispatcher (decides:
+- `cubeplex/im/artifacts.py` — IM-side artifact dispatcher (decides:
   upload-as-image, attach-as-file, or share-link).
-- `cubebox/api/routes/v1/im_ingress.py` — `POST /api/v1/im/feishu/events`
+- `cubeplex/api/routes/v1/im_ingress.py` — `POST /api/v1/im/feishu/events`
   (unauthenticated, platform-signed).
-- `cubebox/api/routes/v1/ws_im.py` — workspace-scope account/identity routes
+- `cubeplex/api/routes/v1/ws_im.py` — workspace-scope account/identity routes
   (`require_member`).
-- `cubebox/api/routes/v1/admin_im.py` — org-admin account listing /
+- `cubeplex/api/routes/v1/admin_im.py` — org-admin account listing /
   enable-disable (`get_admin_request_context`).
-- `cubebox/api/routes/v1/artifact_share.py` — public `GET
+- `cubeplex/api/routes/v1/artifact_share.py` — public `GET
   /api/v1/public/artifacts/share/{nonce}` preview page (no auth).
-- `cubebox/api/schemas/im_connector.py` — request/response pydantic models.
+- `cubeplex/api/schemas/im_connector.py` — request/response pydantic models.
 - `backend/scripts/dev/feishu_long_connection_poc.py` — Phase 0 PoC script
   (deleted before PR; lives only to validate the SDK shape).
 
 Modified:
-- `cubebox/models/__init__.py` (export new tables).
-- `cubebox/api/app.py` (register routers, start worker + long-connection on
+- `cubeplex/models/__init__.py` (export new tables).
+- `cubeplex/api/app.py` (register routers, start worker + long-connection on
   startup).
-- `cubebox/services/credential.py` (`_guard_references`: refuse deleting an
+- `cubeplex/services/credential.py` (`_guard_references`: refuse deleting an
   `im_bot` credential still referenced by an account).
-- `cubebox/api/routes/v1/artifacts.py` (generalize `preview-token` route from
+- `cubeplex/api/routes/v1/artifacts.py` (generalize `preview-token` route from
   Office-only to any artifact; reuse the existing Redis nonce mechanism).
 - `pyproject.toml` (add `lark-oapi` dep via `uv add`).
 
 ---
 
-## Task 0: Long-connection PoC — prove the SDK shape works in cubebox env
+## Task 0: Long-connection PoC — prove the SDK shape works in cubeplex env
 
 **Goal of this task:** Before committing schema or routes, exercise the
 `lark_oapi` long-connection path end-to-end against a real Feishu app: bot
@@ -288,7 +288,7 @@ per-queue tables:
   `chat_id`, Slack `channel`, Discord `channel_id`, …). Always non-null.
 - **`scope_key`** (str, **non-null**, **in unique index**): the connector-owned
   opaque session-boundary key. See the "Connector-neutral session boundary"
-  section above. Cubebox guarantees uniqueness on
+  section above. Cubeplex guarantees uniqueness on
   `(account_id, channel_id, scope_key)` but does not parse the string.
 - **`scope_kind`** (str): a label for the connector's chosen scope
   (`'dm' | 'participant' | 'thread' | 'thread_participant' | ...`). Used for
@@ -307,21 +307,21 @@ No `slack_*` / `feishu_*` columns. The `platform` discriminator on
 `IMConnectorAccount` is the only place the schema records what platform a
 row belongs to.
 
-Public ID prefixes follow the `CubeboxBase._PREFIX` convention. No edit to
+Public ID prefixes follow the `CubeplexBase._PREFIX` convention. No edit to
 `public_id.py` is required — each table sets its own `_PREFIX`. Prefixes:
 `imac` (account), `imtl` (thread link), `imil` (identity link), `imwr`
 (webhook receipt), `imrq` (run queue item).
 
 **Files:**
-- Create: `backend/cubebox/models/im_connector.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/im_connector.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 - Test: `backend/tests/unit/test_im_models.py`
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # backend/tests/unit/test_im_models.py
-from cubebox.models.im_connector import (
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMIdentityLink,
     IMRunQueueItem,
@@ -386,7 +386,7 @@ Expected: FAIL with `ModuleNotFoundError`.
 - [ ] **Step 3: Write the models**
 
 ```python
-# backend/cubebox/models/im_connector.py
+# backend/cubeplex/models/im_connector.py
 """IM connector models. Platform-neutral schema (works for Feishu, Slack, …)."""
 
 from datetime import datetime
@@ -395,10 +395,10 @@ from typing import Any, ClassVar
 from sqlalchemy import JSON, Column, Index, text
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
 
 
-class IMConnectorAccount(CubeboxBase, OrgScopedMixin, table=True):
+class IMConnectorAccount(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = "imac"
     __tablename__ = "im_connector_accounts"
     __table_args__ = (
@@ -418,9 +418,9 @@ class IMConnectorAccount(CubeboxBase, OrgScopedMixin, table=True):
     config: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
 
-class IMThreadLink(CubeboxBase, OrgScopedMixin, table=True):
+class IMThreadLink(CubeplexBase, OrgScopedMixin, table=True):
     """Durable map: (account, channel, connector-owned scope_key) → one
-    cubebox Conversation. The table name keeps the historical 'thread_links'
+    cubeplex Conversation. The table name keeps the historical 'thread_links'
     label for back-compatibility with internal naming, but scope_key is the
     actual session-boundary contract — see the design intro above."""
     _PREFIX: ClassVar[str] = "imtl"
@@ -434,7 +434,7 @@ class IMThreadLink(CubeboxBase, OrgScopedMixin, table=True):
 
     account_id: str = Field(foreign_key="im_connector_accounts.id", max_length=20, index=True)
     channel_id: str = Field(max_length=128)
-    # Connector-owned non-null opaque session-boundary key. Cubebox does not
+    # Connector-owned non-null opaque session-boundary key. Cubeplex does not
     # interpret this string; the connector encodes whatever its platform
     # needs (e.g. 'dm', 'u:<union_id>', 't:<thread_ts>'). Non-null because
     # Postgres treats NULL as distinct in unique indexes.
@@ -445,8 +445,8 @@ class IMThreadLink(CubeboxBase, OrgScopedMixin, table=True):
     conversation_id: str = Field(foreign_key="conversations.id", max_length=20, index=True)
 
 
-class IMIdentityLink(CubeboxBase, OrgScopedMixin, table=True):
-    """Map an IM sender (preferred: union_id) to a cubebox user.
+class IMIdentityLink(CubeplexBase, OrgScopedMixin, table=True):
+    """Map an IM sender (preferred: union_id) to a cubeplex user.
     v1 falls back to account.acting_user_id when no link exists."""
     _PREFIX: ClassVar[str] = "imil"
     __tablename__ = "im_identity_links"
@@ -461,7 +461,7 @@ class IMIdentityLink(CubeboxBase, OrgScopedMixin, table=True):
     user_id: str = Field(foreign_key="users.id", max_length=20)
 
 
-class IMWebhookReceipt(CubeboxBase, OrgScopedMixin, table=True):
+class IMWebhookReceipt(CubeplexBase, OrgScopedMixin, table=True):
     """Idempotency receipt keyed by platform event id. Inserted in the same
     transaction that enqueues the run (transactional outbox)."""
     _PREFIX: ClassVar[str] = "imwr"
@@ -479,7 +479,7 @@ class IMWebhookReceipt(CubeboxBase, OrgScopedMixin, table=True):
     lease_expires_at: datetime | None = Field(default=None)
 
 
-class IMRunQueueItem(CubeboxBase, OrgScopedMixin, table=True):
+class IMRunQueueItem(CubeplexBase, OrgScopedMixin, table=True):
     """Durable outbox row drained by IMRunQueueWorker via FOR UPDATE SKIP LOCKED."""
     _PREFIX: ClassVar[str] = "imrq"
     __tablename__ = "im_run_queue"
@@ -519,10 +519,10 @@ class IMRunQueueItem(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 4: Export tables**
 
-Add to `backend/cubebox/models/__init__.py` (and `__all__`):
+Add to `backend/cubeplex/models/__init__.py` (and `__all__`):
 
 ```python
-from cubebox.models.im_connector import (  # noqa: F401
+from cubeplex.models.im_connector import (  # noqa: F401
     IMConnectorAccount,
     IMIdentityLink,
     IMRunQueueItem,
@@ -535,7 +535,7 @@ from cubebox.models.im_connector import (  # noqa: F401
 
 ```bash
 cd backend && uv run pytest tests/unit/test_im_models.py -v
-git add backend/cubebox/models/im_connector.py backend/cubebox/models/__init__.py \
+git add backend/cubeplex/models/im_connector.py backend/cubeplex/models/__init__.py \
         backend/tests/unit/test_im_models.py
 git commit -m "feat(im): neutral IM connector data model (accounts, threads, receipts, queue)"
 ```
@@ -572,7 +572,7 @@ in Feishu's algorithm (unlike Slack's 5-min skew rule) — the
 `verification_token` check is the dedicated replay defense and runs first.
 
 **Files:**
-- Create: `backend/cubebox/im/__init__.py` (empty), `backend/cubebox/im/feishu/__init__.py` (empty), `backend/cubebox/im/feishu/signature.py`
+- Create: `backend/cubeplex/im/__init__.py` (empty), `backend/cubeplex/im/feishu/__init__.py` (empty), `backend/cubeplex/im/feishu/signature.py`
 - Test: `backend/tests/unit/test_feishu_signature.py`
 
 - [ ] **Step 1: Write failing test**
@@ -583,7 +583,7 @@ import hashlib
 
 import pytest
 
-from cubebox.im.feishu.signature import (
+from cubeplex.im.feishu.signature import (
     FeishuSignatureError,
     verify_feishu_signature,
     verify_verification_token,
@@ -635,7 +635,7 @@ def test_verification_token_constant_time_compare() -> None:
 - [ ] **Step 2: Confirm failure**, then **Step 3: Implement**
 
 ```python
-# backend/cubebox/im/feishu/signature.py
+# backend/cubeplex/im/feishu/signature.py
 """Feishu webhook signature + verification-token validation."""
 
 import hashlib
@@ -676,9 +676,9 @@ def verify_feishu_signature(
 
 ```bash
 cd backend && uv run pytest tests/unit/test_feishu_signature.py -v
-touch backend/cubebox/im/__init__.py backend/cubebox/im/feishu/__init__.py
-git add backend/cubebox/im/__init__.py backend/cubebox/im/feishu/__init__.py \
-        backend/cubebox/im/feishu/signature.py backend/tests/unit/test_feishu_signature.py
+touch backend/cubeplex/im/__init__.py backend/cubeplex/im/feishu/__init__.py
+git add backend/cubeplex/im/__init__.py backend/cubeplex/im/feishu/__init__.py \
+        backend/cubeplex/im/feishu/signature.py backend/tests/unit/test_feishu_signature.py
 git commit -m "feat(im): Feishu webhook signature + verification-token validation"
 ```
 
@@ -715,7 +715,7 @@ platform-agnostic `InboundEvent`. It:
   types in v1, group messages that don't mention the bot.
 
 **Files:**
-- Create: `backend/cubebox/im/types.py`, `backend/cubebox/im/feishu/connector.py`
+- Create: `backend/cubeplex/im/types.py`, `backend/cubeplex/im/feishu/connector.py`
 - Test: `backend/tests/unit/test_feishu_parse_inbound.py`
 
 - [ ] **Step 1: Write failing test**
@@ -724,7 +724,7 @@ platform-agnostic `InboundEvent`. It:
 # backend/tests/unit/test_feishu_parse_inbound.py
 import json
 
-from cubebox.im.feishu.connector import FeishuConnector
+from cubeplex.im.feishu.connector import FeishuConnector
 
 GROUP_MENTION = {
     "header": {"event_id": "evgrp01", "event_type": "im.message.receive_v1"},
@@ -824,7 +824,7 @@ def test_bot_echo_ignored() -> None:
 - [ ] **Step 2: Confirm failure**, then **Step 3: Implement types + parser**
 
 ```python
-# backend/cubebox/im/types.py
+# backend/cubeplex/im/types.py
 """Platform-agnostic IM transport types."""
 
 from dataclasses import dataclass, field
@@ -858,7 +858,7 @@ class InboundEvent:
 
     Field roles:
     - scope_key: CONNECTOR-OWNED SESSION BOUNDARY KEY. Opaque non-NULL string.
-      cubebox guarantees uniqueness on (account_id, channel_id, scope_key);
+      cubeplex guarantees uniqueness on (account_id, channel_id, scope_key);
       the connector decides how to derive the string from its platform's
       semantics (DM, per-participant in group, per-thread, or any composition).
       See the plan's "Connector-neutral session boundary" section.
@@ -906,14 +906,14 @@ class RenderState:
 ```
 
 ```python
-# backend/cubebox/im/feishu/connector.py
+# backend/cubeplex/im/feishu/connector.py
 """Feishu connector: inbound parse + outbound send/edit/react (lark_oapi)."""
 
 import json
 import re
 from typing import Any
 
-from cubebox.im.types import DM_SCOPE_KEY, InboundEvent, make_participant_scope
+from cubeplex.im.types import DM_SCOPE_KEY, InboundEvent, make_participant_scope
 
 # Matches Feishu inline mention markup: <at user_id="ou_xxx">name</at>
 _AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>", re.DOTALL)
@@ -1034,7 +1034,7 @@ class FeishuConnector:
 
 ```bash
 cd backend && uv run pytest tests/unit/test_feishu_parse_inbound.py -v
-git add backend/cubebox/im/types.py backend/cubebox/im/feishu/connector.py \
+git add backend/cubeplex/im/types.py backend/cubeplex/im/feishu/connector.py \
         backend/tests/unit/test_feishu_parse_inbound.py
 git commit -m "feat(im): normalize Feishu events into neutral InboundEvent"
 ```
@@ -1060,7 +1060,7 @@ means "duplicate"; any other constraint (FK, thread-link race) re-raises or
 retries deliberately.
 
 **Files:**
-- Create: `backend/cubebox/repositories/im_connector.py`, `backend/cubebox/im/inbound.py`
+- Create: `backend/cubeplex/repositories/im_connector.py`, `backend/cubeplex/im/inbound.py`
 - Test: `backend/tests/integration/test_im_inbound_outbox.py`
 
 - [ ] **Step 1: Write the failing integration test**
@@ -1070,9 +1070,9 @@ retries deliberately.
 import pytest
 from sqlalchemy import func, select
 
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.models.im_connector import IMRunQueueItem, IMThreadLink
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.im_connector import IMRunQueueItem, IMThreadLink
 
 pytestmark = pytest.mark.asyncio
 
@@ -1141,7 +1141,7 @@ introduces multiple stale identifiers that a verbatim copy will silently
 leave broken. The pieces that MUST be respelled in this plan's terms:
 
 ```python
-# backend/cubebox/repositories/im_connector.py
+# backend/cubeplex/repositories/im_connector.py
 
 async def get_or_create_thread_link(
     session: AsyncSession,
@@ -1174,7 +1174,7 @@ async def get_or_create_thread_link(
 ```
 
 ```python
-# backend/cubebox/im/inbound.py — IntegrityError discrimination
+# backend/cubeplex/im/inbound.py — IntegrityError discrimination
 
 def _is_thread_link_unique_violation(exc: IntegrityError) -> bool:
     # The new schema's unique index is uq_im_scope_link, NOT uq_im_thread_link
@@ -1190,7 +1190,7 @@ def _is_receipt_unique_violation(exc: IntegrityError) -> bool:
 ```
 
 ```python
-# backend/cubebox/im/inbound.py — IMRunQueueItem construction with neutral fields
+# backend/cubeplex/im/inbound.py — IMRunQueueItem construction with neutral fields
 
 item = IMRunQueueItem(
     org_id=account.org_id,
@@ -1224,7 +1224,7 @@ includes the reclaim-on-stale-lease path — copy that as-is.
 
 ```bash
 cd backend && uv run pytest tests/integration/test_im_inbound_outbox.py -v
-git add backend/cubebox/repositories/im_connector.py backend/cubebox/im/inbound.py \
+git add backend/cubeplex/repositories/im_connector.py backend/cubeplex/im/inbound.py \
         backend/tests/integration/test_im_inbound_outbox.py backend/tests/integration/conftest.py
 git commit -m "feat(im): transactional inbound core (receipt + thread + run enqueue)"
 ```
@@ -1240,11 +1240,11 @@ receipt to `completed`, fires `on_run_started(run_id, item)` so the app can
 spawn the outbound tailer.
 
 - [ ] **Step 1: Test** — mirror the sister Slack plan's `test_im_worker.py` (the test of `process_one_queue_item` + the no-queue-empty case under "## Task 7: Queue worker"), update fields to neutral schema, no other changes.
-- [ ] **Step 2: Implement** — copy the `cubebox/im/worker.py` block (the `IMRunQueueWorker` class + `process_one_queue_item`) from the sister Slack plan's Task 7 verbatim. The worker is platform-neutral; no Slack assumptions in it. Update the one import (`from cubebox.models.im_connector import IMRunQueueItem, IMWebhookReceipt`) — schema column names already match.
+- [ ] **Step 2: Implement** — copy the `cubeplex/im/worker.py` block (the `IMRunQueueWorker` class + `process_one_queue_item`) from the sister Slack plan's Task 7 verbatim. The worker is platform-neutral; no Slack assumptions in it. Update the one import (`from cubeplex.models.im_connector import IMRunQueueItem, IMWebhookReceipt`) — schema column names already match.
 - [ ] **Step 3: Run + commit**:
   ```bash
   cd backend && uv run pytest tests/integration/test_im_worker.py -v
-  git add backend/cubebox/im/worker.py backend/tests/integration/test_im_worker.py
+  git add backend/cubeplex/im/worker.py backend/tests/integration/test_im_worker.py
   git commit -m "feat(im): durable run-queue worker (claim -> start_run -> complete receipt)"
   ```
 
@@ -1259,7 +1259,7 @@ official SDK retries internally), and `connect()` hydrates the bot identity
 via `application.v6.application.get` before the dispatcher accepts events.
 
 **Files:**
-- Create: `backend/cubebox/im/feishu/long_connection.py`
+- Create: `backend/cubeplex/im/feishu/long_connection.py`
 - Test: `backend/tests/unit/test_feishu_long_connection_handler.py` (unit-tests the **dispatch lambda**, not the SDK)
 
 The long-connection mode runs alongside the durable queue: an event arrives
@@ -1274,7 +1274,7 @@ inbound mode delivered the event.
 # backend/tests/unit/test_feishu_long_connection_handler.py
 import pytest
 
-from cubebox.im.feishu.long_connection import build_event_handler
+from cubeplex.im.feishu.long_connection import build_event_handler
 
 pytestmark = pytest.mark.asyncio
 
@@ -1323,7 +1323,7 @@ async def test_handler_routes_message_event_into_ingest():
 - [ ] **Step 2: Implement**
 
 ```python
-# backend/cubebox/im/feishu/long_connection.py
+# backend/cubeplex/im/feishu/long_connection.py
 """Feishu long-connection (WebSocket) inbound transport."""
 
 import asyncio
@@ -1341,7 +1341,7 @@ except ImportError:
     lark = None  # type: ignore[assignment]
     P2ImMessageReceiveV1 = None  # type: ignore[assignment]
 
-from cubebox.im.feishu.connector import FeishuConnector
+from cubeplex.im.feishu.connector import FeishuConnector
 
 IngestCallable = Callable[..., Awaitable[Any]]
 
@@ -1361,7 +1361,7 @@ def build_event_handler(
     fires on its own worker thread and MUST cross back via
     `asyncio.run_coroutine_threadsafe(coro, loop)`. Using
     `asyncio.get_event_loop()` from the SDK thread raises `RuntimeError` on
-    Python 3.12+ when there is no loop attached to that thread (cubebox is on
+    Python 3.12+ when there is no loop attached to that thread (cubeplex is on
     3.13). Hermes' equivalent helper is `_submit_on_loop` →
     `safe_schedule_threadsafe`; see `~/hermes-agent/gateway/platforms/feishu.py:2547`.
     """
@@ -1489,7 +1489,7 @@ class FeishuLongConnection:
 
 ```bash
 cd backend && uv run pytest tests/unit/test_feishu_long_connection_handler.py -v
-git add backend/cubebox/im/feishu/long_connection.py \
+git add backend/cubeplex/im/feishu/long_connection.py \
         backend/tests/unit/test_feishu_long_connection_handler.py
 git commit -m "feat(im): Feishu long-connection inbound transport (lark_oapi)"
 ```
@@ -1522,7 +1522,7 @@ dispatch). Key behavioural points:
   it's an update, not a duplicate creation.
 
 **Files:**
-- Create: `backend/cubebox/im/outbound.py`
+- Create: `backend/cubeplex/im/outbound.py`
 - Test: `backend/tests/unit/test_im_outbound_render.py`
 
 - [ ] **Step 1: Write failing test** covering: first text → post; debounce window suppresses; debounce elapsed → edit; tool_call coalesced; done → final edit; error → final error edit; adaptive backoff doubles interval on flood; 3rd flood disables edits; artifact event emits an `OutboundOp(kind="artifact")` with the artifact payload.
@@ -1530,13 +1530,13 @@ dispatch). Key behavioural points:
 - [ ] **Step 2: Implement**
 
 ```python
-# backend/cubebox/im/outbound.py
+# backend/cubeplex/im/outbound.py
 """Outbound rendering: fold run events into debounced IM ops, tail Redis."""
 
 from dataclasses import dataclass
 from typing import Any
 
-from cubebox.im.types import RenderState
+from cubeplex.im.types import RenderState
 
 _EDIT_INTERVAL_DEFAULT = 0.8
 _EDIT_INTERVAL_MAX = 10.0
@@ -1638,7 +1638,7 @@ mirrors the sister Slack plan's `OutboundRunTailer` (its Task 8 §Step 3) with t
 
 ```bash
 cd backend && uv run pytest tests/unit/test_im_outbound_render.py -v
-git add backend/cubebox/im/outbound.py backend/tests/unit/test_im_outbound_render.py
+git add backend/cubeplex/im/outbound.py backend/tests/unit/test_im_outbound_render.py
 git commit -m "feat(im): outbound render fold + adaptive edit backoff"
 ```
 
@@ -1686,7 +1686,7 @@ Apply the same discipline here.
   `~/hermes-agent/gateway/platforms/feishu.py:4310` (`_build_outbound_payload`).
 
 **Files:**
-- Modify: `backend/cubebox/im/feishu/connector.py`
+- Modify: `backend/cubeplex/im/feishu/connector.py`
 - Test: `backend/tests/unit/test_feishu_outbound_payload.py` (pure payload-construction
   tests; the `lark_oapi` HTTP call itself is the unsimulatable boundary covered by Task 16 smoke)
 
@@ -1698,7 +1698,7 @@ Apply the same discipline here.
 
 ```bash
 cd backend && uv run pytest tests/unit/test_feishu_outbound_payload.py -v
-git add backend/cubebox/im/feishu/connector.py backend/tests/unit/test_feishu_outbound_payload.py
+git add backend/cubeplex/im/feishu/connector.py backend/tests/unit/test_feishu_outbound_payload.py
 git commit -m "feat(im): Feishu connector send/edit/image-upload via lark_oapi"
 ```
 
@@ -1764,8 +1764,8 @@ Same defensive pattern for `on_processing_complete`. The tailer calls
 the hook unconditionally; the connector decides whether each call is safe.
 
 **Files:**
-- Modify: `backend/cubebox/im/feishu/connector.py` (add `add_reaction` / `remove_reaction` low-level methods + the three `on_processing_*` hooks).
-- Modify: `backend/cubebox/im/outbound.py` (`OutboundRunTailer` calls the connector hooks at start/done/error — no Feishu strings).
+- Modify: `backend/cubeplex/im/feishu/connector.py` (add `add_reaction` / `remove_reaction` low-level methods + the three `on_processing_*` hooks).
+- Modify: `backend/cubeplex/im/outbound.py` (`OutboundRunTailer` calls the connector hooks at start/done/error — no Feishu strings).
 - Test: `backend/tests/unit/test_im_reactions.py` — assert the tailer invokes `on_processing_start` / `on_processing_complete` / `on_processing_failed` on a recording connector at the right moments; assert FeishuConnector's hook no-ops when the prior reaction is None.
 
 - [ ] **Step 1: Write failing test**
@@ -1774,8 +1774,8 @@ the hook unconditionally; the connector decides whether each call is safe.
 # backend/tests/unit/test_im_reactions.py
 import pytest
 
-from cubebox.im.outbound import OutboundRunTailer
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import OutboundRunTailer
+from cubeplex.im.types import RenderState
 
 pytestmark = pytest.mark.asyncio
 
@@ -1822,7 +1822,7 @@ async def test_processing_reaction_added_on_start_and_removed_on_done(...):
 
 ```bash
 cd backend && uv run pytest tests/unit/test_im_reactions.py -v
-git add backend/cubebox/im/feishu/connector.py backend/cubebox/im/outbound.py \
+git add backend/cubeplex/im/feishu/connector.py backend/cubeplex/im/outbound.py \
         backend/tests/unit/test_im_reactions.py
 git commit -m "feat(im): processing status reactions (in-progress / success / failure)"
 ```
@@ -1844,7 +1844,7 @@ When the run emits an `artifact` event, the IM side decides how to show it:
    `📎 {name} · {type} · view → {share_url}`.
 
 **Share-link mechanism — extract a service helper, NOT a copy of the route.**
-`backend/cubebox/api/routes/v1/artifacts.py:193` already implements a Redis
+`backend/cubeplex/api/routes/v1/artifacts.py:193` already implements a Redis
 nonce + `/api/v1/public/artifacts/dl/{nonce}/{filename}` pattern (designed
 for Office Online Viewer, currently restricted to `.docx`/`.xlsx`/`.pptx`).
 Two consumers need it now: the workspace-scoped HTTP route (`require_member`)
@@ -1855,7 +1855,7 @@ has no `RequestContext` and is not a workspace member. Extract the
 core into a service function and have both consumers call it directly:
 
 ```python
-# backend/cubebox/services/artifact_share.py — NEW
+# backend/cubeplex/services/artifact_share.py — NEW
 """Mint and validate public artifact share tokens (no auth context needed)."""
 
 import secrets
@@ -1913,16 +1913,16 @@ version)`; once expired the share link 404s with a "this link has expired"
 page.
 
 **Files:**
-- Create: `backend/cubebox/services/artifact_share.py` (`mint_share_token` / `resolve_share_token`).
-- Modify: `backend/cubebox/api/routes/v1/artifacts.py` (relax `OFFICE_EXTENSIONS` gate to a separate `OFFICE_VIEWER_EXTENSIONS` for the existing Office route; **add new** `share-token` route that delegates to `mint_share_token`).
-- Create: `backend/cubebox/api/routes/v1/artifact_share.py` (public preview page that delegates to `resolve_share_token`).
-- Create: `backend/cubebox/im/artifacts.py` (the dispatcher used by the tailer).
+- Create: `backend/cubeplex/services/artifact_share.py` (`mint_share_token` / `resolve_share_token`).
+- Modify: `backend/cubeplex/api/routes/v1/artifacts.py` (relax `OFFICE_EXTENSIONS` gate to a separate `OFFICE_VIEWER_EXTENSIONS` for the existing Office route; **add new** `share-token` route that delegates to `mint_share_token`).
+- Create: `backend/cubeplex/api/routes/v1/artifact_share.py` (public preview page that delegates to `resolve_share_token`).
+- Create: `backend/cubeplex/im/artifacts.py` (the dispatcher used by the tailer).
 - Test: `backend/tests/integration/test_artifact_share_token.py` (real Redis), `backend/tests/unit/test_im_artifact_dispatch.py`.
 
 - [ ] **Step 1: Add the share-token route (thin wrapper around the service)**
 
 ```python
-# inside backend/cubebox/api/routes/v1/artifacts.py
+# inside backend/cubeplex/api/routes/v1/artifacts.py
 
 
 @router.post("/{artifact_id}/share-token")
@@ -1954,7 +1954,7 @@ async def create_share_token(
 - [ ] **Step 2: Add the public preview page**
 
 ```python
-# backend/cubebox/api/routes/v1/artifact_share.py
+# backend/cubeplex/api/routes/v1/artifact_share.py
 """Public artifact preview page (no auth, nonce-validated)."""
 
 import orjson
@@ -1962,9 +1962,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.db.session import get_session
-from cubebox.dependencies import RedisHandle, redis_dep
-from cubebox.repositories.artifact import ArtifactRepository
+from cubeplex.db.session import get_session
+from cubeplex.dependencies import RedisHandle, redis_dep
+from cubeplex.repositories.artifact import ArtifactRepository
 
 router = APIRouter(prefix="/public/artifacts", tags=["artifact-share"])
 
@@ -2012,7 +2012,7 @@ def _render_share_html(artifact, version: int) -> str:
 - [ ] **Step 3: IM dispatcher**
 
 ```python
-# backend/cubebox/im/artifacts.py
+# backend/cubeplex/im/artifacts.py
 """IM-side artifact dispatcher."""
 
 from dataclasses import dataclass
@@ -2048,7 +2048,7 @@ class IMArtifactDispatcher:
             await self.connector.send_image_message(image_key)
             return
         # Everything else: mint a share token via the service, post the URL.
-        from cubebox.services.artifact_share import mint_share_token
+        from cubeplex.services.artifact_share import mint_share_token
 
         nonce = await mint_share_token(
             redis=self.redis, key_prefix=self.redis_key_prefix,
@@ -2081,9 +2081,9 @@ class IMArtifactDispatcher:
 ```bash
 cd backend && uv run pytest tests/unit/test_im_artifact_dispatch.py \
                          tests/integration/test_artifact_share_token.py -v
-git add backend/cubebox/api/routes/v1/artifacts.py \
-        backend/cubebox/api/routes/v1/artifact_share.py \
-        backend/cubebox/im/artifacts.py \
+git add backend/cubeplex/api/routes/v1/artifacts.py \
+        backend/cubeplex/api/routes/v1/artifact_share.py \
+        backend/cubeplex/im/artifacts.py \
         backend/tests/unit/test_im_artifact_dispatch.py \
         backend/tests/integration/test_artifact_share_token.py
 git commit -m "feat(im): artifact dispatch (inline image; share-link for other types)"
@@ -2098,8 +2098,8 @@ deploys with public ingress can use it. Local / firewall-bound deploys use
 long-connection (Task 7).
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/im_ingress.py`
-- Modify: `backend/cubebox/api/app.py` (register router)
+- Create: `backend/cubeplex/api/routes/v1/im_ingress.py`
+- Modify: `backend/cubeplex/api/app.py` (register router)
 - Test: `backend/tests/e2e/test_im_feishu_ingress.py`
 
 The handler follows the order from hermes' prior art
@@ -2145,7 +2145,7 @@ On shutdown: stop the long-connection clients, then stop the worker, then
 let `RunManager` drain.
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 - Test: `backend/tests/e2e/test_im_worker_startup.py` (assert `app.state.im_run_queue_worker` exists; if any account has long-connection enabled, also assert `app.state.im_long_connections` has the right shape).
 
 - [ ] **Step 1: Failing test** — assert `app.state.im_run_queue_worker` and `app.state.im_long_connections` after startup.
@@ -2187,8 +2187,8 @@ async def _on_im_run_started(run_id: str, item: IMRunQueueItem) -> None:
 Notes for the implementer:
 
 - `build_credential_service` is the canonical factory at
-  `cubebox/credentials/dependencies.py:21`. Do NOT instantiate
-  `CredentialService(...)` directly — every site under `cubebox/im/` uses
+  `cubeplex/credentials/dependencies.py:21`. Do NOT instantiate
+  `CredentialService(...)` directly — every site under `cubeplex/im/` uses
   the factory so future signature changes do not silently regress.
 - `_build_lark_client(secrets)` returns the same `lark_oapi.Client` shape
   used by the long-connection module. Reuse a single client per account
@@ -2293,11 +2293,11 @@ supply it. Re-hydration on credential rotation is a follow-up (v1 keeps the
 hydrated value through the credential's lifetime).
 
 **Files:**
-- Create: `backend/cubebox/services/im_connector.py`,
-  `backend/cubebox/api/schemas/im_connector.py`,
-  `backend/cubebox/api/routes/v1/ws_im.py`,
-  `backend/cubebox/api/routes/v1/admin_im.py`
-- Modify: `backend/cubebox/services/credential.py` (`_guard_references` blocks
+- Create: `backend/cubeplex/services/im_connector.py`,
+  `backend/cubeplex/api/schemas/im_connector.py`,
+  `backend/cubeplex/api/routes/v1/ws_im.py`,
+  `backend/cubeplex/api/routes/v1/admin_im.py`
+- Modify: `backend/cubeplex/services/credential.py` (`_guard_references` blocks
   deletion of an `im_bot` credential referenced by an `IMConnectorAccount`).
 - Tests: `tests/e2e/test_ws_im_routes.py`, `tests/e2e/test_admin_im_routes.py`, `tests/e2e/test_im_isolation.py`.
 
@@ -2363,7 +2363,7 @@ Sections:
      out of v1 scope.)
 4. **Delivery mode**:
    - **Long connection** (recommended for self-host): no callback URL needed.
-     Cubebox holds the WebSocket on startup.
+     Cubeplex holds the WebSocket on startup.
    - **Webhook** (cloud deploys with public ingress): set Request URL to
      `https://<host>/api/v1/im/feishu/events`, copy `Encrypt Key` and
      `Verification Token` into the `connect_feishu` request body.
@@ -2426,7 +2426,7 @@ project enforces.
     and that `union_id` is the preferred `IMIdentityLink.im_user_id` AND the
     `sender_ref` that feeds `scope_key` for groups.
   - § "Identity mapping": clarify that the v1 binding-level acting user is
-    used for the cubebox `RunContext`, but the IM sender id (union_id) is
+    used for the cubeplex `RunContext`, but the IM sender id (union_id) is
     independently used for `scope_key` — these are two different facets and
     must not be conflated.
   - § "Testing strategy": add the share-link page, the artifact-image inline

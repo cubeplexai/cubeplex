@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { AdminCatalogRow } from '@cubebox/core'
+import type { AdminCatalogRow } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { MCPScopeBadge } from './MCPScopeBadge'

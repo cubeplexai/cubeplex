@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a hybrid (BM25-class + vector) conversation search popover in the sidebar, indexing existing and new conversations into cubebox-side tables; cubepi untouched.
+**Goal:** Ship a hybrid (BM25-class + vector) conversation search popover in the sidebar, indexing existing and new conversations into cubeplex-side tables; cubepi untouched.
 
 **Architecture:** New `conversation_chunks` table holds per-chunk text + pgvector embedding. A pluggable `LexicalSearchBackend` (PGroonga default, pg_bigm for AWS RDS) provides the lexical leg; pgvector + HNSW provides the semantic leg; results fused with RRF. Async embedding worker drains a Postgres `embedding_jobs` queue (no Redis dependency). Frontend: `⌘K` popover in sidebar.
 
@@ -10,7 +10,7 @@
 
 **Spec reference:** `docs/dev/specs/2026-06-11-conversation-search-design.md`
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/conversation-search` (slot 48 — backend `:8048`, frontend `:3048`).
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/conversation-search` (slot 48 — backend `:8048`, frontend `:3048`).
 
 **Read `.worktree.env` before running any command.** Plan commands assume CWD is the worktree root unless noted.
 
@@ -36,26 +36,26 @@ Push and run the codex review loop per PR (`pr-codex-review-loop` skill).
 
 | Path | Responsibility |
 |---|---|
-| `backend/cubebox/models/conversation_chunk.py` | `ConversationChunk` SQLModel — text + embedding + scope. |
-| `backend/cubebox/models/embedding_job.py` | `EmbeddingJob` SQLModel — queue row. |
-| `backend/cubebox/models/search_backfill_progress.py` | `SearchBackfillProgress` SQLModel — backfill cursor. |
-| `backend/cubebox/repositories/conversation_chunk.py` | Repo: insert / replace chunks per conversation, query by scope + ids. |
-| `backend/cubebox/repositories/embedding_job.py` | Repo: enqueue, claim batch, mark done/dead. |
-| `backend/cubebox/search/__init__.py` | Package marker. |
-| `backend/cubebox/search/text_extract.py` | cubepi messages → readable text per message. |
-| `backend/cubebox/search/chunker.py` | sliding-window chunker over a list of `(seq, role, text)`. |
-| `backend/cubebox/search/rrf.py` | Reciprocal Rank Fusion helper. |
-| `backend/cubebox/search/snippet.py` | Snippet + match_offsets extractor. |
-| `backend/cubebox/search/lexical/__init__.py` | Factory: config → `LexicalSearchBackend`. |
-| `backend/cubebox/search/lexical/base.py` | `LexicalSearchBackend` Protocol + concrete `LexicalQueryResult`. |
-| `backend/cubebox/search/lexical/pgroonga.py` | PGroonga backend. |
-| `backend/cubebox/search/lexical/pg_bigm.py` | pg_bigm backend. |
-| `backend/cubebox/search/embedding.py` | OpenAI-protocol embedding provider. |
-| `backend/cubebox/search/service.py` | `ConversationSearchService` — runs both legs, fuses, formats. |
-| `backend/cubebox/search/worker.py` | `EmbeddingWorker` — claim → embed → write. |
-| `backend/cubebox/search/indexer.py` | `enqueue_index_job(conversation_id, ...)` — used by run-done hook. |
-| `backend/cubebox/api/routes/v1/conversation_search.py` | `GET /ws/{ws}/conversations/search`. |
-| `backend/cubebox/api/schemas/conversation_search.py` | Pydantic request / response. |
+| `backend/cubeplex/models/conversation_chunk.py` | `ConversationChunk` SQLModel — text + embedding + scope. |
+| `backend/cubeplex/models/embedding_job.py` | `EmbeddingJob` SQLModel — queue row. |
+| `backend/cubeplex/models/search_backfill_progress.py` | `SearchBackfillProgress` SQLModel — backfill cursor. |
+| `backend/cubeplex/repositories/conversation_chunk.py` | Repo: insert / replace chunks per conversation, query by scope + ids. |
+| `backend/cubeplex/repositories/embedding_job.py` | Repo: enqueue, claim batch, mark done/dead. |
+| `backend/cubeplex/search/__init__.py` | Package marker. |
+| `backend/cubeplex/search/text_extract.py` | cubepi messages → readable text per message. |
+| `backend/cubeplex/search/chunker.py` | sliding-window chunker over a list of `(seq, role, text)`. |
+| `backend/cubeplex/search/rrf.py` | Reciprocal Rank Fusion helper. |
+| `backend/cubeplex/search/snippet.py` | Snippet + match_offsets extractor. |
+| `backend/cubeplex/search/lexical/__init__.py` | Factory: config → `LexicalSearchBackend`. |
+| `backend/cubeplex/search/lexical/base.py` | `LexicalSearchBackend` Protocol + concrete `LexicalQueryResult`. |
+| `backend/cubeplex/search/lexical/pgroonga.py` | PGroonga backend. |
+| `backend/cubeplex/search/lexical/pg_bigm.py` | pg_bigm backend. |
+| `backend/cubeplex/search/embedding.py` | OpenAI-protocol embedding provider. |
+| `backend/cubeplex/search/service.py` | `ConversationSearchService` — runs both legs, fuses, formats. |
+| `backend/cubeplex/search/worker.py` | `EmbeddingWorker` — claim → embed → write. |
+| `backend/cubeplex/search/indexer.py` | `enqueue_index_job(conversation_id, ...)` — used by run-done hook. |
+| `backend/cubeplex/api/routes/v1/conversation_search.py` | `GET /ws/{ws}/conversations/search`. |
+| `backend/cubeplex/api/schemas/conversation_search.py` | Pydantic request / response. |
 | `backend/scripts/dev/backfill_search_index.py` | Iterate workspaces, enqueue all conversations. |
 | `backend/alembic/versions/<rev>_conversation_search_tables.py` | Migration: enable extension, create three tables, create indexes, create vector + lexical indexes by config. |
 | `backend/tests/search/test_text_extract.py` | |
@@ -73,14 +73,14 @@ Push and run the codex review loop per PR (`pr-codex-review-loop` skill).
 
 | Path | Reason |
 |---|---|
-| `backend/cubebox/models/public_id.py` | Add `PREFIX_CONV_CHUNK = "cck"`, `PREFIX_EMBEDDING_JOB = "ejob"`, `PREFIX_BACKFILL = "sbp"`. |
-| `backend/cubebox/models/__init__.py` | Export new models. |
-| `backend/cubebox/repositories/__init__.py` | Export new repos. |
-| `backend/cubebox/api/routes/v1/__init__.py` | Mount the new router. |
-| `backend/cubebox/api/routes/v1/conversations.py` | After successful run, call `indexer.enqueue_index_job`. |
-| `backend/cubebox/api/app.py` | Start `EmbeddingWorker` task in lifespan. |
+| `backend/cubeplex/models/public_id.py` | Add `PREFIX_CONV_CHUNK = "cck"`, `PREFIX_EMBEDDING_JOB = "ejob"`, `PREFIX_BACKFILL = "sbp"`. |
+| `backend/cubeplex/models/__init__.py` | Export new models. |
+| `backend/cubeplex/repositories/__init__.py` | Export new repos. |
+| `backend/cubeplex/api/routes/v1/__init__.py` | Mount the new router. |
+| `backend/cubeplex/api/routes/v1/conversations.py` | After successful run, call `indexer.enqueue_index_job`. |
+| `backend/cubeplex/api/app.py` | Start `EmbeddingWorker` task in lifespan. |
 | `backend/config.yaml` | Add `search:` block (see Task 6). |
-| `backend/cubebox/config.py` | (Verify access pattern matches existing keys — no code change required, just confirm.) |
+| `backend/cubeplex/config.py` | (Verify access pattern matches existing keys — no code change required, just confirm.) |
 | `backend/pyproject.toml` | `uv add pgvector tiktoken httpx-sse` (only if not present). |
 
 ### Frontend — create
@@ -111,7 +111,7 @@ Push and run the codex review loop per PR (`pr-codex-review-loop` skill).
 * Migration timestamp casts: when altering an existing datetime column, hand-add `postgresql_using="<col> AT TIME ZONE 'UTC'"` (this plan only creates new tz-aware columns, so this rule applies to any future revisions).
 * Public IDs via `generate_public_id(PREFIX_X)` in `default_factory`.
 * Dependency adds: `uv add <pkg>` from `backend/`; `pnpm add` from `frontend/packages/web/`.
-* No backward-compat shims — cubebox hasn't shipped publicly.
+* No backward-compat shims — cubeplex hasn't shipped publicly.
 
 ---
 
@@ -120,11 +120,11 @@ Push and run the codex review loop per PR (`pr-codex-review-loop` skill).
 ## Task 1: Add public-ID prefixes
 
 **Files:**
-- Modify: `backend/cubebox/models/public_id.py`
+- Modify: `backend/cubeplex/models/public_id.py`
 
 - [ ] **Step 1: Add the three new constants**
 
-Edit `backend/cubebox/models/public_id.py`, appending to the existing
+Edit `backend/cubeplex/models/public_id.py`, appending to the existing
 `PREFIX_*` block (alphabetical order is fine, follow what's there):
 
 ```python
@@ -136,7 +136,7 @@ PREFIX_BACKFILL: str = "sbp"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/models/public_id.py
+git add backend/cubeplex/models/public_id.py
 git commit -m "feat(models): add public-id prefixes for search tables"
 ```
 
@@ -145,13 +145,13 @@ git commit -m "feat(models): add public-id prefixes for search tables"
 ## Task 2: `ConversationChunk` model
 
 **Files:**
-- Create: `backend/cubebox/models/conversation_chunk.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/conversation_chunk.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Write the model**
 
 ```python
-# backend/cubebox/models/conversation_chunk.py
+# backend/cubeplex/models/conversation_chunk.py
 """Search index chunk — sliding window over a conversation's messages."""
 
 from typing import Any, ClassVar
@@ -160,13 +160,13 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import Column, Index
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
-from cubebox.models.public_id import PREFIX_CONV_CHUNK, generate_public_id
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
+from cubeplex.models.public_id import PREFIX_CONV_CHUNK, generate_public_id
 
 VECTOR_DIM = 1024
 
 
-class ConversationChunk(CubeboxBase, OrgScopedMixin, table=True):
+class ConversationChunk(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = PREFIX_CONV_CHUNK
     __tablename__ = "conversation_chunks"
     __table_args__ = (
@@ -193,24 +193,24 @@ class ConversationChunk(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: Export from package init**
 
-Edit `backend/cubebox/models/__init__.py`. Find the existing import block and
+Edit `backend/cubeplex/models/__init__.py`. Find the existing import block and
 add:
 
 ```python
-from cubebox.models.conversation_chunk import ConversationChunk  # noqa: F401
+from cubeplex.models.conversation_chunk import ConversationChunk  # noqa: F401
 ```
 
 and append `"ConversationChunk"` to the `__all__` list (if present).
 
 - [ ] **Step 3: Type-check**
 
-Run: `uv run mypy cubebox/models/conversation_chunk.py`
+Run: `uv run mypy cubeplex/models/conversation_chunk.py`
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/models/conversation_chunk.py backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/conversation_chunk.py backend/cubeplex/models/__init__.py
 git commit -m "feat(models): ConversationChunk for hybrid search"
 ```
 
@@ -219,13 +219,13 @@ git commit -m "feat(models): ConversationChunk for hybrid search"
 ## Task 3: `EmbeddingJob` model
 
 **Files:**
-- Create: `backend/cubebox/models/embedding_job.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/embedding_job.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Write the model**
 
 ```python
-# backend/cubebox/models/embedding_job.py
+# backend/cubeplex/models/embedding_job.py
 """Async work queue for embedding chunks (Postgres-only, no Redis)."""
 
 from datetime import UTC, datetime
@@ -235,8 +235,8 @@ from typing import ClassVar
 from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
-from cubebox.models.public_id import PREFIX_EMBEDDING_JOB, generate_public_id
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
+from cubeplex.models.public_id import PREFIX_EMBEDDING_JOB, generate_public_id
 
 
 class EmbeddingJobState(StrEnum):
@@ -246,7 +246,7 @@ class EmbeddingJobState(StrEnum):
     dead = "dead"
 
 
-class EmbeddingJob(CubeboxBase, OrgScopedMixin, table=True):
+class EmbeddingJob(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = PREFIX_EMBEDDING_JOB
     __tablename__ = "embedding_jobs"
     __table_args__ = (
@@ -278,21 +278,21 @@ class EmbeddingJob(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: Export from package init**
 
-Edit `backend/cubebox/models/__init__.py`:
+Edit `backend/cubeplex/models/__init__.py`:
 
 ```python
-from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState  # noqa: F401
+from cubeplex.models.embedding_job import EmbeddingJob, EmbeddingJobState  # noqa: F401
 ```
 
 - [ ] **Step 3: Type-check**
 
-Run: `uv run mypy cubebox/models/embedding_job.py`
+Run: `uv run mypy cubeplex/models/embedding_job.py`
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/models/embedding_job.py backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/embedding_job.py backend/cubeplex/models/__init__.py
 git commit -m "feat(models): EmbeddingJob queue for async indexing"
 ```
 
@@ -301,13 +301,13 @@ git commit -m "feat(models): EmbeddingJob queue for async indexing"
 ## Task 4: `SearchBackfillProgress` model
 
 **Files:**
-- Create: `backend/cubebox/models/search_backfill_progress.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Create: `backend/cubeplex/models/search_backfill_progress.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 
 - [ ] **Step 1: Write the model**
 
 ```python
-# backend/cubebox/models/search_backfill_progress.py
+# backend/cubeplex/models/search_backfill_progress.py
 """Backfill cursor — lets the script resume after interruption."""
 
 from typing import ClassVar
@@ -315,11 +315,11 @@ from typing import ClassVar
 from sqlalchemy import Index
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase, OrgScopedMixin
-from cubebox.models.public_id import PREFIX_BACKFILL, generate_public_id
+from cubeplex.models.mixins import CubeplexBase, OrgScopedMixin
+from cubeplex.models.public_id import PREFIX_BACKFILL, generate_public_id
 
 
-class SearchBackfillProgress(CubeboxBase, OrgScopedMixin, table=True):
+class SearchBackfillProgress(CubeplexBase, OrgScopedMixin, table=True):
     _PREFIX: ClassVar[str] = PREFIX_BACKFILL
     __tablename__ = "search_backfill_progress"
     __table_args__ = (Index("ix_sbp_ws", "workspace_id", unique=True),)
@@ -336,21 +336,21 @@ class SearchBackfillProgress(CubeboxBase, OrgScopedMixin, table=True):
 
 - [ ] **Step 2: Export**
 
-Edit `backend/cubebox/models/__init__.py`:
+Edit `backend/cubeplex/models/__init__.py`:
 
 ```python
-from cubebox.models.search_backfill_progress import SearchBackfillProgress  # noqa: F401
+from cubeplex.models.search_backfill_progress import SearchBackfillProgress  # noqa: F401
 ```
 
 - [ ] **Step 3: Type-check**
 
-Run: `uv run mypy cubebox/models/search_backfill_progress.py`
+Run: `uv run mypy cubeplex/models/search_backfill_progress.py`
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/models/search_backfill_progress.py backend/cubebox/models/__init__.py
+git add backend/cubeplex/models/search_backfill_progress.py backend/cubeplex/models/__init__.py
 git commit -m "feat(models): SearchBackfillProgress for resumable backfill"
 ```
 
@@ -424,7 +424,7 @@ search:
 Run from `backend/`:
 
 ```bash
-uv run python -c "from cubebox.config import config; print(config.get('search.embedding.model'))"
+uv run python -c "from cubeplex.config import config; print(config.get('search.embedding.model'))"
 ```
 
 Expected: prints `qwen3-embedding-0.6b`.
@@ -610,8 +610,8 @@ Expected: shows the new revision id.
 - [ ] **Step 5: Sanity SQL**
 
 ```bash
-psql "$CUBEBOX_DATABASE__NAME" -c "\dt conversation_chunks embedding_jobs search_backfill_progress"
-psql "$CUBEBOX_DATABASE__NAME" -c "\di ix_chunks_embedding_hnsw"
+psql "$CUBEPLEX_DATABASE__NAME" -c "\dt conversation_chunks embedding_jobs search_backfill_progress"
+psql "$CUBEPLEX_DATABASE__NAME" -c "\di ix_chunks_embedding_hnsw"
 ```
 
 Expected: all three tables listed; HNSW index exists.
@@ -635,8 +635,8 @@ together so the implementing engineer can see how they fit.
 ## Task 8: Text extractor
 
 **Files:**
-- Create: `backend/cubebox/search/__init__.py` (empty marker)
-- Create: `backend/cubebox/search/text_extract.py`
+- Create: `backend/cubeplex/search/__init__.py` (empty marker)
+- Create: `backend/cubeplex/search/text_extract.py`
 - Create: `backend/tests/search/__init__.py` (empty marker)
 - Create: `backend/tests/search/test_text_extract.py`
 
@@ -655,7 +655,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.search.text_extract import extract_searchable_text
+from cubeplex.search.text_extract import extract_searchable_text
 
 
 def test_user_message_text() -> None:
@@ -700,7 +700,7 @@ Expected: collection error or `ImportError` (module doesn't exist).
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/search/text_extract.py
+# backend/cubeplex/search/text_extract.py
 """Extract human-readable, search-worthy text from a cubepi message."""
 
 from cubepi.providers.base import (
@@ -754,10 +754,10 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-mkdir -p backend/cubebox/search backend/tests/search
-touch backend/cubebox/search/__init__.py backend/tests/search/__init__.py
-git add backend/cubebox/search/__init__.py backend/tests/search/__init__.py \
-        backend/cubebox/search/text_extract.py backend/tests/search/test_text_extract.py
+mkdir -p backend/cubeplex/search backend/tests/search
+touch backend/cubeplex/search/__init__.py backend/tests/search/__init__.py
+git add backend/cubeplex/search/__init__.py backend/tests/search/__init__.py \
+        backend/cubeplex/search/text_extract.py backend/tests/search/test_text_extract.py
 git commit -m "feat(search): text extractor for cubepi messages"
 ```
 
@@ -766,14 +766,14 @@ git commit -m "feat(search): text extractor for cubepi messages"
 ## Task 9: Chunker
 
 **Files:**
-- Create: `backend/cubebox/search/chunker.py`
+- Create: `backend/cubeplex/search/chunker.py`
 - Create: `backend/tests/search/test_chunker.py`
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
 # backend/tests/search/test_chunker.py
-from cubebox.search.chunker import Chunk, MessageInput, chunk_messages
+from cubeplex.search.chunker import Chunk, MessageInput, chunk_messages
 
 
 def _msg(seq: int, text: str) -> MessageInput:
@@ -825,7 +825,7 @@ Expected: ImportError.
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/search/chunker.py
+# backend/cubeplex/search/chunker.py
 """Sliding-window chunker. Token counting via tiktoken cl100k_base."""
 
 from dataclasses import dataclass
@@ -908,7 +908,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/search/chunker.py backend/tests/search/test_chunker.py
+git add backend/cubeplex/search/chunker.py backend/tests/search/test_chunker.py
 git commit -m "feat(search): sliding-window chunker"
 ```
 
@@ -917,14 +917,14 @@ git commit -m "feat(search): sliding-window chunker"
 ## Task 10: RRF fusion
 
 **Files:**
-- Create: `backend/cubebox/search/rrf.py`
+- Create: `backend/cubeplex/search/rrf.py`
 - Create: `backend/tests/search/test_rrf.py`
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
 # backend/tests/search/test_rrf.py
-from cubebox.search.rrf import rrf_fuse
+from cubeplex.search.rrf import rrf_fuse
 
 
 def test_same_doc_top_of_both_lists_wins() -> None:
@@ -956,7 +956,7 @@ Expected: ImportError.
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/search/rrf.py
+# backend/cubeplex/search/rrf.py
 """Reciprocal Rank Fusion. Sum of 1/(k+rank) across input ranked lists."""
 
 from collections.abc import Iterable
@@ -987,7 +987,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/search/rrf.py backend/tests/search/test_rrf.py
+git add backend/cubeplex/search/rrf.py backend/tests/search/test_rrf.py
 git commit -m "feat(search): reciprocal rank fusion"
 ```
 
@@ -996,14 +996,14 @@ git commit -m "feat(search): reciprocal rank fusion"
 ## Task 11: Snippet + match offsets
 
 **Files:**
-- Create: `backend/cubebox/search/snippet.py`
+- Create: `backend/cubeplex/search/snippet.py`
 - Create: `backend/tests/search/test_snippet.py`
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
 # backend/tests/search/test_snippet.py
-from cubebox.search.snippet import extract_snippet
+from cubeplex.search.snippet import extract_snippet
 
 
 def test_keyword_hit_centers_window() -> None:
@@ -1042,7 +1042,7 @@ Expected: ImportError.
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/search/snippet.py
+# backend/cubeplex/search/snippet.py
 """Build a short snippet around the first literal match. NFC + case-fold."""
 
 import unicodedata
@@ -1094,7 +1094,7 @@ Expected: all pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/search/snippet.py backend/tests/search/test_snippet.py
+git add backend/cubeplex/search/snippet.py backend/tests/search/test_snippet.py
 git commit -m "feat(search): snippet + match offsets extractor"
 ```
 
@@ -1103,14 +1103,14 @@ git commit -m "feat(search): snippet + match offsets extractor"
 ## Task 12: Lexical backend protocol + PGroonga impl
 
 **Files:**
-- Create: `backend/cubebox/search/lexical/__init__.py`
-- Create: `backend/cubebox/search/lexical/base.py`
-- Create: `backend/cubebox/search/lexical/pgroonga.py`
+- Create: `backend/cubeplex/search/lexical/__init__.py`
+- Create: `backend/cubeplex/search/lexical/base.py`
+- Create: `backend/cubeplex/search/lexical/pgroonga.py`
 
 - [ ] **Step 1: Write the Protocol + result type**
 
 ```python
-# backend/cubebox/search/lexical/base.py
+# backend/cubeplex/search/lexical/base.py
 """Lexical search backend abstraction. One impl per Postgres extension."""
 
 from dataclasses import dataclass
@@ -1145,10 +1145,10 @@ class LexicalSearchBackend(Protocol):
 - [ ] **Step 2: Write the PGroonga implementation**
 
 ```python
-# backend/cubebox/search/lexical/pgroonga.py
+# backend/cubeplex/search/lexical/pgroonga.py
 """PGroonga backend — `&@~` operator with pgroonga_score()."""
 
-from cubebox.search.lexical.base import LexicalSearchBackend, LexicalSqlBundle
+from cubeplex.search.lexical.base import LexicalSearchBackend, LexicalSqlBundle
 
 
 class PgroongaBackend(LexicalSearchBackend):
@@ -1178,7 +1178,7 @@ class PgroongaBackend(LexicalSearchBackend):
 
 ```python
 # backend/tests/search/test_lexical_backends.py
-from cubebox.search.lexical.pgroonga import PgroongaBackend
+from cubeplex.search.lexical.pgroonga import PgroongaBackend
 
 
 def test_pgroonga_strips_disallowed_chars() -> None:
@@ -1197,12 +1197,12 @@ def test_pgroonga_sql_has_expected_binds() -> None:
 - [ ] **Step 4: Make package init expose them**
 
 ```python
-# backend/cubebox/search/lexical/__init__.py
+# backend/cubeplex/search/lexical/__init__.py
 """Lexical backend selection — config-driven."""
 
-from cubebox.config import config
-from cubebox.search.lexical.base import LexicalSearchBackend
-from cubebox.search.lexical.pgroonga import PgroongaBackend
+from cubeplex.config import config
+from cubeplex.search.lexical.base import LexicalSearchBackend
+from cubeplex.search.lexical.pgroonga import PgroongaBackend
 
 
 def build_lexical_backend() -> LexicalSearchBackend:
@@ -1210,7 +1210,7 @@ def build_lexical_backend() -> LexicalSearchBackend:
     if name == "pgroonga":
         return PgroongaBackend()
     if name == "pg_bigm":
-        from cubebox.search.lexical.pg_bigm import PgBigmBackend
+        from cubeplex.search.lexical.pg_bigm import PgBigmBackend
 
         return PgBigmBackend()
     raise RuntimeError(f"Unknown lexical backend: {name}")
@@ -1227,7 +1227,7 @@ Expected: pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/search/lexical/
+git add backend/cubeplex/search/lexical/
 git add backend/tests/search/test_lexical_backends.py
 git commit -m "feat(search): LexicalSearchBackend protocol + PGroonga"
 ```
@@ -1237,16 +1237,16 @@ git commit -m "feat(search): LexicalSearchBackend protocol + PGroonga"
 ## Task 13: pg_bigm backend
 
 **Files:**
-- Create: `backend/cubebox/search/lexical/pg_bigm.py`
+- Create: `backend/cubeplex/search/lexical/pg_bigm.py`
 - Modify: `backend/tests/search/test_lexical_backends.py`
 
 - [ ] **Step 1: Implementation**
 
 ```python
-# backend/cubebox/search/lexical/pg_bigm.py
+# backend/cubeplex/search/lexical/pg_bigm.py
 """pg_bigm backend — LIKE-based with bigm_similarity()."""
 
-from cubebox.search.lexical.base import LexicalSearchBackend, LexicalSqlBundle
+from cubeplex.search.lexical.base import LexicalSearchBackend, LexicalSqlBundle
 
 
 class PgBigmBackend(LexicalSearchBackend):
@@ -1275,7 +1275,7 @@ class PgBigmBackend(LexicalSearchBackend):
 Add to `backend/tests/search/test_lexical_backends.py`:
 
 ```python
-from cubebox.search.lexical.pg_bigm import PgBigmBackend
+from cubeplex.search.lexical.pg_bigm import PgBigmBackend
 
 
 def test_pgbigm_escapes_like_wildcards() -> None:
@@ -1301,7 +1301,7 @@ Expected: pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/search/lexical/pg_bigm.py backend/tests/search/test_lexical_backends.py
+git add backend/cubeplex/search/lexical/pg_bigm.py backend/tests/search/test_lexical_backends.py
 git commit -m "feat(search): pg_bigm backend for AWS RDS deployments"
 ```
 
@@ -1310,7 +1310,7 @@ git commit -m "feat(search): pg_bigm backend for AWS RDS deployments"
 ## Task 14: Embedding provider
 
 **Files:**
-- Create: `backend/cubebox/search/embedding.py`
+- Create: `backend/cubeplex/search/embedding.py`
 - Create: `backend/tests/search/test_embedding_provider.py`
 
 - [ ] **Step 1: Write failing tests using httpx mock**
@@ -1320,7 +1320,7 @@ git commit -m "feat(search): pg_bigm backend for AWS RDS deployments"
 import httpx
 import pytest
 
-from cubebox.search.embedding import EmbeddingProvider
+from cubeplex.search.embedding import EmbeddingProvider
 
 
 @pytest.mark.asyncio
@@ -1380,7 +1380,7 @@ Expected: ImportError.
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/search/embedding.py
+# backend/cubeplex/search/embedding.py
 """OpenAI-protocol embedding HTTP client.
 
 Configured to talk to DashScope, OpenAI, or any local /v1-compatible server.
@@ -1393,7 +1393,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from cubebox.config import config
+from cubeplex.config import config
 
 
 class EmbeddingProvider:
@@ -1480,7 +1480,7 @@ Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/search/embedding.py backend/tests/search/test_embedding_provider.py
+git add backend/cubeplex/search/embedding.py backend/tests/search/test_embedding_provider.py
 git commit -m "feat(search): OpenAI-protocol embedding provider"
 ```
 
@@ -1493,19 +1493,19 @@ git commit -m "feat(search): OpenAI-protocol embedding provider"
 ## Task 15: `ConversationChunkRepository`
 
 **Files:**
-- Create: `backend/cubebox/repositories/conversation_chunk.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/conversation_chunk.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: Write the repo**
 
 ```python
-# backend/cubebox/repositories/conversation_chunk.py
+# backend/cubeplex/repositories/conversation_chunk.py
 """Repository for conversation_chunks."""
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.conversation_chunk import ConversationChunk
+from cubeplex.models.conversation_chunk import ConversationChunk
 
 
 class ConversationChunkRepository:
@@ -1554,21 +1554,21 @@ class ConversationChunkRepository:
 
 - [ ] **Step 2: Export**
 
-Edit `backend/cubebox/repositories/__init__.py`:
+Edit `backend/cubeplex/repositories/__init__.py`:
 
 ```python
-from cubebox.repositories.conversation_chunk import ConversationChunkRepository  # noqa: F401
+from cubeplex.repositories.conversation_chunk import ConversationChunkRepository  # noqa: F401
 ```
 
 - [ ] **Step 3: Type-check**
 
-Run: `uv run mypy cubebox/repositories/conversation_chunk.py`
+Run: `uv run mypy cubeplex/repositories/conversation_chunk.py`
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/repositories/conversation_chunk.py backend/cubebox/repositories/__init__.py
+git add backend/cubeplex/repositories/conversation_chunk.py backend/cubeplex/repositories/__init__.py
 git commit -m "feat(repos): ConversationChunkRepository"
 ```
 
@@ -1577,13 +1577,13 @@ git commit -m "feat(repos): ConversationChunkRepository"
 ## Task 16: `EmbeddingJobRepository`
 
 **Files:**
-- Create: `backend/cubebox/repositories/embedding_job.py`
-- Modify: `backend/cubebox/repositories/__init__.py`
+- Create: `backend/cubeplex/repositories/embedding_job.py`
+- Modify: `backend/cubeplex/repositories/__init__.py`
 
 - [ ] **Step 1: Write the repo**
 
 ```python
-# backend/cubebox/repositories/embedding_job.py
+# backend/cubeplex/repositories/embedding_job.py
 """Repository for the async embedding queue."""
 
 from datetime import UTC, datetime, timedelta
@@ -1591,7 +1591,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models.embedding_job import EmbeddingJob, EmbeddingJobState
+from cubeplex.models.embedding_job import EmbeddingJob, EmbeddingJobState
 
 
 class EmbeddingJobRepository:
@@ -1698,15 +1698,15 @@ class EmbeddingJobRepository:
 - [ ] **Step 2: Export**
 
 ```python
-# backend/cubebox/repositories/__init__.py
-from cubebox.repositories.embedding_job import EmbeddingJobRepository  # noqa: F401
+# backend/cubeplex/repositories/__init__.py
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository  # noqa: F401
 ```
 
 - [ ] **Step 3: Type-check + commit**
 
 ```bash
-cd backend && uv run mypy cubebox/repositories/embedding_job.py
-git add backend/cubebox/repositories/embedding_job.py backend/cubebox/repositories/__init__.py
+cd backend && uv run mypy cubeplex/repositories/embedding_job.py
+git add backend/cubeplex/repositories/embedding_job.py backend/cubeplex/repositories/__init__.py
 git commit -m "feat(repos): EmbeddingJobRepository with claim/done/fail"
 ```
 
@@ -1715,29 +1715,29 @@ git commit -m "feat(repos): EmbeddingJobRepository with claim/done/fail"
 ## Task 17: Indexing worker
 
 **Files:**
-- Create: `backend/cubebox/search/worker.py`
+- Create: `backend/cubeplex/search/worker.py`
 - Create: `backend/tests/search/test_worker.py`
 
 - [ ] **Step 1: Write the worker**
 
 ```python
-# backend/cubebox/search/worker.py
+# backend/cubeplex/search/worker.py
 """Drains embedding_jobs: claim → load messages → chunk → embed → write."""
 
 import asyncio
 import logging
 from collections.abc import Sequence
 
-from cubebox.agents.checkpointer import init_checkpointer
-from cubebox.config import config
-from cubebox.db.engine import async_session_maker
-from cubebox.models.conversation_chunk import ConversationChunk
-from cubebox.models.embedding_job import EmbeddingJob
-from cubebox.repositories.conversation_chunk import ConversationChunkRepository
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.search.chunker import MessageInput, chunk_messages
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.text_extract import extract_searchable_text
+from cubeplex.agents.checkpointer import init_checkpointer
+from cubeplex.config import config
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.conversation_chunk import ConversationChunk
+from cubeplex.models.embedding_job import EmbeddingJob
+from cubeplex.repositories.conversation_chunk import ConversationChunkRepository
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.search.chunker import MessageInput, chunk_messages
+from cubeplex.search.embedding import EmbeddingProvider
+from cubeplex.search.text_extract import extract_searchable_text
 
 logger = logging.getLogger(__name__)
 
@@ -1855,11 +1855,11 @@ class EmbeddingWorker:
 # backend/tests/search/test_worker.py
 import pytest
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.embedding_job import EmbeddingJobState
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.worker import EmbeddingWorker
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.embedding_job import EmbeddingJobState
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.search.embedding import EmbeddingProvider
+from cubeplex.search.worker import EmbeddingWorker
 
 
 class _FakeProvider(EmbeddingProvider):
@@ -1893,7 +1893,7 @@ async def test_worker_processes_job_for_seeded_conversation(seeded_conversation)
     assert job is not None
     # Verify chunks exist and the job is marked done.
     async with async_session_maker() as session:
-        from cubebox.repositories.conversation_chunk import ConversationChunkRepository
+        from cubeplex.repositories.conversation_chunk import ConversationChunkRepository
 
         n = await ConversationChunkRepository(session).count_for_conversation(conv_id)
     assert n > 0
@@ -1908,9 +1908,9 @@ tests/conftest.py`):
 ```python
 import pytest_asyncio
 
-from cubebox.agents.checkpointer import init_checkpointer
-from cubebox.db.engine import async_session_maker
-from cubebox.models.conversation import Conversation
+from cubeplex.agents.checkpointer import init_checkpointer
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.conversation import Conversation
 
 
 @pytest_asyncio.fixture
@@ -1956,7 +1956,7 @@ import in conftest before continuing.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/search/worker.py backend/tests/search/test_worker.py \
+git add backend/cubeplex/search/worker.py backend/tests/search/test_worker.py \
         backend/tests/conftest.py
 git commit -m "feat(search): EmbeddingWorker — claim, chunk, embed, write"
 ```
@@ -1966,17 +1966,17 @@ git commit -m "feat(search): EmbeddingWorker — claim, chunk, embed, write"
 ## Task 18: Indexer module + incremental hook
 
 **Files:**
-- Create: `backend/cubebox/search/indexer.py`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Create: `backend/cubeplex/search/indexer.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 
 - [ ] **Step 1: Write the indexer helper**
 
 ```python
-# backend/cubebox/search/indexer.py
+# backend/cubeplex/search/indexer.py
 """Convenience helpers used by callers that want to (re)index a conversation."""
 
-from cubebox.db.engine import async_session_maker
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.db.engine import async_session_maker
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
 
 
 async def enqueue_index_job(
@@ -2000,16 +2000,16 @@ async def enqueue_index_job(
 
 - [ ] **Step 2: Make failures observable via structured logging**
 
-Edit `backend/cubebox/search/indexer.py` and replace its body with:
+Edit `backend/cubeplex/search/indexer.py` and replace its body with:
 
 ```python
-# backend/cubebox/search/indexer.py
+# backend/cubeplex/search/indexer.py
 """Convenience helpers used by callers that want to (re)index a conversation."""
 
 import logging
 
-from cubebox.db.engine import async_session_maker
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.db.engine import async_session_maker
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
 
 logger = logging.getLogger(__name__)
 
@@ -2052,15 +2052,15 @@ async def enqueue_index_job(
 
 - [ ] **Step 3: Hook into `_update_conversation_timestamp`**
 
-Edit `backend/cubebox/api/routes/v1/conversations.py`. Find
+Edit `backend/cubeplex/api/routes/v1/conversations.py`. Find
 `_update_conversation_timestamp` (around line 74). After
 `await save_conv_repo.mark_active(conversation_id)`, before
 `await save_engine.dispose()`, append:
 
 ```python
             try:
-                from cubebox.config import config as _cfg
-                from cubebox.search.indexer import enqueue_index_job
+                from cubeplex.config import config as _cfg
+                from cubeplex.search.indexer import enqueue_index_job
 
                 if _cfg.get("search.enabled", True):
                     await enqueue_index_job(
@@ -2090,7 +2090,7 @@ Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/search/indexer.py backend/cubebox/api/routes/v1/conversations.py
+git add backend/cubeplex/search/indexer.py backend/cubeplex/api/routes/v1/conversations.py
 git commit -m "feat(search): enqueue index job on run completion (observable)"
 ```
 
@@ -2099,12 +2099,12 @@ git commit -m "feat(search): enqueue index job on run completion (observable)"
 ## Task 19: Wire the worker into FastAPI lifespan
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Read the existing lifespan**
 
 ```bash
-grep -n "lifespan\|app.state" backend/cubebox/api/app.py | head -30
+grep -n "lifespan\|app.state" backend/cubeplex/api/app.py | head -30
 ```
 
 Note the lifespan function name and where startup/shutdown hooks live.
@@ -2114,9 +2114,9 @@ Note the lifespan function name and where startup/shutdown hooks live.
 Inside the lifespan async function, after existing startup logic, add:
 
 ```python
-    from cubebox.config import config as _cfg
-    from cubebox.search.embedding import EmbeddingProvider
-    from cubebox.search.worker import EmbeddingWorker
+    from cubeplex.config import config as _cfg
+    from cubeplex.search.embedding import EmbeddingProvider
+    from cubeplex.search.worker import EmbeddingWorker
 
     worker_task: asyncio.Task[None] | None = None
     app.state.embedding_provider = None
@@ -2167,7 +2167,7 @@ stdout/stderr.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py
+git add backend/cubeplex/api/app.py
 git commit -m "feat(search): start EmbeddingWorker in FastAPI lifespan"
 ```
 
@@ -2191,8 +2191,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_worker_end_to_end(seeded_conversation, monkeypatch) -> None:
     monkeypatch.setenv("DASHSCOPE_API_KEY", "test")
-    from cubebox.search.embedding import EmbeddingProvider
-    from cubebox.search.worker import EmbeddingWorker
+    from cubeplex.search.embedding import EmbeddingProvider
+    from cubeplex.search.worker import EmbeddingWorker
 
     # Use a deterministic provider so the test does not require network.
     class _Det(EmbeddingProvider):
@@ -2209,9 +2209,9 @@ async def test_worker_end_to_end(seeded_conversation, monkeypatch) -> None:
             return [[1.0 / (i + 1)] * self.dimensions for i, _ in enumerate(texts)]
 
     org_id, ws_id, user_id, conv_id = seeded_conversation
-    from cubebox.db.engine import async_session_maker
-    from cubebox.repositories.embedding_job import EmbeddingJobRepository
-    from cubebox.repositories.conversation_chunk import ConversationChunkRepository
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+    from cubeplex.repositories.conversation_chunk import ConversationChunkRepository
 
     async with async_session_maker() as s:
         await EmbeddingJobRepository(s).enqueue(
@@ -2248,13 +2248,13 @@ git commit -m "test(search): worker round-trip smoke"
 ## Task 21: `ConversationSearchService`
 
 **Files:**
-- Create: `backend/cubebox/search/service.py`
+- Create: `backend/cubeplex/search/service.py`
 - Append: `backend/tests/search/test_service.py`
 
 - [ ] **Step 1: Write the service**
 
 ```python
-# backend/cubebox/search/service.py
+# backend/cubeplex/search/service.py
 """Hybrid search: lexical leg + vector leg → RRF → snippet + offsets."""
 
 import asyncio
@@ -2264,12 +2264,12 @@ from dataclasses import dataclass
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.config import config
-from cubebox.models.conversation import Conversation
-from cubebox.search.embedding import EmbeddingProvider
-from cubebox.search.lexical import build_lexical_backend
-from cubebox.search.rrf import rrf_fuse
-from cubebox.search.snippet import Snippet, extract_snippet
+from cubeplex.config import config
+from cubeplex.models.conversation import Conversation
+from cubeplex.search.embedding import EmbeddingProvider
+from cubeplex.search.lexical import build_lexical_backend
+from cubeplex.search.rrf import rrf_fuse
+from cubeplex.search.snippet import Snippet, extract_snippet
 
 logger = logging.getLogger(__name__)
 
@@ -2411,7 +2411,7 @@ class ConversationSearchService:
     async def _hydrate_chunks(self, chunk_ids: list[str]) -> dict[str, dict]:
         if not chunk_ids:
             return {}
-        from cubebox.utils.time import utc_isoformat
+        from cubeplex.utils.time import utc_isoformat
 
         sql = text(
             """
@@ -2455,10 +2455,10 @@ async def test_search_returns_relevant_conversation(seeded_conversation) -> None
     """After indexing, a search for 'docling' returns the seeded conversation."""
     org_id, ws_id, user_id, conv_id = seeded_conversation
     # Run the worker once to populate chunks.
-    from cubebox.search.embedding import EmbeddingProvider
-    from cubebox.search.worker import EmbeddingWorker
-    from cubebox.db.engine import async_session_maker
-    from cubebox.repositories.embedding_job import EmbeddingJobRepository
+    from cubeplex.search.embedding import EmbeddingProvider
+    from cubeplex.search.worker import EmbeddingWorker
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories.embedding_job import EmbeddingJobRepository
 
     class _Det(EmbeddingProvider):
         def __init__(self) -> None:
@@ -2480,7 +2480,7 @@ async def test_search_returns_relevant_conversation(seeded_conversation) -> None
             org_id=org_id, workspace_id=ws_id, creator_user_id=user_id, conversation_id=conv_id,
         )
     await EmbeddingWorker(_Det())._claim_one()
-    from cubebox.search.service import ConversationSearchService
+    from cubeplex.search.service import ConversationSearchService
 
     async with async_session_maker() as s:
         svc = ConversationSearchService(s, _Det())
@@ -2501,7 +2501,7 @@ Expected: pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/search/service.py backend/tests/search/test_service.py
+git add backend/cubeplex/search/service.py backend/tests/search/test_service.py
 git commit -m "feat(search): ConversationSearchService — hybrid + RRF + snippet"
 ```
 
@@ -2510,14 +2510,14 @@ git commit -m "feat(search): ConversationSearchService — hybrid + RRF + snippe
 ## Task 22: API schemas + route
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/conversation_search.py`
-- Create: `backend/cubebox/api/routes/v1/conversation_search.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
+- Create: `backend/cubeplex/api/schemas/conversation_search.py`
+- Create: `backend/cubeplex/api/routes/v1/conversation_search.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
 
 - [ ] **Step 1: Schemas**
 
 ```python
-# backend/cubebox/api/schemas/conversation_search.py
+# backend/cubeplex/api/schemas/conversation_search.py
 from pydantic import BaseModel, Field
 
 
@@ -2541,7 +2541,7 @@ class SearchResponseSchema(BaseModel):
 - [ ] **Step 2: Route**
 
 ```python
-# backend/cubebox/api/routes/v1/conversation_search.py
+# backend/cubeplex/api/routes/v1/conversation_search.py
 """Workspace-scoped conversation search."""
 
 from typing import Annotated
@@ -2549,14 +2549,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.conversation_search import (
+from cubeplex.api.schemas.conversation_search import (
     SearchResponseSchema,
     SearchResultSchema,
 )
-from cubebox.auth.context import RequestContext
-from cubebox.auth.dependencies import require_member
-from cubebox.db import get_session
-from cubebox.search.service import ConversationSearchService
+from cubeplex.auth.context import RequestContext
+from cubeplex.auth.dependencies import require_member
+from cubeplex.db import get_session
+from cubeplex.search.service import ConversationSearchService
 
 router = APIRouter(prefix="/ws/{workspace_id}/conversations", tags=["conversations"])
 
@@ -2599,7 +2599,7 @@ async def search_conversations(
 
 - [ ] **Step 3: Wire the router**
 
-Edit `backend/cubebox/api/routes/v1/__init__.py`. Find the line that
+Edit `backend/cubeplex/api/routes/v1/__init__.py`. Find the line that
 includes the existing `conversations` router and add a second
 `include_router` call for `conversation_search.router`. Order matters only
 inside FastAPI when prefixes collide; this one has the literal `/search`
@@ -2658,9 +2658,9 @@ Expected: pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/conversation_search.py \
-        backend/cubebox/api/routes/v1/conversation_search.py \
-        backend/cubebox/api/routes/v1/__init__.py \
+git add backend/cubeplex/api/schemas/conversation_search.py \
+        backend/cubeplex/api/routes/v1/conversation_search.py \
+        backend/cubeplex/api/routes/v1/__init__.py \
         backend/tests/api/test_conversation_search_route.py
 git commit -m "feat(api): GET /conversations/search route"
 ```
@@ -2693,12 +2693,12 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.db.engine import async_session_maker
-from cubebox.models.conversation import Conversation
-from cubebox.models.organization import Organization
-from cubebox.models.search_backfill_progress import SearchBackfillProgress
-from cubebox.models.workspace import Workspace
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.organization import Organization
+from cubeplex.models.search_backfill_progress import SearchBackfillProgress
+from cubeplex.models.workspace import Workspace
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
 
 logger = logging.getLogger("backfill")
 
@@ -2820,17 +2820,17 @@ async def test_e2e_search_finds_seeded_conversations(
 ) -> None:
     # Skip if no embedding key — keep CI honest.
     if not os.environ.get("DASHSCOPE_API_KEY") and not os.environ.get(
-        "CUBEBOX_TEST_LOCAL_EMBED"
+        "CUBEPLEX_TEST_LOCAL_EMBED"
     ):
-        pytest.skip("No embedding endpoint configured; set DASHSCOPE_API_KEY or CUBEBOX_TEST_LOCAL_EMBED.")
+        pytest.skip("No embedding endpoint configured; set DASHSCOPE_API_KEY or CUBEPLEX_TEST_LOCAL_EMBED.")
 
     ws = seeded_workspace
     convs = seed_conversations_with_content  # fixture yields a list of (conv_id, gist)
     # Enqueue + drive worker once per conversation.
-    from cubebox.db.engine import async_session_maker
-    from cubebox.repositories.embedding_job import EmbeddingJobRepository
-    from cubebox.search.embedding import EmbeddingProvider
-    from cubebox.search.worker import EmbeddingWorker
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+    from cubeplex.search.embedding import EmbeddingProvider
+    from cubeplex.search.worker import EmbeddingWorker
 
     async with async_session_maker() as s:
         for conv_id, _ in convs:
@@ -2987,7 +2987,7 @@ export * from './conversation-search'
 - [ ] **Step 3: Build core**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build
+cd frontend && pnpm --filter @cubeplex/core build
 ```
 
 Expected: success.
@@ -3014,7 +3014,7 @@ git commit -m "feat(core): searchConversations API method"
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createApiClient, searchConversations, type SearchResult } from '@cubebox/core'
+import { createApiClient, searchConversations, type SearchResult } from '@cubeplex/core'
 
 export interface SearchState {
   loading: boolean
@@ -3093,7 +3093,7 @@ git commit -m "feat(web): useConversationSearch debounced hook"
 
 import Link from 'next/link'
 import { useMemo } from 'react'
-import type { SearchResult } from '@cubebox/core'
+import type { SearchResult } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -3345,7 +3345,7 @@ import { ConversationSearch } from '@/components/sidebar/ConversationSearch'
   <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
     <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
   </div>
-  <span className="text-sm font-semibold tracking-tight">cubebox</span>
+  <span className="text-sm font-semibold tracking-tight">cubeplex</span>
   <ConversationSearch wsId={currentWsId} />
 </div>
 ```
@@ -3381,8 +3381,8 @@ Open `messages/zh.json`, mirror under `"sidebar"`:
 - [ ] **Step 4: Type-check + lint**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web type-check
-cd frontend && pnpm --filter @cubebox/web lint
+cd frontend && pnpm --filter @cubeplex/web type-check
+cd frontend && pnpm --filter @cubeplex/web lint
 ```
 
 Expected: clean.

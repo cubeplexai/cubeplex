@@ -14,8 +14,8 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.auth.dependencies import require_org_admin
-from cubebox.models import (  # noqa: F401
+from cubeplex.auth.dependencies import require_org_admin
+from cubeplex.models import (  # noqa: F401
     Membership,
     Organization,
     OrganizationMembership,
@@ -24,7 +24,7 @@ from cubebox.models import (  # noqa: F401
     User,
     Workspace,
 )
-from cubebox.repositories import (
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationMembershipRepository,
     OrganizationRepository,

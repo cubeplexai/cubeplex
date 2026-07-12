@@ -5,7 +5,7 @@ metadata:
   name: egress-webhook
   namespace: opensandbox
   labels:
-    app.kubernetes.io/part-of: cubebox-egress
+    app.kubernetes.io/part-of: cubeplex-egress
 subjects:
   - kind: ServiceAccount
     name: egress-webhook

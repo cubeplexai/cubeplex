@@ -1,5 +1,5 @@
-from cubebox.agents.schemas import InjectedMessageEvent
-from cubebox.streams.run_manager import cubepi_dict_to_agent_event
+from cubeplex.agents.schemas import InjectedMessageEvent
+from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
 
 
 def test_injected_message_dict_becomes_typed_event():

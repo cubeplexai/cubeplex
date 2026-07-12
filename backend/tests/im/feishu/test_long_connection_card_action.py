@@ -21,7 +21,7 @@ from websockets.frames import Close
 async def test_lc_handler_builds_envelope_and_calls_ingress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im.feishu import long_connection as lc
+    from cubeplex.im.feishu import long_connection as lc
 
     seen: list[dict[str, Any]] = []
 
@@ -54,7 +54,7 @@ async def test_lc_handler_builds_envelope_and_calls_ingress(
         event = _Data()
 
     response = await lc._lc_handle_card_action(
-        _Event(), run_manager=None, redis_key_prefix="cubebox-dev"
+        _Event(), run_manager=None, redis_key_prefix="cubeplex-dev"
     )
     # No toast → response.toast is None or a CallBackToast with empty content
     assert response is not None
@@ -86,7 +86,7 @@ async def test_lc_handler_builds_envelope_and_calls_ingress(
 async def test_lc_handler_carries_toast_when_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.im.feishu import long_connection as lc
+    from cubeplex.im.feishu import long_connection as lc
 
     async def fake_handler(
         envelope: dict[str, Any], *, run_manager: Any = None, redis_key_prefix: str = ""
@@ -110,7 +110,7 @@ async def test_lc_handler_carries_toast_when_set(
         event = _Data()
 
     response = await lc._lc_handle_card_action(
-        _Event(), run_manager=None, redis_key_prefix="cubebox-dev"
+        _Event(), run_manager=None, redis_key_prefix="cubeplex-dev"
     )
     assert response is not None
     assert response.toast is not None
@@ -123,7 +123,7 @@ async def test_lc_handler_tolerates_missing_event_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Defensive: a malformed SDK event shouldn't crash the dispatcher."""
-    from cubebox.im.feishu import long_connection as lc
+    from cubeplex.im.feishu import long_connection as lc
 
     called: list[Any] = []
 
@@ -139,7 +139,7 @@ async def test_lc_handler_tolerates_missing_event_data(
         event = None  # SDK passes None when the payload is missing
 
     response = await lc._lc_handle_card_action(
-        _Event(), run_manager=None, redis_key_prefix="cubebox-dev"
+        _Event(), run_manager=None, redis_key_prefix="cubeplex-dev"
     )
     # The handler is still invoked with an empty envelope; downstream
     # parse_action_payload raises InvalidAction → toast "未知操作".
@@ -149,7 +149,7 @@ async def test_lc_handler_tolerates_missing_event_data(
 
 @pytest.mark.asyncio
 async def test_long_connection_disconnect_disables_reconnect_and_closes_sdk_client() -> None:
-    from cubebox.im.feishu.long_connection import FeishuLongConnection
+    from cubeplex.im.feishu.long_connection import FeishuLongConnection
 
     class _Client:
         def __init__(self) -> None:
@@ -173,7 +173,7 @@ async def test_long_connection_disconnect_disables_reconnect_and_closes_sdk_clie
 
 @pytest.mark.asyncio
 async def test_long_connection_disconnect_runs_sdk_disconnect_on_thread_loop() -> None:
-    from cubebox.im.feishu.long_connection import FeishuLongConnection
+    from cubeplex.im.feishu.long_connection import FeishuLongConnection
 
     loop_ready = threading.Event()
     worker_loop = asyncio.new_event_loop()
@@ -215,7 +215,7 @@ async def test_long_connection_disconnect_runs_sdk_disconnect_on_thread_loop() -
 
 @pytest.mark.asyncio
 async def test_graceful_receiver_suppresses_expected_shutdown_close() -> None:
-    from cubebox.im.feishu.long_connection import _install_graceful_shutdown_receiver
+    from cubeplex.im.feishu.long_connection import _install_graceful_shutdown_receiver
 
     class _Conn:
         async def recv(self) -> bytes:

@@ -5,7 +5,7 @@ import { X, Copy, Check, Plug, Maximize2, Minimize2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { getToolIcon, getParamSummary } from '@/lib/toolIcons'
-import { useMcpToolRegistryStore } from '@cubebox/core'
+import { useMcpToolRegistryStore } from '@cubeplex/core'
 
 interface ToolHeaderSource {
   kind: 'tool'

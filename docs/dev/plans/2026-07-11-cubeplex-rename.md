@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rename every first-party active project identifier from CubeBox to CubePlex without retaining compatibility aliases.
+**Goal:** Rename every first-party active project identifier from CubePlex to CubePlex without retaining compatibility aliases.
 
 **Architecture:** The migration is a controlled mechanical rename: first add an audit that defines the allowed identifier set, then rename tracked paths and text using ordered, case-sensitive substitutions. Package/import changes, operational manifests, and product copy are updated as coherent groups, then builds and audits prove that no active old-name references remain.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Rename all owned forms exactly: `cubebox` → `cubeplex`, `Cubebox` → `Cubeplex`, `CubeBox` → `CubePlex`, `CUBEBOX` → `CUBEPLEX`.
+- Rename all owned forms exactly: `cubeplex` → `cubeplex`, `Cubeplex` → `Cubeplex`, `CubePlex` → `CubePlex`, `CUBEPLEX` → `CUBEPLEX`.
 - Treat case-sensitive and case-insensitive search results as separate acceptance checks.
 - Modify only tracked first-party files through `git ls-files`; exclude `.git`, `node_modules`, `.venv`, and vendored upstream source unless the repository-owned integration identifier requires the change.
 - Do not retain aliases, redirect packages, or old environment-variable names.
@@ -39,7 +39,7 @@ import subprocess
 
 
 ROOT = Path(__file__).parents[2]
-OLD_NAME = "cubebox"
+OLD_NAME = "cubeplex"
 EXCLUDED_PREFIXES = ("backend/alembic/versions/",)
 
 
@@ -68,7 +68,7 @@ def test_tracked_files_do_not_contain_old_project_name() -> None:
 
 Run: `cd backend && uv run pytest tests/test_project_name_audit.py -v | tee ../tmp/cubeplex-audit-red.log`
 
-Expected: FAIL with tracked `cubebox` references, including `pyproject.toml` and source imports.
+Expected: FAIL with tracked `cubeplex` references, including `pyproject.toml` and source imports.
 
 - [ ] **Step 3: Add an explicit temporary migration exemption for historical Alembic revisions**
 
@@ -84,19 +84,19 @@ git commit -m "test: enforce CubePlex project naming"
 ### Task 2: Rename tracked filesystem paths and backend Python namespace
 
 **Files:**
-- Rename: `backend/cubebox/` → `backend/cubeplex/`
-- Rename: `deploy/kubernetes/charts/cubebox/` → `deploy/kubernetes/charts/cubeplex/`
+- Rename: `backend/cubeplex/` → `backend/cubeplex/`
+- Rename: `deploy/kubernetes/charts/cubeplex/` → `deploy/kubernetes/charts/cubeplex/`
 - Modify: `backend/pyproject.toml`, `backend/uv.lock`, `backend/main.py`, `backend/alembic.ini`, `backend/alembic/env.py`, `backend/tests/**`, `backend/scripts/**`, `backend/config*.yaml`, `Makefile`, `scripts/**`
 
 **Interfaces:**
 - Consumes: the Task 1 audit.
-- Produces: importable `cubeplex` Python package and `cubeplex` CLI entry point; no `cubebox` package directory remains.
+- Produces: importable `cubeplex` Python package and `cubeplex` CLI entry point; no `cubeplex` package directory remains.
 
 - [ ] **Step 1: Rename tracked directories with Git**
 
 ```bash
-git mv backend/cubebox backend/cubeplex
-git mv deploy/kubernetes/charts/cubebox deploy/kubernetes/charts/cubeplex
+git mv backend/cubeplex backend/cubeplex
+git mv deploy/kubernetes/charts/cubeplex deploy/kubernetes/charts/cubeplex
 ```
 
 - [ ] **Step 2: Apply ordered case-sensitive substitutions to tracked non-migration text files**
@@ -106,7 +106,7 @@ Run this from the repository root; it operates only on Git-tracked UTF-8 files a
 ```bash
 git ls-files -z \
   | grep -zv '^backend/alembic/versions/' \
-  | xargs -0 -r perl -pi -e 's/CUBEBOX/CUBEPLEX/g; s/CubeBox/CubePlex/g; s/Cubebox/Cubeplex/g; s/cubebox/cubeplex/g'
+  | xargs -0 -r perl -pi -e 's/CUBEPLEX/CUBEPLEX/g; s/CubePlex/CubePlex/g; s/Cubeplex/Cubeplex/g; s/cubeplex/cubeplex/g'
 ```
 
 - [ ] **Step 3: Update backend packaging deliberately**
@@ -147,7 +147,7 @@ git commit -m "refactor: rename backend package to CubePlex"
 
 - [ ] **Step 1: Update workspace package identifiers and imports**
 
-Ensure `frontend/packages/core/package.json` is named `@cubeplex/core`, then replace every `@cubebox/core` import/reference with `@cubeplex/core`. Rename frontend and docs workspace package names from `cubebox-*` to `cubeplex-*`.
+Ensure `frontend/packages/core/package.json` is named `@cubeplex/core`, then replace every `@cubeplex/core` import/reference with `@cubeplex/core`. Rename frontend and docs workspace package names from `cubeplex-*` to `cubeplex-*`.
 
 - [ ] **Step 2: Regenerate pnpm lockfiles from the owning workspaces**
 
@@ -163,7 +163,7 @@ cd frontend && pnpm --filter @cubeplex/core build | tee ../tmp/cubeplex-core-bui
 cd docs/site && pnpm build | tee ../../tmp/cubeplex-docs-build.log
 ```
 
-Expected: both commands exit 0; package resolution must not mention `@cubebox/core`.
+Expected: both commands exit 0; package resolution must not mention `@cubeplex/core`.
 
 - [ ] **Step 4: Commit frontend and documentation rename**
 
@@ -184,7 +184,7 @@ git commit -m "refactor: rename frontend and docs to CubePlex"
 - [ ] **Step 1: Audit all deployment values before editing**
 
 ```bash
-rg -n -i 'cubebox' deploy backend/config*.yaml backend/README.md frontend/docs
+rg -n -i 'cubeplex' deploy backend/config*.yaml backend/README.md frontend/docs
 ```
 
 Classify each result as Docker/Compose, Kubernetes/Helm, configuration/environment variable, or prose/example. Do not change a Kubernetes selector without changing every matching deployment/service/template selector in the same commit.
@@ -195,7 +195,7 @@ Use the tracked-files command from Task 2, scoped to `deploy/`, `backend/config*
 
 - [ ] **Step 3: Add explicit upgrade notes**
 
-In `deploy/README.md`, add a CubeBox-to-CubePlex migration section stating that changed image names, Compose volumes, Kubernetes/Helm resource names, release names, environment-variable prefixes, and database names are breaking changes. State that operators must migrate data/values intentionally rather than expecting an in-place rename.
+In `deploy/README.md`, add a CubePlex-to-CubePlex migration section stating that changed image names, Compose volumes, Kubernetes/Helm resource names, release names, environment-variable prefixes, and database names are breaking changes. State that operators must migrate data/values intentionally rather than expecting an in-place rename.
 
 - [ ] **Step 4: Render and validate deployment definitions**
 
@@ -227,8 +227,8 @@ git commit -m "chore: rename deployment identifiers to CubePlex"
 - [ ] **Step 1: List remaining text matches with both search modes**
 
 ```bash
-rg -n 'cubebox|Cubebox|CubeBox|CUBEBOX' -g '!backend/alembic/versions/**' -g '!**/node_modules/**' -g '!**/.venv/**' -g '!**/.git/**' .
-rg -n -i 'cubebox' -g '!backend/alembic/versions/**' -g '!**/node_modules/**' -g '!**/.venv/**' -g '!**/.git/**' .
+rg -n 'cubeplex|Cubeplex|CubePlex|CUBEPLEX' -g '!backend/alembic/versions/**' -g '!**/node_modules/**' -g '!**/.venv/**' -g '!**/.git/**' .
+rg -n -i 'cubeplex' -g '!backend/alembic/versions/**' -g '!**/node_modules/**' -g '!**/.venv/**' -g '!**/.git/**' .
 ```
 
 Expected: no output from either command. Inspect every remaining match, including immutable historical migration metadata, and either safely rename it or record its external-state justification in `deploy/README.md`.
@@ -236,8 +236,8 @@ Expected: no output from either command. Inspect every remaining match, includin
 - [ ] **Step 2: List remaining filesystem-path matches with both search modes**
 
 ```bash
-find . -path './.git' -prune -o -path '*/node_modules' -prune -o -path '*/.venv' -prune -o -name '*cubebox*' -print
-find . -path './.git' -prune -o -path '*/node_modules' -prune -o -path '*/.venv' -prune -o -iname '*cubebox*' -print
+find . -path './.git' -prune -o -path '*/node_modules' -prune -o -path '*/.venv' -prune -o -name '*cubeplex*' -print
+find . -path './.git' -prune -o -path '*/node_modules' -prune -o -path '*/.venv' -prune -o -iname '*cubeplex*' -print
 ```
 
 Expected: no first-party paths. Remove/recreate generated local artifacts such as old virtual environments only after ensuring they are untracked.

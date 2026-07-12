@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from cubebox.errors import ErrorCode
-from cubebox.streams.run_manager import (
+from cubeplex.errors import ErrorCode
+from cubeplex.streams.run_manager import (
     CubepiAgentRunError,
     _message_for_run_exception,
     _raise_if_cubepi_agent_failed,

@@ -12,18 +12,18 @@
 
 **Read before touching:** `backend/docs/prompt-cache-discipline.md` (tool order + system-prompt injection are cache-sensitive), `backend/docs/agent-system-design.md` (tool/middleware assembly).
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/generative-ui-widgets` (ports 8075/3075). `cat .worktree.env` first. Backend tests: `uv run pytest`. Frontend unit: `pnpm --filter web test`. E2E: `cd frontend && pnpm test:e2e` (the `test:e2e` script lives in `frontend/package.json`; `packages/web/package.json` has no such script).
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/generative-ui-widgets` (ports 8075/3075). `cat .worktree.env` first. Backend tests: `uv run pytest`. Frontend unit: `pnpm --filter web test`. E2E: `cd frontend && pnpm test:e2e` (the `test:e2e` script lives in `frontend/package.json`; `packages/web/package.json` has no such script).
 
 ---
 
 ## File Structure
 
 **Backend (create):**
-- `backend/cubebox/tools/builtin/show_widget.py` — `_ShowWidgetArgs` model + `make_show_widget_tool()` factory. The tool's `execute()` returns a light ack; rendering is entirely frontend.
-- `backend/cubebox/prompts/widget.py` — `WIDGET_GUIDELINES` string (self-authored design constraints) + `WIDGET_TOOL_DESCRIPTION`.
+- `backend/cubeplex/tools/builtin/show_widget.py` — `_ShowWidgetArgs` model + `make_show_widget_tool()` factory. The tool's `execute()` returns a light ack; rendering is entirely frontend.
+- `backend/cubeplex/prompts/widget.py` — `WIDGET_GUIDELINES` string (self-authored design constraints) + `WIDGET_TOOL_DESCRIPTION`.
 
 **Backend (modify):**
-- `backend/cubebox/streams/run_manager.py` — register `make_show_widget_tool()` in `_builtin_tools` (fixed order) and append `WIDGET_GUIDELINES` to the system prompt when the tool is enabled.
+- `backend/cubeplex/streams/run_manager.py` — register `make_show_widget_tool()` in `_builtin_tools` (fixed order) and append `WIDGET_GUIDELINES` to the system prompt when the tool is enabled.
 
 **Frontend (create):**
 - `frontend/packages/web/lib/partialJson.ts` — `extractJsonStringPrefix` (moved out of `writeFilePreview.ts`, exported) + `extractWidgetCode`.
@@ -45,8 +45,8 @@
 ## Task 1: Backend — `show_widget` tool
 
 **Files:**
-- Create: `backend/cubebox/tools/builtin/show_widget.py`
-- Create: `backend/cubebox/prompts/widget.py`
+- Create: `backend/cubeplex/tools/builtin/show_widget.py`
+- Create: `backend/cubeplex/prompts/widget.py`
 - Test: `backend/tests/tools/test_show_widget.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -54,7 +54,7 @@
 ```python
 # backend/tests/tools/test_show_widget.py
 import pytest
-from cubebox.tools.builtin.show_widget import make_show_widget_tool, _ShowWidgetArgs
+from cubeplex.tools.builtin.show_widget import make_show_widget_tool, _ShowWidgetArgs
 
 
 def test_tool_metadata():
@@ -77,12 +77,12 @@ async def test_execute_returns_light_ack():
 - [ ] **Step 2: Run it, verify it fails**
 
 Run: `uv run pytest tests/tools/test_show_widget.py -v`
-Expected: FAIL — `ModuleNotFoundError: cubebox.tools.builtin.show_widget`.
+Expected: FAIL — `ModuleNotFoundError: cubeplex.tools.builtin.show_widget`.
 
 - [ ] **Step 3: Write the prompt constants**
 
 ```python
-# backend/cubebox/prompts/widget.py
+# backend/cubeplex/prompts/widget.py
 """Design guidelines + tool description for the show_widget generative-UI tool.
 
 Self-authored (informed by, not copied from, Claude's artifact guidelines).
@@ -123,7 +123,7 @@ When a visual or interactive explanation is clearly better than text, call
 - [ ] **Step 4: Write the tool**
 
 ```python
-# backend/cubebox/tools/builtin/show_widget.py
+# backend/cubeplex/tools/builtin/show_widget.py
 """show_widget builtin tool.
 
 Declares the schema so the model can stream an HTML widget. execute() does no
@@ -137,7 +137,7 @@ from pydantic import BaseModel, Field
 from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 
-from cubebox.prompts.widget import WIDGET_TOOL_DESCRIPTION
+from cubeplex.prompts.widget import WIDGET_TOOL_DESCRIPTION
 
 
 class _ShowWidgetArgs(BaseModel):
@@ -166,7 +166,7 @@ def make_show_widget_tool() -> AgentTool[_ShowWidgetArgs]:
     )
 ```
 
-> Verified against `cubebox/middleware/sandbox.py:21-23`: `AgentTool` /
+> Verified against `cubeplex/middleware/sandbox.py:21-23`: `AgentTool` /
 > `AgentToolResult` come from `cubepi.agent.types`, `TextContent` from
 > `cubepi.providers.base`. (Not `cubepi.agent.tools` — that module does not exist.)
 
@@ -178,7 +178,7 @@ Expected: PASS (both tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/tools/builtin/show_widget.py backend/cubebox/prompts/widget.py backend/tests/tools/test_show_widget.py
+git add backend/cubeplex/tools/builtin/show_widget.py backend/cubeplex/prompts/widget.py backend/tests/tools/test_show_widget.py
 git commit -m "feat(widget): add show_widget tool + design-guidelines prompt"
 ```
 
@@ -187,7 +187,7 @@ git commit -m "feat(widget): add show_widget tool + design-guidelines prompt"
 ## Task 2: Backend — register tool + inject guidelines
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (builtin-tool assembly block, ~`:977`-`:994`; system-prompt assembly)
+- Modify: `backend/cubeplex/streams/run_manager.py` (builtin-tool assembly block, ~`:977`-`:994`; system-prompt assembly)
 - Test: `backend/tests/tools/test_show_widget.py` (add a registration assertion)
 
 - [ ] **Step 1: Write the failing test**
@@ -196,7 +196,7 @@ Add to `backend/tests/tools/test_show_widget.py`:
 
 ```python
 def test_guidelines_mention_tool_and_constraints():
-    from cubebox.prompts.widget import WIDGET_GUIDELINES
+    from cubeplex.prompts.widget import WIDGET_GUIDELINES
     assert "show_widget" in WIDGET_GUIDELINES
     assert "fetch" in WIDGET_GUIDELINES  # network-blocked note
     assert "localStorage" in WIDGET_GUIDELINES
@@ -212,13 +212,13 @@ exercise the backend run path.)
 
 - [ ] **Step 3: Register the tool in run_manager**
 
-In `backend/cubebox/streams/run_manager.py`, after the `view_images` append block (~`:994`) and before `generate_image`, add:
+In `backend/cubeplex/streams/run_manager.py`, after the `view_images` append block (~`:994`) and before `generate_image`, add:
 
 ```python
         # show_widget — UI-only tool; no DI. Fixed position in the builtin
         # tool order to keep the prompt-cache prefix stable.
         try:
-            from cubebox.tools.builtin.show_widget import make_show_widget_tool
+            from cubeplex.tools.builtin.show_widget import make_show_widget_tool
 
             _builtin_tools.append(make_show_widget_tool())
         except Exception as _exc:
@@ -239,9 +239,9 @@ after the existing appends (e.g. after the `SKILLS_PROMPT_TEMPLATE` block at
 `~:1801`, before the `_run_cubepi_path` call at `:1807`):
 
 ```python
-        # backend/cubebox/streams/run_manager.py, in _execute_run, after the
+        # backend/cubeplex/streams/run_manager.py, in _execute_run, after the
         # SKILLS_PROMPT_TEMPLATE append (~:1801), before _run_cubepi_path(...)
-        from cubebox.prompts.widget import WIDGET_GUIDELINES
+        from cubeplex.prompts.widget import WIDGET_GUIDELINES
 
         effective_system_prompt += "\n\n" + WIDGET_GUIDELINES
 ```
@@ -254,13 +254,13 @@ after the existing appends (e.g. after the `SKILLS_PROMPT_TEMPLATE` block at
 - [ ] **Step 5: Run the backend tool tests + a quick import smoke**
 
 Run: `uv run pytest tests/tools/test_show_widget.py -v`
-Run: `uv run python -c "import cubebox.streams.run_manager"`
+Run: `uv run python -c "import cubeplex.streams.run_manager"`
 Expected: tests PASS; import succeeds with no error.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/tools/test_show_widget.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/tools/test_show_widget.py
 git commit -m "feat(widget): register show_widget tool and inject guidelines prompt"
 ```
 
@@ -776,7 +776,7 @@ subagent output can never contain a widget block to render. (The top-level run
 still includes it from `_builtin_tools`.)
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (SubAgentMiddleware construction, `:1292-1300`)
+- Modify: `backend/cubeplex/streams/run_manager.py` (SubAgentMiddleware construction, `:1292-1300`)
 
 - [ ] **Step 1: Extract a tiny pure helper (so it is unit-testable)**
 
@@ -785,7 +785,7 @@ named module-level pure function in `run_manager.py` (above `_execute_run`) so i
 has a unit seam:
 
 ```python
-# backend/cubebox/streams/run_manager.py (module level)
+# backend/cubeplex/streams/run_manager.py (module level)
 # Annotated `list[Any]` to match this file's convention (it does not import
 # AgentTool at module level — tools are built via lazy imports inside functions).
 def _subagent_shared_tools(tools: list[Any]) -> list[Any]:
@@ -820,8 +820,8 @@ def _subagent_shared_tools(tools: list[Any]) -> list[Any]:
 # backend/tests/tools/test_show_widget.py
 from types import SimpleNamespace
 
-from cubebox.streams.run_manager import _subagent_shared_tools
-from cubebox.tools.builtin.show_widget import make_show_widget_tool
+from cubeplex.streams.run_manager import _subagent_shared_tools
+from cubeplex.tools.builtin.show_widget import make_show_widget_tool
 
 
 def test_subagent_shared_tools_drops_show_widget():
@@ -841,7 +841,7 @@ def test_subagent_shared_tools_drops_show_widget():
 Run: `uv run pytest tests/tools/test_show_widget.py -v`
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/tools/test_show_widget.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/tools/test_show_widget.py
 git commit -m "feat(widget): keep show_widget out of subagent tool set (v1 top-level only)"
 ```
 

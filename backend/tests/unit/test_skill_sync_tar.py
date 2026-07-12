@@ -4,7 +4,7 @@ import io
 import shlex
 import tarfile
 
-from cubebox.skills.sync_tar import build_extract_and_remove_cmd, build_tarball
+from cubeplex.skills.sync_tar import build_extract_and_remove_cmd, build_tarball
 
 
 def test_tar_roundtrip_preserves_content() -> None:

@@ -1,7 +1,7 @@
 ---
 name: internal-comms
 description: Use when writing internal communications such as status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, and project updates.
-version: 1.0.0-cubebox.1
+version: 1.0.0-cubeplex.1
 license: Complete terms in LICENSE.txt
 keywords:
   - office
@@ -26,7 +26,7 @@ To write internal communications, use this skill for:
 To write any internal communication:
 
 1. **Identify the communication type** from the request
-2. **Load the appropriate guideline file** from `/.skills/internal-comms/1.0.0-cubebox.1/examples/`:
+2. **Load the appropriate guideline file** from `/.skills/internal-comms/1.0.0-cubeplex.1/examples/`:
     - `3p-updates.md` - For Progress/Plans/Problems team updates
     - `company-newsletter.md` - For company-wide newsletters
     - `faq-answers.md` - For answering frequently asked questions

@@ -24,7 +24,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 pytestmark = pytest.mark.asyncio
 
@@ -111,7 +111,7 @@ async def seeded_static_org_install_with_tools_cache(
         default_credential_policy="none",
     )
     async with db_session_maker() as session:
-        from cubebox.models.mcp import MCPConnector
+        from cubeplex.models.mcp import MCPConnector
 
         connector = await session.get(MCPConnector, connector_id)
         assert connector is not None
@@ -210,12 +210,12 @@ async def test_discover_tools_for_install_writes_tools_cache(
             init_result=SimpleNamespace(serverInfo=None),
         )
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery._list_raw_mcp_tools", fake_load)
 
-    from cubebox.credentials.dependencies import build_credential_service
-    from cubebox.credentials.encryption import FernetBackend
-    from cubebox.mcp.dependencies import build_user_token_signer
-    from cubebox.services.mcp_discovery import discover_tools_for_install
+    from cubeplex.credentials.dependencies import build_credential_service
+    from cubeplex.credentials.encryption import FernetBackend
+    from cubeplex.mcp.dependencies import build_user_token_signer
+    from cubeplex.services.mcp_discovery import discover_tools_for_install
 
     backend = FernetBackend([_test_fernet_key().encode()])
     async with db_session_maker() as session:
@@ -311,16 +311,16 @@ async def test_discover_tools_for_install_writes_discovery_metadata(
             init_result=init_result,
         )
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery._list_raw_mcp_tools", fake_load)
     # Deterministic: do not outbound-fetch the fixture URL during this test.
     # Materialisation is covered by unit tests with respx.
-    monkeypatch.setattr("cubebox.mcp.icons.icons_fetch_remote_enabled", lambda: False)
+    monkeypatch.setattr("cubeplex.mcp.icons.icons_fetch_remote_enabled", lambda: False)
 
-    from cubebox.credentials.dependencies import build_credential_service
-    from cubebox.credentials.encryption import FernetBackend
-    from cubebox.mcp.dependencies import build_user_token_signer
-    from cubebox.repositories.mcp import MCPConnectorRepository
-    from cubebox.services.mcp_discovery import discover_tools_for_install
+    from cubeplex.credentials.dependencies import build_credential_service
+    from cubeplex.credentials.encryption import FernetBackend
+    from cubeplex.mcp.dependencies import build_user_token_signer
+    from cubeplex.repositories.mcp import MCPConnectorRepository
+    from cubeplex.services.mcp_discovery import discover_tools_for_install
 
     backend = FernetBackend([_test_fernet_key().encode()])
     async with db_session_maker() as session:
@@ -426,7 +426,7 @@ async def test_admin_refresh_discovery_writes_install(
             init_result=SimpleNamespace(serverInfo=None),
         )
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery._list_raw_mcp_tools", fake_load)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery._list_raw_mcp_tools", fake_load)
 
     res = await client.post(f"/api/v1/admin/mcp/installs/{install_id}/refresh-discovery", json={})
     assert res.status_code == 200, res.text
@@ -468,7 +468,7 @@ async def test_admin_test_connection_returns_tool_count(
             tool_infos=[],
         )
 
-    monkeypatch.setattr("cubebox.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
 
     res = await client.post(
         "/api/v1/admin/mcp/test-connection",

@@ -26,7 +26,7 @@ There are three ways a topic comes into being. However it is created, the creato
 
 ### New Topic
 
-Click **New Topic** in the sidebar. In the dialog, give it a title, invite workspace members, and choose the [sandbox mode](#the-shared-sandbox). CubeBox creates the topic with a first conversation and drops you into it.
+Click **New Topic** in the sidebar. In the dialog, give it a title, invite workspace members, and choose the [sandbox mode](#the-shared-sandbox). CubePlex creates the topic with a first conversation and drops you into it.
 
 :::info 📸 Screenshot placeholder
 **Capture:** The "New Topic" dialog with a title entered, two members selected, and the sandbox-mode choice visible.
@@ -41,7 +41,7 @@ You cannot upgrade a conversation that is already part of a topic, or one that i
 
 ### From an IM bot
 
-When a bot is bound to a group chat in **topic** or **shared** routing mode, CubeBox creates a topic automatically the first time a message arrives in that chat. These IM-created topics carry the originating platform and channel as metadata. See [IM Connectors](../im/overview.md).
+When a bot is bound to a group chat in **topic** or **shared** routing mode, CubePlex creates a topic automatically the first time a message arrives in that chat. These IM-created topics carry the originating platform and channel as metadata. See [IM Connectors](../im/overview.md).
 
 :::note Web topics and IM topics don't cross over (current limitation)
 The IM runner only drives topics that originated from IM. A topic you create in the web app cannot currently be answered from an IM channel.
@@ -80,7 +80,7 @@ If an owner leaves or is removed, ownership automatically passes to the earliest
 
 Because a topic is shared, its [code-execution sandbox](../../admin/sandbox.md) is shared too. You pick how that works when you create the topic, and **it cannot be changed afterward** — choose deliberately:
 
-- **Dedicated topic sandbox** — CubeBox spins up a **fresh sandbox that belongs to the topic**. It gets its own isolated storage, separate from anyone's personal sandbox and from every other topic. Files from the conversation you started in are **not** carried over. This is the default for **New Topic** and the safer choice for a group.
+- **Dedicated topic sandbox** — CubePlex spins up a **fresh sandbox that belongs to the topic**. It gets its own isolated storage, separate from anyone's personal sandbox and from every other topic. Files from the conversation you started in are **not** carried over. This is the default for **New Topic** and the safer choice for a group.
 - **Reuse the creator's sandbox** — the topic runs in the **owner's personal sandbox**. Files and environment carry over, which is convenient when you're upgrading your own conversation and want to keep its working files. The trade-off: **every participant's code runs in the owner's environment**, with access to whatever is in it. This is the default when you **upgrade** an existing conversation.
 
 :::caution

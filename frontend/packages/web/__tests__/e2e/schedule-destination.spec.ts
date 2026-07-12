@@ -19,7 +19,7 @@ async function getCsrf(page: Page): Promise<string> {
   // request context inherits the cookie jar but does not auto-inject the
   // double-submit header — we mirror what the in-browser ApiClient does.
   const cookies = await page.context().cookies()
-  const csrf = cookies.find((c) => c.name.startsWith('cubebox_csrf'))?.value ?? ''
+  const csrf = cookies.find((c) => c.name.startsWith('cubeplex_csrf'))?.value ?? ''
   return csrf
 }
 

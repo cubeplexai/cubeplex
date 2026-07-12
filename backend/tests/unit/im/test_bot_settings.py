@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubebox.im.bot_settings import (
+from cubeplex.im.bot_settings import (
     IMBotSettings,
     bot_display_name,
     build_im_attributes,
@@ -63,7 +63,7 @@ class TestTitleAndAttributes:
         assert im_topic_title(scope_kind="channel", bot_name="MyBot", channel_name=None) == ""
 
     def test_bot_display_name_default(self) -> None:
-        assert bot_display_name(None) == "cubebox"
+        assert bot_display_name(None) == "cubeplex"
         assert bot_display_name({"bot_app_name": "Helper"}) == "Helper"
 
     def test_attributes_shape(self) -> None:

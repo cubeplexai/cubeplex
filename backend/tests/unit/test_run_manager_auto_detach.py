@@ -14,7 +14,7 @@ import pytest
 from cubepi.agent.types import HitlRequestEvent
 from cubepi.hitl.types import ApproveRequest, HitlRequest
 
-from cubebox.streams.run_manager import _build_auto_detach_listener
+from cubeplex.streams.run_manager import _build_auto_detach_listener
 
 pytestmark = pytest.mark.asyncio
 

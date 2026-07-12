@@ -1,7 +1,7 @@
 """End-to-end: seed conversations → enqueue → drive worker → call search API.
 
 Requires a real embedding endpoint (OpenAI-compatible). Skipped cleanly
-when neither DASHSCOPE_API_KEY nor CUBEBOX_TEST_LOCAL_EMBED is set so the
+when neither DASHSCOPE_API_KEY nor CUBEPLEX_TEST_LOCAL_EMBED is set so the
 default test pass stays hermetic; CI sets DASHSCOPE_API_KEY to exercise
 the real-network path. The test bypasses EmbeddingProvider.from_config so
 it doesn't depend on whether the operator wired the key into config —
@@ -15,20 +15,20 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from cubebox.agents.checkpointer import init_checkpointer
-from cubebox.db.engine import async_session_maker
-from cubebox.repositories.embedding_job import EmbeddingJobRepository
-from cubebox.services.conversation_search.embedding import EmbeddingProvider
-from cubebox.services.conversation_search.worker import EmbeddingWorker
+from cubeplex.agents.checkpointer import init_checkpointer
+from cubeplex.db.engine import async_session_maker
+from cubeplex.repositories.embedding_job import EmbeddingJobRepository
+from cubeplex.services.conversation_search.embedding import EmbeddingProvider
+from cubeplex.services.conversation_search.worker import EmbeddingWorker
 from tests.e2e.conftest import DEFAULT_ORG_ID, DEFAULT_WS_ID
 
 # Skip the entire module unless a real embedding endpoint is available.
 # Use module-level skip rather than per-test so collection costs (importing
 # heavy cubepi modules) stay low when the suite runs without the secret.
-_EMBED_KEY = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("CUBEBOX_TEST_LOCAL_EMBED")
+_EMBED_KEY = os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("CUBEPLEX_TEST_LOCAL_EMBED")
 pytestmark = pytest.mark.skipif(
     not _EMBED_KEY,
-    reason="No embedding endpoint configured; set DASHSCOPE_API_KEY or CUBEBOX_TEST_LOCAL_EMBED.",
+    reason="No embedding endpoint configured; set DASHSCOPE_API_KEY or CUBEPLEX_TEST_LOCAL_EMBED.",
 )
 
 
@@ -94,11 +94,11 @@ async def test_e2e_search_finds_seeded_conversations(client: TestClient) -> None
     # the operator wired search.embedding.api_key into config.
     provider = EmbeddingProvider(
         base_url=os.environ.get(
-            "CUBEBOX_TEST_EMBED_BASE_URL",
+            "CUBEPLEX_TEST_EMBED_BASE_URL",
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
         ),
         api_key=str(_EMBED_KEY),
-        model=os.environ.get("CUBEBOX_TEST_EMBED_MODEL", "text-embedding-v4"),
+        model=os.environ.get("CUBEPLEX_TEST_EMBED_MODEL", "text-embedding-v4"),
         vector_dim=1024,
         api_dimensions=1024,
         timeout_seconds=30,

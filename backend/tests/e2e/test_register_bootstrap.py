@@ -12,9 +12,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.api.middleware.rate_limit import limiter
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Membership, OrganizationMembership, User
+from cubeplex.api.middleware.rate_limit import limiter
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Membership, OrganizationMembership, User
 
 pytestmark = pytest.mark.e2e
 

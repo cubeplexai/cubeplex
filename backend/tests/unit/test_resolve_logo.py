@@ -1,4 +1,4 @@
-from cubebox.api.routes.v1.admin_providers import _resolve_logo
+from cubeplex.api.routes.v1.admin_providers import _resolve_logo
 
 
 def test_resolve_logo_by_preset_key():
@@ -9,9 +9,9 @@ def test_resolve_logo_by_key_override(monkeypatch):
     # A `key:`-overridden preset_key does NOT start with the vendor, so a split("/")
     # approach would fail. Inject a catalog whose endpoint key is "pretty-id" and
     # assert the logo still resolves via the vendor — a real regression guard.
-    import cubebox.api.routes.v1.admin_providers as mod
-    import cubebox.llm.catalog as catmod  # _resolve_logo does `from cubebox.llm.catalog import load_catalog`
-    from cubebox.llm.catalog import build_catalog
+    import cubeplex.api.routes.v1.admin_providers as mod
+    import cubeplex.llm.catalog as catmod  # _resolve_logo does `from cubeplex.llm.catalog import load_catalog`
+    from cubeplex.llm.catalog import build_catalog
 
     catalog = build_catalog(
         [

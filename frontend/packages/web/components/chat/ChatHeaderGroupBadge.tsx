@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { createApiClient, useTopicStore, type TopicParticipant } from '@cubebox/core'
+import { createApiClient, useTopicStore, type TopicParticipant } from '@cubeplex/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { AvatarStack } from '@/components/ui/avatar-stack'
 import { cn } from '@/lib/utils'

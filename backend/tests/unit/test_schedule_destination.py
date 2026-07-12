@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from cubebox.services.schedule_destination import (
+from cubeplex.services.schedule_destination import (
     DerivedScheduleDestination,
     ImLinkSnapshot,
     derive_schedule_destination,

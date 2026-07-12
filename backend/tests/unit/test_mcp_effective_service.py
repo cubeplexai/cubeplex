@@ -1,4 +1,4 @@
-"""Tests for :class:`cubebox.mcp.effective.MCPEffectiveConnectorService`.
+"""Tests for :class:`cubeplex.mcp.effective.MCPEffectiveConnectorService`.
 
 The service is the join point between connector identity rows, workspace
 state, and credential grants. These tests exercise the workspace-visibility
@@ -15,15 +15,15 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.mcp.effective import MCPEffectiveConnectorService
-from cubebox.mcp.exceptions import OAuthRefreshFailed
-from cubebox.models import (
+from cubeplex.mcp.effective import MCPEffectiveConnectorService
+from cubeplex.mcp.exceptions import OAuthRefreshFailed
+from cubeplex.models import (
     MCPConnector,
     MCPConnectorTemplate,
     MCPCredentialGrant,
     MCPWorkspaceConnectorState,
 )
-from cubebox.repositories.mcp import (
+from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,

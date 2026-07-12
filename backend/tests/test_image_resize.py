@@ -5,7 +5,7 @@ import io
 import pytest
 from PIL import Image
 
-from cubebox.services.attachments import (
+from cubeplex.services.attachments import (
     InvalidImageError,
     decode_image_dimensions,
     resize_to_long_edge,

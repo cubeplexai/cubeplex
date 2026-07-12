@@ -2,13 +2,13 @@
 
 ## Overview
 
-Add SSO support to cubebox with two layers:
+Add SSO support to cubeplex with two layers:
 
 - **Platform-level social login** — Google OIDC, available to all users, configured by platform operator
 - **Organization-level enterprise SSO** — OIDC or SAML 2.0, configured per-org by org admin, forced for org members
 
 SSO is an authentication entry point, not a replacement for the auth stack. All SSO
-flows terminate by issuing the existing cubebox JWT cookie — downstream workspace
+flows terminate by issuing the existing cubeplex JWT cookie — downstream workspace
 scoping, CSRF, RequestContext are untouched.
 
 ## Data Model
@@ -60,7 +60,7 @@ IdP uses non-standard claim names.
   "idp_entity_id": "https://acme.okta.com/saml",
   "idp_sso_url": "https://acme.okta.com/app/.../sso/saml",
   "idp_certificate": "MIIDpDCCA...",
-  "sp_entity_id": "https://cubebox.app/saml/acme",
+  "sp_entity_id": "https://cubeplex.app/saml/acme",
   "name_id_format": "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
   "attribute_mapping": {
     "id": "NameID",
@@ -78,7 +78,7 @@ admin panel shows common presets per IdP vendor to reduce manual input.
 ### Attribute mapping
 
 Both OIDC and SAML configs carry an `attribute_mapping` object that tells
-Identity Resolution how to extract cubebox-relevant fields from IdP responses:
+Identity Resolution how to extract cubeplex-relevant fields from IdP responses:
 
 | Mapping key | Purpose | OIDC default | SAML default |
 |---|---|---|---|
@@ -95,7 +95,7 @@ missing from the IdP response, `id` and `email` cause a login failure;
 Sensitive values (OIDC client_secret, SAML SP private key) are stored in the
 existing Credential Vault, referenced by `credential_id`.
 
-### `external_identities` — maps external identities to cubebox users
+### `external_identities` — maps external identities to cubeplex users
 
 Unified table for both enterprise SSO and social login.
 
@@ -141,7 +141,7 @@ User ──1:N──> ExternalIdentity ──N:1──┘ (provider_id = sso_con
 ### OIDC enterprise SSO
 
 ```
-Browser                     cubebox                          IdP (Okta, etc.)
+Browser                     cubeplex                          IdP (Okta, etc.)
   |                           |                                |
   | POST /auth/sso/initiate   |                                |
   | {org_slug: "acme"}        |                                |
@@ -193,7 +193,7 @@ populates it from `.well-known/openid-configuration` (`jwks_uri` field).
 ### SAML enterprise SSO
 
 ```
-Browser                     cubebox (SP)                     IdP
+Browser                     cubeplex (SP)                     IdP
   |                           |                                |
   | POST /auth/sso/initiate   |                                |
   | {org_slug: "acme"}        |                                |
@@ -335,8 +335,8 @@ the org are disabled for its members:
 If SSO is misconfigured and all users are locked out:
 
 ```bash
-cubebox admin disable-sso --org-slug acme    # sets status → inactive
-cubebox admin list-sso                       # lists all SSO connections
+cubeplex admin disable-sso --org-slug acme    # sets status → inactive
+cubeplex admin list-sso                       # lists all SSO connections
 ```
 
 No self-service recovery (complex and security-risky).
@@ -369,7 +369,7 @@ Admin panel shows:
 
 ```
 ┌─────────────────────────────────┐
-│          Login to cubebox        │
+│          Login to cubeplex        │
 │                                  │
 │  ┌────────────────────────────┐  │
 │  │  Email                      │  │
@@ -467,8 +467,8 @@ POST   /api/v1/admin/sso/discover-oidc              — input issuer URL, return
 ### Operator CLI
 
 ```bash
-cubebox admin disable-sso --org-slug acme    # emergency SSO disable
-cubebox admin list-sso                       # list all SSO connections
+cubeplex admin disable-sso --org-slug acme    # emergency SSO disable
+cubeplex admin list-sso                       # list all SSO connections
 ```
 
 ## Admin Panel UX

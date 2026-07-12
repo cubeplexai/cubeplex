@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from cubebox.im.dingtalk.connector import DingtalkConnector
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.dingtalk.connector import DingtalkConnector
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 class TestParseInbound:

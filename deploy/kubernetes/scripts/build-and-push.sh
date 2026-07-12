@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build cubebox-backend and cubebox-frontend images and push to a docker
+# Build cubeplex-backend and cubeplex-frontend images and push to a docker
 # registry. Tag = git short sha by default.
 #
 # Usage:
@@ -91,18 +91,18 @@ for target in $TARGETS; do
     echo "ERROR: unknown TARGET=$target (allowed: backend frontend egress-webhook)" >&2
     exit 1
   fi
-  image="$REGISTRY/$REPO/cubebox-$target:$TAG"
+  image="$REGISTRY/$REPO/cubeplex-$target:$TAG"
   echo
   echo "==> docker build $image  (using $dockerfile)"
   docker build \
     --file "$dockerfile" \
     --tag "$image" \
-    --tag "$REGISTRY/$REPO/cubebox-$target:latest" \
+    --tag "$REGISTRY/$REPO/cubeplex-$target:latest" \
     "${BUILD_ARGS[@]}" \
     .
   echo "==> docker push $image"
   docker push "$image"
-  docker push "$REGISTRY/$REPO/cubebox-$target:latest"
+  docker push "$REGISTRY/$REPO/cubeplex-$target:latest"
 done
 
 echo

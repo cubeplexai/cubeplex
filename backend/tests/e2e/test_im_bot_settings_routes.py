@@ -40,7 +40,7 @@ async def _create_account(client: httpx.AsyncClient, ws_id: str, tag: str) -> st
     return str(resp.json()["id"])
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+@patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_get_defaults_then_put_roundtrip(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -89,7 +89,7 @@ async def test_get_defaults_then_put_roundtrip(
         await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+@patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_put_shared_requires_sandbox_mode(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -119,7 +119,7 @@ async def test_put_shared_requires_sandbox_mode(
         await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+@patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_put_rejects_shared_for_teams(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -131,8 +131,8 @@ async def test_put_rejects_shared_for_teams(
         return "ou_bot", "", ""
 
     mock_hydrate.side_effect = _fake
-    from cubebox.db.engine import async_session_maker
-    from cubebox.models.im_connector import IMConnectorAccount
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.models.im_connector import IMConnectorAccount
     from tests.e2e.conftest import DEFAULT_WS_ID
 
     account_id = await _create_account(async_client, DEFAULT_WS_ID, "teams")
@@ -174,7 +174,7 @@ async def test_put_foreign_workspace_404(async_client: httpx.AsyncClient) -> Non
     assert resp.status_code == 404
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+@patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_put_requires_admin(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,

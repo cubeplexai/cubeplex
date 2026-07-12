@@ -36,7 +36,7 @@ records every finding and drives a per-module correction workflow.
 ### Tier 1 — Factual errors (a user following the doc will fail)
 
 All in `guides/automation/event-triggers.md`. Verified against
-`backend/cubebox/triggers/ingest.py`, `triggers/signature.py`, and
+`backend/cubeplex/triggers/ingest.py`, `triggers/signature.py`, and
 `api/routes/v1/trigger_ingest.py`.
 
 | # | Doc claims | Reality (code) |
@@ -48,7 +48,7 @@ All in `guides/automation/event-triggers.md`. Verified against
 | T5 | Invalid signature → `401` | Every failure path returns **404** `{"error":"not_found"}` — deliberately opaque (`_flat_404()`) |
 | T6 | Event-log "Rejected" status = signature failed | Signature failures return 404 **before** any `trigger_events` row is inserted, so they never appear in the event log at all |
 | T7 | Implied 5xx for stale requests not mentioned | Timestamp freshness window is **300 s** (`timestamp_fresh`, `signature.py`); stale → 404 |
-| T8 | "GitHub, Stripe… paste the HMAC secret and CubeBox validates `X-Hub-Signature-256` automatically" | **False.** The generic webhook expects CubeBox's own scheme (`X-Signature` over `timestamp.body` + required `X-Timestamp`). GitHub sends no `X-Timestamp` and signs body-only with a different header → always 404. The sender must implement CubeBox's scheme (or sit behind a relay). |
+| T8 | "GitHub, Stripe… paste the HMAC secret and CubePlex validates `X-Hub-Signature-256` automatically" | **False.** The generic webhook expects CubePlex's own scheme (`X-Signature` over `timestamp.body` + required `X-Timestamp`). GitHub sends no `X-Timestamp` and signs body-only with a different header → always 404. The sender must implement CubePlex's scheme (or sit behind a relay). |
 
 > **T8 is the most damaging** — both worked examples ("GitHub issue triage",
 > "Slack alert escalation") are written as drop-in integrations that cannot
@@ -59,7 +59,7 @@ All in `guides/automation/event-triggers.md`. Verified against
 
 | # | Gap |
 |---|---|
-| G1 | **IM connectors have zero docs.** Code ships Feishu, DingTalk, Discord, Slack, Teams (`backend/cubebox/im/`). This is a flagship surface (recent commits are IM-heavy) with no "connect a bot" guide. |
+| G1 | **IM connectors have zero docs.** Code ships Feishu, DingTalk, Discord, Slack, Teams (`backend/cubeplex/im/`). This is a flagship surface (recent commits are IM-heavy) with no "connect a bot" guide. |
 | G2 | **i18n is a shell.** `docusaurus.config.ts` declares the `zh-Hans` locale + a language dropdown, but there is no `i18n/` directory — Chinese users get the switcher and untranslated/fallback pages. Either translate or drop the locale until ready. |
 | G3 | **No API-keys doc** (programmatic access exists in flight). |
 | G4 | **No group-chat / conversation-participants doc** (recent plans). |
@@ -140,7 +140,7 @@ docs to author, i18n decision, etc.).
 | automation/scheduled-tasks | `schedules/` |
 | automation/event-triggers | `triggers/` (already fixed in Step 1; agent verifies only) |
 | admin/{models,members,sandbox,cost} | `api/routes/v1/admin*`, sandbox, cost |
-| **NEW** im-connectors/* | `backend/cubebox/im/{feishu,dingtalk,slack,teams,discord}` |
+| **NEW** im-connectors/* | `backend/cubeplex/im/{feishu,dingtalk,slack,teams,discord}` |
 
 ### Step 3 — process guardrail
 

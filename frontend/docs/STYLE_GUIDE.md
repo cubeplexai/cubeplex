@@ -1,4 +1,4 @@
-# Cubebox Frontend 样式指南
+# Cubeplex Frontend 样式指南
 
 > 本文档基于 cubetrace/frontend 的设计系统整理而成，所有前端开发需遵循此规范。
 
@@ -327,7 +327,7 @@ import { InputBar } from '@/components/layout/InputBar'
 
 ```tsx
 import { ExecutionDetails } from '@/components/chat/ExecutionDetails'
-import type { AgentEvent } from '@cubebox/core'
+import type { AgentEvent } from '@cubeplex/core'
 ;<ExecutionDetails events={agentEvents} isStreaming={false} />
 ```
 

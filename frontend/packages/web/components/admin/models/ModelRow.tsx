@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Brain, Check, Loader2, Pencil, RotateCw, TriangleAlert, Trash2, X } from 'lucide-react'
-import { testModel, type ApiClient, type Model } from '@cubebox/core'
+import { testModel, type ApiClient, type Model } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

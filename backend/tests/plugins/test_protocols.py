@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from cubebox.plugins.protocols import (
-    CUBEBOX_PLUGIN_API_VERSION,
+from cubeplex.plugins.protocols import (
+    CUBEPLEX_PLUGIN_API_VERSION,
     AdminNavItem,
     AdminPanelExtension,
     AuditEvent,
@@ -31,8 +31,8 @@ def test_plugin_manifest_accepts_description() -> None:
 
 
 def test_api_version_constant_is_int_one() -> None:
-    assert CUBEBOX_PLUGIN_API_VERSION == 1
-    assert isinstance(CUBEBOX_PLUGIN_API_VERSION, int)
+    assert CUBEPLEX_PLUGIN_API_VERSION == 1
+    assert isinstance(CUBEPLEX_PLUGIN_API_VERSION, int)
 
 
 def test_permission_resource_minimal() -> None:

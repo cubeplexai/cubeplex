@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cubebox.streams.hitl_resume import serialize_pending_hitl
+from cubeplex.streams.hitl_resume import serialize_pending_hitl
 
 # Unit-test the serializer directly; the route-level integration is
 # covered by T16 E2E (route setup is heavy — needs full FastAPI deps).

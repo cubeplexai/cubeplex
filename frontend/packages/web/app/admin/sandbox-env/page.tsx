@@ -11,7 +11,7 @@ import {
   type CreateEnvIn,
   type EnvEntryOut,
   type UpdateEntryIn,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { EnvTable } from '@/components/sandbox-env/EnvTable'
 import { EnvModal, type ModalMode } from '@/components/sandbox-env/EnvModal'
 

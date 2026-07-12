@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bring up the cubebox compose stack. Verifies the operator has filled in
+# Bring up the cubeplex compose stack. Verifies the operator has filled in
 # .env + config files, then `docker compose up -d --pull always`.
 set -euo pipefail
 

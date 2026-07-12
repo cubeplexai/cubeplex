@@ -29,7 +29,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 pytestmark = pytest.mark.usefixtures("stub_discover_tools")
 
@@ -157,7 +157,7 @@ async def test_lazy_enable_creates_shared_connector(
     connector_id = row_out["connector"]["connector_id"]
 
     # Connector must exist in DB and belong to the org (shared)
-    from cubebox.models import MCPConnector
+    from cubeplex.models import MCPConnector
 
     async with db_maker() as session:
         connector = await session.get(MCPConnector, connector_id)
@@ -395,7 +395,7 @@ async def test_mixed_grants_oauth_user_plus_static_workspace(
 
     # Seed an oauth user grant directly in DB
 
-    from cubebox.models import Credential, MCPCredentialGrant, Workspace
+    from cubeplex.models import Credential, MCPCredentialGrant, Workspace
 
     async with db_maker() as session:
         ws_row = await session.get(Workspace, workspace_id)
@@ -415,7 +415,7 @@ async def test_mixed_grants_oauth_user_plus_static_workspace(
         # Get user id from workspace membership
         from sqlalchemy import select
 
-        from cubebox.models import Membership
+        from cubeplex.models import Membership
 
         mem = (
             (
@@ -539,7 +539,7 @@ async def test_workspace_deletion_purges_unpromoted_ws_templates(
     assert del_resp.status_code == 204, del_resp.text
 
     # Verify template and connector are gone/deleted
-    from cubebox.models import MCPConnector, MCPConnectorTemplate
+    from cubeplex.models import MCPConnector, MCPConnectorTemplate
 
     async with db_maker() as session:
         tpl = await session.get(MCPConnectorTemplate, template_id)
@@ -572,7 +572,7 @@ async def test_workspace_deletion_cascades_non_active_ws_templates(
     """
     from sqlalchemy import update
 
-    from cubebox.models import MCPConnectorTemplate
+    from cubeplex.models import MCPConnectorTemplate
 
     client, workspace_id = admin_client
 

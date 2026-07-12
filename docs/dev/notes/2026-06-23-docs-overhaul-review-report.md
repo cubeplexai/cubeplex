@@ -1,4 +1,4 @@
-# CubeBox Docs Overhaul — Review & Correction Report
+# CubePlex Docs Overhaul — Review & Correction Report
 
 **Date:** 2026-06-23
 **Branch:** `feat/2026-06-23-docs-overhaul`
@@ -49,7 +49,7 @@ the sidebar. Event Triggers (hand-fixed in step 1) needed no further corrections
 | MCP | DCR-auto OAuth list omitted Atlassian | Added Atlassian | `template_seed.py:174` |
 | Scheduled Tasks | Configurable "missed-run policy" (Skip / Run latest) | No such field; only latest due occurrence catches up, older → Skipped (missed) | `schedules/compute.py:17-19`; `poller.py:53,160-211` |
 | Scheduled Tasks | "Three schedule kinds" incl. raw cron the user types | Visual builder: Daily/Weekly/Monthly/Every…/Once; cron is storage only | `ScheduleEditor.tsx:19-27` |
-| Admin (members) | Email-invite flow with sign-up link | "Add members" adds an existing CubeBox user by email; fails if no account | `admin_members.py:90-99` |
+| Admin (members) | Email-invite flow with sign-up link | "Add members" adds an existing CubePlex user by email; fails if no account | `admin_members.py:90-99` |
 | Admin (members) | "Transfer Ownership" action | No such endpoint; owner role unchangeable, owner unremovable | `admin_members.py:120,142` |
 | Admin (sandbox) | Fixed runtime language list | Languages depend on configured `default_image`; agent runs via shell `execute` | `prompts/artifacts.py:13`; `models/sandbox_policy.py:60` |
 | Admin (sandbox) | Resource limits control CPU/memory/duration | Real feature is Command rules (allow/deny/confirm HITL) + per-run timeout | `models/sandbox_policy.py:78-80` |

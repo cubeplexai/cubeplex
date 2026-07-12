@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { useTranslations } from 'next-intl'
-import { useConversationStore, type ConversationParticipant } from '@cubebox/core'
+import { useConversationStore, type ConversationParticipant } from '@cubeplex/core'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar } from '@/components/ui/avatar-resolved'
 import { cn } from '@/lib/utils'

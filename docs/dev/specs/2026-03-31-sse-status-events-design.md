@@ -33,9 +33,9 @@ When sandbox is **not enabled**, no status events are emitted — streaming star
 
 ### Backend Changes
 
-**`cubebox/agents/schemas.py`** — Add `StatusEvent` class with `type: Literal["status"]`.
+**`cubeplex/agents/schemas.py`** — Add `StatusEvent` class with `type: Literal["status"]`.
 
-**`cubebox/api/routes/v1/conversations.py`** — In `event_generator()`, yield `StatusEvent` before and after sandbox initialization:
+**`cubeplex/api/routes/v1/conversations.py`** — In `event_generator()`, yield `StatusEvent` before and after sandbox initialization:
 
 ```python
 # Before sandbox creation

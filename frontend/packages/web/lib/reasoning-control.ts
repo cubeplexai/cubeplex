@@ -1,4 +1,4 @@
-import type { ReasoningControl } from '@cubebox/core'
+import type { ReasoningControl } from '@cubeplex/core'
 
 import type { ThinkingLevel } from '@/lib/types/presets'
 

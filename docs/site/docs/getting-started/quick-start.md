@@ -15,7 +15,7 @@ Get from zero to your first AI conversation in a few minutes.
 <Tabs groupId="deploy-mode">
 <TabItem value="cloud" label="Cloud">
 
-1. Go to [cubebox.ai](https://cubebox.ai) and click **Sign up**.
+1. Go to [cubeplex.ai](https://cubeplex.ai) and click **Sign up**.
 2. Enter your email and password (or use a social login).
 3. If your instance has email verification enabled, enter the one-time code sent to your inbox to confirm your address.
 4. Finish the **onboarding** wizard: name your organization, choose a slug, and create your first workspace.
@@ -23,7 +23,7 @@ Get from zero to your first AI conversation in a few minutes.
 </TabItem>
 <TabItem value="self-hosted" label="Self-hosted">
 
-1. Open the CubeBox URL your administrator provided.
+1. Open the CubePlex URL your administrator provided.
 2. Register with your email and password. If email verification is enabled, enter the one-time code sent to your inbox.
 3. If you are the **first user**, the onboarding wizard has you name the organization, choose a slug, and create your first workspace. You become the organization's owner.
 4. Otherwise you join the existing organization as a member and create your own personal workspace through the same wizard.
@@ -65,7 +65,7 @@ If the agent generates a deliverable, it appears as an **artifact** you can prev
 
 ## 4. Explore further
 
-You now have a working CubeBox setup. Here is where to go next:
+You now have a working CubePlex setup. Here is where to go next:
 
 - [Core Concepts](./core-concepts.md) — Understand conversations, skills, memory, MCP tools, and automation.
 - [Workspace Setup](./workspace-setup.md) — Invite team members and configure workspace settings.

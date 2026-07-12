@@ -15,14 +15,14 @@
 ## File structure
 
 **Backend new files:**
-- `backend/cubebox/models/user_event.py` — `UserEvent` SQLModel
-- `backend/cubebox/repositories/user_event.py` — list/insert/mark_read
-- `backend/cubebox/services/user_event.py` — `UserEventService` + DTOs
-- `backend/cubebox/services/user_event_bus.py` — in-process pub/sub
-- `backend/cubebox/services/reflection_runner.py` — orchestrator
-- `backend/cubebox/services/reflection_context.py` — `ContextVar` for source attribution
-- `backend/cubebox/prompts/reflection_system.py` — system-prompt template for reflection agent
-- `backend/cubebox/api/routes/v1/user_events.py` — SSE + read endpoints
+- `backend/cubeplex/models/user_event.py` — `UserEvent` SQLModel
+- `backend/cubeplex/repositories/user_event.py` — list/insert/mark_read
+- `backend/cubeplex/services/user_event.py` — `UserEventService` + DTOs
+- `backend/cubeplex/services/user_event_bus.py` — in-process pub/sub
+- `backend/cubeplex/services/reflection_runner.py` — orchestrator
+- `backend/cubeplex/services/reflection_context.py` — `ContextVar` for source attribution
+- `backend/cubeplex/prompts/reflection_system.py` — system-prompt template for reflection agent
+- `backend/cubeplex/api/routes/v1/user_events.py` — SSE + read endpoints
 - `backend/alembic/versions/<rev>_add_user_events.py` — migration
 - `backend/tests/unit/test_reflection_runner.py`
 - `backend/tests/unit/test_user_event_bus.py`
@@ -30,15 +30,15 @@
 - `backend/tests/integration/test_reflection_flow.py`
 
 **Backend modified files:**
-- `backend/cubebox/models/memory.py` — add `MemorySourceType.REFLECTION`
-- `backend/cubebox/models/public_id.py` — add `PREFIX_USER_EVENT = "uev"`
-- `backend/cubebox/tools/builtin/memory.py` — honor reflection ContextVar on save/update
-- `backend/cubebox/streams/run_manager.py` — schedule reflection task after AgentEndEvent; remove `ReflectionMiddleware()`
-- `backend/cubebox/api/routes/v1/__init__.py` — register user_events router
+- `backend/cubeplex/models/memory.py` — add `MemorySourceType.REFLECTION`
+- `backend/cubeplex/models/public_id.py` — add `PREFIX_USER_EVENT = "uev"`
+- `backend/cubeplex/tools/builtin/memory.py` — honor reflection ContextVar on save/update
+- `backend/cubeplex/streams/run_manager.py` — schedule reflection task after AgentEndEvent; remove `ReflectionMiddleware()`
+- `backend/cubeplex/api/routes/v1/__init__.py` — register user_events router
 
 **Backend deletions (v1 cleanup):**
-- `backend/cubebox/middleware/reflection.py`
-- `backend/cubebox/prompts/reflection.py`
+- `backend/cubeplex/middleware/reflection.py`
+- `backend/cubeplex/prompts/reflection.py`
 - `backend/tests/unit/test_reflection_middleware.py`
 
 **Frontend new files:**
@@ -61,9 +61,9 @@
 ### Task 1: Add `MemorySourceType.REFLECTION` + reflection ContextVar
 
 **Files:**
-- Modify: `backend/cubebox/models/memory.py`
-- Create: `backend/cubebox/services/reflection_context.py`
-- Modify: `backend/cubebox/tools/builtin/memory.py`
+- Modify: `backend/cubeplex/models/memory.py`
+- Create: `backend/cubeplex/services/reflection_context.py`
+- Modify: `backend/cubeplex/tools/builtin/memory.py`
 - Test: `backend/tests/unit/test_reflection_context.py`
 
 - [ ] **Step 1: Write failing test**
@@ -72,8 +72,8 @@
 # backend/tests/unit/test_reflection_context.py
 import pytest
 
-from cubebox.models.memory import MemorySourceType
-from cubebox.services.reflection_context import (
+from cubeplex.models.memory import MemorySourceType
+from cubeplex.services.reflection_context import (
     reflection_source_active,
     set_reflection_source,
 )
@@ -101,7 +101,7 @@ Expected: ImportError on `reflection_source_active` / `set_reflection_source`.
 
 - [ ] **Step 3: Add `REFLECTION` to `MemorySourceType`**
 
-In `backend/cubebox/models/memory.py`, add to the `MemorySourceType` StrEnum:
+In `backend/cubeplex/models/memory.py`, add to the `MemorySourceType` StrEnum:
 
 ```python
 class MemorySourceType(StrEnum):
@@ -117,7 +117,7 @@ class MemorySourceType(StrEnum):
 - [ ] **Step 4: Create reflection_context module**
 
 ```python
-# backend/cubebox/services/reflection_context.py
+# backend/cubeplex/services/reflection_context.py
 """ContextVar gate for tagging memory writes made during a reflection run.
 
 Set inside ReflectionRunner around the reflection Agent's prompt; read by
@@ -155,10 +155,10 @@ Expected: 3 PASS.
 
 - [ ] **Step 6: Wire into memory tools**
 
-In `backend/cubebox/tools/builtin/memory.py`, inside `_memory_save_execute`, change the `CreateMemoryInput` construction to honor the ContextVar:
+In `backend/cubeplex/tools/builtin/memory.py`, inside `_memory_save_execute`, change the `CreateMemoryInput` construction to honor the ContextVar:
 
 ```python
-from cubebox.services.reflection_context import reflection_source_active
+from cubeplex.services.reflection_context import reflection_source_active
 
 # ...inside _memory_save_execute, replacing the existing CreateMemoryInput(...)
 src_type = MemorySourceType.REFLECTION if reflection_source_active() else MemorySourceType.CONVERSATION
@@ -191,8 +191,8 @@ Add the import for `reflection_source_active` and `MemorySourceType` at the top 
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from cubebox.models.memory import MemoryScope, MemorySourceType, MemoryType
-from cubebox.tools.builtin.memory import create_memory_tools
+from cubeplex.models.memory import MemoryScope, MemorySourceType, MemoryType
+from cubeplex.tools.builtin.memory import create_memory_tools
 
 
 @pytest.mark.asyncio
@@ -217,7 +217,7 @@ async def test_memory_save_uses_reflection_source_when_active() -> None:
         confidence=0.9,
     )
 
-    from cubebox.services.reflection_context import set_reflection_source
+    from cubeplex.services.reflection_context import set_reflection_source
     with set_reflection_source():
         await save_tool.execute("tc1", args)
 
@@ -229,14 +229,14 @@ async def test_memory_save_uses_reflection_source_when_active() -> None:
 
 Run:
 ```bash
-cd backend && uv run pytest tests/unit/test_reflection_context.py -v && uv run ruff check cubebox/services/reflection_context.py cubebox/tools/builtin/memory.py cubebox/models/memory.py && uv run mypy cubebox
+cd backend && uv run pytest tests/unit/test_reflection_context.py -v && uv run ruff check cubeplex/services/reflection_context.py cubeplex/tools/builtin/memory.py cubeplex/models/memory.py && uv run mypy cubeplex
 ```
 Expected: all PASS.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/cubebox/services/reflection_context.py backend/cubebox/models/memory.py backend/cubebox/tools/builtin/memory.py backend/tests/unit/test_reflection_context.py
+git add backend/cubeplex/services/reflection_context.py backend/cubeplex/models/memory.py backend/cubeplex/tools/builtin/memory.py backend/tests/unit/test_reflection_context.py
 git commit -m "feat(memory): add REFLECTION source type + ContextVar gate for attribution"
 ```
 
@@ -245,15 +245,15 @@ git commit -m "feat(memory): add REFLECTION source type + ContextVar gate for at
 ### Task 2: `UserEvent` model + migration + public_id prefix
 
 **Files:**
-- Modify: `backend/cubebox/models/public_id.py`
-- Create: `backend/cubebox/models/user_event.py`
-- Modify: `backend/cubebox/models/__init__.py` (re-export)
+- Modify: `backend/cubeplex/models/public_id.py`
+- Create: `backend/cubeplex/models/user_event.py`
+- Modify: `backend/cubeplex/models/__init__.py` (re-export)
 - Create: `backend/alembic/versions/<rev>_add_user_events.py` (autogen)
 - Test: `backend/tests/unit/test_user_event_model.py`
 
 - [ ] **Step 1: Add public_id prefix**
 
-In `backend/cubebox/models/public_id.py`, add:
+In `backend/cubeplex/models/public_id.py`, add:
 
 ```python
 PREFIX_USER_EVENT = "uev"
@@ -267,7 +267,7 @@ PREFIX_USER_EVENT = "uev"
 # backend/tests/unit/test_user_event_model.py
 from datetime import UTC, datetime
 
-from cubebox.models.user_event import UserEvent, UserEventType
+from cubeplex.models.user_event import UserEvent, UserEventType
 
 
 def test_user_event_construct() -> None:
@@ -285,7 +285,7 @@ def test_user_event_construct() -> None:
 - [ ] **Step 3: Create model**
 
 ```python
-# backend/cubebox/models/user_event.py
+# backend/cubeplex/models/user_event.py
 """UserEvent — user-scoped async notification (memory updates, etc.)."""
 
 from datetime import datetime
@@ -296,15 +296,15 @@ from sqlalchemy import Column, DateTime, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase
-from cubebox.models.public_id import PREFIX_USER_EVENT
+from cubeplex.models.mixins import CubeplexBase
+from cubeplex.models.public_id import PREFIX_USER_EVENT
 
 
 class UserEventType(StrEnum):
     MEMORY_UPDATED = "memory_updated"
 
 
-class UserEvent(CubeboxBase, table=True):
+class UserEvent(CubeplexBase, table=True):
     _PREFIX: ClassVar[str] = PREFIX_USER_EVENT
     __tablename__ = "user_events"
     __table_args__ = (
@@ -324,9 +324,9 @@ class UserEvent(CubeboxBase, table=True):
 
 - [ ] **Step 4: Re-export from models/__init__.py**
 
-Add to `backend/cubebox/models/__init__.py`:
+Add to `backend/cubeplex/models/__init__.py`:
 ```python
-from cubebox.models.user_event import UserEvent, UserEventType
+from cubeplex.models.user_event import UserEvent, UserEventType
 ```
 (Match existing alphabetical / grouped re-export style.)
 
@@ -348,7 +348,7 @@ Expected: migration applies cleanly; test passes.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/models/user_event.py backend/cubebox/models/public_id.py backend/cubebox/models/__init__.py backend/alembic/versions/*_add_user_events.py backend/tests/unit/test_user_event_model.py
+git add backend/cubeplex/models/user_event.py backend/cubeplex/models/public_id.py backend/cubeplex/models/__init__.py backend/alembic/versions/*_add_user_events.py backend/tests/unit/test_user_event_model.py
 git commit -m "feat(models): add user_events table for user-scoped async notifications"
 ```
 
@@ -357,9 +357,9 @@ git commit -m "feat(models): add user_events table for user-scoped async notific
 ### Task 3: `UserEventBus` (pub/sub + DB write-through) + repository + service
 
 **Files:**
-- Create: `backend/cubebox/repositories/user_event.py`
-- Create: `backend/cubebox/services/user_event.py`
-- Create: `backend/cubebox/services/user_event_bus.py`
+- Create: `backend/cubeplex/repositories/user_event.py`
+- Create: `backend/cubeplex/services/user_event.py`
+- Create: `backend/cubeplex/services/user_event_bus.py`
 - Test: `backend/tests/unit/test_user_event_bus.py`
 - Test: `backend/tests/unit/test_user_event_service.py`
 
@@ -370,8 +370,8 @@ git commit -m "feat(models): add user_events table for user-scoped async notific
 import asyncio
 import pytest
 
-from cubebox.services.user_event_bus import UserEventBus, UserEventDTO
-from cubebox.models.user_event import UserEventType
+from cubeplex.services.user_event_bus import UserEventBus, UserEventDTO
+from cubeplex.models.user_event import UserEventType
 
 
 @pytest.mark.asyncio
@@ -437,10 +437,10 @@ Expected: ImportError.
 - [ ] **Step 3: Implement bus**
 
 ```python
-# backend/cubebox/services/user_event_bus.py
+# backend/cubeplex/services/user_event_bus.py
 """In-process pub/sub for user-scoped async events.
 
-Single-instance only — when cubebox scales horizontally, swap the body for
+Single-instance only — when cubeplex scales horizontally, swap the body for
 Redis pub/sub keeping the same publish_local / subscribe interface.
 """
 
@@ -450,7 +450,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
 
-from cubebox.models.user_event import UserEventType
+from cubeplex.models.user_event import UserEventType
 
 
 @dataclass(frozen=True)
@@ -502,13 +502,13 @@ Expected: 2 PASS.
 # backend/tests/unit/test_user_event_service.py
 import pytest
 
-from cubebox.models.user_event import UserEventType
-from cubebox.services.user_event import (
+from cubeplex.models.user_event import UserEventType
+from cubeplex.services.user_event import (
     PublishUserEventInput,
     UserEventService,
 )
-from cubebox.services.user_event_bus import UserEventBus
-from cubebox.repositories.user_event import UserEventRepository
+from cubeplex.services.user_event_bus import UserEventBus
+from cubeplex.repositories.user_event import UserEventRepository
 
 
 @pytest.mark.asyncio
@@ -557,13 +557,13 @@ pattern used by `backend/tests/unit/test_memory_service.py` (or closest analog).
 - [ ] **Step 6: Implement repository and service**
 
 ```python
-# backend/cubebox/repositories/user_event.py
+# backend/cubeplex/repositories/user_event.py
 from __future__ import annotations
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cubebox.models.user_event import UserEvent
+from cubeplex.models.user_event import UserEvent
 
 
 class UserEventRepository:
@@ -600,19 +600,19 @@ class UserEventRepository:
         return row
 ```
 
-> Note on `since_id`: if public IDs are not strictly sortable, switch to `created_at` comparison + tiebreak by `id`. Check `cubebox/models/public_id.py` — if IDs are ulid/ksuid-like they're already time-ordered.
+> Note on `since_id`: if public IDs are not strictly sortable, switch to `created_at` comparison + tiebreak by `id`. Check `cubeplex/models/public_id.py` — if IDs are ulid/ksuid-like they're already time-ordered.
 
 ```python
-# backend/cubebox/services/user_event.py
+# backend/cubeplex/services/user_event.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-from cubebox.models.user_event import UserEvent, UserEventType
-from cubebox.repositories.user_event import UserEventRepository
-from cubebox.services.user_event_bus import UserEventBus, UserEventDTO
-from cubebox.utils.time import utc_isoformat
+from cubeplex.models.user_event import UserEvent, UserEventType
+from cubeplex.repositories.user_event import UserEventRepository
+from cubeplex.services.user_event_bus import UserEventBus, UserEventDTO
+from cubeplex.utils.time import utc_isoformat
 
 
 @dataclass
@@ -657,7 +657,7 @@ Expected: all PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/repositories/user_event.py backend/cubebox/services/user_event.py backend/cubebox/services/user_event_bus.py backend/tests/unit/test_user_event_bus.py backend/tests/unit/test_user_event_service.py
+git add backend/cubeplex/repositories/user_event.py backend/cubeplex/services/user_event.py backend/cubeplex/services/user_event_bus.py backend/tests/unit/test_user_event_bus.py backend/tests/unit/test_user_event_service.py
 git commit -m "feat(events): add UserEventBus (pubsub) + UserEventService (persist + broadcast)"
 ```
 
@@ -666,13 +666,13 @@ git commit -m "feat(events): add UserEventBus (pubsub) + UserEventService (persi
 ### Task 4: SSE endpoint + read endpoint
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/user_events.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py` (or wherever routers are registered)
+- Create: `backend/cubeplex/api/routes/v1/user_events.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py` (or wherever routers are registered)
 - Test: `backend/tests/integration/test_user_events_api.py`
 
 - [ ] **Step 1: Wire bus into app singleton**
 
-The bus is in-process; find where other singletons (e.g. `RunManager`) are constructed and wire `UserEventBus()` there. Most likely in `backend/cubebox/main.py` or `backend/cubebox/dependencies.py`. Expose via FastAPI `Depends`.
+The bus is in-process; find where other singletons (e.g. `RunManager`) are constructed and wire `UserEventBus()` there. Most likely in `backend/cubeplex/main.py` or `backend/cubeplex/dependencies.py`. Expose via FastAPI `Depends`.
 
 ```python
 # in dependencies module
@@ -696,8 +696,8 @@ import json
 import pytest
 from httpx import AsyncClient
 
-from cubebox.models.user_event import UserEventType
-from cubebox.services.user_event import PublishUserEventInput, UserEventService
+from cubeplex.models.user_event import UserEventType
+from cubeplex.services.user_event import PublishUserEventInput, UserEventService
 
 
 @pytest.mark.asyncio
@@ -745,7 +745,7 @@ Expected: 404 / endpoint not registered.
 - [ ] **Step 4: Implement endpoints**
 
 ```python
-# backend/cubebox/api/routes/v1/user_events.py
+# backend/cubeplex/api/routes/v1/user_events.py
 """User-scoped async event channel — SSE stream + mark-read."""
 
 import asyncio
@@ -756,11 +756,11 @@ from typing import AsyncIterator
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 
-from cubebox.api.dependencies import get_current_user_id, get_session
-from cubebox.dependencies import get_user_event_bus
-from cubebox.repositories.user_event import UserEventRepository
-from cubebox.services.user_event_bus import UserEventBus
-from cubebox.utils.time import utc_isoformat
+from cubeplex.api.dependencies import get_current_user_id, get_session
+from cubeplex.dependencies import get_user_event_bus
+from cubeplex.repositories.user_event import UserEventRepository
+from cubeplex.services.user_event_bus import UserEventBus
+from cubeplex.utils.time import utc_isoformat
 
 logger = logging.getLogger(__name__)
 
@@ -834,7 +834,7 @@ def _sse_format(event_type: str, data: dict) -> bytes:
 
 - [ ] **Step 5: Register router**
 
-In `backend/cubebox/api/routes/v1/__init__.py` (or the FastAPI `include_router`
+In `backend/cubeplex/api/routes/v1/__init__.py` (or the FastAPI `include_router`
 location), add the user_events router. Match the existing registration style.
 
 - [ ] **Step 6: Run tests, expect pass**
@@ -845,7 +845,7 @@ Expected: 2 PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/user_events.py backend/cubebox/api/routes/v1/__init__.py backend/cubebox/dependencies.py backend/tests/integration/test_user_events_api.py
+git add backend/cubeplex/api/routes/v1/user_events.py backend/cubeplex/api/routes/v1/__init__.py backend/cubeplex/dependencies.py backend/tests/integration/test_user_events_api.py
 git commit -m "feat(api): /api/v1/user/events SSE channel + mark-read endpoint"
 ```
 
@@ -856,12 +856,12 @@ git commit -m "feat(api): /api/v1/user/events SSE channel + mark-read endpoint"
 ### Task 5: Reflection system prompt
 
 **Files:**
-- Create: `backend/cubebox/prompts/reflection_system.py`
+- Create: `backend/cubeplex/prompts/reflection_system.py`
 
 - [ ] **Step 1: Write the prompt module**
 
 ```python
-# backend/cubebox/prompts/reflection_system.py
+# backend/cubeplex/prompts/reflection_system.py
 """System prompt for the detached memory-reflection agent.
 
 The reflection agent runs in isolation after a main conversation turn
@@ -902,7 +902,7 @@ explain — the user will not see your text.
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/prompts/reflection_system.py
+git add backend/cubeplex/prompts/reflection_system.py
 git commit -m "feat(prompts): add reflection-agent system prompt for detached runs"
 ```
 
@@ -911,7 +911,7 @@ git commit -m "feat(prompts): add reflection-agent system prompt for detached ru
 ### Task 6: `ReflectionRunner` service
 
 **Files:**
-- Create: `backend/cubebox/services/reflection_runner.py`
+- Create: `backend/cubeplex/services/reflection_runner.py`
 - Test: `backend/tests/unit/test_reflection_runner.py`
 
 - [ ] **Step 1: Write failing happy-path test**
@@ -921,8 +921,8 @@ git commit -m "feat(prompts): add reflection-agent system prompt for detached ru
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from cubebox.models.user_event import UserEventType
-from cubebox.services.reflection_runner import (
+from cubeplex.models.user_event import UserEventType
+from cubeplex.services.reflection_runner import (
     ReflectionInput,
     ReflectionRunner,
     ReflectionTurn,
@@ -1009,7 +1009,7 @@ Expected: ImportError.
 - [ ] **Step 3: Implement the runner**
 
 ```python
-# backend/cubebox/services/reflection_runner.py
+# backend/cubeplex/services/reflection_runner.py
 """Out-of-band memory reflection — runs after AgentEndEvent.
 
 Spawns a detached cubepi Agent (cheap model, memory tools only) seeded with
@@ -1031,10 +1031,10 @@ from typing import Any, Callable
 
 from cubepi import Agent, AgentEvent
 
-from cubebox.models.user_event import UserEventType
-from cubebox.prompts.reflection_system import REFLECTION_SYSTEM_PROMPT
-from cubebox.services.reflection_context import set_reflection_source
-from cubebox.services.user_event import PublishUserEventInput, UserEventService
+from cubeplex.models.user_event import UserEventType
+from cubeplex.prompts.reflection_system import REFLECTION_SYSTEM_PROMPT
+from cubeplex.services.reflection_context import set_reflection_source
+from cubeplex.services.user_event import PublishUserEventInput, UserEventService
 
 logger = logging.getLogger(__name__)
 
@@ -1172,7 +1172,7 @@ Expected: 3 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/reflection_runner.py backend/tests/unit/test_reflection_runner.py
+git add backend/cubeplex/services/reflection_runner.py backend/tests/unit/test_reflection_runner.py
 git commit -m "feat(memory): add ReflectionRunner — detached out-of-band memory reflection"
 ```
 
@@ -1181,9 +1181,9 @@ git commit -m "feat(memory): add ReflectionRunner — detached out-of-band memor
 ### Task 7: Wire trigger in `run_manager` + remove v1 ReflectionMiddleware
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Delete: `backend/cubebox/middleware/reflection.py`
-- Delete: `backend/cubebox/prompts/reflection.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
+- Delete: `backend/cubeplex/middleware/reflection.py`
+- Delete: `backend/cubeplex/prompts/reflection.py`
 - Delete: `backend/tests/unit/test_reflection_middleware.py`
 - Test: `backend/tests/integration/test_reflection_flow.py`
 
@@ -1194,8 +1194,8 @@ git commit -m "feat(memory): add ReflectionRunner — detached out-of-band memor
 import asyncio
 import pytest
 
-from cubebox.models.memory import MemorySourceType
-from cubebox.models.user_event import UserEventType
+from cubeplex.models.memory import MemorySourceType
+from cubeplex.models.user_event import UserEventType
 
 
 @pytest.mark.asyncio
@@ -1235,7 +1235,7 @@ test conftest. This test is the contract — Step 2-onward implements it.
 
 - [ ] **Step 2: Locate `AgentEndEvent` handling in run_manager**
 
-Find the spot in `backend/cubebox/streams/run_manager.py` where a main run
+Find the spot in `backend/cubeplex/streams/run_manager.py` where a main run
 completes naturally (after the cubepi agent loop exits with a normal stop_reason
 — NOT on abort, error, or HITL suspend). Likely near the existing
 `AgentEndEvent` consumption (search for `agent_end` or `AgentEndEvent`).
@@ -1305,8 +1305,8 @@ Delete its import.
 - [ ] **Step 6: Delete v1 artifacts**
 
 ```bash
-rm backend/cubebox/middleware/reflection.py
-rm backend/cubebox/prompts/reflection.py
+rm backend/cubeplex/middleware/reflection.py
+rm backend/cubeplex/prompts/reflection.py
 rm backend/tests/unit/test_reflection_middleware.py
 ```
 
@@ -1323,8 +1323,8 @@ Expected: all PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/integration/test_reflection_flow.py
-git rm backend/cubebox/middleware/reflection.py backend/cubebox/prompts/reflection.py backend/tests/unit/test_reflection_middleware.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/integration/test_reflection_flow.py
+git rm backend/cubeplex/middleware/reflection.py backend/cubeplex/prompts/reflection.py backend/tests/unit/test_reflection_middleware.py
 git commit -m "feat(memory): wire ReflectionRunner trigger; remove v1 in-band middleware"
 ```
 
@@ -1344,7 +1344,7 @@ git commit -m "feat(memory): wire ReflectionRunner trigger; remove v1 in-band mi
 
 ```typescript
 // frontend/packages/core/src/sse/userEventClient.ts
-import type { UserEvent } from "@cubebox/core";
+import type { UserEvent } from "@cubeplex/core";
 
 export type UserEventHandler = (event: UserEvent) => void;
 
@@ -1353,7 +1353,7 @@ export interface UserEventClient {
   stop(): void;
 }
 
-const STORAGE_KEY = "cubebox.userEvents.lastSeenId";
+const STORAGE_KEY = "cubeplex.userEvents.lastSeenId";
 
 export function createUserEventClient(baseUrl: string): UserEventClient {
   let es: EventSource | null = null;
@@ -1415,7 +1415,7 @@ Re-export from the core barrel.
 ```typescript
 // frontend/packages/core/src/stores/memoryEventStore.ts
 import { create } from "zustand";
-import type { UserEvent } from "@cubebox/core";
+import type { UserEvent } from "@cubeplex/core";
 
 interface MemoryEventState {
   byConversation: Record<string, UserEvent[]>;
@@ -1574,7 +1574,7 @@ On click:
 // frontend/packages/web/src/components/memory/MemoryUpdateToast.tsx
 import { useEffect } from "react";
 import { toast } from "sonner";  // or whichever toast lib is in use
-import { useMemoryEventStore } from "@cubebox/core";
+import { useMemoryEventStore } from "@cubeplex/core";
 import { useRouter, usePathname } from "next/navigation";
 
 export function MemoryUpdateToastBridge() {
@@ -1683,7 +1683,7 @@ Before opening PR for review:
 - [ ] `uv run pytest` clean (full backend suite)
 - [ ] `pnpm test` clean (frontend unit + integration)
 - [ ] `pnpm exec playwright test memory-reflection.spec.ts` PASS
-- [ ] `uv run ruff check && uv run mypy cubebox` clean
+- [ ] `uv run ruff check && uv run mypy cubeplex` clean
 - [ ] `pnpm typecheck && pnpm lint` clean
 - [ ] Smoke: real backend + frontend, send preference message, see chip
 - [ ] Smoke: send a non-preference message, confirm NO chip appears

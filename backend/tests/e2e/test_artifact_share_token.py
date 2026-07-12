@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.config import config as _cubebox_config
-from cubebox.services.artifact_share import (
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.services.artifact_share import (
     SHARE_TTL_SECONDS,
     mint_share_token,
     resolve_share_token,
@@ -34,7 +34,7 @@ _ART_ID = "art-arts1"
 @pytest_asyncio.fixture
 async def _redis() -> AsyncIterator[Redis]:
     client: Redis = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=False,
     )
     try:

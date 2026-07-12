@@ -4,8 +4,8 @@
 Tests construct ``User`` objects in-memory and assert the predicate directly.
 """
 
-from cubebox.models.user import AvatarKind, User
-from cubebox.sso.identity import _should_sso_overwrite_avatar
+from cubeplex.models.user import AvatarKind, User
+from cubeplex.sso.identity import _should_sso_overwrite_avatar
 
 
 def test_sso_does_not_overwrite_uploaded_avatar() -> None:

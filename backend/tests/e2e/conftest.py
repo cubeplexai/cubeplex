@@ -28,31 +28,31 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-import cubebox.db as _cubebox_db
-from cubebox.api.app import create_app
-from cubebox.api.middleware.rate_limit import limiter
-from cubebox.auth.users import UserManager
-from cubebox.config import config as _cubebox_config
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url, engine
-from cubebox.db.session import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import (
+import cubeplex.db as _cubeplex_db
+from cubeplex.api.app import create_app
+from cubeplex.api.middleware.rate_limit import limiter
+from cubeplex.auth.users import UserManager
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url, engine
+from cubeplex.db.session import get_session
+from cubeplex.models import Role, User
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationRepository,
     WorkspaceRepository,
 )
-from cubebox.sandbox.base import ExecuteResult, Sandbox
-from cubebox.sandbox.lazy import LazySandbox
-from cubebox.sandbox.manager import SandboxManager
-from cubebox.skills.sandbox_paths import SKILLS_ROOT
-from cubebox.skills.sync_tar import SKILLS_DELTA_TGZ_PATH
+from cubeplex.sandbox.base import ExecuteResult, Sandbox
+from cubeplex.sandbox.lazy import LazySandbox
+from cubeplex.sandbox.manager import SandboxManager
+from cubeplex.skills.sandbox_paths import SKILLS_ROOT
+from cubeplex.skills.sync_tar import SKILLS_DELTA_TGZ_PATH
 from tests.e2e.helpers import csrf_cookie_name
 
 
 def _auth_cookie_name() -> str:
     """Resolved auth cookie name; honours per-worktree env override."""
-    return str(_cubebox_config.get("auth.cookie_name", "cubebox_auth"))
+    return str(_cubeplex_config.get("auth.cookie_name", "cubeplex_auth"))
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ async def _flush_test_redis(request: pytest.FixtureRequest) -> AsyncIterator[Non
     Uses a prefix-scoped SCAN + DEL instead of FLUSHDB so two worktrees can
     run E2E in parallel against the same Redis without clobbering each other.
     The prefix is `{redis.key_prefix}:{env}` matching what app.py builds at
-    startup; outside a worktree (CI) the key_prefix defaults to "cubebox" and
+    startup; outside a worktree (CI) the key_prefix defaults to "cubeplex" and
     env to "test", so behavior matches the previous FLUSHDB for a single
     isolated runner.
     """
@@ -173,7 +173,7 @@ async def _flush_test_redis(request: pytest.FixtureRequest) -> AsyncIterator[Non
         yield
         return
     client: Redis = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=True,
     )
     try:
@@ -181,7 +181,7 @@ async def _flush_test_redis(request: pytest.FixtureRequest) -> AsyncIterator[Non
         # in other worktrees isn't clobbered. Prefix matches what app.py builds
         # at startup for `app.state.redis_key_prefix`. We read env_name from
         # the SAME source app.py uses (ENV_FOR_DYNACONF) so the two cannot drift.
-        base_prefix = _cubebox_config.get("redis.key_prefix", "cubebox")
+        base_prefix = _cubeplex_config.get("redis.key_prefix", "cubeplex")
         env_name = os.getenv("ENV_FOR_DYNACONF", "development")
         pattern = f"{base_prefix}:{env_name}:*"
         deleted_keys: list[str] = []
@@ -238,7 +238,7 @@ def _make_test_app() -> FastAPI:
     )
     # Patch module-level async_session_maker so DefaultAuthProvider.authenticate
     # (which opens its own session inline) also uses NullPool in tests.
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:
@@ -258,7 +258,7 @@ def _make_memory_test_app() -> FastAPI:
     )
     # Patch module-level async_session_maker so DefaultAuthProvider.authenticate
     # (which opens its own session inline) also uses NullPool in tests.
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:
@@ -277,7 +277,7 @@ async def _ensure_default_user_and_membership() -> None:
     on_after_register — that's fine, both memberships coexist) and grants
     membership to DEFAULT_WS_ID if not already present.
     """
-    from cubebox.models import Organization, Workspace
+    from cubeplex.models import Organization, Workspace
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     test_session_maker = async_sessionmaker(
@@ -333,8 +333,8 @@ async def _ensure_default_user_and_membership() -> None:
             # the on_after_register hook only grants OWNER on the user's
             # auto-created personal org, so DEFAULT_ORG_ID needs an explicit grant
             # for routes resolving to it (e.g. /admin/cost via DEFAULT_WS_ID).
-            from cubebox.models import OrgRole
-            from cubebox.repositories import OrganizationMembershipRepository
+            from cubeplex.models import OrgRole
+            from cubeplex.repositories import OrganizationMembershipRepository
 
             om_repo = OrganizationMembershipRepository(session)
             om_role = await om_repo.get_role(user_id=user.id, org_id=DEFAULT_ORG_ID)
@@ -349,8 +349,8 @@ async def _ensure_default_user_and_membership() -> None:
             # wrong org.
             from sqlalchemy import delete
 
-            from cubebox.models import Membership as MembershipModel
-            from cubebox.models import OrganizationMembership
+            from cubeplex.models import Membership as MembershipModel
+            from cubeplex.models import OrganizationMembership
 
             await session.execute(
                 delete(OrganizationMembership).where(
@@ -403,8 +403,8 @@ async def _ensure_default_ws_member() -> None:
 
             # Ensure org-level membership so resolve_current_org_id picks
             # DEFAULT_ORG_ID for this user too (mirror the admin's setup).
-            from cubebox.models import OrgRole
-            from cubebox.repositories import OrganizationMembershipRepository
+            from cubeplex.models import OrgRole
+            from cubeplex.repositories import OrganizationMembershipRepository
 
             om_repo = OrganizationMembershipRepository(session)
             om_role = await om_repo.get_role(user_id=user.id, org_id=DEFAULT_ORG_ID)
@@ -415,8 +415,8 @@ async def _ensure_default_ws_member() -> None:
             # org/ws memberships so DEFAULT_ORG_ID/WS resolves deterministically.
             from sqlalchemy import delete
 
-            from cubebox.models import Membership as MembershipModel
-            from cubebox.models import OrganizationMembership
+            from cubeplex.models import Membership as MembershipModel
+            from cubeplex.models import OrganizationMembership
 
             await session.execute(
                 delete(OrganizationMembership).where(
@@ -560,9 +560,9 @@ async def _ensure_test_user_membership(
     ws_repo = WorkspaceRepository(session)
     mem_repo = MembershipRepository(session)
 
-    from cubebox.auth.users import _slugify_org_name
-    from cubebox.models import OrgRole
-    from cubebox.repositories import OrganizationMembershipRepository
+    from cubeplex.auth.users import _slugify_org_name
+    from cubeplex.models import OrgRole
+    from cubeplex.repositories import OrganizationMembershipRepository
 
     org_name = f"Org {email}"
     org = await org_repo.create(name=org_name, slug=_slugify_org_name(org_name))
@@ -579,8 +579,8 @@ async def _ensure_test_user_membership(
     # bootstrap-created memberships in other orgs.
     from sqlalchemy import delete
 
-    from cubebox.models import Membership as MembershipModel
-    from cubebox.models import OrganizationMembership
+    from cubeplex.models import Membership as MembershipModel
+    from cubeplex.models import OrganizationMembership
 
     await session.execute(
         delete(OrganizationMembership).where(
@@ -725,8 +725,8 @@ async def member_client_two_workspaces() -> AsyncIterator[tuple[httpx.AsyncClien
         async with setup_maker() as session:
             from sqlalchemy import select as sa_select
 
-            from cubebox.models import User as UserModel
-            from cubebox.models import Workspace as WorkspaceModel
+            from cubeplex.models import User as UserModel
+            from cubeplex.models import Workspace as WorkspaceModel
 
             ws_row = await session.get(WorkspaceModel, ws_a)
             assert ws_row is not None
@@ -789,8 +789,8 @@ async def _seed_skill_artifact(workspace_id: str, *, skill_md: bytes) -> tuple[s
     """
     from sqlalchemy import select as sa_select
 
-    from cubebox.models import Artifact, Conversation, Membership, Workspace
-    from cubebox.objectstore import get_objectstore_client
+    from cubeplex.models import Artifact, Conversation, Membership, Workspace
+    from cubeplex.objectstore import get_objectstore_client
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
@@ -961,7 +961,7 @@ async def redis_client() -> AsyncIterator[Redis]:
     Use for repository/seeder-layer E2E tests that interact with Redis directly.
     """
     client: Redis = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=False,
     )
     try:
@@ -998,9 +998,9 @@ def stub_discover_tools(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     async def _noop(**_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr("cubebox.services.mcp_discovery.run_post_grant_discovery", _noop)
-    monkeypatch.setattr("cubebox.api.routes.v1.admin_mcp.run_post_grant_discovery", _noop)
-    monkeypatch.setattr("cubebox.api.routes.v1.ws_mcp.run_post_grant_discovery", _noop)
+    monkeypatch.setattr("cubeplex.services.mcp_discovery.run_post_grant_discovery", _noop)
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.run_post_grant_discovery", _noop)
+    monkeypatch.setattr("cubeplex.api.routes.v1.ws_mcp.run_post_grant_discovery", _noop)
     yield
 
 
@@ -1080,7 +1080,7 @@ async def _seed_four_layer_template(
     two templates pointing at the same URL — useful for cross-template
     URL uniqueness tests.
     """
-    from cubebox.repositories.mcp import MCPConnectorTemplateRepository
+    from cubeplex.repositories.mcp import MCPConnectorTemplateRepository
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
@@ -1177,8 +1177,8 @@ async def _seed_same_ws_admin_and_member(
             from sqlalchemy import delete
             from sqlalchemy import select as sa_select
 
-            from cubebox.models import Membership as MembershipModel
-            from cubebox.models import OrganizationMembership, OrgRole, Workspace
+            from cubeplex.models import Membership as MembershipModel
+            from cubeplex.models import OrganizationMembership, OrgRole, Workspace
 
             ws = await session.get(Workspace, workspace_id)
             assert ws is not None
@@ -1211,7 +1211,7 @@ async def _seed_same_ws_admin_and_member(
 
             mem_repo = MembershipRepository(session)
             await mem_repo.grant(user_id=member_user.id, workspace_id=workspace_id, role=role_for_b)
-            from cubebox.repositories import OrganizationMembershipRepository
+            from cubeplex.repositories import OrganizationMembershipRepository
 
             om_repo = OrganizationMembershipRepository(session)
             existing_om = await om_repo.get_role(user_id=member_user.id, org_id=org_id)
@@ -1396,10 +1396,10 @@ async def seeded_org_ws_user() -> AsyncIterator[tuple[str, str, str, str]]:
     """
     from sqlalchemy import delete
 
-    from cubebox.auth.users import _slugify_org_name
-    from cubebox.models import Membership as MembershipModel
-    from cubebox.models import OrganizationMembership, OrgRole
-    from cubebox.repositories import OrganizationMembershipRepository
+    from cubeplex.auth.users import _slugify_org_name
+    from cubeplex.models import Membership as MembershipModel
+    from cubeplex.models import OrganizationMembership, OrgRole
+    from cubeplex.repositories import OrganizationMembershipRepository
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     test_session_maker = async_sessionmaker(
@@ -1478,18 +1478,18 @@ async def seeded_session_org_ws() -> AsyncIterator[tuple[AsyncSession, str, str,
     repository/service-layer E2E tests that need direct DB access and the
     preinstalled skill catalog (e.g. find_skills tool unit-integration tests).
     """
-    from cubebox.auth.users import _slugify_org_name
-    from cubebox.config import backend_dir
-    from cubebox.config import config as _cfg
-    from cubebox.models import Organization, Workspace
-    from cubebox.seeders import seed_preinstalled_skills
+    from cubeplex.auth.users import _slugify_org_name
+    from cubeplex.config import backend_dir
+    from cubeplex.config import config as _cfg
+    from cubeplex.models import Organization, Workspace
+    from cubeplex.seeders import seed_preinstalled_skills
 
     test_engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
 
     # Seed preinstalled skills via the real seeder (Redis lock, real object store).
     redis: Redis = Redis.from_url(
-        _cubebox_config.get("redis.url", "redis://127.0.0.1:6379/0"),
+        _cubeplex_config.get("redis.url", "redis://127.0.0.1:6379/0"),
         decode_responses=False,
     )
     try:
@@ -1616,7 +1616,7 @@ async def _clean_search_tables() -> AsyncIterator[None]:
     pending`` referencing now-vanished conversations) get claimed first by the
     worker under test, starving the test's own enqueue.
     """
-    from cubebox.db.engine import async_session_maker as _asm
+    from cubeplex.db.engine import async_session_maker as _asm
 
     async with _asm() as session:
         await session.execute(text("TRUNCATE TABLE embedding_jobs RESTART IDENTITY"))
@@ -1634,10 +1634,10 @@ async def search_test_user_ctx(_clean_search_tables: None) -> tuple[str, str, st
     Conversation / ConversationChunk / EmbeddingJob. The slug and email are
     randomized so concurrent / repeated runs don't collide.
     """
-    from cubebox.db.engine import async_session_maker as _asm
-    from cubebox.models.organization import Organization
-    from cubebox.models.user import User as UserModel
-    from cubebox.models.workspace import Workspace
+    from cubeplex.db.engine import async_session_maker as _asm
+    from cubeplex.models.organization import Organization
+    from cubeplex.models.user import User as UserModel
+    from cubeplex.models.workspace import Workspace
 
     suffix = secrets.token_hex(6)
     async with _asm() as session:
@@ -1666,9 +1666,9 @@ async def seeded_conversation(
     """Create a conversation and seed three small cubepi messages."""
     from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
-    from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.db.engine import async_session_maker as _asm
-    from cubebox.models.conversation import Conversation
+    from cubeplex.agents.checkpointer import init_checkpointer
+    from cubeplex.db.engine import async_session_maker as _asm
+    from cubeplex.models.conversation import Conversation
 
     org_id, ws_id, user_id = search_test_user_ctx
     async with _asm() as session:
@@ -1706,9 +1706,9 @@ async def seed_conversations_with_content(
     """
     from cubepi.providers.base import AssistantMessage, TextContent, UserMessage
 
-    from cubebox.agents.checkpointer import init_checkpointer
-    from cubebox.db.engine import async_session_maker as _asm
-    from cubebox.models.conversation import Conversation
+    from cubeplex.agents.checkpointer import init_checkpointer
+    from cubeplex.db.engine import async_session_maker as _asm
+    from cubeplex.models.conversation import Conversation
 
     org_id, ws_id, user_id = search_test_user_ctx
     seeds: list[tuple[str, list[TextContent], str]] = [
@@ -1763,7 +1763,7 @@ async def seed_remote_source() -> AsyncIterator[Callable[..., Awaitable[str]]]:
     (it's covered by ``test_create_rejects_ssrf_base_urls``); they only need a
     registered source, so they seed one straight into the DB.
     """
-    from cubebox.repositories.skill_registry import SkillRegistryRepository
+    from cubeplex.repositories.skill_registry import SkillRegistryRepository
 
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
     maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -1835,8 +1835,8 @@ async def fresh_workspace_and_sandbox(
     """
     del fake_opensandbox  # consumed to activate monkeypatch
 
-    from cubebox.auth.users import _slugify_org_name
-    from cubebox.models import Organization, Workspace
+    from cubeplex.auth.users import _slugify_org_name
+    from cubeplex.models import Organization, Workspace
 
     suffix = secrets.token_hex(4)
     org_name = f"sync-e2e-{suffix}"
@@ -1855,7 +1855,7 @@ async def fresh_workspace_and_sandbox(
         from fastapi_users.db import SQLAlchemyUserDatabase
         from fastapi_users.schemas import BaseUserCreate
 
-        from cubebox.auth.users import UserManager
+        from cubeplex.auth.users import UserManager
 
         email = f"sync-e2e-{suffix}@example.com"
         password = secrets.token_urlsafe(12)
@@ -1903,9 +1903,9 @@ async def fresh_workspace_and_sandbox(
             # both tables, then clean up skill installs before dropping the ws.
             from sqlalchemy import delete, update
 
-            from cubebox.models.skill import OrgSkillInstall
-            from cubebox.models.user_sandbox import UserSandbox
-            from cubebox.models.user_sandbox_sync_event import UserSandboxSyncEvent
+            from cubeplex.models.skill import OrgSkillInstall
+            from cubeplex.models.user_sandbox import UserSandbox
+            from cubeplex.models.user_sandbox_sync_event import UserSandboxSyncEvent
 
             await cleanup_session.execute(
                 update(UserSandbox)
@@ -1954,8 +1954,8 @@ async def admin_client_and_sandbox(
 
     from sqlalchemy import delete as sa_delete
 
-    from cubebox.models import OrganizationMembership, OrgRole
-    from cubebox.repositories import OrganizationMembershipRepository
+    from cubeplex.models import OrganizationMembership, OrgRole
+    from cubeplex.repositories import OrganizationMembershipRepository
 
     async with session_factory() as session:
         user_db_inst = SQLAlchemyUserDatabase(session, User)
@@ -1996,8 +1996,8 @@ async def admin_client_and_sandbox(
         # cleanup can delete the workspace without FK violations.
         from sqlalchemy import delete as sa_delete2
 
-        from cubebox.models import Membership as MembershipModel
-        from cubebox.models import OrganizationMembership
+        from cubeplex.models import Membership as MembershipModel
+        from cubeplex.models import OrganizationMembership
 
         async with session_factory() as cleanup:
             await cleanup.execute(
@@ -2042,8 +2042,8 @@ async def install_skill_for_workspace(
     only appears in this workspace's enabled-skills list.  Object storage
     upload is real (rustfs).
     """
-    from cubebox.skills.cache import SkillCache
-    from cubebox.skills.service import SkillPublishService
+    from cubeplex.skills.cache import SkillCache
+    from cubeplex.skills.service import SkillPublishService
 
     cache_dir = Path(tempfile.mkdtemp())
     publisher = SkillPublishService(session=session, cache=SkillCache(cache_root=cache_dir))
@@ -2071,7 +2071,7 @@ async def uninstall_skill_for_workspace(
     """
     from sqlalchemy import delete, select
 
-    from cubebox.models.skill import OrgSkillInstall, Skill, SkillVersion
+    from cubeplex.models.skill import OrgSkillInstall, Skill, SkillVersion
 
     await session.execute(
         delete(OrgSkillInstall).where(

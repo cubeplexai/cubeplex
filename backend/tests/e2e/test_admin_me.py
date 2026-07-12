@@ -45,10 +45,10 @@ async def test_admin_me_picks_own_org_when_added_to_older_foreign_workspace(
     from fastapi_users.schemas import BaseUserCreate
     from sqlalchemy import select
 
-    from cubebox.auth.users import UserManager
-    from cubebox.models import Role, User, Workspace
-    from cubebox.models.organization_membership import OrgRole
-    from cubebox.repositories import MembershipRepository, OrganizationMembershipRepository
+    from cubeplex.auth.users import UserManager
+    from cubeplex.models import Role, User, Workspace
+    from cubeplex.models.organization_membership import OrgRole
+    from cubeplex.repositories import MembershipRepository, OrganizationMembershipRepository
 
     client, ws_a = admin_client
     me_a = (await client.get("/api/v1/auth/me")).json()
@@ -97,9 +97,9 @@ async def test_admin_me_uses_org_membership_not_workspace_admin(member_client, s
     client, workspace_id = member_client
     from sqlalchemy import select
 
-    from cubebox.models import Membership, Role, User, Workspace
-    from cubebox.models.organization_membership import OrgRole
-    from cubebox.repositories import (
+    from cubeplex.models import Membership, Role, User, Workspace
+    from cubeplex.models.organization_membership import OrgRole
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
         WorkspaceRepository,

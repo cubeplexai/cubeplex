@@ -8,7 +8,7 @@ they want to swap models.
 
 ## Where things live
 
-The subsystem is `cubebox.services.conversation_search` (a regular
+The subsystem is `cubeplex.services.conversation_search` (a regular
 service package). Tests sit at `backend/tests/services/conversation_search/`
 for unit pieces and `backend/tests/e2e/test_conversation_search*` for the
 DB-backed paths.
@@ -48,7 +48,7 @@ whole subsystem (no worker, no route data) and is independent of
 
 ## The three-way check
 
-`cubebox.services.conversation_search.startup._verify_dim_alignment` runs
+`cubeplex.services.conversation_search.startup._verify_dim_alignment` runs
 at FastAPI lifespan startup, after a provider is built, and fetches:
 
 - `schema_dim` — `format_type(atttypid, atttypmod)` on
@@ -159,8 +159,8 @@ When an operator later flips `embedding.enabled=true` and restarts:
 
 ## See also
 
-- `backend/cubebox/services/conversation_search/startup.py` — startup wiring.
-- `backend/cubebox/services/conversation_search/embedding.py` —
+- `backend/cubeplex/services/conversation_search/startup.py` — startup wiring.
+- `backend/cubeplex/services/conversation_search/embedding.py` —
   `EmbeddingProvider.from_config`.
 - `backend/alembic/versions/fabe1279b9f6_conversation_search_tables.py` —
   the migration that builds the `vector(N)` column.

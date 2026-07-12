@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.sandbox.manager import SandboxManager
 
 
 class _FakeRaw:
@@ -107,7 +107,7 @@ async def test_pre_create_setup_failure_releases_reservation(
     phantom winner. Regression test for codex P1 r3317495775."""
     import sqlalchemy as sa
 
-    from cubebox.sandbox_env.injector import SandboxEnvInjector
+    from cubeplex.sandbox_env.injector import SandboxEnvInjector
 
     factory, _fake_create = session_factory
     mgr = SandboxManager(factory, mock_encryption_backend)
@@ -167,7 +167,7 @@ async def test_reconnect_failure_after_create_keeps_running_row(
 
     monkeypatch.setattr(opensandbox.Sandbox, "connect", staticmethod(fake_connect))
 
-    from cubebox.sandbox.base import SandboxError
+    from cubeplex.sandbox.base import SandboxError
 
     with pytest.raises(SandboxError, match="reconnect failed"):
         await mgr.get_or_create(

@@ -40,8 +40,8 @@
 | `web/components/panel/SearchResultView.tsx`          | Accept `highlightText`, scroll + highlight matching item                   |
 | `web/components/panel/WebFetchView.tsx`              | Accept `highlightText`, scroll + highlight matching text                   |
 | `web/components/panel/GenericToolView.tsx`           | Accept `highlightText`, scroll + highlight matching text                   |
-| `backend/cubebox/middleware/citations/middleware.py` | Store `citations` list in `additional_kwargs`                              |
-| `backend/cubebox/agents/convert.py`                  | Extract `citations` from ToolMessage for API response                      |
+| `backend/cubeplex/middleware/citations/middleware.py` | Store `citations` list in `additional_kwargs`                              |
+| `backend/cubeplex/agents/convert.py`                  | Extract `citations` from ToolMessage for API response                      |
 
 ---
 
@@ -239,12 +239,12 @@ git commit -m "feat(citations): add citation Zustand store"
 
 **Files:**
 
-- Modify: `backend/cubebox/middleware/citations/middleware.py`
-- Modify: `backend/cubebox/agents/convert.py`
+- Modify: `backend/cubeplex/middleware/citations/middleware.py`
+- Modify: `backend/cubeplex/agents/convert.py`
 
 - [ ] **Step 1: Store citations in `additional_kwargs`**
 
-In `backend/cubebox/middleware/citations/middleware.py`, the `awrap_tool_call` method currently builds `citation_data` dicts and pushes them to the queue. Collect them in a list and also store in `additional_kwargs`.
+In `backend/cubeplex/middleware/citations/middleware.py`, the `awrap_tool_call` method currently builds `citation_data` dicts and pushes them to the queue. Collect them in a list and also store in `additional_kwargs`.
 
 After line 76 (`chunks_for_llm: list[str] = []`), add:
 
@@ -277,7 +277,7 @@ To:
 
 - [ ] **Step 2: Extract citations in `convert.py`**
 
-In `backend/cubebox/agents/convert.py`, in the `elif isinstance(msg, ToolMessage):` block (around line 172), extract citations from `additional_kwargs` and add to the API response.
+In `backend/cubeplex/agents/convert.py`, in the `elif isinstance(msg, ToolMessage):` block (around line 172), extract citations from `additional_kwargs` and add to the API response.
 
 Change the ToolMessage result dict (lines 178-191) to include citations:
 
@@ -314,7 +314,7 @@ Expected: format, lint, type-check, tests all PASS
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/middleware/citations/middleware.py backend/cubebox/agents/convert.py
+git add backend/cubeplex/middleware/citations/middleware.py backend/cubeplex/agents/convert.py
 git commit -m "feat(citations): persist citation data in checkpoint and API response"
 ```
 
@@ -496,8 +496,8 @@ Create `frontend/packages/web/components/chat/CitationMarker.tsx`:
 
 import { useState, useCallback } from 'react'
 import { Globe, ExternalLink, Calendar } from 'lucide-react'
-import { useCitationStore, usePanelStore } from '@cubebox/core'
-import type { CitationData } from '@cubebox/core'
+import { useCitationStore, usePanelStore } from '@cubeplex/core'
+import type { CitationData } from '@cubeplex/core'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 
 interface CitationMarkerProps {
@@ -600,7 +600,7 @@ export function CitationMarker({ citationId, chunkIndex, conversationId }: Citat
     if (!citation) return
     const chunk = citation.chunks.find((c) => c.chunk_index === chunkIndex)
     // Find the tool result from the message store to populate the panel
-    const { useMessageStore } = require('@cubebox/core')
+    const { useMessageStore } = require('@cubeplex/core')
     const toolResultMap = useMessageStore.getState().toolResultMap
     const result = toolResultMap[citation.tool_call_id]
 
@@ -677,7 +677,7 @@ Add imports at the top:
 ```ts
 import { renderWithCitations } from '@/lib/citations'
 import { CitationMarker } from './CitationMarker'
-import { useConversationStore } from '@cubebox/core'
+import { useConversationStore } from '@cubeplex/core'
 ```
 
 In the `ContentBlockRenderer` function, find the text block rendering (around line 328):
@@ -1225,7 +1225,7 @@ const handleOpenPanel = useCallback(() => {
 Add import at top:
 
 ```ts
-import { useCitationStore, usePanelStore, useMessageStore } from '@cubebox/core'
+import { useCitationStore, usePanelStore, useMessageStore } from '@cubeplex/core'
 ```
 
 (Replace the separate `useCitationStore` and `usePanelStore` imports with a combined one, and add `useMessageStore`.)

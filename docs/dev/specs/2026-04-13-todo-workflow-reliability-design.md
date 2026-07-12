@@ -304,7 +304,7 @@ A later version should persist the latest todo state directly into LangGraph che
 
 Files in scope:
 
-- `cubebox/middleware/todo.py`
+- `cubeplex/middleware/todo.py`
 - `tests/unit/test_middleware_todo.py`
 
 Changes:
@@ -317,7 +317,7 @@ Changes:
 
 Files in scope:
 
-- `cubebox/middleware/todo.py`
+- `cubeplex/middleware/todo.py`
 - `tests/unit/test_middleware_todo.py`
 
 Changes:
@@ -332,7 +332,7 @@ Changes:
 Files in scope:
 
 - Resume/state restoration module for agent sessions
-- `cubebox/middleware/todo.py`
+- `cubeplex/middleware/todo.py`
 - Related tests
 
 Changes:

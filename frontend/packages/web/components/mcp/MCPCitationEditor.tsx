@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { CitationConfigJSON } from '@cubebox/core'
+import type { CitationConfigJSON } from '@cubeplex/core'
 import { Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'

@@ -9,13 +9,13 @@
  * Setup is seeded via API (creates the template server-side without browser
  * overhead); assertions are through UI page.locator visibility, not JSON.
  *
- * Requires a running backend (CUBEBOX_API_URL env) and frontend dev server.
+ * Requires a running backend (CUBEPLEX_API_URL env) and frontend dev server.
  */
 
 import { test, expect, type Page } from '@playwright/test'
 
 const PASSWORD = 'correcthorsebatterystaple'
-const BACKEND_URL = process.env.CUBEBOX_API_URL ?? 'http://localhost:8091'
+const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8091'
 
 function uniqueEmail(): string {
   return `u-mcp-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`

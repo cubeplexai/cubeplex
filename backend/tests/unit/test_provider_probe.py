@@ -6,7 +6,7 @@ covers the orchestrator's overall-result computation.
 
 import pytest
 
-from cubebox.services.provider_probe import (
+from cubeplex.services.provider_probe import (
     ProbeError,
     ProbeStep,
     _aggregate_overall,
@@ -529,7 +529,7 @@ class _UsageStub(_StubProvider):
 async def test_probe_usage_pass_when_usage_present():
     from cubepi.providers.base import Usage
 
-    from cubebox.services.provider_probe import probe_usage
+    from cubeplex.services.provider_probe import probe_usage
 
     step = await probe_usage(
         _UsageStub(usage=Usage(input_tokens=10, output_tokens=3), events=[]),
@@ -541,7 +541,7 @@ async def test_probe_usage_pass_when_usage_present():
 
 @pytest.mark.asyncio
 async def test_probe_usage_warn_when_absent():
-    from cubebox.services.provider_probe import probe_usage
+    from cubeplex.services.provider_probe import probe_usage
 
     step = await probe_usage(_UsageStub(usage=None, events=[]), model_id="m")
     assert step.status == "warn"

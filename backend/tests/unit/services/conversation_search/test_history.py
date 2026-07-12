@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.services.conversation_search.history import (
+from cubeplex.services.conversation_search.history import (
     estimate_tokens,
     format_history_turns,
     format_tool_result,

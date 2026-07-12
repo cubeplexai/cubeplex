@@ -8,7 +8,7 @@ import {
   type PublicShareArtifact,
   type Message,
   type ContentBlock,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { ToolCallGroup } from '@/components/chat/ToolCallGroup'
@@ -340,7 +340,7 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
       <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
           {/* Logo */}
-          <span className="font-semibold text-foreground tracking-tight select-none">cubebox</span>
+          <span className="font-semibold text-foreground tracking-tight select-none">cubeplex</span>
 
           {/* Title */}
           <h1 className="flex-1 text-center text-sm font-medium text-foreground truncate px-2">

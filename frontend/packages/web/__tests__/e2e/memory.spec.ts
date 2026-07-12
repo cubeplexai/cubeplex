@@ -21,7 +21,7 @@ test('Memory Center: create + list + archive personal memory', async ({ page, re
   const apiBase = process.env.PLAYWRIGHT_API_BASE ?? page.url().split('/w/')[0]
   const cookies = await page.context().cookies()
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ')
-  const csrf = cookies.find((c) => c.name.startsWith('cubebox_csrf'))?.value ?? ''
+  const csrf = cookies.find((c) => c.name.startsWith('cubeplex_csrf'))?.value ?? ''
 
   const seedRes = await request.post(`${apiBase}/api/v1/ws/${wsId}/memory`, {
     headers: { 'X-CSRF-Token': csrf, Cookie: cookieHeader, 'Content-Type': 'application/json' },

@@ -1,4 +1,4 @@
-# cubepi JSONL Tracing in cubebox — Design
+# cubepi JSONL Tracing in cubeplex — Design
 
 **Date:** 2026-05-20
 **Status:** Approved — ready for implementation plan
@@ -7,21 +7,21 @@
 ## 1. Goal
 
 Wire cubepi 0.4's tracing (`cubepi.tracing.Tracer` + `JsonlSpanExporter`)
-into cubebox's agent run path so that each conversation turn produces an
+into cubeplex's agent run path so that each conversation turn produces an
 on-disk OTLP/JSON trace file. Purpose: local debugging — inspect the full
 prompt, model response, per-call timing, token usage, and tool args/results
 of any run after the fact.
 
 cubepi already ships the tracing machinery (dep pinned as
 `cubepi[mcp,postgres,tracing,tracing-otlp]>=0.4.0`). This work is purely the
-cubebox-side integration: build a `Tracer`, attach it to the per-run agent,
+cubeplex-side integration: build a `Tracer`, attach it to the per-run agent,
 gate it behind config.
 
 ## 2. Integration Point
 
-`cubebox/streams/run_manager.py` → `RunManager._run_cubepi_path`.
+`cubeplex/streams/run_manager.py` → `RunManager._run_cubepi_path`.
 
-The agent is built there via `create_cubebox_agent(...)` (~line 1064) and run
+The agent is built there via `create_cubeplex_agent(...)` (~line 1064) and run
 via `await agent.prompt(_user_msg)` (~line 1134). The tracer attaches to that
 agent and wraps the `prompt()` call.
 
@@ -35,9 +35,9 @@ from cubepi.tracing import JsonlSpanExporter, Tracer
 
 if tracing_enabled:
     tracer = Tracer(
-        service_name="cubebox",
+        service_name="cubeplex",
         deployment_environment=<config env>,
-        agent_name="cubebox-agent",
+        agent_name="cubeplex-agent",
         exporters=[JsonlSpanExporter(directory=<config dir>)],
         record_content=<config>,
     )

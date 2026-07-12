@@ -21,9 +21,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from cubepi.hitl import CheckpointedChannel
 
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
-from cubebox.streams.run_manager import RunContext, RunManager
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.streams.run_manager import RunContext, RunManager
 
 pytestmark = pytest.mark.asyncio
 
@@ -41,7 +41,7 @@ def _stub_app() -> MagicMock:
 
 
 def _stub_cp() -> MagicMock:
-    """A checkpointer that ``create_cubebox_agent`` accepts and the caller can
+    """A checkpointer that ``create_cubeplex_agent`` accepts and the caller can
     pass to ``CheckpointedChannel``."""
     cp = MagicMock()
     cp.load = AsyncMock(return_value=None)
@@ -61,7 +61,7 @@ async def _build(
     mock_agent = MagicMock()
     mock_agent._extra = {}
     monkeypatch.setattr(
-        "cubebox.agents.graph.create_cubebox_agent",
+        "cubeplex.agents.graph.create_cubeplex_agent",
         MagicMock(return_value=mock_agent),
     )
 
@@ -105,7 +105,7 @@ async def _build(
     # _build_agent_for_conversation imports load_llm_snapshot / build_chain_model
     # locally inside the method, so we patch the source modules.
     monkeypatch.setattr(
-        "cubebox.llm.snapshot.load_llm_snapshot",
+        "cubeplex.llm.snapshot.load_llm_snapshot",
         _fake_load,
     )
 
@@ -114,7 +114,7 @@ async def _build(
     mock_bound_model.spec.id = "claude-stub"
     mock_bound_model.provider = MagicMock()
     monkeypatch.setattr(
-        "cubebox.llm.builder.build_chain_model",
+        "cubeplex.llm.builder.build_chain_model",
         MagicMock(return_value=mock_bound_model),
     )
 

@@ -8,7 +8,7 @@
 # build.sh instead — this script is the in-cluster fallback.
 #
 # Usage:
-#   TAG=hub.sensedeal.vip/library/cubebox-sandbox:24.04-$(date +%Y%m%d)-nekoN \
+#   TAG=hub.sensedeal.vip/library/cubeplex-sandbox:24.04-$(date +%Y%m%d)-nekoN \
 #   NODE=k8s-test-208 \
 #   TURN_URL=turn:192.168.1.208:3478 TURN_USER=neko TURN_CRED=neko \
 #   ./build-on-node.sh
@@ -68,4 +68,4 @@ kubectl exec "$POD" -n default -- sh -c "
   exit 1
 "
 echo "Pushed ${TAG}"
-echo "Next: update the prepull DaemonSet image and CUBEBOX_SANDBOX__IMAGE to ${TAG}"
+echo "Next: update the prepull DaemonSet image and CUBEPLEX_SANDBOX__IMAGE to ${TAG}"

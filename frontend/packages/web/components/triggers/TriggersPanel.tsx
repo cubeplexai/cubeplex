@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Plus } from 'lucide-react'
-import { createApiClient, useTriggerStore, type CreateTriggerBody } from '@cubebox/core'
+import { createApiClient, useTriggerStore, type CreateTriggerBody } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { PANE_CONTENT_WIDTH, SectionHeader } from '@/components/shared/SectionHeader'
 import { ListDetailLayout } from '@/components/shared/ListDetailLayout'

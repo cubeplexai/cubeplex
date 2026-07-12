@@ -9,12 +9,12 @@ from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Role, User
-from cubebox.models.memory import MemoryItem, MemoryScope, MemorySourceType, MemoryType
-from cubebox.models.organization import Organization
-from cubebox.models.workspace import Workspace
-from cubebox.repositories import MembershipRepository, OrganizationRepository, WorkspaceRepository
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Role, User
+from cubeplex.models.memory import MemoryItem, MemoryScope, MemorySourceType, MemoryType
+from cubeplex.models.organization import Organization
+from cubeplex.models.workspace import Workspace
+from cubeplex.repositories import MembershipRepository, OrganizationRepository, WorkspaceRepository
 
 
 def _token(n: int = 6) -> str:
@@ -93,12 +93,12 @@ async def second_member_client(
     workspace so both clients target the same scope.
 
     Implementation note: _make_memory_test_app() patches the module-level
-    _cubebox_db.async_session_maker. Creating a second app after member_client
+    _cubeplex_db.async_session_maker. Creating a second app after member_client
     is already running would overwrite that patch and break member_client's
     JWT auth. We save and restore the original patched value so both apps
     can coexist.
     """
-    import cubebox.db as _cubebox_db
+    import cubeplex.db as _cubeplex_db
 
     _primary_client, workspace_id = member_client
 
@@ -110,15 +110,15 @@ async def second_member_client(
     )
 
     # Save the session maker that member_client's app installed.
-    _saved_session_maker = _cubebox_db.async_session_maker
+    _saved_session_maker = _cubeplex_db.async_session_maker
 
     # Create a brand-new isolated user (own org + personal workspace).
-    # This calls _make_memory_test_app() which patches _cubebox_db.async_session_maker.
+    # This calls _make_memory_test_app() which patches _cubeplex_db.async_session_maker.
     app, email, password, _own_workspace_id = await _make_isolated_user(Role.MEMBER)
     app.state.deployment_mode = "multi_tenant"
 
     # Restore member_client's session maker so its JWT auth continues to work.
-    _cubebox_db.async_session_maker = _saved_session_maker
+    _cubeplex_db.async_session_maker = _saved_session_maker
 
     # Grant the second user membership in the PRIMARY workspace via DB.
     engine = create_async_engine(_build_database_url(), poolclass=NullPool)
@@ -127,7 +127,7 @@ async def second_member_client(
         async with session_maker() as session:
             from sqlalchemy import select
 
-            from cubebox.models import User as _User
+            from cubeplex.models import User as _User
 
             result = await session.execute(select(_User).where(_User.email == email))
             second_user = result.scalar_one()
@@ -146,7 +146,7 @@ async def second_member_client(
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as second_client:
             await _login_and_attach(second_client, email, password)
             # Restore session maker again in case _login_and_attach or lifespan patched it.
-            _cubebox_db.async_session_maker = _saved_session_maker
+            _cubeplex_db.async_session_maker = _saved_session_maker
             yield second_client, workspace_id
 
 
@@ -172,7 +172,7 @@ async def poisoned_workspace_memory(
             assert ws is not None, f"Workspace {ws_id} not found in DB"
             org_id = ws.org_id
 
-            from cubebox.models import Membership
+            from cubeplex.models import Membership
 
             stmt = sa_select(Membership).where(Membership.workspace_id == ws_id)
             membership = (await session.execute(stmt)).scalars().first()

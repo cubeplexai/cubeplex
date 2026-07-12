@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubebox.im.feishu.link_command import parse_link_command
+from cubeplex.im.feishu.link_command import parse_link_command
 
 
 class TestParseLinkCommand:

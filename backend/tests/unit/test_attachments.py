@@ -3,7 +3,7 @@
 import pytest
 from cubepi.providers.base import AssistantMessage, TextContent, Usage, UserMessage
 
-from cubebox.middleware.attachments import AttachmentHintMiddleware
+from cubeplex.middleware.attachments import AttachmentHintMiddleware
 
 
 @pytest.mark.asyncio

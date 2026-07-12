@@ -6,18 +6,18 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.models import EgressRef
-from cubebox.repositories.credential import CredentialRepository
-from cubebox.repositories.egress_ref import EgressRefRepository
-from cubebox.sandbox_env.exchange_auth import SidecarIdentity
-from cubebox.sandbox_env.placeholder import hash_placeholder, mint_placeholder
-from cubebox.services.credential import CredentialService
-from cubebox.services.egress_exchange import (
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.models import EgressRef
+from cubeplex.repositories.credential import CredentialRepository
+from cubeplex.repositories.egress_ref import EgressRefRepository
+from cubeplex.sandbox_env.exchange_auth import SidecarIdentity
+from cubeplex.sandbox_env.placeholder import hash_placeholder, mint_placeholder
+from cubeplex.services.credential import CredentialService
+from cubeplex.services.egress_exchange import (
     EgressExchangeError,
     EgressExchangeService,
 )
-from cubebox.services.sandbox_env import SANDBOX_ENV_KIND
+from cubeplex.services.sandbox_env import SANDBOX_ENV_KIND
 
 
 @pytest.fixture
@@ -176,7 +176,7 @@ async def test_exchange_fails_with_past_expiry(session: AsyncSession) -> None:
 
 async def test_extend_expiry_revives_a_soon_to_expire_ref(session: AsyncSession) -> None:
     """A long-running sandbox: extending expiry keeps a near-expired ref valid."""
-    from cubebox.repositories.egress_ref import EgressRefRepository
+    from cubeplex.repositories.egress_ref import EgressRefRepository
 
     placeholder = mint_placeholder()
     ref_hash = hash_placeholder(placeholder)

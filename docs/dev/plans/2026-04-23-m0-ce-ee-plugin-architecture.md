@@ -4,7 +4,7 @@
 
 **Goal:** Freeze 5 `Protocol` extension interfaces (AuthProvider / PermissionChecker / AuditSink / UserDirectorySyncer / AdminPanelExtension), wire `pip entry_points` discovery + CE default fallback, integrate AuthProvider + PermissionChecker into existing CE flows, hook 3 audit call sites, and stand up the AdminPanelExtension startup scan — all without breaking any existing auth / RBAC test.
 
-**Architecture:** New package `backend/cubebox/plugins/` holds Protocols + registry + CE defaults. CE default implementations are instantiated directly by the registry (no entry_points). External plugins declare entry_points under per-Protocol groups (`cubebox.auth_provider` etc.) plus a mandatory `cubebox.plugin_manifest` for API version checking. `Sandbox.execute / upload / download` are unchanged; only auth + admin plumbing touched.
+**Architecture:** New package `backend/cubeplex/plugins/` holds Protocols + registry + CE defaults. CE default implementations are instantiated directly by the registry (no entry_points). External plugins declare entry_points under per-Protocol groups (`cubeplex.auth_provider` etc.) plus a mandatory `cubeplex.plugin_manifest` for API version checking. `Sandbox.execute / upload / download` are unchanged; only auth + admin plumbing touched.
 
 **Tech Stack:** Python 3.12, FastAPI, fastapi-users, pytest, pytest-asyncio, importlib.metadata (entry_points), structlog, Pydantic, SQLModel, dynaconf.
 
@@ -17,8 +17,8 @@
 ### Create
 
 ```
-backend/cubebox/plugins/
-├─ __init__.py                      # Re-export PluginManifest, registry getters, CUBEBOX_PLUGIN_API_VERSION
+backend/cubeplex/plugins/
+├─ __init__.py                      # Re-export PluginManifest, registry getters, CUBEPLEX_PLUGIN_API_VERSION
 ├─ protocols.py                     # 5 Protocols + dataclasses + PluginManifest
 ├─ registry.py                      # PluginRegistry (discover, resolve, getters)
 ├─ audit.py                         # audit_log() helper
@@ -48,11 +48,11 @@ backend/tests/fixtures/fake_plugin/
 ### Modify
 
 ```
-backend/cubebox/auth/dependencies.py        # require_role rewritten to call PermissionChecker
-backend/cubebox/auth/users.py               # on_after_login hook + audit_log calls
-backend/cubebox/api/app.py                  # Plugin discovery startup; mount auth routers + admin extension routers + manifest endpoint
-backend/cubebox/api/routes/v1/workspaces.py # invite create → audit_log
-backend/cubebox/config.py                   # plugins.* pydantic schema
+backend/cubeplex/auth/dependencies.py        # require_role rewritten to call PermissionChecker
+backend/cubeplex/auth/users.py               # on_after_login hook + audit_log calls
+backend/cubeplex/api/app.py                  # Plugin discovery startup; mount auth routers + admin extension routers + manifest endpoint
+backend/cubeplex/api/routes/v1/workspaces.py # invite create → audit_log
+backend/cubeplex/config.py                   # plugins.* pydantic schema
 backend/config.yaml                         # plugins: section default
 backend/config.development.yaml             # plugins: section default
 backend/config.test.yaml                    # plugins: section default
@@ -63,57 +63,57 @@ backend/config.test.yaml                    # plugins: section default
 
 ## Tasks
 
-### Task 1: Create `cubebox.plugins` package skeleton
+### Task 1: Create `cubeplex.plugins` package skeleton
 
 **Files:**
-- Create: `backend/cubebox/plugins/__init__.py`
-- Create: `backend/cubebox/plugins/defaults/__init__.py`
+- Create: `backend/cubeplex/plugins/__init__.py`
+- Create: `backend/cubeplex/plugins/defaults/__init__.py`
 - Create: `backend/tests/plugins/__init__.py`
 
 - [ ] **Step 1: Create directory + empty __init__.py files**
 
 ```bash
-mkdir -p backend/cubebox/plugins/defaults
+mkdir -p backend/cubeplex/plugins/defaults
 mkdir -p backend/tests/plugins
-touch backend/cubebox/plugins/defaults/__init__.py
+touch backend/cubeplex/plugins/defaults/__init__.py
 touch backend/tests/plugins/__init__.py
 ```
 
-- [ ] **Step 2: Add placeholder `cubebox/plugins/__init__.py` with module docstring**
+- [ ] **Step 2: Add placeholder `cubeplex/plugins/__init__.py` with module docstring**
 
 ```python
 """CE/EE plugin protocols + entry_points-based discovery.
 
-This package defines the contracts that external plugins (e.g. cubebox-ee)
-implement to extend cubebox CE. See docs/superpowers/specs/2026-04-22-ce-ee-plugin-architecture-design.md.
+This package defines the contracts that external plugins (e.g. cubeplex-ee)
+implement to extend cubeplex CE. See docs/superpowers/specs/2026-04-22-ce-ee-plugin-architecture-design.md.
 """
 ```
 
 - [ ] **Step 3: Verify import works**
 
-Run: `cd backend && uv run python -c "import cubebox.plugins"`
+Run: `cd backend && uv run python -c "import cubeplex.plugins"`
 Expected: no error.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/plugins/ backend/tests/plugins/
+git add backend/cubeplex/plugins/ backend/tests/plugins/
 git commit -m "chore(plugins): create package skeleton for M0 plugin architecture"
 ```
 
 ---
 
-### Task 2: Define `PluginManifest` + `CUBEBOX_PLUGIN_API_VERSION` constant
+### Task 2: Define `PluginManifest` + `CUBEPLEX_PLUGIN_API_VERSION` constant
 
 **Files:**
-- Create: `backend/cubebox/plugins/protocols.py`
+- Create: `backend/cubeplex/plugins/protocols.py`
 - Create: `backend/tests/plugins/test_protocols.py`
 
 - [ ] **Step 1: Write failing test for PluginManifest dataclass**
 
 ```python
 # backend/tests/plugins/test_protocols.py
-from cubebox.plugins.protocols import CUBEBOX_PLUGIN_API_VERSION, PluginManifest
+from cubeplex.plugins.protocols import CUBEPLEX_PLUGIN_API_VERSION, PluginManifest
 
 
 def test_plugin_manifest_constructs_with_required_fields() -> None:
@@ -130,22 +130,22 @@ def test_plugin_manifest_accepts_description() -> None:
 
 
 def test_api_version_constant_is_int_one() -> None:
-    assert CUBEBOX_PLUGIN_API_VERSION == 1
-    assert isinstance(CUBEBOX_PLUGIN_API_VERSION, int)
+    assert CUBEPLEX_PLUGIN_API_VERSION == 1
+    assert isinstance(CUBEPLEX_PLUGIN_API_VERSION, int)
 ```
 
 - [ ] **Step 2: Run test, verify it fails**
 
 Run: `cd backend && uv run pytest tests/plugins/test_protocols.py -v`
-Expected: FAIL with `ImportError: cannot import name 'PluginManifest' from 'cubebox.plugins.protocols'`
+Expected: FAIL with `ImportError: cannot import name 'PluginManifest' from 'cubeplex.plugins.protocols'`
 
 - [ ] **Step 3: Implement protocols.py with manifest + version**
 
 ```python
-# backend/cubebox/plugins/protocols.py
+# backend/cubeplex/plugins/protocols.py
 """Plugin Protocols + supporting dataclasses + version constant.
 
-CUBEBOX_PLUGIN_API_VERSION is the single integer plugins must declare via
+CUBEPLEX_PLUGIN_API_VERSION is the single integer plugins must declare via
 their PluginManifest. Mismatch → registry refuses to load the plugin.
 """
 
@@ -157,7 +157,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Request
 
-CUBEBOX_PLUGIN_API_VERSION: Final[int] = 1
+CUBEPLEX_PLUGIN_API_VERSION: Final[int] = 1
 
 
 @dataclass(frozen=True)
@@ -178,8 +178,8 @@ Expected: PASS (3 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/protocols.py backend/tests/plugins/test_protocols.py
-git commit -m "feat(plugins): add PluginManifest dataclass and CUBEBOX_PLUGIN_API_VERSION constant"
+git add backend/cubeplex/plugins/protocols.py backend/tests/plugins/test_protocols.py
+git commit -m "feat(plugins): add PluginManifest dataclass and CUBEPLEX_PLUGIN_API_VERSION constant"
 ```
 
 ---
@@ -187,7 +187,7 @@ git commit -m "feat(plugins): add PluginManifest dataclass and CUBEBOX_PLUGIN_AP
 ### Task 3: Define `PermissionResource`, `AuditEvent`, `AdminNavItem`, `SyncResult`, `SyncSchedule` dataclasses
 
 **Files:**
-- Modify: `backend/cubebox/plugins/protocols.py`
+- Modify: `backend/cubeplex/plugins/protocols.py`
 - Modify: `backend/tests/plugins/test_protocols.py`
 
 - [ ] **Step 1: Add failing tests for new dataclasses**
@@ -198,7 +198,7 @@ Append to `backend/tests/plugins/test_protocols.py`:
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from cubebox.plugins.protocols import (
+from cubeplex.plugins.protocols import (
     AdminNavItem,
     AuditEvent,
     PermissionResource,
@@ -271,7 +271,7 @@ Expected: FAIL with import errors for PermissionResource, AuditEvent, AdminNavIt
 
 - [ ] **Step 3: Add dataclasses to protocols.py**
 
-Append to `backend/cubebox/plugins/protocols.py`:
+Append to `backend/cubeplex/plugins/protocols.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -329,7 +329,7 @@ Expected: PASS (9 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/protocols.py backend/tests/plugins/test_protocols.py
+git add backend/cubeplex/plugins/protocols.py backend/tests/plugins/test_protocols.py
 git commit -m "feat(plugins): add PermissionResource, AuditEvent, AdminNavItem, SyncResult, SyncSchedule"
 ```
 
@@ -338,7 +338,7 @@ git commit -m "feat(plugins): add PermissionResource, AuditEvent, AdminNavItem, 
 ### Task 4: Define 5 Protocols (`AuthProvider`, `PermissionChecker`, `AuditSink`, `UserDirectorySyncer`, `AdminPanelExtension`)
 
 **Files:**
-- Modify: `backend/cubebox/plugins/protocols.py`
+- Modify: `backend/cubeplex/plugins/protocols.py`
 - Modify: `backend/tests/plugins/test_protocols.py`
 
 - [ ] **Step 1: Add failing tests asserting Protocol satisfaction**
@@ -346,7 +346,7 @@ git commit -m "feat(plugins): add PermissionResource, AuditEvent, AdminNavItem, 
 Append to `backend/tests/plugins/test_protocols.py`:
 
 ```python
-from cubebox.plugins.protocols import (
+from cubeplex.plugins.protocols import (
     AdminPanelExtension,
     AuditSink,
     AuthProvider,
@@ -414,14 +414,14 @@ Expected: FAIL — Protocols don't exist yet.
 
 - [ ] **Step 3: Add Protocol definitions to protocols.py**
 
-Append to `backend/cubebox/plugins/protocols.py`:
+Append to `backend/cubeplex/plugins/protocols.py`:
 
 ```python
 # Forward-declare User type; imported only for type checking to avoid cycles
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from cubebox.models import User
+    from cubeplex.models import User
 
 
 @runtime_checkable
@@ -469,15 +469,15 @@ class AdminPanelExtension(Protocol):
 Run: `cd backend && uv run pytest tests/plugins/test_protocols.py -v`
 Expected: PASS (11 tests total)
 
-- [ ] **Step 5: Re-export from `cubebox/plugins/__init__.py`**
+- [ ] **Step 5: Re-export from `cubeplex/plugins/__init__.py`**
 
-Replace `backend/cubebox/plugins/__init__.py`:
+Replace `backend/cubeplex/plugins/__init__.py`:
 
 ```python
 """CE/EE plugin protocols + entry_points-based discovery."""
 
-from cubebox.plugins.protocols import (
-    CUBEBOX_PLUGIN_API_VERSION,
+from cubeplex.plugins.protocols import (
+    CUBEPLEX_PLUGIN_API_VERSION,
     AdminNavItem,
     AdminPanelExtension,
     AuditEvent,
@@ -492,7 +492,7 @@ from cubebox.plugins.protocols import (
 )
 
 __all__ = [
-    "CUBEBOX_PLUGIN_API_VERSION",
+    "CUBEPLEX_PLUGIN_API_VERSION",
     "AdminNavItem",
     "AdminPanelExtension",
     "AuditEvent",
@@ -510,7 +510,7 @@ __all__ = [
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/plugins/protocols.py backend/cubebox/plugins/__init__.py backend/tests/plugins/test_protocols.py
+git add backend/cubeplex/plugins/protocols.py backend/cubeplex/plugins/__init__.py backend/tests/plugins/test_protocols.py
 git commit -m "feat(plugins): define 5 runtime_checkable Protocols (auth/permissions/audit/sync/admin)"
 ```
 
@@ -519,7 +519,7 @@ git commit -m "feat(plugins): define 5 runtime_checkable Protocols (auth/permiss
 ### Task 5: `PluginRegistry` skeleton + manifest discovery + version validation
 
 **Files:**
-- Create: `backend/cubebox/plugins/registry.py`
+- Create: `backend/cubeplex/plugins/registry.py`
 - Create: `backend/tests/plugins/test_registry_manifest.py`
 
 - [ ] **Step 1: Write failing test for manifest discovery + version mismatch**
@@ -532,11 +532,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cubebox.plugins.protocols import CUBEBOX_PLUGIN_API_VERSION, PluginManifest
-from cubebox.plugins.registry import PluginRegistry
+from cubeplex.plugins.protocols import CUBEPLEX_PLUGIN_API_VERSION, PluginManifest
+from cubeplex.plugins.registry import PluginRegistry
 
 
-def _ep(name: str, value, group: str = "cubebox.plugin_manifest"):
+def _ep(name: str, value, group: str = "cubeplex.plugin_manifest"):
     """Build a fake importlib.metadata.EntryPoint mock that load() returns `value`."""
     m = MagicMock()
     m.name = name
@@ -549,7 +549,7 @@ def _ep(name: str, value, group: str = "cubebox.plugin_manifest"):
 @pytest.mark.asyncio
 async def test_no_external_manifests_uses_defaults_only() -> None:
     reg = PluginRegistry()
-    with patch("cubebox.plugins.registry.importlib.metadata.entry_points") as mock_eps:
+    with patch("cubeplex.plugins.registry.importlib.metadata.entry_points") as mock_eps:
         mock_eps.return_value = []
         await reg.discover()
     # No external manifests → registry has no plugins beyond defaults.
@@ -559,12 +559,12 @@ async def test_no_external_manifests_uses_defaults_only() -> None:
 @pytest.mark.asyncio
 async def test_valid_manifest_is_registered() -> None:
     manifest = PluginManifest(
-        api_version=CUBEBOX_PLUGIN_API_VERSION, name="ee", version="0.1.0"
+        api_version=CUBEPLEX_PLUGIN_API_VERSION, name="ee", version="0.1.0"
     )
     reg = PluginRegistry()
-    with patch("cubebox.plugins.registry.importlib.metadata.entry_points") as mock_eps:
+    with patch("cubeplex.plugins.registry.importlib.metadata.entry_points") as mock_eps:
         mock_eps.side_effect = lambda group: (
-            [_ep("main", manifest)] if group == "cubebox.plugin_manifest" else []
+            [_ep("main", manifest)] if group == "cubeplex.plugin_manifest" else []
         )
         await reg.discover()
     assert "ee" in reg._manifests
@@ -575,9 +575,9 @@ async def test_valid_manifest_is_registered() -> None:
 async def test_version_mismatch_raises() -> None:
     bad_manifest = PluginManifest(api_version=999, name="ee", version="0.1.0")
     reg = PluginRegistry()
-    with patch("cubebox.plugins.registry.importlib.metadata.entry_points") as mock_eps:
+    with patch("cubeplex.plugins.registry.importlib.metadata.entry_points") as mock_eps:
         mock_eps.side_effect = lambda group: (
-            [_ep("main", bad_manifest)] if group == "cubebox.plugin_manifest" else []
+            [_ep("main", bad_manifest)] if group == "cubeplex.plugin_manifest" else []
         )
         with pytest.raises(RuntimeError, match="api_version"):
             await reg.discover()
@@ -588,9 +588,9 @@ async def test_missing_manifest_for_plugin_with_entry_point_raises() -> None:
     """A wheel registers an AuthProvider but no plugin_manifest → reject."""
     fake_provider_cls = MagicMock()
     reg = PluginRegistry()
-    with patch("cubebox.plugins.registry.importlib.metadata.entry_points") as mock_eps:
+    with patch("cubeplex.plugins.registry.importlib.metadata.entry_points") as mock_eps:
         def by_group(group):
-            if group == "cubebox.auth_provider":
+            if group == "cubeplex.auth_provider":
                 ep = _ep("rogue", fake_provider_cls, group)
                 ep.dist = MagicMock(name="rogue-pkg")
                 return [ep]
@@ -603,12 +603,12 @@ async def test_missing_manifest_for_plugin_with_entry_point_raises() -> None:
 - [ ] **Step 2: Run tests, verify fail**
 
 Run: `cd backend && uv run pytest tests/plugins/test_registry_manifest.py -v`
-Expected: FAIL — `cubebox.plugins.registry` doesn't exist.
+Expected: FAIL — `cubeplex.plugins.registry` doesn't exist.
 
 - [ ] **Step 3: Implement registry.py with manifest discovery**
 
 ```python
-# backend/cubebox/plugins/registry.py
+# backend/cubeplex/plugins/registry.py
 """Plugin discovery + resolution."""
 
 from __future__ import annotations
@@ -617,8 +617,8 @@ import importlib.metadata
 import logging
 from typing import TYPE_CHECKING
 
-from cubebox.plugins.protocols import (
-    CUBEBOX_PLUGIN_API_VERSION,
+from cubeplex.plugins.protocols import (
+    CUBEPLEX_PLUGIN_API_VERSION,
     AdminPanelExtension,
     AuditSink,
     AuthProvider,
@@ -633,12 +633,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Per-Protocol entry_points group names. External wheels publish here.
-GROUP_MANIFEST = "cubebox.plugin_manifest"
-GROUP_AUTH = "cubebox.auth_provider"
-GROUP_PERMISSIONS = "cubebox.permission_checker"
-GROUP_AUDIT = "cubebox.audit_sink"
-GROUP_DIRECTORY = "cubebox.user_directory_syncer"
-GROUP_ADMIN_PANEL = "cubebox.admin_panel_extension"
+GROUP_MANIFEST = "cubeplex.plugin_manifest"
+GROUP_AUTH = "cubeplex.auth_provider"
+GROUP_PERMISSIONS = "cubeplex.permission_checker"
+GROUP_AUDIT = "cubeplex.audit_sink"
+GROUP_DIRECTORY = "cubeplex.user_directory_syncer"
+GROUP_ADMIN_PANEL = "cubeplex.admin_panel_extension"
 
 PROTOCOL_GROUPS: dict[str, type] = {
     GROUP_AUTH: AuthProvider,
@@ -673,10 +673,10 @@ class PluginRegistry:
                 raise RuntimeError(
                     f"entry_point {ep.value} did not return a PluginManifest"
                 )
-            if manifest.api_version != CUBEBOX_PLUGIN_API_VERSION:
+            if manifest.api_version != CUBEPLEX_PLUGIN_API_VERSION:
                 raise RuntimeError(
                     f"plugin {manifest.name!r}: api_version={manifest.api_version} "
-                    f"but cubebox CE requires api_version={CUBEBOX_PLUGIN_API_VERSION}"
+                    f"but cubeplex CE requires api_version={CUBEPLEX_PLUGIN_API_VERSION}"
                 )
             self._manifests[manifest.name] = manifest
             # Map dist name to manifest for cross-group lookup
@@ -723,7 +723,7 @@ Expected: PASS (4 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/registry.py backend/tests/plugins/test_registry_manifest.py
+git add backend/cubeplex/plugins/registry.py backend/tests/plugins/test_registry_manifest.py
 git commit -m "feat(plugins): PluginRegistry discovery + manifest version validation"
 ```
 
@@ -732,7 +732,7 @@ git commit -m "feat(plugins): PluginRegistry discovery + manifest version valida
 ### Task 6: Singular Protocol resolution (selected sentinel + 0/1/multiple external)
 
 **Files:**
-- Modify: `backend/cubebox/plugins/registry.py`
+- Modify: `backend/cubeplex/plugins/registry.py`
 - Create: `backend/tests/plugins/test_registry_singular.py`
 
 - [ ] **Step 1: Write failing tests for singular resolution scenarios**
@@ -743,8 +743,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cubebox.plugins.protocols import CUBEBOX_PLUGIN_API_VERSION, PluginManifest
-from cubebox.plugins.registry import GROUP_AUTH, PluginRegistry
+from cubeplex.plugins.protocols import CUBEPLEX_PLUGIN_API_VERSION, PluginManifest
+from cubeplex.plugins.registry import GROUP_AUTH, PluginRegistry
 
 
 class _StubAuthProvider:
@@ -763,7 +763,7 @@ class _StubAuthProvider:
 def _seed_registry(reg: PluginRegistry, candidates: dict[str, type]) -> None:
     reg._candidates[GROUP_AUTH] = dict(candidates)
     reg._manifests = {
-        "ee": PluginManifest(api_version=CUBEBOX_PLUGIN_API_VERSION, name="ee", version="0.1.0")
+        "ee": PluginManifest(api_version=CUBEPLEX_PLUGIN_API_VERSION, name="ee", version="0.1.0")
     }
 
 
@@ -824,7 +824,7 @@ Expected: FAIL with `AttributeError: ... has no attribute 'resolve_singular'`
 
 - [ ] **Step 3: Implement `resolve_singular` on PluginRegistry**
 
-Append to `PluginRegistry` class in `backend/cubebox/plugins/registry.py`:
+Append to `PluginRegistry` class in `backend/cubeplex/plugins/registry.py`:
 
 ```python
     def resolve_singular(
@@ -873,7 +873,7 @@ Expected: PASS (6 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/registry.py backend/tests/plugins/test_registry_singular.py
+git add backend/cubeplex/plugins/registry.py backend/tests/plugins/test_registry_singular.py
 git commit -m "feat(plugins): registry.resolve_singular with selected sentinel + conflict rules"
 ```
 
@@ -882,14 +882,14 @@ git commit -m "feat(plugins): registry.resolve_singular with selected sentinel +
 ### Task 7: Multi-instance Protocol resolution + `disabled` config
 
 **Files:**
-- Modify: `backend/cubebox/plugins/registry.py`
+- Modify: `backend/cubeplex/plugins/registry.py`
 - Create: `backend/tests/plugins/test_registry_plural.py`
 
 - [ ] **Step 1: Write failing tests**
 
 ```python
 # backend/tests/plugins/test_registry_plural.py
-from cubebox.plugins.registry import GROUP_AUDIT, PluginRegistry
+from cubeplex.plugins.registry import GROUP_AUDIT, PluginRegistry
 
 
 class _StubSink:
@@ -960,7 +960,7 @@ Expected: FAIL — `resolve_plural` missing.
 
 - [ ] **Step 3: Implement `resolve_plural`**
 
-Append to `PluginRegistry` class in `backend/cubebox/plugins/registry.py`:
+Append to `PluginRegistry` class in `backend/cubeplex/plugins/registry.py`:
 
 ```python
     def resolve_plural(
@@ -994,7 +994,7 @@ Expected: PASS (5 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/registry.py backend/tests/plugins/test_registry_plural.py
+git add backend/cubeplex/plugins/registry.py backend/tests/plugins/test_registry_plural.py
 git commit -m "feat(plugins): registry.resolve_plural with disabled filter"
 ```
 
@@ -1003,7 +1003,7 @@ git commit -m "feat(plugins): registry.resolve_plural with disabled filter"
 ### Task 8: CE default `AuthProvider` (wraps fastapi-users)
 
 **Files:**
-- Create: `backend/cubebox/plugins/defaults/auth.py`
+- Create: `backend/cubeplex/plugins/defaults/auth.py`
 - Create: `backend/tests/plugins/test_default_auth.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1011,8 +1011,8 @@ git commit -m "feat(plugins): registry.resolve_plural with disabled filter"
 ```python
 # backend/tests/plugins/test_default_auth.py
 import pytest
-from cubebox.plugins import AuthProvider
-from cubebox.plugins.defaults.auth import DefaultAuthProvider
+from cubeplex.plugins import AuthProvider
+from cubeplex.plugins.defaults.auth import DefaultAuthProvider
 
 
 def test_default_auth_provider_satisfies_protocol() -> None:
@@ -1036,16 +1036,16 @@ Expected: FAIL with ImportError.
 - [ ] **Step 3: Implement DefaultAuthProvider**
 
 ```python
-# backend/cubebox/plugins/defaults/auth.py
+# backend/cubeplex/plugins/defaults/auth.py
 """CE default AuthProvider: wraps fastapi-users for cookie/JWT auth."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from cubebox.auth.jwt import auth_backend
-from cubebox.auth.users import fastapi_users
-from cubebox.models import User
+from cubeplex.auth.jwt import auth_backend
+from cubeplex.auth.users import fastapi_users
+from cubeplex.models import User
 
 
 class DefaultAuthProvider:
@@ -1062,17 +1062,17 @@ class DefaultAuthProvider:
             fastapi_users.get_auth_router(auth_backend),
             fastapi_users.get_register_router(
                 # Schema imports stay lazy to avoid circular imports at module load
-                __import__("cubebox.api.schemas.auth", fromlist=["UserRead"]).UserRead,
-                __import__("cubebox.api.schemas.auth", fromlist=["UserCreate"]).UserCreate,
+                __import__("cubeplex.api.schemas.auth", fromlist=["UserRead"]).UserRead,
+                __import__("cubeplex.api.schemas.auth", fromlist=["UserCreate"]).UserCreate,
             ),
             fastapi_users.get_users_router(
-                __import__("cubebox.api.schemas.auth", fromlist=["UserRead"]).UserRead,
-                __import__("cubebox.api.schemas.auth", fromlist=["UserUpdate"]).UserUpdate,
+                __import__("cubeplex.api.schemas.auth", fromlist=["UserRead"]).UserRead,
+                __import__("cubeplex.api.schemas.auth", fromlist=["UserUpdate"]).UserUpdate,
             ),
         ]
 ```
 
-NOTE: actual imports for UserRead/UserCreate/UserUpdate may need adjustment based on real `cubebox/api/schemas/auth.py` shape. If the `__import__` indirection feels brittle, refactor to direct imports once the file structure is verified.
+NOTE: actual imports for UserRead/UserCreate/UserUpdate may need adjustment based on real `cubeplex/api/schemas/auth.py` shape. If the `__import__` indirection feels brittle, refactor to direct imports once the file structure is verified.
 
 - [ ] **Step 4: Run tests, verify pass**
 
@@ -1082,7 +1082,7 @@ Expected: PASS (2 tests). If schema imports fail, fix them per actual `api/schem
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/defaults/auth.py backend/tests/plugins/test_default_auth.py
+git add backend/cubeplex/plugins/defaults/auth.py backend/tests/plugins/test_default_auth.py
 git commit -m "feat(plugins): DefaultAuthProvider wraps fastapi-users"
 ```
 
@@ -1091,7 +1091,7 @@ git commit -m "feat(plugins): DefaultAuthProvider wraps fastapi-users"
 ### Task 9: CE default `PermissionChecker` (wraps Role lookup)
 
 **Files:**
-- Create: `backend/cubebox/plugins/defaults/permissions.py`
+- Create: `backend/cubeplex/plugins/defaults/permissions.py`
 - Create: `backend/tests/plugins/test_default_permissions.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1103,9 +1103,9 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.models import Role
-from cubebox.plugins import PermissionChecker, PermissionResource
-from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
+from cubeplex.models import Role
+from cubeplex.plugins import PermissionChecker, PermissionResource
+from cubeplex.plugins.defaults.permissions import DefaultPermissionChecker
 
 
 def test_default_permission_checker_satisfies_protocol() -> None:
@@ -1164,7 +1164,7 @@ Expected: FAIL with ImportError.
 - [ ] **Step 3: Implement DefaultPermissionChecker**
 
 ```python
-# backend/cubebox/plugins/defaults/permissions.py
+# backend/cubeplex/plugins/defaults/permissions.py
 """CE default PermissionChecker: wraps existing Membership.get_role lookup."""
 
 from __future__ import annotations
@@ -1172,13 +1172,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from cubebox.models import Role
-from cubebox.plugins.protocols import PermissionResource
+from cubeplex.models import Role
+from cubeplex.plugins.protocols import PermissionResource
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from cubebox.repositories import MembershipRepository
+    from cubeplex.repositories import MembershipRepository
 
 
 class DefaultPermissionChecker:
@@ -1229,7 +1229,7 @@ Expected: PASS (5 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/defaults/permissions.py backend/tests/plugins/test_default_permissions.py
+git add backend/cubeplex/plugins/defaults/permissions.py backend/tests/plugins/test_default_permissions.py
 git commit -m "feat(plugins): DefaultPermissionChecker wraps Role lookup"
 ```
 
@@ -1238,7 +1238,7 @@ git commit -m "feat(plugins): DefaultPermissionChecker wraps Role lookup"
 ### Task 10: CE default `AuditSink` (no-op + structlog)
 
 **Files:**
-- Create: `backend/cubebox/plugins/defaults/audit.py`
+- Create: `backend/cubeplex/plugins/defaults/audit.py`
 - Create: `backend/tests/plugins/test_default_audit.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1250,8 +1250,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.plugins import AuditEvent, AuditSink
-from cubebox.plugins.defaults.audit import DefaultAuditSink
+from cubeplex.plugins import AuditEvent, AuditSink
+from cubeplex.plugins.defaults.audit import DefaultAuditSink
 
 
 def test_default_audit_sink_satisfies_protocol() -> None:
@@ -1286,16 +1286,16 @@ Expected: FAIL with ImportError.
 - [ ] **Step 3: Implement DefaultAuditSink**
 
 ```python
-# backend/cubebox/plugins/defaults/audit.py
+# backend/cubeplex/plugins/defaults/audit.py
 """CE default AuditSink: structlog INFO no-op (no DB write)."""
 
 from __future__ import annotations
 
 import logging
 
-from cubebox.plugins.protocols import AuditEvent
+from cubeplex.plugins.protocols import AuditEvent
 
-logger = logging.getLogger("cubebox.audit")
+logger = logging.getLogger("cubeplex.audit")
 
 
 class DefaultAuditSink:
@@ -1321,7 +1321,7 @@ Expected: PASS (2 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/defaults/audit.py backend/tests/plugins/test_default_audit.py
+git add backend/cubeplex/plugins/defaults/audit.py backend/tests/plugins/test_default_audit.py
 git commit -m "feat(plugins): DefaultAuditSink logs via structlog (no DB write)"
 ```
 
@@ -1330,15 +1330,15 @@ git commit -m "feat(plugins): DefaultAuditSink logs via structlog (no DB write)"
 ### Task 11: CE default `AdminPanelExtension` (empty)
 
 **Files:**
-- Create: `backend/cubebox/plugins/defaults/admin_panel.py`
+- Create: `backend/cubeplex/plugins/defaults/admin_panel.py`
 - Create: `backend/tests/plugins/test_default_admin_panel.py`
 
 - [ ] **Step 1: Write failing test**
 
 ```python
 # backend/tests/plugins/test_default_admin_panel.py
-from cubebox.plugins import AdminPanelExtension
-from cubebox.plugins.defaults.admin_panel import DefaultAdminPanelExtension
+from cubeplex.plugins import AdminPanelExtension
+from cubeplex.plugins.defaults.admin_panel import DefaultAdminPanelExtension
 
 
 def test_default_admin_panel_satisfies_protocol() -> None:
@@ -1360,7 +1360,7 @@ Expected: FAIL with ImportError.
 - [ ] **Step 3: Implement DefaultAdminPanelExtension**
 
 ```python
-# backend/cubebox/plugins/defaults/admin_panel.py
+# backend/cubeplex/plugins/defaults/admin_panel.py
 """CE default AdminPanelExtension: empty (CE itself contributes nothing)."""
 
 from __future__ import annotations
@@ -1369,7 +1369,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
-from cubebox.plugins.protocols import AdminNavItem
+from cubeplex.plugins.protocols import AdminNavItem
 
 
 class DefaultAdminPanelExtension:
@@ -1391,7 +1391,7 @@ Expected: PASS (2 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/defaults/admin_panel.py backend/tests/plugins/test_default_admin_panel.py
+git add backend/cubeplex/plugins/defaults/admin_panel.py backend/tests/plugins/test_default_admin_panel.py
 git commit -m "feat(plugins): DefaultAdminPanelExtension returns empty (CE contributes no extensions)"
 ```
 
@@ -1400,8 +1400,8 @@ git commit -m "feat(plugins): DefaultAdminPanelExtension returns empty (CE contr
 ### Task 12: Wire `PluginRegistry` getters + module-level singleton
 
 **Files:**
-- Modify: `backend/cubebox/plugins/registry.py`
-- Modify: `backend/cubebox/plugins/__init__.py`
+- Modify: `backend/cubeplex/plugins/registry.py`
+- Modify: `backend/cubeplex/plugins/__init__.py`
 - Create: `backend/tests/plugins/test_registry_getters.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1410,13 +1410,13 @@ git commit -m "feat(plugins): DefaultAdminPanelExtension returns empty (CE contr
 # backend/tests/plugins/test_registry_getters.py
 import pytest
 
-from cubebox.plugins import (
+from cubeplex.plugins import (
     AdminPanelExtension,
     AuditSink,
     AuthProvider,
     PermissionChecker,
 )
-from cubebox.plugins.registry import PluginRegistry
+from cubeplex.plugins.registry import PluginRegistry
 
 
 @pytest.mark.asyncio
@@ -1471,7 +1471,7 @@ Expected: FAIL — getters not implemented.
 
 - [ ] **Step 3: Implement getters + bind_defaults + module singleton**
 
-Append to `PluginRegistry` class in `backend/cubebox/plugins/registry.py`:
+Append to `PluginRegistry` class in `backend/cubeplex/plugins/registry.py`:
 
 ```python
     # Resolved instances (set by bind_defaults after discover).
@@ -1496,10 +1496,10 @@ Append to `PluginRegistry` class in `backend/cubebox/plugins/registry.py`:
         `config` should be a config object exposing `plugins.<group>.selected`
         and `plugins.<group>.disabled` (None = empty list / None).
         """
-        from cubebox.plugins.defaults.admin_panel import DefaultAdminPanelExtension
-        from cubebox.plugins.defaults.audit import DefaultAuditSink
-        from cubebox.plugins.defaults.auth import DefaultAuthProvider
-        from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
+        from cubeplex.plugins.defaults.admin_panel import DefaultAdminPanelExtension
+        from cubeplex.plugins.defaults.audit import DefaultAuditSink
+        from cubeplex.plugins.defaults.auth import DefaultAuthProvider
+        from cubeplex.plugins.defaults.permissions import DefaultPermissionChecker
 
         auth_default = auth_default or DefaultAuthProvider()
         permissions_default = permissions_default or DefaultPermissionChecker()
@@ -1570,12 +1570,12 @@ def reset_registry_for_tests() -> None:
     _registry = None
 ```
 
-- [ ] **Step 4: Re-export getters from `cubebox/plugins/__init__.py`**
+- [ ] **Step 4: Re-export getters from `cubeplex/plugins/__init__.py`**
 
-Append to `backend/cubebox/plugins/__init__.py` (inside __all__ + new imports):
+Append to `backend/cubeplex/plugins/__init__.py` (inside __all__ + new imports):
 
 ```python
-from cubebox.plugins.registry import (
+from cubeplex.plugins.registry import (
     PluginRegistry,
     get_registry,
     reset_registry_for_tests,
@@ -1592,7 +1592,7 @@ Expected: All plugin tests PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/plugins/registry.py backend/cubebox/plugins/__init__.py backend/tests/plugins/test_registry_getters.py
+git add backend/cubeplex/plugins/registry.py backend/cubeplex/plugins/__init__.py backend/tests/plugins/test_registry_getters.py
 git commit -m "feat(plugins): registry getters + bind_defaults + module-level singleton"
 ```
 
@@ -1601,14 +1601,14 @@ git commit -m "feat(plugins): registry getters + bind_defaults + module-level si
 ### Task 13: Add `plugins.*` config schema (pydantic + YAML)
 
 **Files:**
-- Modify: `backend/cubebox/config.py`
+- Modify: `backend/cubeplex/config.py`
 - Modify: `backend/config.yaml`
 - Modify: `backend/config.development.yaml`
 - Modify: `backend/config.test.yaml`
 
-- [ ] **Step 1: Read current `cubebox/config.py` to find pydantic model location**
+- [ ] **Step 1: Read current `cubeplex/config.py` to find pydantic model location**
 
-Run: `cd backend && head -80 cubebox/config.py`
+Run: `cd backend && head -80 cubeplex/config.py`
 
 Identify the pydantic settings class (commonly `Settings` or similar).
 
@@ -1617,7 +1617,7 @@ Identify the pydantic settings class (commonly `Settings` or similar).
 If `config.py` uses pydantic Settings, append a nested model:
 
 ```python
-# Append in backend/cubebox/config.py near other section schemas
+# Append in backend/cubeplex/config.py near other section schemas
 
 from pydantic import BaseModel
 
@@ -1663,13 +1663,13 @@ plugins:
 
 - [ ] **Step 4: Verify config loads without error**
 
-Run: `cd backend && uv run python -c "from cubebox.config import config; print(config.get('plugins.auth_provider.selected'))"`
+Run: `cd backend && uv run python -c "from cubeplex.config import config; print(config.get('plugins.auth_provider.selected'))"`
 Expected: prints `None`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/config.py backend/config.yaml backend/config.development.yaml backend/config.test.yaml
+git add backend/cubeplex/config.py backend/config.yaml backend/config.development.yaml backend/config.test.yaml
 git commit -m "feat(plugins): add plugins.* config section with sensible defaults"
 ```
 
@@ -1678,7 +1678,7 @@ git commit -m "feat(plugins): add plugins.* config section with sensible default
 ### Task 14: Rewrite `require_role` to call `PermissionChecker`
 
 **Files:**
-- Modify: `backend/cubebox/auth/dependencies.py`
+- Modify: `backend/cubeplex/auth/dependencies.py`
 - Run regression: `backend/tests/test_rbac.py`
 
 - [ ] **Step 1: Write a focused regression test that asserts behavior unchanged**
@@ -1693,11 +1693,11 @@ Expected: PASS (baseline confirmed before refactor).
 
 - [ ] **Step 2: Modify `require_role` to delegate to PermissionChecker**
 
-Replace the body of `require_role` factory in `backend/cubebox/auth/dependencies.py`:
+Replace the body of `require_role` factory in `backend/cubeplex/auth/dependencies.py`:
 
 ```python
-from cubebox.plugins import PermissionResource, get_registry
-from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
+from cubeplex.plugins import PermissionResource, get_registry
+from cubeplex.plugins.defaults.permissions import DefaultPermissionChecker
 
 
 def _action_for_roles(allowed: tuple[Role, ...]) -> str:
@@ -1730,7 +1730,7 @@ def require_role(
         checker = get_registry().get_permission_checker()
         # CE default needs a repo factory bound at call time
         if isinstance(checker, DefaultPermissionChecker):
-            from cubebox.repositories import MembershipRepository
+            from cubeplex.repositories import MembershipRepository
             checker._repo_factory = lambda _s: MembershipRepository(session)
         resource = PermissionResource(
             type="workspace", id=ctx.workspace_id, workspace_id=ctx.workspace_id  # type: ignore[arg-type]
@@ -1749,7 +1749,7 @@ NOTE: `ctx.workspace_id` is a `str` in `RequestContext`; `PermissionResource.id`
 
 - [ ] **Step 3: Bootstrap the registry once at module import (or app startup)**
 
-If running tests, the registry singleton needs `bind_defaults()` to have been called at least once. Add to `backend/cubebox/plugins/__init__.py`:
+If running tests, the registry singleton needs `bind_defaults()` to have been called at least once. Add to `backend/cubeplex/plugins/__init__.py`:
 
 ```python
 def ensure_registry_bound() -> None:
@@ -1766,7 +1766,7 @@ In `backend/tests/conftest.py` (or create one if absent), add an autouse fixture
 ```python
 import pytest
 
-from cubebox.plugins import ensure_registry_bound, reset_registry_for_tests
+from cubeplex.plugins import ensure_registry_bound, reset_registry_for_tests
 
 
 @pytest.fixture(autouse=True)
@@ -1788,7 +1788,7 @@ Expected: PASS for all rbac + auth tests.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/auth/dependencies.py backend/cubebox/plugins/__init__.py backend/tests/conftest.py
+git add backend/cubeplex/auth/dependencies.py backend/cubeplex/plugins/__init__.py backend/tests/conftest.py
 git commit -m "refactor(auth): rewrite require_role to call PermissionChecker (CE default = current Role lookup)"
 ```
 
@@ -1797,7 +1797,7 @@ git commit -m "refactor(auth): rewrite require_role to call PermissionChecker (C
 ### Task 15: Wire `current_active_user` to `AuthProvider.authenticate`
 
 **Files:**
-- Modify: `backend/cubebox/auth/dependencies.py`
+- Modify: `backend/cubeplex/auth/dependencies.py`
 - Run regression: any auth e2e tests
 
 - [ ] **Step 1: Confirm baseline auth tests pass**
@@ -1810,7 +1810,7 @@ Expected: PASS.
 
 - [ ] **Step 2: Replace `current_active_user` with delegate to AuthProvider**
 
-In `backend/cubebox/auth/dependencies.py`, replace the line:
+In `backend/cubeplex/auth/dependencies.py`, replace the line:
 
 ```python
 current_active_user = fastapi_users.current_user(active=True)
@@ -1847,7 +1847,7 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/auth/dependencies.py
+git add backend/cubeplex/auth/dependencies.py
 git commit -m "refactor(auth): current_active_user delegates to AuthProvider.authenticate"
 ```
 
@@ -1856,22 +1856,22 @@ git commit -m "refactor(auth): current_active_user delegates to AuthProvider.aut
 ### Task 16: Mount `AuthProvider.get_auth_routers()` at app startup
 
 **Files:**
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Read current `app.py` to find where auth routers are mounted today**
 
 ```bash
-cd backend && grep -n "auth" cubebox/api/app.py | head -30
+cd backend && grep -n "auth" cubeplex/api/app.py | head -30
 ```
 
 Identify lines like `app.include_router(fastapi_users.get_auth_router(...))`.
 
 - [ ] **Step 2: Replace direct `fastapi_users.get_*_router` calls with registry-driven mount**
 
-In `backend/cubebox/api/app.py`, find the `lifespan` async context manager (or app startup section). Add at startup:
+In `backend/cubeplex/api/app.py`, find the `lifespan` async context manager (or app startup section). Add at startup:
 
 ```python
-from cubebox.plugins import ensure_registry_bound, get_registry
+from cubeplex.plugins import ensure_registry_bound, get_registry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1905,7 +1905,7 @@ Expected: tests PASS; server returns 401 on `/me` without cookie.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/app.py
+git add backend/cubeplex/api/app.py
 git commit -m "feat(api): mount AuthProvider.get_auth_routers() at startup via registry"
 ```
 
@@ -1914,7 +1914,7 @@ git commit -m "feat(api): mount AuthProvider.get_auth_routers() at startup via r
 ### Task 17: Add `audit_log()` helper
 
 **Files:**
-- Create: `backend/cubebox/plugins/audit.py`
+- Create: `backend/cubeplex/plugins/audit.py`
 - Create: `backend/tests/plugins/test_audit_helper.py`
 
 - [ ] **Step 1: Write failing test**
@@ -1927,8 +1927,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.plugins import get_registry
-from cubebox.plugins.audit import audit_log
+from cubeplex.plugins import get_registry
+from cubeplex.plugins.audit import audit_log
 
 
 @pytest.mark.asyncio
@@ -1955,12 +1955,12 @@ async def test_audit_log_dispatches_to_all_sinks() -> None:
 - [ ] **Step 2: Run, verify fail**
 
 Run: `cd backend && uv run pytest tests/plugins/test_audit_helper.py -v`
-Expected: FAIL — `cubebox.plugins.audit` doesn't exist.
+Expected: FAIL — `cubeplex.plugins.audit` doesn't exist.
 
 - [ ] **Step 3: Implement audit helper**
 
 ```python
-# backend/cubebox/plugins/audit.py
+# backend/cubeplex/plugins/audit.py
 """Helper for emitting AuditEvents to all registered AuditSinks."""
 
 from __future__ import annotations
@@ -1969,8 +1969,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from cubebox.plugins.protocols import AuditEvent
-from cubebox.plugins.registry import get_registry
+from cubeplex.plugins.protocols import AuditEvent
+from cubeplex.plugins.registry import get_registry
 
 
 async def audit_log(
@@ -2010,7 +2010,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/plugins/audit.py backend/tests/plugins/test_audit_helper.py
+git add backend/cubeplex/plugins/audit.py backend/tests/plugins/test_audit_helper.py
 git commit -m "feat(plugins): add audit_log helper that fans out to all AuditSinks"
 ```
 
@@ -2019,7 +2019,7 @@ git commit -m "feat(plugins): add audit_log helper that fans out to all AuditSin
 ### Task 18: Hook `audit_log("auth.login")` in `UserManager.on_after_login`
 
 **Files:**
-- Modify: `backend/cubebox/auth/users.py`
+- Modify: `backend/cubeplex/auth/users.py`
 - Create: `backend/tests/test_audit_login.py`
 
 - [ ] **Step 1: Write failing test**
@@ -2031,8 +2031,8 @@ from uuid import uuid4
 
 import pytest
 
-from cubebox.auth.users import UserManager
-from cubebox.plugins import get_registry
+from cubeplex.auth.users import UserManager
+from cubeplex.plugins import get_registry
 
 
 @pytest.mark.asyncio
@@ -2060,7 +2060,7 @@ Expected: FAIL — `on_after_login` doesn't exist on UserManager.
 
 - [ ] **Step 3: Add `on_after_login` to UserManager**
 
-In `backend/cubebox/auth/users.py`, add method to `UserManager` class:
+In `backend/cubeplex/auth/users.py`, add method to `UserManager` class:
 
 ```python
     async def on_after_login(
@@ -2068,7 +2068,7 @@ In `backend/cubebox/auth/users.py`, add method to `UserManager` class:
         user: User,
         request: Request | None = None,
     ) -> None:
-        from cubebox.plugins.audit import audit_log
+        from cubeplex.plugins.audit import audit_log
         await audit_log(
             action="auth.login",
             user_id=user.id,
@@ -2082,7 +2082,7 @@ In `backend/cubebox/auth/users.py`, add method to `UserManager` class:
 In the same `UserManager.on_after_register`, add at end (after the bootstrap try/except block, before setting `_default_workspace_id`):
 
 ```python
-        from cubebox.plugins.audit import audit_log
+        from cubeplex.plugins.audit import audit_log
         await audit_log(
             action="auth.register",
             user_id=user.id,
@@ -2099,7 +2099,7 @@ Expected: PASS for new test + no regression in rbac.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/auth/users.py backend/tests/test_audit_login.py
+git add backend/cubeplex/auth/users.py backend/tests/test_audit_login.py
 git commit -m "feat(auth): emit audit_log for auth.login + auth.register"
 ```
 
@@ -2108,13 +2108,13 @@ git commit -m "feat(auth): emit audit_log for auth.login + auth.register"
 ### Task 19: Hook `audit_log("workspace.invite_created")` in invite endpoint
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py`
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py`
 - Create: `backend/tests/test_audit_invite.py`
 
 - [ ] **Step 1: Find the create-invite handler**
 
 ```bash
-cd backend && grep -n "invite" cubebox/api/routes/v1/workspaces.py
+cd backend && grep -n "invite" cubeplex/api/routes/v1/workspaces.py
 ```
 
 Identify the handler (likely `async def create_invite(...)`).
@@ -2130,7 +2130,7 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import AsyncClient
 
-from cubebox.plugins import get_registry
+from cubeplex.plugins import get_registry
 
 
 @pytest.mark.asyncio
@@ -2159,10 +2159,10 @@ Expected: FAIL.
 
 - [ ] **Step 4: Add `audit_log` call in invite handler**
 
-In `backend/cubebox/api/routes/v1/workspaces.py`, find the create-invite handler. After successful invite creation:
+In `backend/cubeplex/api/routes/v1/workspaces.py`, find the create-invite handler. After successful invite creation:
 
 ```python
-from cubebox.plugins.audit import audit_log
+from cubeplex.plugins.audit import audit_log
 
 # inside handler, after invite is persisted:
 await audit_log(
@@ -2185,7 +2185,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/workspaces.py backend/tests/test_audit_invite.py
+git add backend/cubeplex/api/routes/v1/workspaces.py backend/tests/test_audit_invite.py
 git commit -m "feat(workspaces): emit audit_log for workspace.invite_created"
 ```
 
@@ -2194,8 +2194,8 @@ git commit -m "feat(workspaces): emit audit_log for workspace.invite_created"
 ### Task 20: AdminPanelExtension startup scan + manifest endpoint
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/admin_extensions.py`
-- Modify: `backend/cubebox/api/app.py`
+- Create: `backend/cubeplex/api/routes/v1/admin_extensions.py`
+- Modify: `backend/cubeplex/api/app.py`
 - Create: `backend/tests/test_admin_extensions.py`
 
 - [ ] **Step 1: Write failing test for empty manifest in CE**
@@ -2226,16 +2226,16 @@ Expected: FAIL.
 - [ ] **Step 3: Create the manifest endpoint**
 
 ```python
-# backend/cubebox/api/routes/v1/admin_extensions.py
+# backend/cubeplex/api/routes/v1/admin_extensions.py
 """GET /api/v1/admin/_extensions/manifest — aggregated nav items + iframe URLs."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from cubebox.auth.dependencies import current_active_user
-from cubebox.models import User
-from cubebox.plugins import get_registry
+from cubeplex.auth.dependencies import current_active_user
+from cubeplex.models import User
+from cubeplex.plugins import get_registry
 
 router = APIRouter(prefix="/admin/_extensions", tags=["admin"])
 
@@ -2271,10 +2271,10 @@ async def get_manifest(_user: User = Depends(current_active_user)) -> list[dict]
 
 - [ ] **Step 4: Mount router + admin extension routers + static at startup**
 
-In `backend/cubebox/api/app.py` lifespan, after `bind_defaults`:
+In `backend/cubeplex/api/app.py` lifespan, after `bind_defaults`:
 
 ```python
-from cubebox.api.routes.v1 import admin_extensions
+from cubeplex.api.routes.v1 import admin_extensions
 from fastapi.staticfiles import StaticFiles
 
 # inside lifespan:
@@ -2301,7 +2301,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/admin_extensions.py backend/cubebox/api/app.py backend/tests/test_admin_extensions.py
+git add backend/cubeplex/api/routes/v1/admin_extensions.py backend/cubeplex/api/app.py backend/tests/test_admin_extensions.py
 git commit -m "feat(admin): manifest endpoint + dynamic mount of AdminPanelExtension routers/static"
 ```
 
@@ -2325,26 +2325,26 @@ git commit -m "feat(admin): manifest endpoint + dynamic mount of AdminPanelExten
 [project]
 name = "fake-plugin"
 version = "0.0.1"
-description = "Fake cubebox plugin used by Layer 1 contract tests."
+description = "Fake cubeplex plugin used by Layer 1 contract tests."
 requires-python = ">=3.12"
 dependencies = []
 
-[project.entry-points."cubebox.plugin_manifest"]
+[project.entry-points."cubeplex.plugin_manifest"]
 main = "fake_plugin:MANIFEST"
 
-[project.entry-points."cubebox.auth_provider"]
+[project.entry-points."cubeplex.auth_provider"]
 fake = "fake_plugin.auth:FakeAuthProvider"
 
-[project.entry-points."cubebox.permission_checker"]
+[project.entry-points."cubeplex.permission_checker"]
 fake = "fake_plugin.permissions:FakePermissionChecker"
 
-[project.entry-points."cubebox.audit_sink"]
+[project.entry-points."cubeplex.audit_sink"]
 fake = "fake_plugin.audit:FakeAuditSink"
 
-[project.entry-points."cubebox.user_directory_syncer"]
+[project.entry-points."cubeplex.user_directory_syncer"]
 fake = "fake_plugin.directory:FakeUserDirectorySyncer"
 
-[project.entry-points."cubebox.admin_panel_extension"]
+[project.entry-points."cubeplex.admin_panel_extension"]
 fake = "fake_plugin.admin_panel:FakeAdminPanelExtension"
 
 [build-system]
@@ -2356,10 +2356,10 @@ build-backend = "setuptools.build_meta"
 
 ```python
 # backend/tests/fixtures/fake_plugin/fake_plugin/__init__.py
-from cubebox.plugins import CUBEBOX_PLUGIN_API_VERSION, PluginManifest
+from cubeplex.plugins import CUBEPLEX_PLUGIN_API_VERSION, PluginManifest
 
 MANIFEST = PluginManifest(
-    api_version=CUBEBOX_PLUGIN_API_VERSION,
+    api_version=CUBEPLEX_PLUGIN_API_VERSION,
     name="fake",
     version="0.0.1",
     description="Fixture plugin for Layer 1 contract tests.",
@@ -2371,7 +2371,7 @@ MANIFEST = PluginManifest(
 `fake_plugin/auth.py`:
 
 ```python
-from cubebox.plugins import AuthProvider
+from cubeplex.plugins import AuthProvider
 
 
 class FakeAuthProvider:
@@ -2401,7 +2401,7 @@ class FakeAuditSink:
 `fake_plugin/directory.py`:
 
 ```python
-from cubebox.plugins import SyncResult, SyncSchedule
+from cubeplex.plugins import SyncResult, SyncSchedule
 
 
 class FakeUserDirectorySyncer:
@@ -2415,7 +2415,7 @@ class FakeUserDirectorySyncer:
 `fake_plugin/admin_panel.py`:
 
 ```python
-from cubebox.plugins import AdminNavItem
+from cubeplex.plugins import AdminNavItem
 
 
 class FakeAdminPanelExtension:
@@ -2481,13 +2481,13 @@ from pathlib import Path
 
 import pytest
 
-from cubebox.plugins import (
-    CUBEBOX_PLUGIN_API_VERSION,
+from cubeplex.plugins import (
+    CUBEPLEX_PLUGIN_API_VERSION,
     AuthProvider,
     PluginManifest,
     reset_registry_for_tests,
 )
-from cubebox.plugins.registry import PluginRegistry
+from cubeplex.plugins.registry import PluginRegistry
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "fake_plugin"
 
@@ -2533,7 +2533,7 @@ async def test_singular_zero_external_uses_default(fresh_registry) -> None:
     reg = PluginRegistry()
     await reg.discover()
     reg.bind_defaults()
-    from cubebox.plugins.defaults.auth import DefaultAuthProvider
+    from cubeplex.plugins.defaults.auth import DefaultAuthProvider
     assert isinstance(reg.get_auth_provider(), DefaultAuthProvider)
 
 
@@ -2563,7 +2563,7 @@ async def test_singular_selected_builtin_forces_default(installed_fake_plugin, f
     reg = PluginRegistry()
     await reg.discover()
     reg.bind_defaults(config=_Cfg())
-    from cubebox.plugins.defaults.auth import DefaultAuthProvider
+    from cubeplex.plugins.defaults.auth import DefaultAuthProvider
     assert isinstance(reg.get_auth_provider(), DefaultAuthProvider)
 
 
@@ -2614,7 +2614,7 @@ async def test_plural_aggregates_default_plus_external(installed_fake_plugin, fr
     await reg.discover()
     reg.bind_defaults()
     sinks = reg.get_audit_sinks()
-    from cubebox.plugins.defaults.audit import DefaultAuditSink
+    from cubeplex.plugins.defaults.audit import DefaultAuditSink
     from fake_plugin.audit import FakeAuditSink
     types = {type(s) for s in sinks}
     assert DefaultAuditSink in types
@@ -2639,7 +2639,7 @@ async def test_plural_disabled_filters_out(installed_fake_plugin, fresh_registry
     await reg.discover()
     reg.bind_defaults(config=_Cfg())
     sinks = reg.get_audit_sinks()
-    from cubebox.plugins.defaults.audit import DefaultAuditSink
+    from cubeplex.plugins.defaults.audit import DefaultAuditSink
     assert not any(isinstance(s, DefaultAuditSink) for s in sinks)
 
 
@@ -2655,7 +2655,7 @@ async def test_missing_manifest_rejects_plugin(tmp_path, fresh_registry) -> None
         "name = 'rogue'\n"
         "version = '0.0.1'\n"
         "requires-python = '>=3.12'\n"
-        "[project.entry-points.\"cubebox.auth_provider\"]\n"
+        "[project.entry-points.\"cubeplex.auth_provider\"]\n"
         "rogue = 'rogue:R'\n"
         "[build-system]\n"
         "requires = ['setuptools>=61']\n"
@@ -2687,7 +2687,7 @@ async def test_api_version_mismatch_rejects(tmp_path, fresh_registry) -> None:
     pkg.mkdir()
     (pkg / "old_pkg").mkdir()
     (pkg / "old_pkg" / "__init__.py").write_text(
-        "from cubebox.plugins import PluginManifest\n"
+        "from cubeplex.plugins import PluginManifest\n"
         "MANIFEST = PluginManifest(api_version=999, name='old', version='0.0.1')\n"
     )
     (pkg / "pyproject.toml").write_text(
@@ -2695,7 +2695,7 @@ async def test_api_version_mismatch_rejects(tmp_path, fresh_registry) -> None:
         "name = 'old-pkg'\n"
         "version = '0.0.1'\n"
         "requires-python = '>=3.12'\n"
-        "[project.entry-points.\"cubebox.plugin_manifest\"]\n"
+        "[project.entry-points.\"cubeplex.plugin_manifest\"]\n"
         "main = 'old_pkg:MANIFEST'\n"
         "[build-system]\n"
         "requires = ['setuptools>=61']\n"
@@ -2727,8 +2727,8 @@ async def test_external_plugin_named_builtin_rejected(tmp_path, fresh_registry) 
     pkg.mkdir()
     (pkg / "rsv_pkg").mkdir()
     (pkg / "rsv_pkg" / "__init__.py").write_text(
-        "from cubebox.plugins import PluginManifest, CUBEBOX_PLUGIN_API_VERSION\n"
-        "MANIFEST = PluginManifest(api_version=CUBEBOX_PLUGIN_API_VERSION, name='rsv', version='0.0.1')\n"
+        "from cubeplex.plugins import PluginManifest, CUBEPLEX_PLUGIN_API_VERSION\n"
+        "MANIFEST = PluginManifest(api_version=CUBEPLEX_PLUGIN_API_VERSION, name='rsv', version='0.0.1')\n"
         "class A:\n"
         "    async def authenticate(self, r): return None\n"
         "    def get_auth_routers(self): return []\n"
@@ -2738,9 +2738,9 @@ async def test_external_plugin_named_builtin_rejected(tmp_path, fresh_registry) 
         "name = 'rsv-pkg'\n"
         "version = '0.0.1'\n"
         "requires-python = '>=3.12'\n"
-        "[project.entry-points.\"cubebox.plugin_manifest\"]\n"
+        "[project.entry-points.\"cubeplex.plugin_manifest\"]\n"
         "main = 'rsv_pkg:MANIFEST'\n"
-        "[project.entry-points.\"cubebox.auth_provider\"]\n"
+        "[project.entry-points.\"cubeplex.auth_provider\"]\n"
         "builtin = 'rsv_pkg:A'\n"
         "[build-system]\n"
         "requires = ['setuptools>=61']\n"
@@ -2799,7 +2799,7 @@ Append to `.github/workflows/ci.yml`:
 ```yaml
   test-ee-compat:
     # Layer 1: in-repo contract tests (always run)
-    # Layer 2: real cubebox-ee integration is gated until the EE repo exists
+    # Layer 2: real cubeplex-ee integration is gated until the EE repo exists
     runs-on: ubuntu-latest
     needs: [backend-check]   # adjust to your existing job name
     steps:
@@ -2811,22 +2811,22 @@ Append to `.github/workflows/ci.yml`:
         run: cd backend && uv run pytest tests/plugins/test_contracts.py -v
 
   test-ee-compat-cross-repo:
-    # Layer 2 placeholder: enable once cubebox/cubebox-ee repo exists
+    # Layer 2 placeholder: enable once cubeplex/cubeplex-ee repo exists
     if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { path: cubebox }
+        with: { path: cubeplex }
       - uses: actions/checkout@v4
-        with: { repository: cubebox/cubebox-ee, path: cubebox-ee, token: ${{ secrets.EE_REPO_READ_TOKEN }} }
+        with: { repository: cubeplex/cubeplex-ee, path: cubeplex-ee, token: ${{ secrets.EE_REPO_READ_TOKEN }} }
       - uses: astral-sh/setup-uv@v3
       - name: Install CE from working tree + EE
         run: |
-          cd cubebox-ee
-          uv pip install -e ../cubebox/backend
+          cd cubeplex-ee
+          uv pip install -e ../cubeplex/backend
           uv pip install -e .
       - name: Run EE smoke tests
-        run: cd cubebox-ee && uv run pytest
+        run: cd cubeplex-ee && uv run pytest
 ```
 
 - [ ] **Step 3: Validate workflow YAML**
@@ -2865,7 +2865,7 @@ from fastapi.testclient import TestClient
 @pytest.mark.e2e
 def test_ce_defaults_load_and_serve(client: TestClient) -> None:
     """CE-only deployment: all Protocols resolve to builtin; app starts cleanly."""
-    from cubebox.plugins import get_registry
+    from cubeplex.plugins import get_registry
 
     reg = get_registry()
     assert reg.auth_provider is not None
@@ -2894,7 +2894,7 @@ def test_admin_extensions_manifest_requires_admin(client: TestClient, admin_cook
 def test_login_emits_audit_event(client: TestClient, member_credentials: tuple[str, str], caplog) -> None:
     """AuditSink receives `auth.login` via the real login flow."""
     email, password = member_credentials
-    with caplog.at_level("INFO", logger="cubebox.audit"):
+    with caplog.at_level("INFO", logger="cubeplex.audit"):
         r = client.post("/auth/jwt/login", data={"username": email, "password": password})
         assert r.status_code == 200
     assert any("auth.login" in rec.message for rec in caplog.records), (
@@ -2991,8 +2991,8 @@ If clean, M0 is implementation-complete; ready for branch merge / PR review.
   - fake_plugin fixture + 11 contract tests → Tasks 21-22
   - CI placeholder → Task 23
 - ✅ Existing test_rbac.py + auth tests must remain green (Tasks 14, 15 validate)
-- ✅ All entry_point group names match: `cubebox.plugin_manifest`, `cubebox.auth_provider`, `cubebox.permission_checker`, `cubebox.audit_sink`, `cubebox.user_directory_syncer`, `cubebox.admin_panel_extension`
+- ✅ All entry_point group names match: `cubeplex.plugin_manifest`, `cubeplex.auth_provider`, `cubeplex.permission_checker`, `cubeplex.audit_sink`, `cubeplex.user_directory_syncer`, `cubeplex.admin_panel_extension`
 - ✅ Reserved name `"builtin"` consistent across resolve_singular / resolve_plural / contract test
-- ✅ `CUBEBOX_PLUGIN_API_VERSION = 1` consistent
-- ⚠ DefaultAuthProvider's lazy schema import (`__import__`) may need refactor when implementer verifies actual `cubebox.api.schemas.auth` paths. Flagged in Task 8.
-- ⚠ Plugin Schema imports for fastapi-users (`UserRead`/`UserCreate`/`UserUpdate`) expected in `cubebox.api.schemas.auth`; if missing, implementer may need to create them as part of Task 8.
+- ✅ `CUBEPLEX_PLUGIN_API_VERSION = 1` consistent
+- ⚠ DefaultAuthProvider's lazy schema import (`__import__`) may need refactor when implementer verifies actual `cubeplex.api.schemas.auth` paths. Flagged in Task 8.
+- ⚠ Plugin Schema imports for fastapi-users (`UserRead`/`UserCreate`/`UserUpdate`) expected in `cubeplex.api.schemas.auth`; if missing, implementer may need to create them as part of Task 8.

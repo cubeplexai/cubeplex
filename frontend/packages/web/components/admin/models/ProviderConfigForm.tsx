@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { AlertTriangle, ChevronDown } from 'lucide-react'
-import type { Provider, ProviderCreate, ProviderUpdate, WireApi } from '@cubebox/core'
+import type { Provider, ProviderCreate, ProviderUpdate, WireApi } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

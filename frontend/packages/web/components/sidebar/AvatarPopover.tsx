@@ -12,7 +12,7 @@ import {
   useAuthStore,
   useConversationStore,
   useWorkspaceStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Avatar } from '@/components/ui/avatar-resolved'
 import { useAdminAccess } from '@/hooks/useAdminAccess'

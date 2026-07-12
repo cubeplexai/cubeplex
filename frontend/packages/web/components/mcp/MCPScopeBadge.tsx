@@ -1,7 +1,7 @@
 'use client'
 
 import { useTranslations } from 'next-intl'
-import type { MCPTemplateScope } from '@cubebox/core'
+import type { MCPTemplateScope } from '@cubeplex/core'
 import type { ComponentProps } from 'react'
 
 import { Badge } from '@/components/ui/badge'

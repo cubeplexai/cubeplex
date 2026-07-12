@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fakeredis.aioredis import FakeRedis
 
-from cubebox.streams.run_events import create_run, get_run_meta, update_run_meta
+from cubeplex.streams.run_events import create_run, get_run_meta, update_run_meta
 
 
 @pytest.mark.asyncio

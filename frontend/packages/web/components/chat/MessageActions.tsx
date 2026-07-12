@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 import { GitBranch } from 'lucide-react'
 
-import { createApiClient, useConversationStore, ApiError } from '@cubebox/core'
+import { createApiClient, useConversationStore, ApiError } from '@cubeplex/core'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 

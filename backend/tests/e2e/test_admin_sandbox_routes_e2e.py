@@ -13,8 +13,8 @@ import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from cubebox.sandbox.sync_events import UserSandboxSyncEventService
-from cubebox.sandbox.sync_result import SyncResult
+from cubeplex.sandbox.sync_events import UserSandboxSyncEventService
+from cubeplex.sandbox.sync_result import SyncResult
 
 pytestmark = pytest.mark.e2e
 
@@ -87,9 +87,9 @@ async def test_get_sandbox_404_for_cross_org(
 
     from sqlalchemy import delete as sa_delete
 
-    from cubebox.models import Organization, UserSandbox
-    from cubebox.models.user import User
-    from cubebox.models.workspace import Workspace
+    from cubeplex.models import Organization, UserSandbox
+    from cubeplex.models.user import User
+    from cubeplex.models.workspace import Workspace
 
     client, _ns = admin_client_and_sandbox
 

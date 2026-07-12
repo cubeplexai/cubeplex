@@ -1,6 +1,6 @@
 'use client'
 
-import { wsInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubebox/core'
+import { wsInvokeTool, type ApiClient, type ToolInvokeResult } from '@cubeplex/core'
 
 import { TryItForm } from './TryItForm'
 

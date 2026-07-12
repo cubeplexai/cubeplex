@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-from cubebox.api.schemas.model_presets import AdminModelPresetsBody
-from cubebox.llm.errors import BrokenPresetError
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.services.model_presets import (
+from cubeplex.api.schemas.model_presets import AdminModelPresetsBody
+from cubeplex.llm.errors import BrokenPresetError
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.services.model_presets import (
     find_preset_refs_to_model,
     read_org_presets,
     write_org_presets,

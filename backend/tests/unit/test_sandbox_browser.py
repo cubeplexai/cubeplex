@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
-from cubebox.sandbox.local import LocalSandbox
+from cubeplex.sandbox.base import BrowserEndpoint, ExecuteResult, Sandbox
+from cubeplex.sandbox.local import LocalSandbox
 
 
 class _RecordingSandbox(Sandbox):
@@ -75,7 +75,7 @@ async def test_local_sandbox_start_browser_is_noop() -> None:
 @pytest.mark.asyncio
 async def test_opensandbox_browser_endpoint_uses_signed_endpoint() -> None:
     """OpenSandbox.get_browser_endpoint signs port 8080 and maps the result."""
-    from cubebox.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.opensandbox import OpenSandbox
 
     class _FakeSigned:
         # OpenSandbox returns a scheme-qualified host/path with no query string.
@@ -110,8 +110,8 @@ async def test_opensandbox_translates_provider_error_to_sandbox_error() -> None:
     """The driver must not leak opensandbox's own exception type to callers."""
     from opensandbox.exceptions.sandbox import SandboxInternalException
 
-    from cubebox.sandbox.base import SandboxError
-    from cubebox.sandbox.opensandbox import OpenSandbox
+    from cubeplex.sandbox.base import SandboxError
+    from cubeplex.sandbox.opensandbox import OpenSandbox
 
     class _FailingInner:
         id = "sb-1"
@@ -135,8 +135,8 @@ async def test_live_view_returns_503_when_sandbox_unavailable(monkeypatch) -> No
 
     from fastapi import HTTPException
 
-    from cubebox.api.routes.v1 import ws_browser
-    from cubebox.sandbox import SandboxError
+    from cubeplex.api.routes.v1 import ws_browser
+    from cubeplex.sandbox import SandboxError
 
     class _Manager:
         async def get_or_create(self, *args, **kwargs):
@@ -166,7 +166,7 @@ async def test_keepalive_returns_404_when_no_active_sandbox(monkeypatch) -> None
 
     from fastapi import HTTPException
 
-    from cubebox.api.routes.v1 import ws_browser
+    from cubeplex.api.routes.v1 import ws_browser
 
     class _Manager:
         async def touch_active(self, *args, **kwargs) -> bool:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.skills.content_hash import (
+from cubeplex.skills.content_hash import (
     _compute_skill_version_hash_sync,
     compute_skill_version_hash,
 )

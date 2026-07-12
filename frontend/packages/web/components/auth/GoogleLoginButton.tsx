@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
-import { ApiError, createApiClient, getGoogleAuthorizeUrl } from '@cubebox/core'
+import { ApiError, createApiClient, getGoogleAuthorizeUrl } from '@cubeplex/core'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 

@@ -14,7 +14,7 @@ menu** in the sidebar (click your avatar, then choose **Profile settings**).
 Your profile picture appears next to your name in conversations, member lists,
 and the sidebar. You can either upload a photo or pick a generated avatar.
 
-- **Upload** — click **Upload** and choose an image file. CubeBox converts it
+- **Upload** — click **Upload** and choose an image file. CubePlex converts it
   to a 256×256 square PNG (preserving aspect ratio, centered) and stores it.
   Any reasonable image works; faces and logos both render well at avatar size.
 - **Shuffle** — click **Shuffle** to generate a fresh grid of 30 cartoon
@@ -42,5 +42,5 @@ The rest of the profile page covers the other account fields:
 
 - **Display name** — the name other members see on your messages and in member lists.
 - **Password** — change your sign-in password.
-- **API keys** — create keys for programmatic access to the CubeBox API.
+- **API keys** — create keys for programmatic access to the CubePlex API.
 - **Delete account** — permanently remove your account and personal data.

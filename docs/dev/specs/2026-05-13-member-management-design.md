@@ -116,7 +116,7 @@ Modal form:
 
 ### State
 
-New Zustand store in `@cubebox/core`:
+New Zustand store in `@cubeplex/core`:
 
 ```typescript
 interface MemberStoreState {

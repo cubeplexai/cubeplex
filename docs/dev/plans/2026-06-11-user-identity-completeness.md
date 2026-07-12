@@ -4,26 +4,26 @@
 
 **Goal:** Implement P0 + P1 identity features: display name, invite frontend, password lifecycle, workspace rename, email infra, email verification, profile page, org settings, workspace archive/delete, leave workspace, account deletion.
 
-**Architecture:** 5 phases with dependency ordering. Each task is a self-contained backend or frontend unit that can be committed independently. Backend tasks use TDD with pytest; frontend tasks use component-level verification. All work happens in worktree `/home/chris/cubebox/.worktrees/feat/user-identity-completeness` (slot 65, ports 8065/3065).
+**Architecture:** 5 phases with dependency ordering. Each task is a self-contained backend or frontend unit that can be committed independently. Backend tasks use TDD with pytest; frontend tasks use component-level verification. All work happens in worktree `/home/chris/cubeplex/.worktrees/feat/user-identity-completeness` (slot 65, ports 8065/3065).
 
 **Tech Stack:** FastAPI + SQLModel + Alembic (backend), Next.js 14 + React 19 + Zustand + next-intl + sonner (frontend), fastapi-users (auth), aiosmtplib (email).
 
 **Spec:** `docs/dev/specs/2026-06-11-user-identity-completeness-design.md`
 
-**Worktree:** Always `cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness` first. Backend port 8065, frontend port 3065. Cookie names `cubebox_auth_65` / `cubebox_csrf_65`.
+**Worktree:** Always `cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness` first. Backend port 8065, frontend port 3065. Cookie names `cubeplex_auth_65` / `cubeplex_csrf_65`.
 
 ---
 
 ## File Map
 
 ### Backend — New Files
-- `backend/cubebox/services/email.py` — EmailService with pluggable backends (log/smtp/resend)
-- `backend/cubebox/templates/email/password_reset.html` — Password reset email template
-- `backend/cubebox/templates/email/password_reset.txt` — Plain text variant
-- `backend/cubebox/templates/email/email_verification.html` — Email verification template
-- `backend/cubebox/templates/email/email_verification.txt` — Plain text variant
-- `backend/cubebox/templates/email/workspace_invite.html` — Invite email template
-- `backend/cubebox/templates/email/workspace_invite.txt` — Plain text variant
+- `backend/cubeplex/services/email.py` — EmailService with pluggable backends (log/smtp/resend)
+- `backend/cubeplex/templates/email/password_reset.html` — Password reset email template
+- `backend/cubeplex/templates/email/password_reset.txt` — Plain text variant
+- `backend/cubeplex/templates/email/email_verification.html` — Email verification template
+- `backend/cubeplex/templates/email/email_verification.txt` — Plain text variant
+- `backend/cubeplex/templates/email/workspace_invite.html` — Invite email template
+- `backend/cubeplex/templates/email/workspace_invite.txt` — Plain text variant
 - `backend/tests/unit/test_email_service.py` — Email service unit tests
 - `backend/tests/unit/test_change_password.py` — Change password endpoint tests
 - `backend/tests/unit/test_workspace_rename.py` — Workspace rename tests
@@ -32,17 +32,17 @@
 - `backend/tests/unit/test_account_deletion.py` — Account deletion tests
 
 ### Backend — Modified Files
-- `backend/cubebox/models/user.py` — Add `display_name` field
-- `backend/cubebox/models/workspace.py` — Add `archived_at` field
-- `backend/cubebox/api/routes/v1/auth.py` — Extend register/me/patch-me, add change-password, delete-account, include reset/verify routers
-- `backend/cubebox/api/routes/v1/workspaces.py` — Add PATCH rename, list/revoke invites, archive/unarchive/delete, leave, extend accept response, filter archived
-- `backend/cubebox/api/routes/v1/ws_members.py` — Add display_name to response
-- `backend/cubebox/api/routes/v1/admin_members.py` — Add display_name to response
-- `backend/cubebox/api/routes/v1/admin.py` — Add PATCH org endpoint
-- `backend/cubebox/auth/users.py` — Add on_after_forgot_password, on_after_request_verify hooks
-- `backend/cubebox/repositories/invite_token.py` — Add list_for_workspace, delete methods
-- `backend/cubebox/repositories/workspace.py` — Add update, archive, delete methods
-- `backend/cubebox/repositories/membership.py` — Add count_admins, remove_self methods
+- `backend/cubeplex/models/user.py` — Add `display_name` field
+- `backend/cubeplex/models/workspace.py` — Add `archived_at` field
+- `backend/cubeplex/api/routes/v1/auth.py` — Extend register/me/patch-me, add change-password, delete-account, include reset/verify routers
+- `backend/cubeplex/api/routes/v1/workspaces.py` — Add PATCH rename, list/revoke invites, archive/unarchive/delete, leave, extend accept response, filter archived
+- `backend/cubeplex/api/routes/v1/ws_members.py` — Add display_name to response
+- `backend/cubeplex/api/routes/v1/admin_members.py` — Add display_name to response
+- `backend/cubeplex/api/routes/v1/admin.py` — Add PATCH org endpoint
+- `backend/cubeplex/auth/users.py` — Add on_after_forgot_password, on_after_request_verify hooks
+- `backend/cubeplex/repositories/invite_token.py` — Add list_for_workspace, delete methods
+- `backend/cubeplex/repositories/workspace.py` — Add update, archive, delete methods
+- `backend/cubeplex/repositories/membership.py` — Add count_admins, remove_self methods
 
 ### Frontend — New Files
 - `frontend/packages/core/src/api/invites.ts` — Invite API client functions
@@ -82,15 +82,15 @@
 ### Task 1: Email Infrastructure (Backend)
 
 **Files:**
-- Create: `backend/cubebox/services/email.py`
-- Create: `backend/cubebox/templates/email/` (directory + base templates)
+- Create: `backend/cubeplex/services/email.py`
+- Create: `backend/cubeplex/templates/email/` (directory + base templates)
 - Create: `backend/tests/unit/test_email_service.py`
 - Modify: `backend/pyproject.toml` (add aiosmtplib)
 
 - [ ] **Step 1: Add aiosmtplib dependency**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
 uv add aiosmtplib
 ```
 
@@ -101,7 +101,7 @@ Create `backend/tests/unit/test_email_service.py`:
 ```python
 import pytest
 
-from cubebox.services.email import EmailService, LogEmailBackend
+from cubeplex.services.email import EmailService, LogEmailBackend
 
 
 @pytest.mark.asyncio
@@ -129,12 +129,12 @@ async def test_send_renders_template() -> None:
     )
 ```
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend && uv run pytest tests/unit/test_email_service.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend && uv run pytest tests/unit/test_email_service.py -v`
 Expected: FAIL (module not found)
 
 - [ ] **Step 3: Implement EmailService**
 
-Create `backend/cubebox/services/email.py`:
+Create `backend/cubeplex/services/email.py`:
 
 ```python
 """Pluggable email service with log/smtp/resend backends."""
@@ -147,7 +147,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 from loguru import logger
 
-from cubebox.config import config
+from cubeplex.config import config
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "email"
 
@@ -169,7 +169,7 @@ class SmtpEmailBackend(EmailBackend):
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
 
-        from_addr = config.get("email.from_address", "noreply@cubebox.local")
+        from_addr = config.get("email.from_address", "noreply@cubeplex.local")
         msg = MIMEMultipart("alternative")
         msg["From"] = from_addr
         msg["To"] = to
@@ -217,7 +217,7 @@ def get_email_service() -> EmailService:
 
 - [ ] **Step 4: Create email templates directory and base templates**
 
-Create `backend/cubebox/templates/email/password_reset.html`:
+Create `backend/cubeplex/templates/email/password_reset.html`:
 
 ```html
 <p>Hi,</p>
@@ -226,7 +226,7 @@ Create `backend/cubebox/templates/email/password_reset.html`:
 <p>This link expires in 1 hour. If you didn't request this, ignore this email.</p>
 ```
 
-Create `backend/cubebox/templates/email/password_reset.txt`:
+Create `backend/cubeplex/templates/email/password_reset.txt`:
 
 ```
 Hi,
@@ -238,37 +238,37 @@ Click the link below to reset your password:
 This link expires in 1 hour. If you didn't request this, ignore this email.
 ```
 
-Create `backend/cubebox/templates/email/email_verification.html`:
+Create `backend/cubeplex/templates/email/email_verification.html`:
 
 ```html
-<p>Welcome to cubebox!</p>
+<p>Welcome to cubeplex!</p>
 <p>Click the link below to verify your email:</p>
 <p><a href="{{ verify_url }}">{{ verify_url }}</a></p>
 ```
 
-Create `backend/cubebox/templates/email/email_verification.txt`:
+Create `backend/cubeplex/templates/email/email_verification.txt`:
 
 ```
-Welcome to cubebox!
+Welcome to cubeplex!
 
 Click the link below to verify your email:
 
 {{ verify_url }}
 ```
 
-Create `backend/cubebox/templates/email/workspace_invite.html`:
+Create `backend/cubeplex/templates/email/workspace_invite.html`:
 
 ```html
-<p>You've been invited to join the workspace <strong>{{ workspace_name }}</strong> on cubebox.</p>
+<p>You've been invited to join the workspace <strong>{{ workspace_name }}</strong> on cubeplex.</p>
 <p>Click the link below to accept:</p>
 <p><a href="{{ invite_url }}">{{ invite_url }}</a></p>
 <p>This link expires in 24 hours.</p>
 ```
 
-Create `backend/cubebox/templates/email/workspace_invite.txt`:
+Create `backend/cubeplex/templates/email/workspace_invite.txt`:
 
 ```
-You've been invited to join the workspace "{{ workspace_name }}" on cubebox.
+You've been invited to join the workspace "{{ workspace_name }}" on cubeplex.
 
 Click the link below to accept:
 
@@ -279,14 +279,14 @@ This link expires in 24 hours.
 
 - [ ] **Step 5: Run tests, verify pass**
 
-Run: `cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend && uv run pytest tests/unit/test_email_service.py -v`
+Run: `cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend && uv run pytest tests/unit/test_email_service.py -v`
 Expected: PASS
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/services/email.py backend/cubebox/templates/email/ backend/tests/unit/test_email_service.py backend/pyproject.toml backend/uv.lock
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/services/email.py backend/cubeplex/templates/email/ backend/tests/unit/test_email_service.py backend/pyproject.toml backend/uv.lock
 git commit -m "feat: add pluggable email service with log/smtp backends"
 ```
 
@@ -295,15 +295,15 @@ git commit -m "feat: add pluggable email service with log/smtp backends"
 ### Task 2: User Display Name — Backend
 
 **Files:**
-- Modify: `backend/cubebox/models/user.py` — add display_name
-- Modify: `backend/cubebox/api/routes/v1/auth.py` — extend register, me, patch-me
-- Modify: `backend/cubebox/api/routes/v1/ws_members.py` — add display_name to response
-- Modify: `backend/cubebox/api/routes/v1/admin_members.py` — add display_name to response
+- Modify: `backend/cubeplex/models/user.py` — add display_name
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` — extend register, me, patch-me
+- Modify: `backend/cubeplex/api/routes/v1/ws_members.py` — add display_name to response
+- Modify: `backend/cubeplex/api/routes/v1/admin_members.py` — add display_name to response
 - Alembic migration (autogenerated)
 
 - [ ] **Step 1: Add display_name to User model**
 
-In `backend/cubebox/models/user.py`, add after the `language` field (line 28):
+In `backend/cubeplex/models/user.py`, add after the `language` field (line 28):
 
 ```python
 display_name: str | None = Field(default=None, max_length=100)
@@ -312,14 +312,14 @@ display_name: str | None = Field(default=None, max_length=100)
 - [ ] **Step 2: Generate alembic migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
 uv run alembic revision --autogenerate -m "add display_name to users"
 uv run alembic upgrade head
 ```
 
 - [ ] **Step 3: Extend PATCH /auth/me to accept display_name**
 
-In `backend/cubebox/api/routes/v1/auth.py`, replace the `UserLanguageUpdate` model and `patch_me` route:
+In `backend/cubeplex/api/routes/v1/auth.py`, replace the `UserLanguageUpdate` model and `patch_me` route:
 
 Replace `class UserLanguageUpdate(BaseModel):` through the entire `patch_me` function with:
 
@@ -337,7 +337,7 @@ async def patch_me(
 ) -> dict[str, object]:
     from sqlalchemy import select
 
-    from cubebox.models import OrganizationMembership
+    from cubeplex.models import OrganizationMembership
 
     if body.language is None and body.display_name is None:
         raise HTTPException(
@@ -402,13 +402,13 @@ Note: `session.refresh(user)` re-attaches the user object to the current session
 
 - [ ] **Step 6: Add display_name to member list responses**
 
-In `backend/cubebox/api/routes/v1/ws_members.py`:
+In `backend/cubeplex/api/routes/v1/ws_members.py`:
 - Add `display_name: str | None = None` to `WsMemberOut` model
 - Add `display_name: str | None = None` to `AddWsMemberResponse` model
 - In `list_workspace_members()`, add `"display_name": u.display_name` when building each WsMemberOut (where `u` is the User looked up by user_id)
 - In `add_workspace_member()`, look up the target user and include display_name in response
 
-In `backend/cubebox/api/routes/v1/admin_members.py`:
+In `backend/cubeplex/api/routes/v1/admin_members.py`:
 - Add `display_name: str | None = None` to `OrgMemberOut` model
 - Add `display_name: str | None = None` to `AddOrgMemberResponse` model
 - In `list_org_members()`, add display_name from User lookup
@@ -417,16 +417,16 @@ In `backend/cubebox/api/routes/v1/admin_members.py`:
 - [ ] **Step 7: Run mypy and existing tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/
 uv run pytest tests/unit/ -x -q
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/models/user.py backend/cubebox/api/routes/v1/auth.py backend/cubebox/api/routes/v1/ws_members.py backend/cubebox/api/routes/v1/admin_members.py backend/alembic/versions/
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/models/user.py backend/cubeplex/api/routes/v1/auth.py backend/cubeplex/api/routes/v1/ws_members.py backend/cubeplex/api/routes/v1/admin_members.py backend/alembic/versions/
 git commit -m "feat: add user display_name to model, auth API, and member lists"
 ```
 
@@ -608,15 +608,15 @@ In `frontend/packages/web/messages/zh.json`, add to `"auth"`:
 - [ ] **Step 7: Build core and verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add frontend/
 git commit -m "feat(ui): display user name in registration, sidebar, and member lists"
 ```
@@ -626,12 +626,12 @@ git commit -m "feat(ui): display user name in registration, sidebar, and member 
 ### Task 4: Workspace Rename — Backend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py` — add PATCH endpoint
-- Modify: `backend/cubebox/repositories/workspace.py` — add update method
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py` — add PATCH endpoint
+- Modify: `backend/cubeplex/repositories/workspace.py` — add update method
 
 - [ ] **Step 1: Add update method to WorkspaceRepository**
 
-In `backend/cubebox/repositories/workspace.py`, add:
+In `backend/cubeplex/repositories/workspace.py`, add:
 
 ```python
 async def update_name(self, workspace_id: str, name: str) -> Workspace | None:
@@ -647,7 +647,7 @@ async def update_name(self, workspace_id: str, name: str) -> Workspace | None:
 
 - [ ] **Step 2: Add PATCH /workspaces/{workspace_id} endpoint**
 
-In `backend/cubebox/api/routes/v1/workspaces.py`, add a new Pydantic model after `WorkspaceCreate`:
+In `backend/cubeplex/api/routes/v1/workspaces.py`, add a new Pydantic model after `WorkspaceCreate`:
 
 ```python
 class WorkspaceUpdate(BaseModel):
@@ -670,7 +670,7 @@ async def rename_workspace(
     if ws is None:
         raise HTTPException(status_code=404, detail="workspace not found")
 
-    from cubebox.plugins.audit import audit_log
+    from cubeplex.plugins.audit import audit_log
 
     await audit_log(
         action="workspace.renamed",
@@ -686,15 +686,15 @@ async def rename_workspace(
 - [ ] **Step 3: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/api/routes/v1/workspaces.py cubebox/repositories/workspace.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/api/routes/v1/workspaces.py cubeplex/repositories/workspace.py
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/api/routes/v1/workspaces.py backend/cubebox/repositories/workspace.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/api/routes/v1/workspaces.py backend/cubeplex/repositories/workspace.py
 git commit -m "feat: add workspace rename endpoint (PATCH /workspaces/{id})"
 ```
 
@@ -765,15 +765,15 @@ Chinese counterparts in `zh.json`.
 - [ ] **Step 5: Build and verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add frontend/
 git commit -m "feat(ui): workspace rename in settings"
 ```
@@ -785,12 +785,12 @@ git commit -m "feat(ui): workspace rename in settings"
 ### Task 6: Forgot Password — Backend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py` — register reset-password router
-- Modify: `backend/cubebox/auth/users.py` — add on_after_forgot_password hook
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` — register reset-password router
+- Modify: `backend/cubeplex/auth/users.py` — add on_after_forgot_password hook
 
 - [ ] **Step 1: Register reset-password router**
 
-In `backend/cubebox/api/routes/v1/auth.py`, at the bottom of the file (after the existing `router.include_router` line), add:
+In `backend/cubeplex/api/routes/v1/auth.py`, at the bottom of the file (after the existing `router.include_router` line), add:
 
 ```python
 router.include_router(fastapi_users.get_reset_password_router(), prefix="")
@@ -800,20 +800,20 @@ This mounts `POST /auth/forgot-password` and `POST /auth/reset-password`.
 
 - [ ] **Step 2: Implement on_after_forgot_password hook in UserManager**
 
-In `backend/cubebox/auth/users.py`, add to the `UserManager` class (after `on_after_login`):
+In `backend/cubeplex/auth/users.py`, add to the `UserManager` class (after `on_after_login`):
 
 ```python
 async def on_after_forgot_password(
     self, user: User, token: str, request: Request | None = None
 ) -> None:
-    from cubebox.services.email import get_email_service
+    from cubeplex.services.email import get_email_service
 
     base_url = config.get("app.base_url", "http://localhost:3000")
     reset_url = f"{base_url}/reset-password?token={token}"
     try:
         await get_email_service().send(
             to=user.email,
-            subject="Reset your cubebox password",
+            subject="Reset your cubeplex password",
             template="password_reset",
             context={"reset_url": reset_url, "email": user.email},
         )
@@ -824,15 +824,15 @@ async def on_after_forgot_password(
 - [ ] **Step 3: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/api/routes/v1/auth.py cubebox/auth/users.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/api/routes/v1/auth.py cubeplex/auth/users.py
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/api/routes/v1/auth.py backend/cubebox/auth/users.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/api/routes/v1/auth.py backend/cubeplex/auth/users.py
 git commit -m "feat: enable forgot/reset password via fastapi-users router + email hook"
 ```
 
@@ -894,7 +894,7 @@ Create `frontend/packages/web/app/(auth)/forgot-password/page.tsx`:
 import { useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, forgotPassword } from '@cubebox/core'
+import { createApiClient, forgotPassword } from '@cubeplex/core'
 
 export default function ForgotPasswordPage() {
   const t = useTranslations('auth')
@@ -971,7 +971,7 @@ import { use, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, resetPassword } from '@cubebox/core'
+import { createApiClient, resetPassword } from '@cubeplex/core'
 
 export default function ResetPasswordPage({
   searchParams,
@@ -1105,15 +1105,15 @@ Add Chinese counterparts in `zh.json`.
 - [ ] **Step 6: Build and verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add frontend/
 git commit -m "feat(ui): forgot/reset password pages and login link"
 ```
@@ -1123,11 +1123,11 @@ git commit -m "feat(ui): forgot/reset password pages and login link"
 ### Task 8: Change Password — Backend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py` — add POST /auth/change-password
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` — add POST /auth/change-password
 
 - [ ] **Step 1: Add change-password endpoint**
 
-In `backend/cubebox/api/routes/v1/auth.py`, add a new model and route:
+In `backend/cubeplex/api/routes/v1/auth.py`, add a new model and route:
 
 ```python
 class ChangePasswordRequest(BaseModel):
@@ -1162,7 +1162,7 @@ async def change_password(
     session.add(user)
     await session.commit()
 
-    from cubebox.plugins.audit import audit_log
+    from cubeplex.plugins.audit import audit_log
 
     await audit_log(
         action="auth.password_changed",
@@ -1175,15 +1175,15 @@ async def change_password(
 - [ ] **Step 2: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/api/routes/v1/auth.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/api/routes/v1/auth.py
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/api/routes/v1/auth.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/api/routes/v1/auth.py
 git commit -m "feat: add POST /auth/change-password endpoint"
 ```
 
@@ -1194,12 +1194,12 @@ git commit -m "feat: add POST /auth/change-password endpoint"
 ### Task 9: Invite Backend Additions
 
 **Files:**
-- Modify: `backend/cubebox/repositories/invite_token.py` — add list, delete
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py` — add GET invites, DELETE invite, extend accept response
+- Modify: `backend/cubeplex/repositories/invite_token.py` — add list, delete
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py` — add GET invites, DELETE invite, extend accept response
 
 - [ ] **Step 1: Extend InviteTokenRepository**
 
-In `backend/cubebox/repositories/invite_token.py`, add:
+In `backend/cubeplex/repositories/invite_token.py`, add:
 
 ```python
 async def list_for_workspace(self, workspace_id: str) -> list[InviteToken]:
@@ -1224,7 +1224,7 @@ async def delete(self, token: str) -> None:
 
 - [ ] **Step 2: Add GET /workspaces/{workspace_id}/invites**
 
-In `backend/cubebox/api/routes/v1/workspaces.py`, add:
+In `backend/cubeplex/api/routes/v1/workspaces.py`, add:
 
 ```python
 @router.get("/{workspace_id}/invites")
@@ -1263,7 +1263,7 @@ async def revoke_invite(
 
 - [ ] **Step 4: Extend invite creation to support email notification (F10)**
 
-In `backend/cubebox/api/routes/v1/workspaces.py`, find the existing `InviteCreate` model (or add one) and add an optional `email` field:
+In `backend/cubeplex/api/routes/v1/workspaces.py`, find the existing `InviteCreate` model (or add one) and add an optional `email` field:
 
 ```python
 class InviteCreate(BaseModel):
@@ -1276,7 +1276,7 @@ In the `create_invite` function, after issuing the token, add:
 ```python
     email_sent = False
     if body.email is not None:
-        from cubebox.services.email import get_email_service
+        from cubeplex.services.email import get_email_service
 
         base_url = config.get("app.base_url", "http://localhost:3000")
         invite_url = f"{base_url}/invite/accept?token={tok.token}"
@@ -1285,7 +1285,7 @@ In the `create_invite` function, after issuing the token, add:
         try:
             await get_email_service().send(
                 to=body.email,
-                subject=f"You're invited to {ws_name} on cubebox",
+                subject=f"You're invited to {ws_name} on cubeplex",
                 template="workspace_invite",
                 context={"invite_url": invite_url, "workspace_name": ws_name},
             )
@@ -1315,8 +1315,8 @@ In the `accept_invite` function, after consuming the token and granting membersh
 Also: before granting workspace membership, check if the user is an org member. If not, auto-add them:
 
 ```python
-    from cubebox.models import OrgRole
-    from cubebox.repositories import OrganizationMembershipRepository
+    from cubeplex.models import OrgRole
+    from cubeplex.repositories import OrganizationMembershipRepository
 
     ws = await WorkspaceRepository(session).get(tok.workspace_id)
     if ws is not None:
@@ -1329,15 +1329,15 @@ Also: before granting workspace membership, check if the user is an org member. 
 - [ ] **Step 5: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/api/routes/v1/workspaces.py cubebox/repositories/invite_token.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/api/routes/v1/workspaces.py cubeplex/repositories/invite_token.py
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/api/routes/v1/workspaces.py backend/cubebox/repositories/invite_token.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/api/routes/v1/workspaces.py backend/cubeplex/repositories/invite_token.py
 git commit -m "feat: invite list/revoke endpoints and enriched accept response"
 ```
 
@@ -1426,7 +1426,7 @@ import { use, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, acceptInvite, useAuthStore, type AcceptInviteResult } from '@cubebox/core'
+import { createApiClient, acceptInvite, useAuthStore, type AcceptInviteResult } from '@cubeplex/core'
 
 export default function AcceptInvitePage({
   searchParams,
@@ -1502,7 +1502,7 @@ Create `frontend/packages/web/components/workspace-settings/members/CreateInvite
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Copy, Check } from 'lucide-react'
-import { createApiClient, createInvite } from '@cubebox/core'
+import { createApiClient, createInvite } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -1613,7 +1613,7 @@ Create `frontend/packages/web/components/workspace-settings/members/InviteSectio
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFormatter, useTranslations } from 'next-intl'
 import { Link2, Trash2 } from 'lucide-react'
-import { createApiClient, listInvites, revokeInvite, type InviteToken } from '@cubebox/core'
+import { createApiClient, listInvites, revokeInvite, type InviteToken } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -1765,15 +1765,15 @@ Add Chinese counterparts in `zh.json`.
 - [ ] **Step 7: Build and verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add frontend/
 git commit -m "feat(ui): invite creation, management, and accept page"
 ```
@@ -1801,7 +1801,7 @@ Create `frontend/packages/web/components/profile/ProfileForm.tsx`:
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { createApiClient, updateProfile, useAuthStore } from '@cubebox/core'
+import { createApiClient, updateProfile, useAuthStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 
 export function ProfileForm() {
@@ -1867,7 +1867,7 @@ Create `frontend/packages/web/components/profile/ChangePasswordForm.tsx`:
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { createApiClient, changePassword } from '@cubebox/core'
+import { createApiClient, changePassword } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 
 export function ChangePasswordForm() {
@@ -2021,15 +2021,15 @@ Add Chinese counterparts.
 - [ ] **Step 6: Build and verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add frontend/
 git commit -m "feat(ui): user profile page with display name and password change"
 ```
@@ -2039,11 +2039,11 @@ git commit -m "feat(ui): user profile page with display name and password change
 ### Task 12: Organization Settings — Backend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/admin.py` — add GET /admin/org and PATCH /admin/org
+- Modify: `backend/cubeplex/api/routes/v1/admin.py` — add GET /admin/org and PATCH /admin/org
 
 - [ ] **Step 1: Add GET /admin/org endpoint**
 
-In `backend/cubebox/api/routes/v1/admin.py`, add:
+In `backend/cubeplex/api/routes/v1/admin.py`, add:
 
 ```python
 @router.get("/org")
@@ -2060,7 +2060,7 @@ async def get_org(
 
 - [ ] **Step 2: Add PATCH /admin/org endpoint**
 
-In `backend/cubebox/api/routes/v1/admin.py`, add at module level:
+In `backend/cubeplex/api/routes/v1/admin.py`, add at module level:
 
 ```python
 import re
@@ -2095,7 +2095,7 @@ async def update_org(
 
     if body.slug is not None and body.slug != org.slug:
         from sqlalchemy import select
-        from cubebox.models import Organization
+        from cubeplex.models import Organization
 
         existing = await session.execute(
             select(Organization).where(Organization.slug == body.slug)  # type: ignore[arg-type]
@@ -2111,7 +2111,7 @@ async def update_org(
     await session.commit()
     await session.refresh(org)
 
-    from cubebox.plugins.audit import audit_log
+    from cubeplex.plugins.audit import audit_log
 
     await audit_log(
         action="org.updated",
@@ -2127,15 +2127,15 @@ Add necessary imports at the top of the file: `re`, `Field`, `Request` from exis
 - [ ] **Step 3: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/api/routes/v1/admin.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/api/routes/v1/admin.py
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/api/routes/v1/admin.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/api/routes/v1/admin.py
 git commit -m "feat: add GET + PATCH /admin/org endpoints for org settings"
 ```
 
@@ -2158,7 +2158,7 @@ Create `frontend/packages/web/components/admin/settings/OrgInfoCard.tsx`:
 import { useEffect, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { createApiClient, toApiError } from '@cubebox/core'
+import { createApiClient, toApiError } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
 
@@ -2284,16 +2284,16 @@ In `en.json` under `adminSettings`, add:
 - [ ] **Step 4: Build and verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add frontend/ backend/cubebox/api/routes/v1/admin.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add frontend/ backend/cubeplex/api/routes/v1/admin.py
 git commit -m "feat: org settings card in admin panel (name + slug editing)"
 ```
 
@@ -2302,12 +2302,12 @@ git commit -m "feat: org settings card in admin panel (name + slug editing)"
 ### Task 14: Email Verification — Backend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py` — register verify router, add is_verified to /me
-- Modify: `backend/cubebox/auth/users.py` — add on_after_request_verify hook
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` — register verify router, add is_verified to /me
+- Modify: `backend/cubeplex/auth/users.py` — add on_after_request_verify hook
 
 - [ ] **Step 1: Register verify router**
 
-In `backend/cubebox/api/routes/v1/auth.py`, at the bottom:
+In `backend/cubeplex/api/routes/v1/auth.py`, at the bottom:
 
 ```python
 router.include_router(fastapi_users.get_verify_router(UserRead), prefix="")
@@ -2325,20 +2325,20 @@ In the `me()` function's return dict, add:
 
 - [ ] **Step 3: Implement on_after_request_verify hook**
 
-In `backend/cubebox/auth/users.py`, add to `UserManager`:
+In `backend/cubeplex/auth/users.py`, add to `UserManager`:
 
 ```python
 async def on_after_request_verify(
     self, user: User, token: str, request: Request | None = None
 ) -> None:
-    from cubebox.services.email import get_email_service
+    from cubeplex.services.email import get_email_service
 
     base_url = config.get("app.base_url", "http://localhost:3000")
     verify_url = f"{base_url}/verify-email?token={token}"
     try:
         await get_email_service().send(
             to=user.email,
-            subject="Verify your cubebox email",
+            subject="Verify your cubeplex email",
             template="email_verification",
             context={"verify_url": verify_url},
         )
@@ -2349,15 +2349,15 @@ async def on_after_request_verify(
 - [ ] **Step 4: Run mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/api/routes/v1/auth.py cubebox/auth/users.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/api/routes/v1/auth.py cubeplex/auth/users.py
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add backend/cubebox/api/routes/v1/auth.py backend/cubebox/auth/users.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add backend/cubeplex/api/routes/v1/auth.py backend/cubeplex/auth/users.py
 git commit -m "feat: enable email verification via fastapi-users router + email hook"
 ```
 
@@ -2366,7 +2366,7 @@ git commit -m "feat: enable email verification via fastapi-users router + email 
 ### Task 14b: Email Verification — Frontend + Auto-Trigger
 
 **Files:**
-- Modify: `backend/cubebox/auth/users.py` — auto-trigger request_verify on registration
+- Modify: `backend/cubeplex/auth/users.py` — auto-trigger request_verify on registration
 - Create: `frontend/packages/web/app/(auth)/verify-email/page.tsx` — token landing page
 - Create: `frontend/packages/web/components/auth/VerifyEmailPage.tsx` — verify logic
 - Create: `frontend/packages/web/components/layout/VerificationBanner.tsx` — persistent banner
@@ -2437,7 +2437,7 @@ import {
   verifyEmail,
   requestVerifyToken,
   useAuthStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 export function VerifyEmailPage() {
   const t = useTranslations('verifyEmail')
@@ -2510,7 +2510,7 @@ import {
   createApiClient,
   requestVerifyToken,
   useAuthStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 export function VerificationBanner() {
   const t = useTranslations('verificationBanner')
@@ -2597,7 +2597,7 @@ In `zh.json`:
 
 - [ ] **Step 6: Auto-trigger verification email on registration**
 
-In `backend/cubebox/auth/users.py`, at the end of `on_after_register` (after the audit_log call), add:
+In `backend/cubeplex/auth/users.py`, at the end of `on_after_register` (after the audit_log call), add:
 
 ```python
 try:
@@ -2611,21 +2611,21 @@ This calls `request_verify`, which triggers `on_after_request_verify` (implement
 - [ ] **Step 7: Build and verify**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/auth/users.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/auth/users.py
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
-git add frontend/ backend/cubebox/auth/users.py
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
+git add frontend/ backend/cubeplex/auth/users.py
 git commit -m "feat: email verification frontend (verify page, banner, auto-trigger on register)"
 ```
 
@@ -2636,14 +2636,14 @@ git commit -m "feat: email verification frontend (verify page, banner, auto-trig
 ### Task 15: Leave Workspace — Backend + Frontend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py` — add POST /workspaces/{id}/leave
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py` — add POST /workspaces/{id}/leave
 - Modify: `frontend/packages/core/src/api/workspaces.ts` — add leaveWorkspace
 - Modify: `frontend/packages/web/components/workspace-settings/members/WsMembersTable.tsx` — add leave button
 - Modify: `frontend/packages/web/messages/en.json` / `zh.json`
 
 - [ ] **Step 1: Add leave endpoint (backend)**
 
-In `backend/cubebox/api/routes/v1/workspaces.py`, add:
+In `backend/cubeplex/api/routes/v1/workspaces.py`, add:
 
 ```python
 @router.post("/{workspace_id}/leave")
@@ -2671,7 +2671,7 @@ async def leave_workspace(
     org_id = ws.org_id if ws else None
 
     from sqlalchemy import delete as sa_delete
-    from cubebox.models import Membership
+    from cubeplex.models import Membership
 
     await session.execute(
         sa_delete(Membership).where(
@@ -2681,7 +2681,7 @@ async def leave_workspace(
     )
     await session.commit()
 
-    from cubebox.plugins.audit import audit_log
+    from cubeplex.plugins.audit import audit_log
 
     await audit_log(
         action="workspace.member_left",
@@ -2721,7 +2721,7 @@ Under `"wsMembers"`:
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add backend/ frontend/
 git commit -m "feat: leave workspace endpoint and UI"
 ```
@@ -2731,13 +2731,13 @@ git commit -m "feat: leave workspace endpoint and UI"
 ### Task 16: Workspace Archive & Delete — Backend
 
 **Files:**
-- Modify: `backend/cubebox/models/workspace.py` — add archived_at
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py` — add archive/unarchive/delete, filter archived
+- Modify: `backend/cubeplex/models/workspace.py` — add archived_at
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py` — add archive/unarchive/delete, filter archived
 - Alembic migration
 
 - [ ] **Step 1: Add archived_at to Workspace model**
 
-In `backend/cubebox/models/workspace.py`, add:
+In `backend/cubeplex/models/workspace.py`, add:
 
 ```python
 from datetime import datetime
@@ -2752,7 +2752,7 @@ archived_at: datetime | None = Field(
 - [ ] **Step 2: Generate migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
 uv run alembic revision --autogenerate -m "add archived_at to workspaces"
 uv run alembic upgrade head
 ```
@@ -2815,18 +2815,18 @@ async def delete_workspace(
         raise HTTPException(status_code=400, detail="cannot_delete_last_workspace")
 
     from sqlalchemy import delete as sa_delete
-    from cubebox.models import (
+    from cubeplex.models import (
         Conversation,
         InviteToken,
         Membership,
     )
-    from cubebox.models.mcp import McpConnectorInstall, McpWorkspaceToken
-    from cubebox.models.skill import SkillInstall, SkillHide
-    from cubebox.models.trigger import Trigger
-    from cubebox.models.scheduled_task import ScheduledTask
-    from cubebox.models.egress_ref import EgressRef
-    from cubebox.models.memory import Memory
-    from cubebox.models.sandbox_env import SandboxEnv
+    from cubeplex.models.mcp import McpConnectorInstall, McpWorkspaceToken
+    from cubeplex.models.skill import SkillInstall, SkillHide
+    from cubeplex.models.trigger import Trigger
+    from cubeplex.models.scheduled_task import ScheduledTask
+    from cubeplex.models.egress_ref import EgressRef
+    from cubeplex.models.memory import Memory
+    from cubeplex.models.sandbox_env import SandboxEnv
 
     # Delete child rows that lack ON DELETE CASCADE on workspace_id FK.
     # Order: deepest dependents first to avoid FK violations.
@@ -2850,12 +2850,12 @@ async def delete_workspace(
 - [ ] **Step 5: Run mypy, commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
-uv run mypy cubebox/
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
+uv run mypy cubeplex/
 ```
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add backend/
 git commit -m "feat: workspace archive/unarchive/delete with soft-delete column"
 ```
@@ -2897,7 +2897,7 @@ In the workspace settings page, add a new tab or section for workspace managemen
 - [ ] **Step 3: Add i18n keys, build, commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add frontend/
 git commit -m "feat(ui): workspace archive and delete in settings danger zone"
 ```
@@ -2907,14 +2907,14 @@ git commit -m "feat(ui): workspace archive and delete in settings danger zone"
 ### Task 18: Account Deletion — Backend + Frontend
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py` — add POST /auth/delete-account
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` — add POST /auth/delete-account
 - Create: `frontend/packages/web/components/profile/DeleteAccountDialog.tsx`
 - Modify: `frontend/packages/web/app/(app)/settings/profile/page.tsx` — add danger zone
 - Modify: `frontend/packages/web/messages/en.json` / `zh.json`
 
 - [ ] **Step 1: Add delete-account endpoint (backend)**
 
-In `backend/cubebox/api/routes/v1/auth.py`:
+In `backend/cubeplex/api/routes/v1/auth.py`:
 
 ```python
 class DeleteAccountRequest(BaseModel):
@@ -2935,7 +2935,7 @@ async def delete_account(
     if not verified:
         raise HTTPException(status_code=400, detail="incorrect_password")
 
-    from cubebox.models import OrgRole, OrganizationMembership
+    from cubeplex.models import OrgRole, OrganizationMembership
     from sqlalchemy import select
 
     owner_rows = (
@@ -2949,7 +2949,7 @@ async def delete_account(
     if owner_rows:
         raise HTTPException(status_code=400, detail="transfer_ownership_first")
 
-    from cubebox.plugins.audit import audit_log
+    from cubeplex.plugins.audit import audit_log
 
     await audit_log(
         action="auth.account_deleted",
@@ -2958,19 +2958,19 @@ async def delete_account(
     )
 
     from sqlalchemy import delete as sa_delete, update as sa_update
-    from cubebox.models import Membership, OrganizationMembership as OM
-    from cubebox.models.conversation import Conversation
-    from cubebox.models.attachment import Attachment
-    from cubebox.models.billing import BillingEvent
-    from cubebox.models.user_event import UserEvent
-    from cubebox.models.trigger import Trigger
-    from cubebox.models.scheduled_task import ScheduledTask
-    from cubebox.models.egress_ref import EgressRef
-    from cubebox.models.memory import Memory
-    from cubebox.models.user_sandbox import UserSandbox
-    from cubebox.models.invite_token import InviteToken
-    from cubebox.models.mcp import McpConnectorInstall, McpWorkspaceToken
-    from cubebox.models.skill import SkillInstall, SkillHide, SkillRegistry
+    from cubeplex.models import Membership, OrganizationMembership as OM
+    from cubeplex.models.conversation import Conversation
+    from cubeplex.models.attachment import Attachment
+    from cubeplex.models.billing import BillingEvent
+    from cubeplex.models.user_event import UserEvent
+    from cubeplex.models.trigger import Trigger
+    from cubeplex.models.scheduled_task import ScheduledTask
+    from cubeplex.models.egress_ref import EgressRef
+    from cubeplex.models.memory import Memory
+    from cubeplex.models.user_sandbox import UserSandbox
+    from cubeplex.models.invite_token import InviteToken
+    from cubeplex.models.mcp import McpConnectorInstall, McpWorkspaceToken
+    from cubeplex.models.skill import SkillInstall, SkillHide, SkillRegistry
 
     # NULL out created_by / user_id on shared data that should survive.
     await session.execute(
@@ -3009,14 +3009,14 @@ async def delete_account(
             sa_delete(model).where(col == user.id)  # type: ignore[arg-type]
         )
 
-    from cubebox.models import User as UserModel
+    from cubeplex.models import User as UserModel
 
     await session.execute(
         sa_delete(UserModel).where(UserModel.id == user.id)  # type: ignore[arg-type]
     )
     await session.commit()
 
-    cookie_name = config.get("auth.cookie_name", "cubebox_auth")
+    cookie_name = config.get("auth.cookie_name", "cubeplex_auth")
     response = Response(
         content='{"deleted": true}',
         media_type="application/json",
@@ -3035,7 +3035,7 @@ Create `frontend/packages/web/components/profile/DeleteAccountDialog.tsx`:
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, toApiError, useAuthStore } from '@cubebox/core'
+import { createApiClient, toApiError, useAuthStore } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import * as DialogPrimitive from '@base-ui-components/react/dialog'
 
@@ -3144,13 +3144,13 @@ In `en.json` under `"profile"`, add:
 - [ ] **Step 5: Build, verify, commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness
 git add backend/ frontend/
 git commit -m "feat: account deletion endpoint, dialog, and profile danger zone"
 ```
@@ -3162,31 +3162,31 @@ git commit -m "feat: account deletion endpoint, dialog, and profile danger zone"
 - [ ] **Run full backend tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
 uv run pytest tests/ -x -q
 ```
 
 - [ ] **Run full frontend typecheck**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/core build
-pnpm --filter @cubebox/web typecheck
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/core build
+pnpm --filter @cubeplex/web typecheck
 ```
 
 - [ ] **Run frontend linting**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
-pnpm --filter @cubebox/web lint
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
+pnpm --filter @cubeplex/web lint
 ```
 
 - [ ] **Manual verification: start backend and frontend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/backend
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/backend
 python main.py &
-cd /home/chris/cubebox/.worktrees/feat/user-identity-completeness/frontend
+cd /home/chris/cubeplex/.worktrees/feat/user-identity-completeness/frontend
 pnpm dev &
 ```
 

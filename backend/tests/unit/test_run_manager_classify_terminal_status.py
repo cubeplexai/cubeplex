@@ -1,6 +1,6 @@
 """Truth-table tests for ``classify_terminal_status``.
 
-Covers the five rows in cubebox/streams/hitl_resume.py docstring. Pure-function
+Covers the five rows in cubeplex/streams/hitl_resume.py docstring. Pure-function
 tests, no fixtures.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from cubebox.streams.hitl_resume import TerminalClassification, classify_terminal_status
+from cubeplex.streams.hitl_resume import TerminalClassification, classify_terminal_status
 
 
 def _fake_pending(qid: str) -> MagicMock:

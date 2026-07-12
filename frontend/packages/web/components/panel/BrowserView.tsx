@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Eye, Hand, RefreshCw } from 'lucide-react'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 
 import { PanelHeader } from '@/components/panel/PanelHeader'
 import { useBrowserLiveView } from '@/hooks/useBrowserLiveView'

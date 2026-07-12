@@ -1,6 +1,6 @@
 # K8s Deployment — Graceful Restart
 
-The cubebox backend drains in-flight LangGraph runs on `SIGTERM` before
+The cubeplex backend drains in-flight LangGraph runs on `SIGTERM` before
 exiting. To get zero-downtime rolling restarts, pair this with a long
 termination grace period and the split health probes.
 
@@ -15,7 +15,7 @@ termination grace period and the split health probes.
 spec:
   terminationGracePeriodSeconds: 3600   # match lifecycle.graceful_drain_timeout_seconds
   containers:
-    - name: cubebox
+    - name: cubeplex
       readinessProbe:
         httpGet: { path: /health/ready, port: 8000 }
         periodSeconds: 5

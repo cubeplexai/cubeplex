@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Hash, MessageCircle, MessageSquare } from 'lucide-react'
-import { createApiClient, getTopic, getConversation } from '@cubebox/core'
-import type { ScheduledTaskOut } from '@cubebox/core'
+import { createApiClient, getTopic, getConversation } from '@cubeplex/core'
+import type { ScheduledTaskOut } from '@cubeplex/core'
 import { cn } from '@/lib/utils'
 import { topicDisplayTitle } from '@/lib/topicTitle'
 

@@ -7,7 +7,7 @@ Author: agent eval (worktree `feat/2026-06-24-office-skills`)
 
 We had collected several third-party PPT/Excel/PDF/Word skills from the web but
 only smoke-tested them. This pass deeply evaluates the **PowerPoint** skills to
-decide what (if anything) cubebox should preinstall. PPT splits into two camps:
+decide what (if anything) cubeplex should preinstall. PPT splits into two camps:
 
 - **Native `.pptx`** — produce an editable PowerPoint binary (python-pptx / PptxGenJS / html2pptx).
 - **HTML decks** — produce a self-contained HTML slide deck.
@@ -100,12 +100,12 @@ design product, not a lightweight agent skill.
 ### Bug 1 — registry-installed skills can't read their bundled files
 
 Registry skills get a colon canonical name (`<org>:<skill>`). Files mount at
-`/.skills/{name}/{version}/` (`cubebox/sandbox/lazy.py`), and the system prompt
+`/.skills/{name}/{version}/` (`cubeplex/sandbox/lazy.py`), and the system prompt
 only told the agent the *pattern* `/.skills/<name>/<version>/`. The LLM
 mis-renders the colon as a path separator and drops the version segment, so
 reads of `scripts/`/`references/` fail. Preinstalled (plain-name) skills had 0
 read errors. **Fix:** normalise `:`→`__` in a single `sandbox_skill_dir()` helper
-(`cubebox/skills/sandbox_paths.py`) used by both the file-sync and `load_skill`;
+(`cubeplex/skills/sandbox_paths.py`) used by both the file-sync and `load_skill`;
 `load_skill` now returns the exact `path` and the prompt tells the agent to use
 it verbatim instead of constructing it.
 

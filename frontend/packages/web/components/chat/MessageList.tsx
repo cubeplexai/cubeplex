@@ -13,13 +13,13 @@ import {
   submitAskUserAnswer,
   cancelActiveRun,
   ApiError,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import type {
   AssistantMessage as AssistantMessageType,
   Message,
   SubagentSummary,
   TurnUsage,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { AlertCircle } from 'lucide-react'
 import { RunErrorBubble } from './RunErrorBubble'
 import { UserMessage } from './UserMessage'
@@ -140,7 +140,7 @@ function buildHistoricalToolResultMap(
 
 /**
  * Map the HITL answer-submit 4xx codes (defined in
- * ``backend/cubebox/api/routes/v1/conversations.py``) to UI recovery actions:
+ * ``backend/cubeplex/api/routes/v1/conversations.py``) to UI recovery actions:
  *
  *   - ``resume_in_flight`` — another submit beat us; reload to pick up the
  *     authoritative state.
@@ -571,7 +571,7 @@ export function MessageList({ conversationId }: MessageListProps) {
         {(messages ?? []).map((msg) => (
           // id="msg-{seq}" matches the conversation-search route's
           // matched_message_seq (cubepi_messages.seq — see
-          // backend/cubebox/search/worker.py). SearchResultRow links to
+          // backend/cubeplex/search/worker.py). SearchResultRow links to
           // #msg-N; the browser scrolls to this anchor when the user
           // clicks a search hit. ``seq`` is missing only on the optimistic
           // user bubble before the run is claimed — those are never search

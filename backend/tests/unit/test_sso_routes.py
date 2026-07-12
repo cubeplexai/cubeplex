@@ -15,14 +15,14 @@ import pytest_asyncio
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from cubebox.api.routes.v1.sso import (
+from cubeplex.api.routes.v1.sso import (
     _enforce_forced_sso_for_user,
     _login_and_redirect,
     sso_initiate,
     sso_oidc_callback,
     sso_saml_acs,
 )
-from cubebox.models import (
+from cubeplex.models import (
     Membership,
     Organization,
     Role,
@@ -30,7 +30,7 @@ from cubebox.models import (
     User,
     Workspace,
 )
-from cubebox.sso.state import SSOStateStore
+from cubeplex.sso.state import SSOStateStore
 
 pytestmark = pytest.mark.asyncio
 
@@ -77,7 +77,7 @@ async def org_with_oidc_sso(
             "authorization_endpoint": "https://idp.example.com/authorize",
             "token_endpoint": "https://idp.example.com/token",
             "jwks_uri": "https://idp.example.com/jwks",
-            "client_id": "cubebox-client",
+            "client_id": "cubeplex-client",
         },
     )
     sso_session.add(conn)
@@ -93,7 +93,7 @@ async def test_org_info_returns_sso_enabled(
     sso_session: Any,
     org_with_oidc_sso: tuple[Organization, SSOConnection],
 ) -> None:
-    from cubebox.api.routes.v1.sso import get_org_info
+    from cubeplex.api.routes.v1.sso import get_org_info
 
     org, _ = org_with_oidc_sso
     resp = await get_org_info(org.slug, sso_session)
@@ -106,7 +106,7 @@ async def test_org_info_no_sso(
     sso_session: Any,
     make_org_with_user: Callable[..., Awaitable[tuple[Organization, User]]],
 ) -> None:
-    from cubebox.api.routes.v1.sso import get_org_info
+    from cubeplex.api.routes.v1.sso import get_org_info
 
     org, _ = await make_org_with_user(email="solo@example.com")
     resp = await get_org_info(org.slug, sso_session)
@@ -115,7 +115,7 @@ async def test_org_info_no_sso(
 
 
 async def test_org_info_404_for_unknown_slug(sso_session: Any) -> None:
-    from cubebox.api.routes.v1.sso import get_org_info
+    from cubeplex.api.routes.v1.sso import get_org_info
 
     with pytest.raises(HTTPException) as exc_info:
         await get_org_info("does-not-exist", sso_session)
@@ -130,7 +130,7 @@ async def test_initiate_oidc_returns_authorize_url_with_state_and_nonce(
     fake_redis: fakeredis.aioredis.FakeRedis,
     org_with_oidc_sso: tuple[Organization, SSOConnection],
 ) -> None:
-    from cubebox.api.routes.v1.sso import SSOInitiateRequest
+    from cubeplex.api.routes.v1.sso import SSOInitiateRequest
 
     org, conn = org_with_oidc_sso
     request = _make_request(fake_redis)
@@ -148,7 +148,7 @@ async def test_initiate_oidc_returns_authorize_url_with_state_and_nonce(
 
     # State is consumable by the same store; PKCE verifier was attached.
     state = resp.redirect_url.split("state=")[1].split("&")[0]
-    from cubebox.config import config
+    from cubeplex.config import config
 
     store = SSOStateStore(
         redis=fake_redis, secret_key=config.get("auth.jwt_secret", "CHANGE_ME").encode()
@@ -171,7 +171,7 @@ async def test_oidc_callback_rejects_non_oidc_state(
 ) -> None:
     """A state token forged for the `google` protocol must not pass the
     OIDC callback's protocol guard."""
-    from cubebox.config import config
+    from cubeplex.config import config
 
     store = SSOStateStore(
         redis=fake_redis, secret_key=config.get("auth.jwt_secret", "CHANGE_ME").encode()
@@ -200,7 +200,7 @@ async def test_oidc_callback_rejects_non_oidc_state(
 async def test_oidc_callback_rejects_state_without_nonce(
     sso_session: Any, fake_redis: fakeredis.aioredis.FakeRedis
 ) -> None:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     store = SSOStateStore(
         redis=fake_redis, secret_key=config.get("auth.jwt_secret", "CHANGE_ME").encode()
@@ -233,7 +233,7 @@ async def test_saml_acs_rejects_without_sidecar_request_id(
 ) -> None:
     """A SAML state with no sidecar AuthnRequest ID is an unsolicited /
     IdP-initiated assertion and must be rejected."""
-    from cubebox.config import config
+    from cubeplex.config import config
 
     org, _ = await make_org_with_user(email="x@saml.example")
     conn = SSOConnection(
@@ -274,7 +274,7 @@ async def test_saml_acs_rejects_without_sidecar_request_id(
 async def test_saml_acs_rejects_non_saml_state(
     sso_session: Any, fake_redis: fakeredis.aioredis.FakeRedis
 ) -> None:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     store = SSOStateStore(
         redis=fake_redis, secret_key=config.get("auth.jwt_secret", "CHANGE_ME").encode()

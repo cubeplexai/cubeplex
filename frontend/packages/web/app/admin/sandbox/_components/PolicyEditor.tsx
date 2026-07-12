@@ -9,7 +9,7 @@ import {
   type SandboxCommandRule,
   type SandboxNetworkRule,
   type SandboxPolicyOut,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

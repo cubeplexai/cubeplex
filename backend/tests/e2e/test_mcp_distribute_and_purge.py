@@ -15,16 +15,16 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import MCPConnectorTemplate, Organization, User, Workspace
-from cubebox.repositories.mcp import (
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import MCPConnectorTemplate, Organization, User, Workspace
+from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
     MCPCredentialGrantRepository,
     MCPTemplateSettingsRepository,
     MCPWorkspaceConnectorStateRepository,
 )
-from cubebox.repositories.workspace import WorkspaceRepository
-from cubebox.services.mcp_installs import MCPConnectorService
+from cubeplex.repositories.workspace import WorkspaceRepository
+from cubeplex.services.mcp_installs import MCPConnectorService
 
 pytestmark = pytest.mark.e2e
 
@@ -249,7 +249,7 @@ async def test_purge_deletes_connector_grants_states_keeps_template(
     async with db_maker() as session:
         from sqlalchemy import select
 
-        from cubebox.models import MCPConnector, MCPConnectorTemplate, MCPWorkspaceConnectorState
+        from cubeplex.models import MCPConnector, MCPConnectorTemplate, MCPWorkspaceConnectorState
 
         gone_connector = (
             await session.execute(
@@ -311,7 +311,7 @@ async def test_purge_is_atomic_rollback_on_failure(
 
     from sqlalchemy import select
 
-    from cubebox.models import (
+    from cubeplex.models import (
         Credential,
         MCPConnector,
         MCPCredentialGrant,
@@ -441,15 +441,15 @@ async def test_purge_rollback_preserves_grants_states_and_credentials_when_conne
     from cryptography.fernet import Fernet
     from sqlalchemy import select
 
-    from cubebox.credentials.encryption import FernetBackend
-    from cubebox.models import (
+    from cubeplex.credentials.encryption import FernetBackend
+    from cubeplex.models import (
         Credential,
         MCPConnector,
         MCPCredentialGrant,
         MCPWorkspaceConnectorState,
     )
-    from cubebox.repositories.credential import CredentialRepository
-    from cubebox.services.credential import CredentialService
+    from cubeplex.repositories.credential import CredentialRepository
+    from cubeplex.services.credential import CredentialService
 
     fernet_backend = FernetBackend([Fernet.generate_key()])
 
@@ -661,7 +661,7 @@ async def test_bootstrap_skips_org_disabled_templates(
     An auto_enroll connector whose template is disabled -> the new workspace
     gets no state row.
     """
-    from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
+    from cubeplex.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
 
     async with db_maker() as session:
         org = await _seed_org(session, "bootstrap")
@@ -724,10 +724,10 @@ async def test_purge_deletes_vault_credential_rows(
     from cryptography.fernet import Fernet
     from sqlalchemy import select
 
-    from cubebox.credentials.encryption import FernetBackend
-    from cubebox.models import Credential
-    from cubebox.repositories.credential import CredentialRepository
-    from cubebox.services.credential import CredentialService
+    from cubeplex.credentials.encryption import FernetBackend
+    from cubeplex.models import Credential
+    from cubeplex.repositories.credential import CredentialRepository
+    from cubeplex.services.credential import CredentialService
 
     async with db_maker() as session:
         org = await _seed_org(session, "cred-purge")

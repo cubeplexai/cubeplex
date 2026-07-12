@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubebox.streams.run_manager import (
+from cubeplex.streams.run_manager import (
     _build_attachment_content_blocks,
     _hydrate_attachments_into_sandbox,
 )
@@ -28,10 +28,10 @@ async def _stub_session() -> AsyncGenerator[MagicMock, None]:
 def _patches(hydrator_cls: MagicMock) -> Any:
     """Patch the four lazy imports inside _hydrate_attachments_into_sandbox."""
     return (
-        patch("cubebox.agents.hydrator.AttachmentHydrator", hydrator_cls),
-        patch("cubebox.db.engine.async_session_maker", _stub_session),
-        patch("cubebox.objectstore.get_objectstore_client", MagicMock()),
-        patch("cubebox.repositories.AttachmentRepository", MagicMock()),
+        patch("cubeplex.agents.hydrator.AttachmentHydrator", hydrator_cls),
+        patch("cubeplex.db.engine.async_session_maker", _stub_session),
+        patch("cubeplex.objectstore.get_objectstore_client", MagicMock()),
+        patch("cubeplex.repositories.AttachmentRepository", MagicMock()),
     )
 
 
@@ -138,8 +138,8 @@ async def test_build_blocks_drops_documents_when_sandbox_unavailable() -> None:
         yield MagicMock()
 
     with (
-        patch("cubebox.db.engine.async_session_maker", _ses),
-        patch("cubebox.repositories.AttachmentRepository", repo_cls),
+        patch("cubeplex.db.engine.async_session_maker", _ses),
+        patch("cubeplex.repositories.AttachmentRepository", repo_cls),
     ):
         blocks = await _build_attachment_content_blocks(
             org_id="o1",
@@ -173,8 +173,8 @@ async def test_build_blocks_keeps_everything_when_sandbox_available() -> None:
         yield MagicMock()
 
     with (
-        patch("cubebox.db.engine.async_session_maker", _ses),
-        patch("cubebox.repositories.AttachmentRepository", repo_cls),
+        patch("cubeplex.db.engine.async_session_maker", _ses),
+        patch("cubeplex.repositories.AttachmentRepository", repo_cls),
     ):
         blocks = await _build_attachment_content_blocks(
             org_id="o1",

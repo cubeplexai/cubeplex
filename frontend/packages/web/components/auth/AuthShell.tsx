@@ -22,7 +22,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
         <span className="grid size-7 place-items-center rounded-md bg-primary text-[13px] font-semibold text-primary-foreground shadow-[0_12px_40px_rgba(0,112,243,0.24)]">
           c
         </span>
-        <span className="text-sm font-semibold tracking-normal text-foreground">cubebox</span>
+        <span className="text-sm font-semibold tracking-normal text-foreground">cubeplex</span>
       </div>
       <AuthLanguageSwitcher />
 
@@ -43,7 +43,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div
-            data-testid="cubebox-runtime-visual"
+            data-testid="cubeplex-runtime-visual"
             data-visual="animated-cube-background"
             aria-hidden="true"
             className="pointer-events-none absolute -bottom-16 -right-12 aspect-square w-[min(84vw,28rem)] opacity-80 md:-bottom-24 md:right-0 md:w-[31rem] lg:-bottom-44 lg:-right-72 lg:w-[43rem]"

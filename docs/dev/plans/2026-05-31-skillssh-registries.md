@@ -15,7 +15,7 @@
 > **Working directory for all Phase A and Phase B commands:** `backend/`
 > Unless stated otherwise, run every shell command from the `backend/` directory:
 > ```bash
-> cd /home/chris/cubebox/.worktrees/feat/skillssh-source/backend
+> cd /home/chris/cubeplex/.worktrees/feat/skillssh-source/backend
 > ```
 
 ### Task 1: DB migration — rename `skill_sources` → `skill_registries`
@@ -58,7 +58,7 @@ Expected: `Running upgrade ... -> <rev>, rename skill_sources to skill_registrie
 uv run python -c "
 import asyncio
 from sqlalchemy import text
-from cubebox.db.engine import async_session_maker
+from cubeplex.db.engine import async_session_maker
 async def main():
     async with async_session_maker() as s:
         r = await s.execute(text(\"SELECT tablename FROM pg_tables WHERE tablename='skill_registries'\"))
@@ -81,20 +81,20 @@ git commit -m "chore(db): rename skill_sources table to skill_registries"
 ### Task 2: Rename model + repository
 
 **Files:**
-- Rename: `backend/cubebox/models/skill_source.py` → `skill_registry.py`
-- Rename: `backend/cubebox/repositories/skill_source.py` → `skill_registry.py`
-- Modify: `backend/cubebox/models/__init__.py`
+- Rename: `backend/cubeplex/models/skill_source.py` → `skill_registry.py`
+- Rename: `backend/cubeplex/repositories/skill_source.py` → `skill_registry.py`
+- Modify: `backend/cubeplex/models/__init__.py`
 - Modify: `backend/alembic/env.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_skill_sources.py` (import only, class rename in Task 4)
+- Modify: `backend/cubeplex/api/routes/v1/admin_skill_sources.py` (import only, class rename in Task 4)
 
 - [ ] **Step 1: Rename + rewrite model file**
 
 ```bash
 # from backend/
-git mv cubebox/models/skill_source.py cubebox/models/skill_registry.py
+git mv cubeplex/models/skill_source.py cubeplex/models/skill_registry.py
 ```
 
-Replace entire content of `cubebox/models/skill_registry.py`:
+Replace entire content of `cubeplex/models/skill_registry.py`:
 
 ```python
 """Registered remote skill registries (org-scoped admin config)."""
@@ -103,10 +103,10 @@ from typing import ClassVar
 
 from sqlmodel import Field
 
-from cubebox.models.mixins import CubeboxBase
+from cubeplex.models.mixins import CubeplexBase
 
 
-class SkillRegistry(CubeboxBase, table=True):
+class SkillRegistry(CubeplexBase, table=True):
     """A remote registry an org admin registered for skill discovery.
 
     The built-in local catalog adapter is implicit (always present) and has no
@@ -130,10 +130,10 @@ class SkillRegistry(CubeboxBase, table=True):
 
 ```bash
 # from backend/
-git mv cubebox/repositories/skill_source.py cubebox/repositories/skill_registry.py
+git mv cubeplex/repositories/skill_source.py cubeplex/repositories/skill_registry.py
 ```
 
-Replace entire content of `cubebox/repositories/skill_registry.py`:
+Replace entire content of `cubeplex/repositories/skill_registry.py`:
 
 ```python
 """Repository for org-configured skill registries."""
@@ -143,7 +143,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import SkillRegistry
+from cubeplex.models import SkillRegistry
 
 
 class SkillRegistryRepository:
@@ -216,42 +216,42 @@ class SkillRegistryRepository:
         return True
 ```
 
-- [ ] **Step 3: Update `cubebox/models/__init__.py`**
+- [ ] **Step 3: Update `cubeplex/models/__init__.py`**
 
 Find the line that exports `SkillSource` and replace with `SkillRegistry`:
 
 ```python
 # Before:
-from cubebox.models.skill_source import SkillSource
+from cubeplex.models.skill_source import SkillSource
 
 # After:
-from cubebox.models.skill_registry import SkillRegistry
+from cubeplex.models.skill_registry import SkillRegistry
 ```
 
 Also update the `__all__` list if it exists: replace `"SkillSource"` → `"SkillRegistry"`.
 
 - [ ] **Step 4: Update `alembic/env.py`**
 
-Find `from cubebox.models.skill_source import SkillSource` (or the models import block) and replace with:
+Find `from cubeplex.models.skill_source import SkillSource` (or the models import block) and replace with:
 
 ```python
-from cubebox.models.skill_registry import SkillRegistry  # noqa: F401
+from cubeplex.models.skill_registry import SkillRegistry  # noqa: F401
 ```
 
-Or if the file imports from `cubebox.models` directly, no change needed — the __init__.py update handles it.
+Or if the file imports from `cubeplex.models` directly, no change needed — the __init__.py update handles it.
 
 - [ ] **Step 5: Update `admin_skill_sources.py` import**
 
-In `cubebox/api/routes/v1/admin_skill_sources.py`, replace:
+In `cubeplex/api/routes/v1/admin_skill_sources.py`, replace:
 
 ```python
 # Before:
-from cubebox.models import SkillSource
-from cubebox.repositories.skill_source import SkillSourceRepository
+from cubeplex.models import SkillSource
+from cubeplex.repositories.skill_source import SkillSourceRepository
 
 # After:
-from cubebox.models import SkillRegistry
-from cubebox.repositories.skill_registry import SkillRegistryRepository
+from cubeplex.models import SkillRegistry
+from cubeplex.repositories.skill_registry import SkillRegistryRepository
 ```
 
 Also replace all occurrences of `SkillSource(` with `SkillRegistry(` and `SkillSourceRepository(` with `SkillRegistryRepository(` in that file (do NOT rename the route or request/response classes yet — that's Task 4).
@@ -259,7 +259,7 @@ Also replace all occurrences of `SkillSource(` with `SkillRegistry(` and `SkillS
 - [ ] **Step 6: Verify mypy passes**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 
 Expected: `Success: no issues found in N source files`
@@ -275,9 +275,9 @@ Expected: all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add cubebox/models/skill_registry.py cubebox/models/__init__.py \
-        cubebox/repositories/skill_registry.py \
-        cubebox/api/routes/v1/admin_skill_sources.py \
+git add cubeplex/models/skill_registry.py cubeplex/models/__init__.py \
+        cubeplex/repositories/skill_registry.py \
+        cubeplex/api/routes/v1/admin_skill_sources.py \
         alembic/env.py
 git commit -m "refactor(models): rename SkillSource→SkillRegistry, SkillSourceRepository→SkillRegistryRepository"
 ```
@@ -287,14 +287,14 @@ git commit -m "refactor(models): rename SkillSource→SkillRegistry, SkillSource
 ### Task 3: Rename Protocol + adapters + container
 
 **Files:**
-- Modify: `backend/cubebox/skills/sources/base.py`
-- Modify: `backend/cubebox/skills/sources/local.py`
-- Modify: `backend/cubebox/skills/sources/remote.py`
-- Modify: `backend/cubebox/skills/sources/registry.py`
-- Modify: `backend/cubebox/skills/discovery.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_skills.py`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py`
+- Modify: `backend/cubeplex/skills/sources/base.py`
+- Modify: `backend/cubeplex/skills/sources/local.py`
+- Modify: `backend/cubeplex/skills/sources/remote.py`
+- Modify: `backend/cubeplex/skills/sources/registry.py`
+- Modify: `backend/cubeplex/skills/discovery.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_skills.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py`
 - Modify: `backend/tests/e2e/conftest.py`
 - Modify: `backend/tests/e2e/test_skill_discovery_remote.py`
 - Modify: `backend/tests/unit/test_remote_registry_source.py` (rename file too)
@@ -348,11 +348,11 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill_registry import SkillRegistryRepository
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.sources.base import SkillRegistryAdapter, TrustTier
-from cubebox.skills.sources.local import LocalCatalogAdapter
-from cubebox.skills.sources.remote import RemoteRegistryAdapter
+from cubeplex.repositories.skill_registry import SkillRegistryRepository
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.sources.base import SkillRegistryAdapter, TrustTier
+from cubeplex.skills.sources.local import LocalCatalogAdapter
+from cubeplex.skills.sources.remote import RemoteRegistryAdapter
 
 
 class SkillsAdapterManager:
@@ -411,8 +411,8 @@ For each file, replace old name → new name. Run this grep to see exact lines:
 
 ```bash
 grep -rn "SkillSourceRegistry\|RemoteRegistrySource\|LocalCatalogSource\|SkillSource\b" \
-  cubebox/ tests/ --include="*.py" | grep -v '.venv'
-# (run from backend/ — cubebox/ and tests/ are subdirs of backend/)
+  cubeplex/ tests/ --include="*.py" | grep -v '.venv'
+# (run from backend/ — cubeplex/ and tests/ are subdirs of backend/)
 ```
 
 Make replacements:
@@ -432,12 +432,12 @@ Key files to check: `discovery.py`, `run_manager.py`, `ws_skills.py`, `conversat
 git mv tests/unit/test_remote_registry_source.py tests/unit/test_remote_registry_adapter.py
 ```
 
-Update the import inside: `from cubebox.skills.sources.remote import RemoteRegistrySource` → `RemoteRegistryAdapter`, update all usages.
+Update the import inside: `from cubeplex.skills.sources.remote import RemoteRegistrySource` → `RemoteRegistryAdapter`, update all usages.
 
 - [ ] **Step 7: Verify mypy + tests**
 
 ```bash
-uv run mypy cubebox/ && uv run pytest tests/unit/ -v -x
+uv run mypy cubeplex/ && uv run pytest tests/unit/ -v -x
 ```
 
 Expected: mypy clean, all unit tests pass.
@@ -445,10 +445,10 @@ Expected: mypy clean, all unit tests pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add cubebox/skills/sources/ cubebox/skills/discovery.py \
-        cubebox/streams/run_manager.py \
-        cubebox/api/routes/v1/ws_skills.py \
-        cubebox/api/routes/v1/conversations.py \
+git add cubeplex/skills/sources/ cubeplex/skills/discovery.py \
+        cubeplex/streams/run_manager.py \
+        cubeplex/api/routes/v1/ws_skills.py \
+        cubeplex/api/routes/v1/conversations.py \
         tests/
 git commit -m "refactor(skills): rename source→registry/adapter throughout (SkillsAdapterManager, SkillRegistryAdapter, LocalCatalogAdapter, RemoteRegistryAdapter)"
 ```
@@ -458,17 +458,17 @@ git commit -m "refactor(skills): rename source→registry/adapter throughout (Sk
 ### Task 4: Rename + update admin API route
 
 **Files:**
-- Rename: `backend/cubebox/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py`
-- Modify: `backend/cubebox/api/app.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
+- Rename: `backend/cubeplex/api/routes/v1/admin_skill_sources.py` → `admin_skill_registries.py`
+- Modify: `backend/cubeplex/api/app.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
 - Rename: `backend/tests/e2e/test_skill_sources_admin.py` → `test_skill_registries_admin.py`
 
 - [ ] **Step 1: Rename the route file**
 
 ```bash
 # from backend/
-git mv cubebox/api/routes/v1/admin_skill_sources.py \
-       cubebox/api/routes/v1/admin_skill_registries.py
+git mv cubeplex/api/routes/v1/admin_skill_sources.py \
+       cubeplex/api/routes/v1/admin_skill_registries.py
 ```
 
 - [ ] **Step 2: Rewrite the route file**
@@ -489,11 +489,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.context import RequestContext
-from cubebox.db import get_session
-from cubebox.mcp.dependencies import get_admin_request_context
-from cubebox.models import SkillRegistry
-from cubebox.repositories.skill_registry import SkillRegistryRepository
+from cubeplex.auth.context import RequestContext
+from cubeplex.db import get_session
+from cubeplex.mcp.dependencies import get_admin_request_context
+from cubeplex.models import SkillRegistry
+from cubeplex.repositories.skill_registry import SkillRegistryRepository
 
 router = APIRouter(prefix="/admin/skill-registries", tags=["admin-skill-registries"])
 
@@ -656,11 +656,11 @@ async def delete_registry(
 In `app.py`, replace the old import and include:
 ```python
 # Before:
-from cubebox.api.routes.v1.admin_skill_sources import router as admin_skill_sources_router
+from cubeplex.api.routes.v1.admin_skill_sources import router as admin_skill_sources_router
 app.include_router(admin_skill_sources_router, ...)
 
 # After:
-from cubebox.api.routes.v1.admin_skill_registries import router as admin_skill_registries_router
+from cubeplex.api.routes.v1.admin_skill_registries import router as admin_skill_registries_router
 app.include_router(admin_skill_registries_router, ...)
 ```
 
@@ -678,7 +678,7 @@ Inside the file, update all imports from `admin_skill_sources` → `admin_skill_
 - [ ] **Step 5: Verify mypy + admin tests**
 
 ```bash
-uv run mypy cubebox/ && uv run pytest tests/e2e/test_skill_registries_admin.py -v
+uv run mypy cubeplex/ && uv run pytest tests/e2e/test_skill_registries_admin.py -v
 ```
 
 Expected: clean.
@@ -686,7 +686,7 @@ Expected: clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/api/ tests/e2e/test_skill_registries_admin.py
+git add cubeplex/api/ tests/e2e/test_skill_registries_admin.py
 git commit -m "refactor(api): rename admin/skill-sources→skill-registries; add kind, DELETE endpoint"
 ```
 
@@ -696,7 +696,7 @@ git commit -m "refactor(api): rename admin/skill-sources→skill-registries; add
 
 > **Working directory for all Phase B commands:** `backend/`
 > ```bash
-> cd /home/chris/cubebox/.worktrees/feat/skillssh-source/backend
+> cd /home/chris/cubeplex/.worktrees/feat/skillssh-source/backend
 > ```
 
 ### Task 5: Config block
@@ -718,7 +718,7 @@ In `config.yaml` under the `default:` block, after the existing `skills:` sectio
 
 ```bash
 uv run python -c "
-from cubebox.config import config
+from cubeplex.config import config
 print(config.get('registry.skills_sh.github_token', 'NOT_SET'))
 "
 ```
@@ -749,8 +749,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from cubebox.skills.sources.base import TrustTier, decode_candidate_id
-from cubebox.skills.sources.skills_sh import SkillsShAdapter
+from cubeplex.skills.sources.base import TrustTier, decode_candidate_id
+from cubeplex.skills.sources.skills_sh import SkillsShAdapter
 
 
 def _make_transport() -> httpx.MockTransport:
@@ -890,7 +890,7 @@ async def test_fetch_raises_on_missing_skill_md() -> None:
 cd backend && uv run pytest tests/unit/test_skills_sh_adapter.py -v 2>&1 | head -20
 ```
 
-Expected: `ModuleNotFoundError: No module named 'cubebox.skills.sources.skills_sh'`
+Expected: `ModuleNotFoundError: No module named 'cubeplex.skills.sources.skills_sh'`
 
 - [ ] **Step 3: Commit the tests**
 
@@ -904,7 +904,7 @@ git commit -m "test(skills-sh): add SkillsShAdapter unit tests (red)"
 ### Task 7: SkillsShAdapter — implementation
 
 **Files:**
-- Create: `backend/cubebox/skills/sources/skills_sh.py`
+- Create: `backend/cubeplex/skills/sources/skills_sh.py`
 
 - [ ] **Step 1: Create the implementation**
 
@@ -917,7 +917,7 @@ import json
 
 import httpx
 
-from cubebox.skills.sources.base import (
+from cubeplex.skills.sources.base import (
     SkillCandidate,
     SkillRegistryAdapter,
     SourceKind,
@@ -1101,8 +1101,8 @@ class SkillsShAdapter:
 
 ```bash
 uv run python -c "
-from cubebox.skills.sources.skills_sh import SkillsShAdapter
-from cubebox.skills.sources.base import SkillRegistryAdapter
+from cubeplex.skills.sources.skills_sh import SkillsShAdapter
+from cubeplex.skills.sources.base import SkillRegistryAdapter
 # structural check
 a: SkillRegistryAdapter = SkillsShAdapter(
     source_id='x', trust_tier='community',
@@ -1125,7 +1125,7 @@ Expected: 5 tests pass.
 - [ ] **Step 4: Run mypy**
 
 ```bash
-uv run mypy cubebox/skills/sources/skills_sh.py
+uv run mypy cubeplex/skills/sources/skills_sh.py
 ```
 
 Expected: `Success`
@@ -1133,7 +1133,7 @@ Expected: `Success`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cubebox/skills/sources/skills_sh.py
+git add cubeplex/skills/sources/skills_sh.py
 git commit -m "feat(skills-sh): implement SkillsShAdapter (search + fetch via GitHub)"
 ```
 
@@ -1142,15 +1142,15 @@ git commit -m "feat(skills-sh): implement SkillsShAdapter (search + fetch via Gi
 ### Task 8: Wire SkillsShAdapter into SkillsAdapterManager
 
 **Files:**
-- Modify: `backend/cubebox/skills/sources/registry.py`
+- Modify: `backend/cubeplex/skills/sources/registry.py`
 
 - [ ] **Step 1: Update `build()` in `SkillsAdapterManager`**
 
 Add the import and the `skills-sh` branch in `build()`:
 
 ```python
-from cubebox.config import config as _config
-from cubebox.skills.sources.skills_sh import SkillsShAdapter
+from cubeplex.config import config as _config
+from cubeplex.skills.sources.skills_sh import SkillsShAdapter
 
 # inside build():
 for row in rows:
@@ -1187,7 +1187,7 @@ Expected: all pass.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cubebox/skills/sources/registry.py
+git add cubeplex/skills/sources/registry.py
 git commit -m "feat(skills-sh): wire SkillsShAdapter into SkillsAdapterManager.build()"
 ```
 
@@ -1197,11 +1197,11 @@ git commit -m "feat(skills-sh): wire SkillsShAdapter into SkillsAdapterManager.b
 
 > **Working directory for all Phase C commands:** `frontend/`
 > ```bash
-> cd /home/chris/cubebox/.worktrees/feat/skillssh-source/frontend
+> cd /home/chris/cubeplex/.worktrees/feat/skillssh-source/frontend
 > ```
 > Git commits in Phase C still run from the **worktree root** (one level up):
 > ```bash
-> cd /home/chris/cubebox/.worktrees/feat/skillssh-source && git add ... && git commit ...
+> cd /home/chris/cubeplex/.worktrees/feat/skillssh-source && git add ... && git commit ...
 > ```
 
 ### Task 9: Frontend data hook

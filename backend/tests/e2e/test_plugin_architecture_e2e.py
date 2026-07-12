@@ -23,11 +23,11 @@ async def test_ce_defaults_load_after_lifespan(
     """CE-only deployment: registry binds all singular Protocols to defaults;
     audit has at least the default sink; no syncers; admin_panel has at most default.
     """
-    from cubebox.plugins import get_registry
-    from cubebox.plugins.defaults.admin_panel import DefaultAdminPanelExtension
-    from cubebox.plugins.defaults.audit import DefaultAuditSink
-    from cubebox.plugins.defaults.auth import DefaultAuthProvider
-    from cubebox.plugins.defaults.permissions import DefaultPermissionChecker
+    from cubeplex.plugins import get_registry
+    from cubeplex.plugins.defaults.admin_panel import DefaultAdminPanelExtension
+    from cubeplex.plugins.defaults.audit import DefaultAuditSink
+    from cubeplex.plugins.defaults.auth import DefaultAuthProvider
+    from cubeplex.plugins.defaults.permissions import DefaultPermissionChecker
 
     _client, _ws_id = admin_client  # ensure lifespan has run via the fixture
 
@@ -100,14 +100,14 @@ async def test_workspace_rename_emits_audit_event(
     client, ws_id = admin_client
 
     caplog.clear()
-    with caplog.at_level(logging.INFO, logger="cubebox.audit"):
+    with caplog.at_level(logging.INFO, logger="cubeplex.audit"):
         resp = await client.patch(
             f"/api/v1/workspaces/{ws_id}",
             json={"name": "audit-renamed"},
         )
         assert resp.status_code == 200
 
-    messages = [r.getMessage() for r in caplog.records if r.name == "cubebox.audit"]
+    messages = [r.getMessage() for r in caplog.records if r.name == "cubeplex.audit"]
     assert any("workspace.renamed" in m for m in messages), (
         f"no audit log for workspace.renamed; captured: {messages}"
     )

@@ -7,9 +7,9 @@ import secrets
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp._constants import server_url_hash, slugify_for_namespace
-from cubebox.models import MCPConnector, MCPConnectorTemplate, Organization
-from cubebox.repositories.mcp import MCPConnectorRepository
+from cubeplex.mcp._constants import server_url_hash, slugify_for_namespace
+from cubeplex.models import MCPConnector, MCPConnectorTemplate, Organization
+from cubeplex.repositories.mcp import MCPConnectorRepository
 
 pytestmark = pytest.mark.e2e
 

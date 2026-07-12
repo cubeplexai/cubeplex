@@ -5,7 +5,7 @@ title: Members & Roles
 
 # Members & Roles
 
-CubeBox uses a two-level role system: **organization roles** control access to admin settings, and **workspace roles** control what a member can do inside a specific workspace.
+CubePlex uses a two-level role system: **organization roles** control access to admin settings, and **workspace roles** control what a member can do inside a specific workspace.
 
 Org-level member management happens at **Admin > Members** (`/admin/members`). Workspace-level roles are managed within each workspace's settings.
 
@@ -32,7 +32,7 @@ The role hierarchy is: **Owner > Admin > Member**. Higher roles inherit all perm
 4. Select an organization role (Admin or Member).
 5. Click **Add**.
 
-The person must already have a CubeBox account — the email is matched against existing accounts, and adding fails if no account with that email exists. Ask new teammates to sign up first, then add them to your organization. Once added, they immediately gain the access their org role grants.
+The person must already have a CubePlex account — the email is matched against existing accounts, and adding fails if no account with that email exists. Ask new teammates to sign up first, then add them to your organization. Once added, they immediately gain the access their org role grants.
 
 ## Change a member's org role
 

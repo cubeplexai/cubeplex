@@ -19,8 +19,8 @@ import pytest
 from cubepi.agent.types import AfterToolCallContext, AgentContext, AgentToolResult
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall
 
-from cubebox.middleware.skills import SkillsMiddleware
-from cubebox.tools.builtin.load_skill import LoadSkillOutput
+from cubeplex.middleware.skills import SkillsMiddleware
+from cubeplex.tools.builtin.load_skill import LoadSkillOutput
 
 # ---------------------------------------------------------------------------
 # Helpers

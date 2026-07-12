@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 from opensandbox.models.execd import RunCommandOpts
 
-from cubebox.sandbox.opensandbox import OpenSandbox
+from cubeplex.sandbox.opensandbox import OpenSandbox
 
 
 def _make_backend() -> tuple[OpenSandbox, MagicMock]:

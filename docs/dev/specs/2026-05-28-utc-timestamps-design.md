@@ -7,7 +7,7 @@ during the local codex review pass.
 
 ## Problem & motivation
 
-cubebox originated on MySQL where naïve `DATETIME` was the standard storage
+cubeplex originated on MySQL where naïve `DATETIME` was the standard storage
 type. Migrating to Postgres kept the convention: every `datetime` field in
 every SQLModel is mapped to `timestamp without time zone`. Python writes
 `datetime.now(UTC)` (tz-aware) which gets stored as naïve UTC clock values;
@@ -29,11 +29,11 @@ invariant. Codex flagged it as nit #11. The user's decision:
 > All time fields, the DB should store UTC. Application/frontend handles
 > timezone formatting. No backward compatibility needed.
 
-Cubebox hasn't shipped publicly, so we cut over cleanly with a single PR.
+Cubeplex hasn't shipped publicly, so we cut over cleanly with a single PR.
 
 ## Goals
 
-- Every `datetime` column in cubebox is Postgres `timestamptz` (mapped to
+- Every `datetime` column in cubeplex is Postgres `timestamptz` (mapped to
   SQLAlchemy `DateTime(timezone=True)`).
 - Postgres stores absolute UTC instants regardless of session `TimeZone`.
 - Reads come back tz-aware UTC; no Python-side `replace(tzinfo=UTC)` needed.
@@ -50,7 +50,7 @@ Cubebox hasn't shipped publicly, so we cut over cleanly with a single PR.
   what this is about).
 - Backward compatibility shims (project hasn't shipped publicly).
 - Performance tuning. `ALTER COLUMN ... TYPE timestamptz` rewrites the
-  column in place; for cubebox's current row counts this is fine.
+  column in place; for cubeplex's current row counts this is fine.
 - A guard / lint rule that auto-detects future regressions. Trust the
   CLAUDE.md hard rule.
 
@@ -60,7 +60,7 @@ Cubebox hasn't shipped publicly, so we cut over cleanly with a single PR.
 
 | Model file | Columns |
 |---|---|
-| `mixins.py` (CubeboxBase) | `created_at`, `updated_at` (inherited by ~all tables) |
+| `mixins.py` (CubeplexBase) | `created_at`, `updated_at` (inherited by ~all tables) |
 | `user_sandbox.py` | `last_activity_at`, `paused_at`, `last_resumed_at`, `in_use_until`, `last_provider_check` |
 | `provider.py` | `last_liveness_at`, `last_test_at` |
 | `memory.py` | `last_used_at` |
@@ -77,13 +77,13 @@ Cubebox hasn't shipped publicly, so we cut over cleanly with a single PR.
 ### 1. Column convention
 
 Each `datetime` `Field` is explicitly annotated with
-`sa_column=Column(DateTime(timezone=True), ...)`. Example (CubeboxBase):
+`sa_column=Column(DateTime(timezone=True), ...)`. Example (CubeplexBase):
 
 ```python
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
-class CubeboxBase(SQLModel):
+class CubeplexBase(SQLModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -199,10 +199,10 @@ redundant or wrong:
 
 **4.1 Delete naïve-fallback defense blocks (4 places):**
 
-- `backend/cubebox/repositories/invite_token.py:30-32`
-- `backend/cubebox/repositories/egress_ref.py:33-34`
-- `backend/cubebox/mcp/effective.py:562-563`
-- `backend/cubebox/mcp/oauth/token_manager.py:339-340`
+- `backend/cubeplex/repositories/invite_token.py:30-32`
+- `backend/cubeplex/repositories/egress_ref.py:33-34`
+- `backend/cubeplex/mcp/effective.py:562-563`
+- `backend/cubeplex/mcp/oauth/token_manager.py:339-340`
 
 Each looks like:
 ```python
@@ -215,13 +215,13 @@ migration, the DB returns tz-aware values; these branches are dead.
 
 **4.2 Tighten `utc_isoformat()`:**
 
-`backend/cubebox/utils/time.py` switches from idempotent fallback to a
+`backend/cubeplex/utils/time.py` switches from idempotent fallback to a
 loud assertion:
 
 ```python
 def utc_isoformat(dt: datetime) -> str:
     """Return ISO 8601 with UTC offset. Asserts the datetime is tz-aware —
-    after the timestamptz migration, every datetime in cubebox is tz-aware
+    after the timestamptz migration, every datetime in cubeplex is tz-aware
     by construction; a naïve dt here means someone violated the hard rule."""
     assert dt.tzinfo is not None, (
         f"naïve datetime reached utc_isoformat: {dt!r}; should be tz-aware"
@@ -235,7 +235,7 @@ The 35 call sites are unchanged.
 
 Grep for `record.<datetime_field>` patterns participating in Python-side
 comparisons or subtraction with `datetime.now(...)`. Known one:
-`backend/cubebox/sandbox/manager.py` G11 grace block (around the
+`backend/cubeplex/sandbox/manager.py` G11 grace block (around the
 `pause_idle_age = (datetime.now(UTC) - last_activity).total_seconds()`
 section, which defensively does `if last_activity.tzinfo is None:
 last_activity = last_activity.replace(tzinfo=UTC)`). Delete the defense;
@@ -266,8 +266,8 @@ trivial; collectively a grep + delete pass.
 - `utc_isoformat()` keeps outputting `"...+00:00"`; the 35 call sites that
   use it serialise identically before and after the migration.
 - Two Pydantic v2 response schemas declare `datetime` fields directly
-  (`backend/cubebox/api/schemas/provider.py:133-134, 181-182` —
-  `created_at`/`updated_at`; `backend/cubebox/api/schemas/mcp.py:25, 105`
+  (`backend/cubeplex/api/schemas/provider.py:133-134, 181-182` —
+  `created_at`/`updated_at`; `backend/cubeplex/api/schemas/mcp.py:25, 105`
   — `expires_at`). FastAPI/Pydantic v2 default-serialises datetimes:
   - **Pre-migration**: column is naïve → Pydantic emits
     `"2026-05-28T11:30:54.000000"` (no offset). A frontend parsing this
@@ -295,7 +295,7 @@ change. No new test files. Existing tests are the regression net.
 Validation steps:
 
 1. `cd backend && uv run pytest -q` — all green.
-2. `cd backend && uv run mypy cubebox/` — clean.
+2. `cd backend && uv run mypy cubeplex/` — clean.
 3. `cd backend && uv run alembic upgrade head` then `alembic downgrade -1`
    then `alembic upgrade head` — each step succeeds.
 4. **Manual TimeZone smoke test** (one-off, recorded in plan but not
@@ -325,9 +325,9 @@ PR description must:
 
 ## References
 
-- `backend/cubebox/utils/time.py` — current `utc_isoformat()`.
-- `backend/cubebox/models/mixins.py` — `CubeboxBase` (cascades to most tables).
-- `backend/cubebox/repositories/user_sandbox.py` — the reaper SQL
+- `backend/cubeplex/utils/time.py` — current `utc_isoformat()`.
+- `backend/cubeplex/models/mixins.py` — `CubeplexBase` (cascades to most tables).
+- `backend/cubeplex/repositories/user_sandbox.py` — the reaper SQL
   introduced in PR #156 that motivated this fix.
 - `docs/dev/notes/2026-05-28-opensandbox-pause-resume-internals.md` —
   source of nit #11 that surfaced this.

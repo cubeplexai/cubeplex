@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubeplex/core'
 // Direct import: useUserEvents is a client-only hook and must NOT be loaded
-// via the @cubebox/core barrel (would force react into server bundles for
+// via the @cubeplex/core barrel (would force react into server bundles for
 // any file importing AUTH_COOKIE_NAME).
-import { useUserEvents } from '@cubebox/core/hooks/useUserEvents'
+import { useUserEvents } from '@cubeplex/core/hooks/useUserEvents'
 import { Menu } from 'lucide-react'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
@@ -77,7 +77,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             >
               <Menu className="size-4" />
             </button>
-            <span className="ml-2 text-sm font-semibold tracking-tight">cubebox</span>
+            <span className="ml-2 text-sm font-semibold tracking-tight">cubeplex</span>
           </div>
         )}
         {/* Reserve remaining vertical space for the child page so the 44px

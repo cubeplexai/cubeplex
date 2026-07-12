@@ -22,8 +22,8 @@ from cubepi.providers.base import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.agents.checkpointer import _build_dsn, init_checkpointer
-from cubebox.services.history_window import find_latest_todos, load_history_window
+from cubeplex.agents.checkpointer import _build_dsn, init_checkpointer
+from cubeplex.services.history_window import find_latest_todos, load_history_window
 
 pytestmark = pytest.mark.e2e
 

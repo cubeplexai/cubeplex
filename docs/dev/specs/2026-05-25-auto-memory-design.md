@@ -6,13 +6,13 @@
 
 ## Problem
 
-cubebox's agent has a memory subsystem, but it only **reads** automatically and
+cubeplex's agent has a memory subsystem, but it only **reads** automatically and
 **writes** on explicit request:
 
-- `MemoryMiddleware` (`backend/cubebox/middleware/memory.py`) has only read-side
+- `MemoryMiddleware` (`backend/cubeplex/middleware/memory.py`) has only read-side
   hooks — `transform_system_prompt` (inject pinned memory) and
   `transform_context` (prepend a relevance snapshot). No write/extract hook.
-- The `memory_save` tool exists (`backend/cubebox/tools/builtin/memory.py`) but
+- The `memory_save` tool exists (`backend/cubeplex/tools/builtin/memory.py`) but
   the system prompt contains **no guidance on when to save**. The only memory
   text (`MEMORY_PROMPT_HEADER`, `prompts/memory.py`) is read-side descriptive and
   is injected **only when pinned memory already exists**.
@@ -42,7 +42,7 @@ Studied `~/claude-code/src/memdir` + `src/services/autoDream`. Two layers:
    `minSessions` (scanned at most every 10 min). A per-holder lock prevents
    piled-up concurrent consolidations.
 
-cubebox is a multi-tenant server (not a single-user CLI), and **already
+cubeplex is a multi-tenant server (not a single-user CLI), and **already
 persists every run's full conversation to the Postgres checkpointer
 (`cubepi_messages`)** — so the "capture" raw material is free; no daily-log
 needed. We adopt the same two-layer shape.
@@ -59,7 +59,7 @@ Make the **existing** `memory_save` tool fire proactively by adding a standing
   when there's no pinned memory, so no authoring guidance is ever shown. Split
   the concern: the *pinned-memory block* stays conditional, but a *"how/when to
   save" block* is always present.
-- **Per-type `when_to_save` triggers mapped to cubebox's real taxonomy** (the
+- **Per-type `when_to_save` triggers mapped to cubeplex's real taxonomy** (the
   `memory_save` tool's `type`: `preference`, `correction`, `procedure`,
   `project_fact`, `decision`, `org_policy`) — NOT Claude Code's
   user/feedback/project/reference. Each type gets a concrete trigger:
@@ -120,7 +120,7 @@ new worker.
   `last` unchanged so it retries.
 
 **Consolidation runtime — OneShotLLM (decided).** A single LLM call via
-`cubebox.llm.oneshot.OneShotLLM` (cheap model). Inputs: this conversation's
+`cubeplex.llm.oneshot.OneShotLLM` (cheap model). Inputs: this conversation's
 history up to `cutoff` (**bounded** — see window cap) + the user's existing active
 personal memory items.
 
@@ -153,15 +153,15 @@ disable it, which would break explicit shared saves).
 
 ## Components / files
 
-- **Layer 1:** `backend/cubebox/prompts/memory.py` (authoring block + per-type
+- **Layer 1:** `backend/cubeplex/prompts/memory.py` (authoring block + per-type
   triggers + "proactive saves are personal-only") and
-  `backend/cubebox/middleware/memory.py` (`transform_system_prompt` always injects
+  `backend/cubeplex/middleware/memory.py` (`transform_system_prompt` always injects
   the **static** authoring block; the variable pinned block stays conditional —
   see cache note).
-- **Layer 2 scheduling:** `backend/cubebox/streams/run_manager.py` — `_execute_run`
+- **Layer 2 scheduling:** `backend/cubeplex/streams/run_manager.py` — `_execute_run`
   per-conversation cheap check → spawn a background task tracked in an app-level
   registry (see drain-safety) with `conversation_id` + `user_id`.
-- **Layer 2 service:** new `backend/cubebox/services/memory_consolidation.py` —
+- **Layer 2 service:** new `backend/cubeplex/services/memory_consolidation.py` —
   gate read, lock + atomic high-water-mark, OneShotLLM call, op
   parse/validate/cap, and applying ops via `MemoryService` (scope hard-coded
   PERSONAL, source stamped).

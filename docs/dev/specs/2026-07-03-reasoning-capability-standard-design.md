@@ -4,17 +4,17 @@
 **Author:** xfgong
 **Date:** 2026-07-03
 **Scope:** Redesign the reasoning-control abstraction shared by cubepi and
-cubebox so official APIs work out of the box, while custom OpenAI-compatible
+cubeplex so official APIs work out of the box, while custom OpenAI-compatible
 endpoints can still describe their non-standard request fields safely.
 
 ## 1. Problem
 
-cubepi and cubebox currently expose `thinking` as the user-facing and runtime
+cubepi and cubeplex currently expose `thinking` as the user-facing and runtime
 control for model reasoning:
 
 - API requests carry `thinking: "off" | "low" | "medium" | "high" | "xhigh"`.
 - Conversations persist `thinking`.
-- `RunManager`, `create_cubebox_agent`, and cubepi `StreamOptions` pass that
+- `RunManager`, `create_cubeplex_agent`, and cubepi `StreamOptions` pass that
   value through.
 - Provider capabilities translate it through `reasoning_off_payload`,
   `reasoning_on_payload`, and `reasoning_level`.
@@ -28,7 +28,7 @@ several concerns:
 - Whether a reasoning summary or encrypted reasoning item should be returned.
 - Which wire field expresses those controls for a given API.
 
-The current abstraction mixes those concerns. It also lets a Cubebox-level
+The current abstraction mixes those concerns. It also lets a Cubeplex-level
 concept named `thinking` accidentally land in the wrong wire location. The
 recent LiteLLM incident was the concrete failure: a custom OpenAI-compatible
 provider stored `reasoning_on_payload: {"thinking": {"type": "enabled"}}`.
@@ -36,16 +36,16 @@ cubepi merged that payload at the top level of `chat.completions.create(...)`,
 and the OpenAI SDK rejected it as an unexpected keyword argument.
 
 The goal is not to hardcode every vendor in cubepi. The goal is to make official
-protocol behavior a cubepi concern, then give Cubebox a precise, validated way
+protocol behavior a cubepi concern, then give Cubeplex a precise, validated way
 to describe non-standard provider mappings.
 
 ## 2. Goals
 
-1. Give Cubebox one provider-neutral runtime control for reasoning.
-2. Put official API defaults in cubepi, not in Cubebox business logic.
+1. Give Cubeplex one provider-neutral runtime control for reasoning.
+2. Put official API defaults in cubepi, not in Cubeplex business logic.
 3. Keep vendor-specific and custom-provider behavior data-driven.
 4. Make custom capability mappings understandable, previewable, and lintable.
-5. Remove `budget_tokens` from the public Cubebox abstraction. Token budgets are
+5. Remove `budget_tokens` from the public Cubeplex abstraction. Token budgets are
    an implementation detail of older Anthropic-style mappings.
 6. Prefer a clean implementation over backwards compatibility with the current
    `thinking` field.
@@ -53,13 +53,13 @@ to describe non-standard provider mappings.
 ## 3. Non-Goals
 
 - Do not add one provider subclass per commercial vendor.
-- Do not make Cubebox know OpenAI or Anthropic wire details at call sites.
+- Do not make Cubeplex know OpenAI or Anthropic wire details at call sites.
 - Do not expose raw chain-of-thought. Summary controls are for provider-supported
   summaries only.
 - Do not build a full visual capability editor in the first slice. JSON plus
   preview and lint is enough.
-- Do not move the Cubebox vendor catalog into cubepi. cubepi owns protocols and
-  generic profiles; Cubebox owns product catalog entries.
+- Do not move the Cubeplex vendor catalog into cubepi. cubepi owns protocols and
+  generic profiles; Cubeplex owns product catalog entries.
 
 ## 4. Proposed User Model
 
@@ -89,7 +89,7 @@ Meaning:
 - `summary`: request a provider-supported reasoning summary. `none` means do
   not request summaries.
 
-`max` is Cubebox's canonical highest effort. Providers that call this `xhigh`,
+`max` is Cubeplex's canonical highest effort. Providers that call this `xhigh`,
 `max`, or something else translate it through capability mappings.
 
 ## 5. Layer Boundary
@@ -104,18 +104,18 @@ cubepi should ship built-in profiles for official API shapes:
 - `anthropic.messages.legacy_budget`
 
 Provider classes use those profiles by default when no explicit capability is
-supplied. Cubebox should not need to know that OpenAI Responses uses
+supplied. Cubeplex should not need to know that OpenAI Responses uses
 `reasoning.effort`, that Chat Completions may use a chat-specific effort field,
 or that Anthropic adaptive thinking uses `thinking` plus `output_config.effort`.
 
-### Cubebox owns catalog and overrides
+### Cubeplex owns catalog and overrides
 
-Cubebox stores provider rows, model rows, catalog presets, custom provider
+Cubeplex stores provider rows, model rows, catalog presets, custom provider
 config, and organization settings. It can reference cubepi profile ids and store
 overrides, but it should not implement protocol-specific payload rewriting at
 runtime.
 
-Example Cubebox catalog entry:
+Example Cubeplex catalog entry:
 
 ```yaml
 api: openai-completions
@@ -274,7 +274,7 @@ reasoning:
 Anthropic provider code still needs to inspect the final payload. If
 `thinking.budget_tokens` is present, it must adjust `max_tokens` so the budget is
 below the output cap and enough visible-output room remains. This is a provider
-wire constraint, not a Cubebox API concept.
+wire constraint, not a Cubeplex API concept.
 
 ## 8. Custom Provider Workflow
 
@@ -283,7 +283,7 @@ cubepi source. Provide three tools.
 
 ### 8.1 Profile picker
 
-The Cubebox Add Provider flow asks for the wire API:
+The Cubeplex Add Provider flow asks for the wire API:
 
 - OpenAI Chat-compatible
 - OpenAI Responses-compatible
@@ -329,7 +329,7 @@ should warn before the provider is saved.
 
 ### 8.3 Capability lint
 
-cubepi exposes a lint helper used by Cubebox create/update and probe flows:
+cubepi exposes a lint helper used by Cubeplex create/update and probe flows:
 
 ```python
 lint_capability(
@@ -369,7 +369,7 @@ strict mode.
   ReasoningCapability`.
 - Add built-in profile registry and profile merge logic.
 
-### cubebox backend
+### cubeplex backend
 
 - Replace request body `thinking` with `reasoning`.
 - Replace conversation column `thinking` with `reasoning JSON`.
@@ -387,7 +387,7 @@ Clean migration:
 - Existing local conversations do not need exact preservation because this is a
   clean cutover.
 
-### cubebox frontend
+### cubeplex frontend
 
 - Replace model picker payload field `thinking` with `reasoning`.
 - Rename UI copy from "thinking" to "reasoning" or "reasoning effort".
@@ -421,7 +421,7 @@ Advisory warnings:
 - usage block missing,
 - capability lint warnings.
 
-Runtime should not mutate Cubebox-specific request payloads. It should pass
+Runtime should not mutate Cubeplex-specific request payloads. It should pass
 `ReasoningControl` into cubepi, and cubepi should produce the final provider
 payload.
 
@@ -437,7 +437,7 @@ payload.
 - Update OpenAI Chat, OpenAI Responses, and Anthropic providers.
 - Unit-test payload diffs for all built-in profiles.
 
-### Slice 2: cubebox backend cutover
+### Slice 2: cubeplex backend cutover
 
 - Update request/response schemas.
 - Add migration for `conversations.reasoning`.
@@ -473,7 +473,7 @@ payload.
 - Preview returns payload diff without making network calls.
 - Anthropic legacy budget still adjusts `max_tokens`.
 
-### cubebox backend tests
+### cubeplex backend tests
 
 - `SendMessageRequest` accepts `reasoning` and rejects `thinking`.
 - Conversation create/update/fork persists `reasoning`.
@@ -500,19 +500,19 @@ this changes provider setup behavior and chat request semantics:
 
 The docs should explain:
 
-- Cubebox uses `mode`, `effort`, and `summary`.
+- Cubeplex uses `mode`, `effort`, and `summary`.
 - Official APIs need no manual mapping.
 - Custom APIs use capability overrides.
 - Preview shows the final provider payload diff.
 
 ## 14. Open Questions
 
-1. Should `summary="summarized"` be Anthropic-only, or should Cubebox collapse it
+1. Should `summary="summarized"` be Anthropic-only, or should Cubeplex collapse it
    into `summary="auto"` for non-Anthropic APIs?
 2. Should capability lint ever block save, or only provider test?
-3. Should Cubebox persist the selected profile id plus overrides, or persist only
+3. Should Cubeplex persist the selected profile id plus overrides, or persist only
    the fully resolved capability snapshot? The current provider platform favors
    snapshots for runtime stability, but profile ids make future profile upgrades
    easier to explain.
 4. Should `mode=auto` be the default for reasoning-capable models, or should
-   Cubebox keep the current default behavior of no reasoning unless requested?
+   Cubeplex keep the current default behavior of no reasoning unless requested?

@@ -15,9 +15,9 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import AssistantMessage, TextContent, ToolCall, Usage
 
-from cubebox.middleware.citation import CitationMiddleware, _extract_text_content
-from cubebox.middleware.citations.config import CitationConfig
-from cubebox.middleware.citations.counter import (
+from cubeplex.middleware.citation import CitationMiddleware, _extract_text_content
+from cubeplex.middleware.citations.config import CitationConfig
+from cubeplex.middleware.citations.counter import (
     CitationCounter,
     citation_counter_var,
     citation_event_queue,
@@ -499,7 +499,7 @@ def test_citation_config_rejects_unknown_content_type() -> None:
 
 @pytest.mark.asyncio
 async def test_transform_system_prompt_appends_when_configs_present() -> None:
-    from cubebox.prompts.citations import CITATION_PROMPT
+    from cubeplex.prompts.citations import CITATION_PROMPT
 
     mw = _make_middleware()  # default: web_search config
     out = await mw.transform_system_prompt("BASE", ctx=object())

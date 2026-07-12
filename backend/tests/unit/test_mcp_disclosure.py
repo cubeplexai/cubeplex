@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.disclosure — config, threshold gate, deferred groups."""
+"""Unit tests for cubeplex.mcp.disclosure — config, threshold gate, deferred groups."""
 
 from __future__ import annotations
 
@@ -7,14 +7,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cubebox.mcp.disclosure import (
+from cubeplex.mcp.disclosure import (
     DisclosureSettings,
     _compute_namespaced_tool_names,
     _spec_description,
     build_deferred_groups,
     disclosure_active,
 )
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 
 def _make_spec(
@@ -204,7 +204,7 @@ class TestLoadToolsForSpecs:
     async def test_returns_namespaced_tools_and_citations(self) -> None:
         from cubepi.agent.types import AgentTool
 
-        from cubebox.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
 
         fake_tool = AgentTool(
             name="create_issue",
@@ -228,12 +228,12 @@ class TestLoadToolsForSpecs:
 
         with (
             patch(
-                "cubebox.mcp.cubepi_runtime._resolve_auth_from_spec",
+                "cubeplex.mcp.cubepi_runtime._resolve_auth_from_spec",
                 new_callable=AsyncMock,
                 return_value=({}, spec.server_url),
             ),
             patch(
-                "cubebox.mcp.cubepi_runtime.load_mcp_tools_http",
+                "cubeplex.mcp.cubepi_runtime.load_mcp_tools_http",
                 new_callable=AsyncMock,
                 return_value=discovery,
             ),
@@ -256,11 +256,11 @@ class TestLoadToolsForSpecs:
 
     @pytest.mark.asyncio
     async def test_handles_auth_failure_gracefully(self) -> None:
-        from cubebox.mcp.cubepi_runtime import _load_tools_for_specs
+        from cubeplex.mcp.cubepi_runtime import _load_tools_for_specs
 
         spec = _make_spec(name="BadServer")
         with patch(
-            "cubebox.mcp.cubepi_runtime._resolve_auth_from_spec",
+            "cubeplex.mcp.cubepi_runtime._resolve_auth_from_spec",
             new_callable=AsyncMock,
             side_effect=RuntimeError("boom"),
         ):
@@ -380,7 +380,7 @@ class TestBuildDeferredGroups:
         )
 
         with patch(
-            "cubebox.mcp.disclosure._load_tools_for_specs_deferred",
+            "cubeplex.mcp.disclosure._load_tools_for_specs_deferred",
             new_callable=AsyncMock,
             return_value=([fake_tool], {"GitHub__create_issue": object()}),
         ) as mock_load:

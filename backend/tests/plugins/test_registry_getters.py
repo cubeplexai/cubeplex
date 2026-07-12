@@ -1,12 +1,12 @@
 import pytest
 
-from cubebox.plugins import (
+from cubeplex.plugins import (
     AdminPanelExtension,
     AuditSink,
     AuthProvider,
     PermissionChecker,
 )
-from cubebox.plugins.registry import PluginRegistry
+from cubeplex.plugins.registry import PluginRegistry
 
 
 @pytest.mark.asyncio

@@ -12,7 +12,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push, refresh }),
 }))
 
-vi.mock('@cubebox/core/hooks/useDeploymentMode', () => ({
+vi.mock('@cubeplex/core/hooks/useDeploymentMode', () => ({
   useDeploymentMode: () => ({
     mode: 'multi_tenant',
     loading: false,
@@ -37,10 +37,10 @@ describe('Login page surface', () => {
 
     expect(screen.getByText(/agent workspace/i)).toBeInTheDocument()
     expect(screen.getByText(/memory, tools, and approvals/i)).toBeInTheDocument()
-    expect(screen.getByTestId('auth-brand-logo')).toHaveTextContent('cubebox')
+    expect(screen.getByTestId('auth-brand-logo')).toHaveTextContent('cubeplex')
     expect(screen.getByTestId('auth-ambient-background')).toBeInTheDocument()
-    expect(screen.getByTestId('cubebox-runtime-visual')).toBeInTheDocument()
-    expect(screen.getByTestId('cubebox-runtime-visual')).toHaveAttribute(
+    expect(screen.getByTestId('cubeplex-runtime-visual')).toBeInTheDocument()
+    expect(screen.getByTestId('cubeplex-runtime-visual')).toHaveAttribute(
       'data-visual',
       'animated-cube-background',
     )

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { Hash, MessageCircle } from 'lucide-react'
-import { createApiClient, wsListImAccounts } from '@cubebox/core'
-import type { ImAccount } from '@cubebox/core'
+import { createApiClient, wsListImAccounts } from '@cubeplex/core'
+import type { ImAccount } from '@cubeplex/core'
 
 interface ReadOnlyImChannelDestinationProps {
   wsId: string

@@ -8,12 +8,12 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill import (
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
 )
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillPublishService
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillPublishService
 
 
 async def _seed_org_and_user(
@@ -125,7 +125,7 @@ async def test_publish_from_zip_accepts_single_enclosing_directory(
 
 @pytest.mark.asyncio
 async def test_publish_version_collision_raises(tmp_path, db_session) -> None:
-    from cubebox.skills.service import VersionCollisionError
+    from cubeplex.skills.service import VersionCollisionError
 
     org_id = f"org-{secrets.token_hex(4)}"
     org_slug = f"org-{secrets.token_hex(4)}"
@@ -208,7 +208,7 @@ async def test_publish_twice_into_same_workspace_upserts_install(tmp_path, db_se
 
 @pytest.mark.asyncio
 async def test_publish_invalid_frontmatter_raises(tmp_path, db_session) -> None:
-    from cubebox.skills.frontmatter import InvalidFrontmatterError
+    from cubeplex.skills.frontmatter import InvalidFrontmatterError
 
     z = _make_zip({"SKILL.md": b"# no frontmatter\n"})
     publisher = SkillPublishService(
@@ -220,7 +220,7 @@ async def test_publish_invalid_frontmatter_raises(tmp_path, db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_publish_rejects_name_with_colon(tmp_path, db_session) -> None:
-    from cubebox.skills.service import InvalidSkillNameError
+    from cubeplex.skills.service import InvalidSkillNameError
 
     z = _make_zip({"SKILL.md": b"---\nname: foo:bar\ndescription: y\nversion: 1.0.0\n---\n"})
     publisher = SkillPublishService(
@@ -232,7 +232,7 @@ async def test_publish_rejects_name_with_colon(tmp_path, db_session) -> None:
 
 @pytest.mark.asyncio
 async def test_publish_rejects_oversized_file(tmp_path, db_session) -> None:
-    from cubebox.skills.service import FileTooLargeError
+    from cubeplex.skills.service import FileTooLargeError
 
     big = b"x" * (11 * 1024 * 1024)
     z = _make_zip(

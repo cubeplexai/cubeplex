@@ -10,14 +10,14 @@ _FAKE_PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16).decode("ascii"
 
 def test_run_manager_imports_with_cubepi_tools() -> None:
     """RunManager still imports after wiring."""
-    from cubebox.streams.run_manager import RunManager
+    from cubeplex.streams.run_manager import RunManager
 
     assert RunManager is not None
 
 
 def test_run_cubepi_path_method_exists() -> None:
     """The cubepi dispatch method is still on RunManager."""
-    from cubebox.streams.run_manager import RunManager
+    from cubeplex.streams.run_manager import RunManager
 
     assert hasattr(RunManager, "_run_cubepi_path")
 
@@ -41,7 +41,7 @@ def test_generate_image_tool_produced_when_sandbox_and_provider_present() -> Non
     from cubepi.agent.types import AgentTool
     from cubepi.providers.images.faux import FauxImagesProvider
 
-    from cubebox.tools.builtin.generate_image import make_generate_image_tool
+    from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
     provider_instance = FauxImagesProvider(provider_id="image-gen", png_b64=_FAKE_PNG)
     images_model = provider_instance.model("gpt-image-2")
@@ -64,7 +64,7 @@ def test_generate_image_tool_not_added_when_sandbox_is_none() -> None:
     """The if-sandbox-is-not-None guard prevents adding generate_image to _builtin_tools."""
     from cubepi.providers.images.faux import FauxImagesProvider
 
-    from cubebox.tools.builtin.generate_image import make_generate_image_tool
+    from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
     sandbox: object | None = None
     collected: list[object] = []
@@ -91,14 +91,14 @@ def test_generate_image_tool_not_added_when_config_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When image_generation.enabled=False, tool is skipped — mirrors run_manager guard."""
-    from cubebox.llm.config import ImageGenerationConfig
+    from cubeplex.llm.config import ImageGenerationConfig
 
     monkeypatch.setattr(
-        "cubebox.llm.config.get_image_generation_config",
+        "cubeplex.llm.config.get_image_generation_config",
         lambda: ImageGenerationConfig(enabled=False, api_key="sk-test"),
     )
 
-    from cubebox.llm.config import get_image_generation_config
+    from cubeplex.llm.config import get_image_generation_config
 
     cfg = get_image_generation_config()
     # Guard: not enabled → no tool
@@ -107,7 +107,7 @@ def test_generate_image_tool_not_added_when_config_disabled(
     if cfg.enabled and cfg.api_key:
         from cubepi.providers.images.faux import FauxImagesProvider
 
-        from cubebox.tools.builtin.generate_image import make_generate_image_tool
+        from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
         _provider = FauxImagesProvider(provider_id="image-gen", png_b64=_FAKE_PNG)
         images_model = _provider.model(cfg.model)
@@ -130,14 +130,14 @@ def test_generate_image_tool_not_added_when_api_key_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When image_generation.api_key is None/empty, tool is skipped."""
-    from cubebox.llm.config import ImageGenerationConfig
+    from cubeplex.llm.config import ImageGenerationConfig
 
     monkeypatch.setattr(
-        "cubebox.llm.config.get_image_generation_config",
+        "cubeplex.llm.config.get_image_generation_config",
         lambda: ImageGenerationConfig(enabled=True, api_key=None),
     )
 
-    from cubebox.llm.config import get_image_generation_config
+    from cubeplex.llm.config import get_image_generation_config
 
     cfg = get_image_generation_config()
     collected: list[object] = []
@@ -145,7 +145,7 @@ def test_generate_image_tool_not_added_when_api_key_absent(
     if cfg.enabled and cfg.api_key:
         from cubepi.providers.images.faux import FauxImagesProvider
 
-        from cubebox.tools.builtin.generate_image import make_generate_image_tool
+        from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
         _provider = FauxImagesProvider(provider_id="image-gen", png_b64=_FAKE_PNG)
         images_model = _provider.model(cfg.model)
@@ -171,8 +171,8 @@ def test_generate_image_tool_added_when_config_enabled(
     from cubepi.agent.types import AgentTool
     from cubepi.providers.images.faux import FauxImagesProvider
 
-    from cubebox.llm.config import ImageGenerationConfig
-    from cubebox.tools.builtin.generate_image import make_generate_image_tool
+    from cubeplex.llm.config import ImageGenerationConfig
+    from cubeplex.tools.builtin.generate_image import make_generate_image_tool
 
     cfg = ImageGenerationConfig(
         enabled=True,
@@ -233,7 +233,7 @@ def test_create_scheduled_task_available_on_every_trigger() -> None:
     inside scheduled fires (e.g. a daily task that reschedules itself)."""
     from cubepi.agent.types import AgentTool
 
-    from cubebox.tools.builtin.create_scheduled_task import (
+    from cubeplex.tools.builtin.create_scheduled_task import (
         make_create_scheduled_task_tool,
     )
 
@@ -254,7 +254,7 @@ def test_create_trigger_skipped_when_trigger_not_interactive() -> None:
     out of a scheduled fire or IM-worker run."""
     from unittest.mock import MagicMock
 
-    from cubebox.tools.builtin.create_trigger import make_create_trigger_tool
+    from cubeplex.tools.builtin.create_trigger import make_create_trigger_tool
 
     collected: list[object] = []
     for trigger in ("schedule", "webhook", "im_worker", "system"):
@@ -279,7 +279,7 @@ def test_create_trigger_included_when_interactive() -> None:
 
     from cubepi.agent.types import AgentTool
 
-    from cubebox.tools.builtin.create_trigger import make_create_trigger_tool
+    from cubeplex.tools.builtin.create_trigger import make_create_trigger_tool
 
     collected: list[object] = []
     trigger = "interactive"
@@ -309,7 +309,7 @@ def test_run_manager_source_gates_create_trigger_on_interactive() -> None:
     """
     import inspect
 
-    from cubebox.streams import run_manager
+    from cubeplex.streams import run_manager
 
     src = inspect.getsource(run_manager)
     assert 'if trigger == "interactive":' in src

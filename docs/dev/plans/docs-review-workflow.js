@@ -1,6 +1,6 @@
 export const meta = {
   name: 'docs-module-review',
-  description: 'Per-module review + in-place correction of the CubeBox docs site against the code',
+  description: 'Per-module review + in-place correction of the CubePlex docs site against the code',
   phases: [
     { title: 'Review & correct' },
     { title: 'Synthesize' },
@@ -9,9 +9,9 @@ export const meta = {
 
 // All agents operate inside this worktree. Absolute paths only — subagents do
 // not inherit cwd.
-const WT = '/home/chris/cubebox/.worktrees/feat/2026-06-23-docs-overhaul'
+const WT = '/home/chris/cubeplex/.worktrees/feat/2026-06-23-docs-overhaul'
 const DOCS = `${WT}/docs/site/docs`
-const CODE = `${WT}/backend/cubebox`
+const CODE = `${WT}/backend/cubeplex`
 const FE = `${WT}/frontend/packages/web`
 
 const PLACEHOLDER = [
@@ -26,7 +26,7 @@ const PLACEHOLDER = [
 ].join('\n')
 
 const RULES = `
-You are correcting ONE module of the CubeBox user-facing docs site (Docusaurus).
+You are correcting ONE module of the CubePlex user-facing docs site (Docusaurus).
 Worktree root: ${WT}
 Docs root:     ${DOCS}
 Backend code:  ${CODE}
@@ -180,7 +180,7 @@ inputs (input/output tokens, per-model rates).`,
     isAuthoring: true,
     prompt: `Module: IM Connectors — AUTHORING (this surface has ZERO docs today).
 Code: ${CODE}/im (feishu, dingtalk, slack, teams, discord), ${CODE}/api/routes/v1/im_ingress.py,
-admin_im.py, and ${WT}/backend/cubebox/im/feishu/*.
+admin_im.py, and ${WT}/backend/cubeplex/im/feishu/*.
 Task:
 1. CREATE ${DOCS}/im/overview.md — what IM connectors are, the supported
    platforms (state honestly which are mature vs early, based on the code), the
@@ -218,7 +218,7 @@ const clean = reports.filter(Boolean)
 phase('Synthesize')
 const summary = await agent(
   `You are the docs-overhaul synthesizer. Below are JSON change reports from
-per-module doc-correction agents for the CubeBox docs site.
+per-module doc-correction agents for the CubePlex docs site.
 
 ${JSON.stringify(clean, null, 2)}
 

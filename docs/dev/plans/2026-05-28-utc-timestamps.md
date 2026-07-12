@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Spec: `docs/dev/specs/2026-05-28-utc-timestamps-design.md` (HEAD `afe460e6`). Stay on branch `feat/utc-timestamps` (slot 85, port 8085). Read `.worktree.env` first inside the worktree. Never `--no-verify`, never amend, never switch branches mid-execution. Each Task ends with a commit.
 
-**Goal:** Migrate all 22 `datetime` columns in cubebox from naïve Postgres `timestamp without time zone` to tz-aware `timestamptz`. After the migration, DB stores absolute UTC instants regardless of session `TimeZone`, and Python-side defensive `replace(tzinfo=UTC)` blocks are deleted.
+**Goal:** Migrate all 22 `datetime` columns in cubeplex from naïve Postgres `timestamp without time zone` to tz-aware `timestamptz`. After the migration, DB stores absolute UTC instants regardless of session `TimeZone`, and Python-side defensive `replace(tzinfo=UTC)` blocks are deleted.
 
 **Architecture:** Single PR. (1) Convert all 22 fields to `sa_column=Column(DateTime(timezone=True), ...)`. (2) Autogen one alembic revision, hand-add `postgresql_using="<col> AT TIME ZONE 'UTC'"` to each `alter_column` (autogen omits it; default cast applies session `TimeZone` — wrong for our stored UTC values). (3) Delete five Python-side defensive blocks rendered dead by the migration. (4) Tighten `utc_isoformat` to assert tz-aware. (5) Fix two test files that explicitly seeded naïve datetimes. (6) Add a CLAUDE.md hard rule.
 
@@ -17,18 +17,18 @@
 - [ ] **Step 1: Verify worktree, branch, and slot**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/utc-timestamps
+cd /home/chris/cubeplex/.worktrees/feat/utc-timestamps
 cat .worktree.env
 git rev-parse --abbrev-ref HEAD
 ```
 
-Expected: `feat/utc-timestamps`. Slot `85`, ports `8085`/`3085`, DB `cubebox_feat_utc_timestamps`. If not on that branch, STOP and report.
+Expected: `feat/utc-timestamps`. Slot `85`, ports `8085`/`3085`, DB `cubeplex_feat_utc_timestamps`. If not on that branch, STOP and report.
 
 - [ ] **Step 2: Run the baseline test sweep on the unchanged tree**
 
 ```bash
 cd backend && uv run pytest -q
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 
 Expected: all green. Record the count (we want the same count green after migration). This is the baseline regression net.
@@ -56,17 +56,17 @@ No commit in this task. It's verification only.
 ## Task 1 — Convert 11 model files to tz-aware columns
 
 **Files:**
-- Modify: `backend/cubebox/models/mixins.py` (CubeboxBase/TimestampMixin — 2 cols, cascades to most tables)
-- Modify: `backend/cubebox/models/user_sandbox.py` (5 cols)
-- Modify: `backend/cubebox/models/provider.py` (2 cols)
-- Modify: `backend/cubebox/models/skill.py` (3 cols)
-- Modify: `backend/cubebox/models/invite_token.py` (2 cols)
-- Modify: `backend/cubebox/models/billing.py` (2 cols)
-- Modify: `backend/cubebox/models/mcp.py` (2 cols)
-- Modify: `backend/cubebox/models/conversation.py` (1 col)
-- Modify: `backend/cubebox/models/egress_ref.py` (1 col)
-- Modify: `backend/cubebox/models/memory.py` (1 col)
-- Modify: `backend/cubebox/models/attachment.py` (1 col)
+- Modify: `backend/cubeplex/models/mixins.py` (CubeplexBase/TimestampMixin — 2 cols, cascades to most tables)
+- Modify: `backend/cubeplex/models/user_sandbox.py` (5 cols)
+- Modify: `backend/cubeplex/models/provider.py` (2 cols)
+- Modify: `backend/cubeplex/models/skill.py` (3 cols)
+- Modify: `backend/cubeplex/models/invite_token.py` (2 cols)
+- Modify: `backend/cubeplex/models/billing.py` (2 cols)
+- Modify: `backend/cubeplex/models/mcp.py` (2 cols)
+- Modify: `backend/cubeplex/models/conversation.py` (1 col)
+- Modify: `backend/cubeplex/models/egress_ref.py` (1 col)
+- Modify: `backend/cubeplex/models/memory.py` (1 col)
+- Modify: `backend/cubeplex/models/attachment.py` (1 col)
 
 All 22 fields must be converted in one task because the next task (autogen) needs to see every change at once to produce a single complete revision.
 
@@ -134,7 +134,7 @@ Steps:
 
 - [ ] **Step 1: Convert `mixins.py` (`TimestampMixin.created_at`, `updated_at` — pattern A)**
 
-Edit `backend/cubebox/models/mixins.py`:
+Edit `backend/cubeplex/models/mixins.py`:
 
 ```python
 from datetime import UTC, datetime
@@ -143,7 +143,7 @@ from typing import Any, ClassVar
 from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field, SQLModel
 
-from cubebox.models.public_id import generate_public_id
+from cubeplex.models.public_id import generate_public_id
 
 
 class TimestampMixin:
@@ -151,7 +151,7 @@ class TimestampMixin:
 
     Use directly on tables with composite/non-prefixed PKs (e.g. association
     tables). Tables with a synthetic public-id PK get these for free via
-    :class:`CubeboxBase`.
+    :class:`CubeplexBase`.
     """
 
     created_at: datetime = Field(
@@ -164,7 +164,7 @@ class TimestampMixin:
     )
 ```
 
-The rest of the file (`CubeboxBase`, `OrgScopedMixin`, `org_scope_index`) is unchanged.
+The rest of the file (`CubeplexBase`, `OrgScopedMixin`, `org_scope_index`) is unchanged.
 
 - [ ] **Step 2: Convert `user_sandbox.py` (5 cols)**
 
@@ -250,7 +250,7 @@ Apply:
 - [ ] **Step 12: Sanity-check mypy on the changed files**
 
 ```bash
-cd backend && uv run mypy cubebox/models/
+cd backend && uv run mypy cubeplex/models/
 ```
 
 Expected: no new mypy errors. If `Column(...)` constructor signature complaints surface, add `# type: ignore[arg-type]` only where mypy strictly demands; don't blanket-ignore.
@@ -258,7 +258,7 @@ Expected: no new mypy errors. If `Column(...)` constructor signature complaints 
 - [ ] **Step 13: Commit Task 1**
 
 ```bash
-git add backend/cubebox/models/
+git add backend/cubeplex/models/
 git commit -m "refactor(models): tz-aware datetime columns (timestamptz) (#???)"
 ```
 
@@ -330,7 +330,7 @@ Revision ID: <rev>
 Revises: <prev>
 Create Date: <date>
 
-This migration switches all 22 cubebox datetime columns from
+This migration switches all 22 cubeplex datetime columns from
 ``timestamp without time zone`` to ``timestamp with time zone``.
 
 Hand-edit: every ``op.alter_column`` call carries a manually-added
@@ -373,10 +373,10 @@ No commit at this step — verification only.
 ## Task 3 — Delete 4 naïve-fallback defense blocks
 
 **Files:**
-- Modify: `backend/cubebox/repositories/invite_token.py:30-32`
-- Modify: `backend/cubebox/repositories/egress_ref.py:33-34`
-- Modify: `backend/cubebox/mcp/effective.py:562-563`
-- Modify: `backend/cubebox/mcp/oauth/token_manager.py:339-340`
+- Modify: `backend/cubeplex/repositories/invite_token.py:30-32`
+- Modify: `backend/cubeplex/repositories/egress_ref.py:33-34`
+- Modify: `backend/cubeplex/mcp/effective.py:562-563`
+- Modify: `backend/cubeplex/mcp/oauth/token_manager.py:339-340`
 
 These blocks all look like:
 
@@ -425,7 +425,7 @@ Same pattern: drop `if expires_at.tzinfo is None: expires_at = expires_at.replac
 - [ ] **Step 5: mypy + targeted test run**
 
 ```bash
-cd backend && uv run mypy cubebox/repositories/invite_token.py cubebox/repositories/egress_ref.py cubebox/mcp/effective.py cubebox/mcp/oauth/token_manager.py
+cd backend && uv run mypy cubeplex/repositories/invite_token.py cubeplex/repositories/egress_ref.py cubeplex/mcp/effective.py cubeplex/mcp/oauth/token_manager.py
 cd backend && uv run pytest tests/ -k "invite_token or egress_ref or mcp_effective or token_manager" -q
 ```
 
@@ -434,7 +434,7 @@ Expected: green. If a test fails because a fixture seeded naïve datetimes (e.g.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/repositories/invite_token.py backend/cubebox/repositories/egress_ref.py backend/cubebox/mcp/effective.py backend/cubebox/mcp/oauth/token_manager.py
+git add backend/cubeplex/repositories/invite_token.py backend/cubeplex/repositories/egress_ref.py backend/cubeplex/mcp/effective.py backend/cubeplex/mcp/oauth/token_manager.py
 git commit -m "refactor(timestamps): drop naive-fallback tzinfo defenses (DB now returns tz-aware)"
 ```
 
@@ -443,7 +443,7 @@ git commit -m "refactor(timestamps): drop naive-fallback tzinfo defenses (DB now
 ## Task 4 — Tighten `utc_isoformat` to assert tz-aware
 
 **Files:**
-- Modify: `backend/cubebox/utils/time.py`
+- Modify: `backend/cubeplex/utils/time.py`
 
 Steps:
 
@@ -458,7 +458,7 @@ from datetime import datetime
 def utc_isoformat(dt: datetime) -> str:
     """Return an ISO 8601 string with the UTC offset.
 
-    Post-timestamptz-migration, every datetime in cubebox is tz-aware by
+    Post-timestamptz-migration, every datetime in cubeplex is tz-aware by
     construction. A naïve dt reaching this helper means someone violated
     the CLAUDE.md "tz-aware time columns" hard rule — fail loudly so the
     bug is visible rather than silently fixed.
@@ -482,7 +482,7 @@ Expected: no test relies on the naïve-fallback behaviour. If there's a test tha
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/utils/time.py
+git add backend/cubeplex/utils/time.py
 git commit -m "refactor(timestamps): utc_isoformat asserts tz-aware (loud failure on regressions)"
 ```
 
@@ -556,19 +556,19 @@ git commit -m "test(timestamps): drop naive-datetime simulation in lease + egres
 
 ## Task 6 — Audit & remove remaining defensive tzinfo handling
 
-**Files:** depends on grep results. Known one: `backend/cubebox/sandbox/manager.py` (the G11 grace block introduced by PR #156).
+**Files:** depends on grep results. Known one: `backend/cubeplex/sandbox/manager.py` (the G11 grace block introduced by PR #156).
 
 Steps:
 
 - [ ] **Step 1: Grep for remaining defensive `tzinfo is None` blocks across production code**
 
 ```bash
-grep -rn "tzinfo is None\|replace(tzinfo=" backend/cubebox/ --include="*.py"
+grep -rn "tzinfo is None\|replace(tzinfo=" backend/cubeplex/ --include="*.py"
 ```
 
 Expected output: only matches in `utils/time.py` (the assert we just wrote — `tzinfo is not None`, not `is None`; the grep may match incidentally — read context to confirm). All other matches should already be deleted by Tasks 3 + 4.
 
-Known remaining hit: `backend/cubebox/sandbox/manager.py` G11 grace block (around the `pause_idle_age = (datetime.now(UTC) - last_activity).total_seconds()` section, lines ~920-940 — look for `if last_activity.tzinfo is None`).
+Known remaining hit: `backend/cubeplex/sandbox/manager.py` G11 grace block (around the `pause_idle_age = (datetime.now(UTC) - last_activity).total_seconds()` section, lines ~920-940 — look for `if last_activity.tzinfo is None`).
 
 - [ ] **Step 2: Delete `manager.py` G11 defensive block**
 
@@ -595,7 +595,7 @@ The comment about TZ-naïve storage is now wrong; delete it together with the de
 - [ ] **Step 3: Re-grep**
 
 ```bash
-grep -rn "tzinfo is None\|replace(tzinfo=" backend/cubebox/ --include="*.py"
+grep -rn "tzinfo is None\|replace(tzinfo=" backend/cubeplex/ --include="*.py"
 ```
 
 Expected output: only `utc_isoformat`'s assert line (which contains `tzinfo is not None`, technically matched by the grep). All real defensive blocks should be gone.
@@ -611,7 +611,7 @@ Expected: green. The reconciler grace test (`test_reconcile_pausing_stuck_past_g
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/manager.py
+git add backend/cubeplex/sandbox/manager.py
 git commit -m "refactor(sandbox): drop G11 grace tzinfo defense (timestamptz makes it redundant)"
 ```
 
@@ -669,7 +669,7 @@ Expected: same number of `passed` as Task 0 baseline. Any regression is a Task 1
 - [ ] **Step 2: mypy strict full sweep**
 
 ```bash
-cd backend && uv run mypy cubebox/
+cd backend && uv run mypy cubeplex/
 ```
 
 Expected: clean.
@@ -690,8 +690,8 @@ This is a one-off manual verification that the migration achieved the goal (TZ-a
 
 ```bash
 # Get the slot 85 test DB connection string from .worktree.env (it's
-# cubebox_test_feat_utc_timestamps). Or use the dev DB for the worktree.
-psql "host=localhost dbname=cubebox_feat_utc_timestamps" <<'SQL'
+# cubeplex_test_feat_utc_timestamps). Or use the dev DB for the worktree.
+psql "host=localhost dbname=cubeplex_feat_utc_timestamps" <<'SQL'
 -- Seed one row using the application's would-be write path (UTC-now).
 INSERT INTO user_sandboxes (id, user_id, sandbox_id, image, status,
     ttl_seconds, last_activity_at, paused_at, paused_ttl_seconds,

@@ -13,14 +13,14 @@ via `OrgScopedMixin`.
 ## Auth Mechanics
 
 - **fastapi-users** with JWT cookie strategy.
-- Auth cookie: `cubebox_auth`.
+- Auth cookie: `cubeplex_auth`.
 - Register / login endpoints are rate-limited via slowapi.
 
 ### CSRF
 
-Double-submit cookie pattern. A `cubebox_csrf` cookie is set on login;
+Double-submit cookie pattern. A `cubeplex_csrf` cookie is set on login;
 mutating requests (POST/PUT/PATCH/DELETE) must echo it in the
-`X-CSRF-Token` header whenever the `cubebox_auth` cookie is present.
+`X-CSRF-Token` header whenever the `cubeplex_auth` cookie is present.
 
 ### Workspace Scoping
 
@@ -38,7 +38,7 @@ Path-based scoping lets browser-direct loads (`<img>`, `<iframe>`,
 ### Repository Layer
 
 `OrgScopedMixin` + `ScopedRepository[T]`
-(`cubebox/repositories/base.py`) automatically filter every query by
+(`cubeplex/repositories/base.py`) automatically filter every query by
 `(org_id, workspace_id)` — **structural isolation, not an ACL check
 bolted on top**. New business repositories should subclass
 `ScopedRepository`.
@@ -99,8 +99,8 @@ row — **distinct from workspace-level `Membership.role`.**
 ## Operator CLI (M9)
 
 ```bash
-cubebox admin grant-admin <email> [--org-slug X]   # promote → org admin
-cubebox admin revoke-admin <email> [--org-slug X]  # demote admin → member
+cubeplex admin grant-admin <email> [--org-slug X]   # promote → org admin
+cubeplex admin revoke-admin <email> [--org-slug X]  # demote admin → member
 ```
 
 `--org-slug` is required when more than one org exists. `revoke-admin`

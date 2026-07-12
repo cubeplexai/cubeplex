@@ -25,10 +25,10 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url
-from cubebox.repositories.user_sandbox import UserSandboxRepository
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url
+from cubeplex.repositories.user_sandbox import UserSandboxRepository
+from cubeplex.sandbox.manager import SandboxManager
 
 pytestmark = pytest.mark.e2e
 
@@ -154,9 +154,9 @@ class TestGroupChatRunContextResolution:
         so this resolution is the structural seam for the "personal memory
         skipped in group chat" behaviour.
         """
-        from cubebox.api.routes.v1.conversations import _resolve_topic_run_context
-        from cubebox.auth.context import RequestContext
-        from cubebox.models.conversation import Conversation
+        from cubeplex.api.routes.v1.conversations import _resolve_topic_run_context
+        from cubeplex.auth.context import RequestContext
+        from cubeplex.models.conversation import Conversation
 
         (admin_c, ws_id, _), (_, _, member_uid) = four_layer_admin_and_member
         resp = await admin_c.post(
@@ -176,7 +176,7 @@ class TestGroupChatRunContextResolution:
         try:
             maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with maker() as session:
-                from cubebox.models import User
+                from cubeplex.models import User
 
                 conv_row = await session.get(Conversation, conv_id)
                 assert conv_row is not None
@@ -193,7 +193,7 @@ class TestGroupChatRunContextResolution:
         finally:
             await engine.dispose()
 
-        from cubebox.models import Role
+        from cubeplex.models import Role
 
         ctx = RequestContext(
             user=user_row,
@@ -227,9 +227,9 @@ class TestGroupChatRunContextResolution:
         (1:1 included) so a later 1:1->group conversion can attribute past
         messages; the frontend gates the badge on is_group_chat.
         """
-        from cubebox.api.routes.v1.conversations import _resolve_topic_run_context
-        from cubebox.auth.context import RequestContext
-        from cubebox.models.conversation import Conversation
+        from cubeplex.api.routes.v1.conversations import _resolve_topic_run_context
+        from cubeplex.auth.context import RequestContext
+        from cubeplex.models.conversation import Conversation
 
         (admin_c, ws_id, _), _ = four_layer_admin_and_member
         resp = await admin_c.post(f"/api/v1/ws/{ws_id}/conversations", params={"title": "Solo"})
@@ -240,7 +240,7 @@ class TestGroupChatRunContextResolution:
         try:
             maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
             async with maker() as session:
-                from cubebox.models import User
+                from cubeplex.models import User
 
                 conv_row = await session.get(Conversation, conv_id)
                 assert conv_row is not None
@@ -250,7 +250,7 @@ class TestGroupChatRunContextResolution:
         finally:
             await engine.dispose()
 
-        from cubebox.models import Role
+        from cubeplex.models import Role
 
         ctx = RequestContext(
             user=user_row,
@@ -298,7 +298,7 @@ class TestDedicatedSandboxIsolation:
         # Create a real topic row first — user_sandboxes.topic_id has an FK
         # to topics.id, so a synthetic id would raise IntegrityError on
         # reserve and the manager would mis-interpret it as a lost race.
-        from cubebox.models.topic import Topic
+        from cubeplex.models.topic import Topic
 
         async with session_factory() as s:
             topic_row = Topic(
@@ -412,13 +412,13 @@ class TestIMResumeRefusesTopicConversation:
     """The IM resume path explicitly refuses topic conversations in v1
     so a participant clicking a card in a non-topic conversation can't
     accidentally answer a topic HITL. The guard lives in
-    ``cubebox.im.resume.resume_paused_run`` after
+    ``cubeplex.im.resume.resume_paused_run`` after
     ``_resolve_run_context`` returns a non-null ``topic_id``.
     """
 
     @pytest.mark.anyio
     async def test_resume_paused_run_refuses_topic(self) -> None:
-        from cubebox.im import resume as resume_mod
+        from cubeplex.im import resume as resume_mod
 
         async def _fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None, bool]:
             return ("conv-topic", "user-1", "org-1", "ws-1", "top-1", False)
@@ -441,7 +441,7 @@ class TestIMResumeRefusesTopicConversation:
     @pytest.mark.anyio
     async def test_resume_paused_run_allows_personal_conversation(self) -> None:
         """Counterpart: a non-topic conversation must NOT trigger the guard."""
-        from cubebox.im import resume as resume_mod
+        from cubeplex.im import resume as resume_mod
 
         async def _fake_resolve(run_id: str) -> tuple[str, str, str, str, str | None, bool]:
             return ("conv-personal", "user-1", "org-1", "ws-1", None, False)
@@ -462,7 +462,7 @@ class TestIMResumeRefusesTopicConversation:
 
 
 class TestSenderAttributionViaCubepi:
-    """Sender attribution moved to cubepi (provider boundary). Cubebox sets
+    """Sender attribution moved to cubepi (provider boundary). Cubeplex sets
     ``metadata.sender_display_name`` on the UserMessage and cubepi's
     ``apply_sender_attribution`` rewrites the first text block. This smoke
     test pins the contract so a bad cubepi pin bump fails here, not deep

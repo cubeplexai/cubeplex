@@ -6,11 +6,11 @@ Slug: im-bot-settings
 
 ## Problem
 
-Two gaps, one theme — **how an IM bot turns inbound messages into cubebox
+Two gaps, one theme — **how an IM bot turns inbound messages into cubeplex
 conversations is not configurable from the product.**
 
 1. **Topic grouping is invisible / not configurable.** Today a bot's
-   conversations only roll up under a cubebox `Topic` when a channel is in
+   conversations only roll up under a cubeplex `Topic` when a channel is in
    `shared` mode. In the default `isolated` mode every conversation is
    `topic_id = NULL` — a flat, standalone "personal conversation" per
    sender. There is no way to say "group this bot's chats under a Topic"
@@ -51,7 +51,7 @@ class IMBotSettings(BaseModel):
     (per-sender). Current default behavior.
   - `shared`: everyone in a channel shares one conversation (per-channel).
 - **topic_mode**
-  - `topic` (default): each conversation rolls up under a cubebox `Topic`.
+  - `topic` (default): each conversation rolls up under a cubeplex `Topic`.
   - `flat`: no Topic — standalone personal conversations (today's isolated
     behavior).
 

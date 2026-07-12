@@ -14,8 +14,8 @@ mcp-installs E2E suite.
 
 from __future__ import annotations
 
-from cubebox.mcp.cubepi_runtime import _apply_static_credential, _inject_query_param
-from cubebox.mcp.effective import MCPRuntimeConnectorSpec
+from cubeplex.mcp.cubepi_runtime import _apply_static_credential, _inject_query_param
+from cubeplex.mcp.effective import MCPRuntimeConnectorSpec
 
 
 def _make_spec(

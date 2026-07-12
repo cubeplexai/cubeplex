@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
 
 
 def test_preset_is_frozen():

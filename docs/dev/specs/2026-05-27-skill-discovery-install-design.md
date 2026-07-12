@@ -9,7 +9,7 @@ Related: #143 (progressive disclosure of the skill index)
 
 ## Problem & Motivation
 
-cubebox already has a working skills system: an agent can `load_skill(name)` to
+cubeplex already has a working skills system: an agent can `load_skill(name)` to
 pull a skill's `SKILL.md` into its system prompt mid-run. But the agent can only
 load skills that are *already enabled in the workspace*. Today a skill gets into
 a workspace through admin flows — an admin uploads a `.zip`, installs it org-wide,
@@ -74,7 +74,7 @@ as more skills exist, so discovery and the prompt index both need an on-demand
 
 ## Current Skills System (what already exists)
 
-### Data model — `backend/cubebox/models/skill.py`
+### Data model — `backend/cubeplex/models/skill.py`
 
 - `Skill` — global catalog row. `source` is `preinstalled` (owner_org_id=NULL,
   bare slug name) or `uploaded` (owner org, `<org-slug>:<skill-slug>` name).
@@ -94,10 +94,10 @@ as more skills exist, so discovery and the prompt index both need an on-demand
 ### Scopes (already enforced)
 
 - Catalog visibility: `SkillRepository.list_visible_for_org` = all preinstalled
-  + own-org uploaded, minus deprecated (`backend/cubebox/repositories/skill.py`).
+  + own-org uploaded, minus deprecated (`backend/cubeplex/repositories/skill.py`).
 - Effective workspace-enabled set:
   `SkillCatalogService.list_enabled_for_workspace`
-  (`backend/cubebox/skills/service.py`) = org-wide installs that are auto-bound
+  (`backend/cubeplex/skills/service.py`) = org-wide installs that are auto-bound
   or explicitly enabled (and not explicitly disabled) **plus** workspace-private
   installs (always on).
 
@@ -106,17 +106,17 @@ as more skills exist, so discovery and the prompt index both need an on-demand
 - At run start, `run_manager.py` (~line 1804) calls
   `list_enabled_for_workspace`, formats `- \`name\` — description` lines, and
   appends them via `SKILLS_PROMPT_TEMPLATE`
-  (`backend/cubebox/prompts/skills.py`) as a **stable suffix** to the system
+  (`backend/cubeplex/prompts/skills.py`) as a **stable suffix** to the system
   prompt (cache-prefix discipline).
 - The agent calls `load_skill(name)`
-  (`backend/cubebox/tools/builtin/load_skill.py`). It resolves the name via
+  (`backend/cubeplex/tools/builtin/load_skill.py`). It resolves the name via
   `find_enabled_by_name`, fetches `SKILL.md`, returns JSON `LoadSkillOutput`.
-- `SkillsMiddleware` (`backend/cubebox/middleware/skills.py`) watches
+- `SkillsMiddleware` (`backend/cubeplex/middleware/skills.py`) watches
   `after_tool_call` for `load_skill`, stores content in
   `extra["loaded_skills"]`, and on each subsequent model call appends it to the
   system prompt via `transform_system_prompt`. State persists for the run.
 
-### Seeding — `backend/cubebox/seeders/skill_seeder.py`
+### Seeding — `backend/cubeplex/seeders/skill_seeder.py`
 
 Walks a `preinstalled/` dir, parses `SKILL.md` frontmatter, upserts `Skill` +
 `SkillVersion`, uploads files to the object store. Redis-locked (multi-replica
@@ -124,10 +124,10 @@ safe). Deprecates preinstalled skills no longer on disk.
 
 ### Routes (scope-isolated today)
 
-- Member: `backend/cubebox/api/routes/v1/ws_skills.py` —
+- Member: `backend/cubeplex/api/routes/v1/ws_skills.py` —
   `GET /ws/{ws}/skills` (scopes `workspace|org|catalog`, with `q`/`tag`
   filters), preview, file fetch, member publish.
-- Admin: `backend/cubebox/api/routes/v1/admin_skills.py` —
+- Admin: `backend/cubeplex/api/routes/v1/admin_skills.py` —
   `/admin/skills` list/detail/version, install/patch/uninstall, upload, plus
   `/admin/workspaces/{ws}/skills` binding management.
 
@@ -177,7 +177,7 @@ that metadata plus trust signals*, reachable over HTTP or via a CLI.
 - Install **scope** is explicit: project-local `skills/` vs global/user
   (`-g`), with a confirm step (`-y` to skip). [Vercel KB].
 
-Takeaway for cubebox: model discovery as **one agent tool that fans out over
+Takeaway for cubeplex: model discovery as **one agent tool that fans out over
 sources, normalizes to one candidate shape, ranks with a trust signal, and
 returns a short list**; model install as **an explicit confirm step that copies
 the chosen skill into the local catalog and installs it into a scope**, then let
@@ -186,7 +186,7 @@ the existing load path light it up.
 ### Semantic vs keyword search
 
 The directory tooling is primarily keyword/metadata + popularity ranking, not
-embeddings. For cubebox v1 we follow suit: keyword match over
+embeddings. For cubeplex v1 we follow suit: keyword match over
 name/description/keywords, ordered by a trust/recency signal. Semantic
 (embedding) search is a later enhancement (Open Questions) — descriptions are
 short and curated, so keyword recall is usually adequate, and embeddings add a

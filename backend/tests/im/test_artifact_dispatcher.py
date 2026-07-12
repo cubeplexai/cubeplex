@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from cubebox.im.artifacts import IMArtifactDispatcher
-from cubebox.im.feishu.card_model import ArtifactItem, CardState
+from cubeplex.im.artifacts import IMArtifactDispatcher
+from cubeplex.im.feishu.card_model import ArtifactItem, CardState
 
 
 class _FakeConnector:
@@ -40,7 +40,7 @@ def _new_dispatcher(state: CardState, conn: _FakeConnector) -> IMArtifactDispatc
 @pytest.mark.asyncio
 async def test_website_artifact_writes_share_url_to_card_state() -> None:
     # ``website`` is link-kind: it still mints a share-link at handle() time.
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     state.artifacts.append(ArtifactItem(id="art_1", artifact_type="website", name="site"))
     conn = _FakeConnector()
     disp = _new_dispatcher(state, conn)
@@ -55,7 +55,7 @@ async def test_website_artifact_writes_share_url_to_card_state() -> None:
 async def test_file_kind_artifact_is_captured_not_share_linked() -> None:
     # ``document`` is file-kind: captured for terminal native delivery, NOT
     # share-linked at handle() time (avoids double-delivery).
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     conn = _FakeConnector()
     disp = _new_dispatcher(state, conn)
     await disp.handle({"id": "art_1", "artifact_type": "document", "name": "r.pdf", "version": 1})
@@ -68,7 +68,7 @@ async def test_file_kind_artifact_is_captured_not_share_linked() -> None:
 async def test_dispatcher_creates_missing_artifact_row() -> None:
     """fold_event normally creates the row; this guards against an artifact
     event arriving without a prior fold_event call (e.g., out-of-order)."""
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     conn = _FakeConnector()
     disp = _new_dispatcher(state, conn)
     await disp.handle({"id": "art_new", "artifact_type": "website", "name": "site", "version": 1})
@@ -78,7 +78,7 @@ async def test_dispatcher_creates_missing_artifact_row() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatcher_skips_when_id_missing() -> None:
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     conn = _FakeConnector()
     disp = _new_dispatcher(state, conn)
     await disp.handle({"artifact_type": "document", "name": "x.pdf"})
@@ -87,7 +87,7 @@ async def test_dispatcher_skips_when_id_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatcher_skips_share_url_when_base_url_invalid() -> None:
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     state.artifacts.append(ArtifactItem(id="art_1", artifact_type="website", name="site"))
     conn = _FakeConnector()
     disp = IMArtifactDispatcher(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from cubebox.api.routes.v1.conversations import _parse_error_params
+from cubeplex.api.routes.v1.conversations import _parse_error_params
 
 
 def test_parse_error_params_returns_dict_when_valid_json() -> None:

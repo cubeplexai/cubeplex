@@ -4,7 +4,7 @@
 
 **Goal:** Parse `requires.env` from Clawhub SKILL.md frontmatter and display required env var names in the skill detail panels (both workspace and admin views).
 
-**Architecture:** Fix the frontmatter parser to also expand `metadata.openclaw` nesting (Clawhub's convention). Add `extract_env_vars(raw_metadata)` as a public pure function in `frontmatter.py` — both route files import it (reuse goes one layer down, not at route layer). Expose `env_vars: list[str]` in `CandidatePreviewResponse`. Frontend exports `SkillPreviewResponse` from `@cubebox/core` and shares it across both detail panels.
+**Architecture:** Fix the frontmatter parser to also expand `metadata.openclaw` nesting (Clawhub's convention). Add `extract_env_vars(raw_metadata)` as a public pure function in `frontmatter.py` — both route files import it (reuse goes one layer down, not at route layer). Expose `env_vars: list[str]` in `CandidatePreviewResponse`. Frontend exports `SkillPreviewResponse` from `@cubeplex/core` and shares it across both detail panels.
 
 **Tech Stack:** Python (FastAPI + Pydantic), TypeScript (Next.js + React 19), SWR for data fetching.
 
@@ -14,11 +14,11 @@
 
 | File | Change |
 |---|---|
-| `backend/cubebox/skills/frontmatter.py` | Extend alias expansion; add public `extract_env_vars()` |
+| `backend/cubeplex/skills/frontmatter.py` | Extend alias expansion; add public `extract_env_vars()` |
 | `backend/tests/unit/test_skill_frontmatter.py` | Tests for `metadata.openclaw` nesting + `extract_env_vars` |
-| `backend/cubebox/api/schemas/skill_discovery.py` | Add `env_vars: list[str]` to `CandidatePreviewResponse` |
-| `backend/cubebox/api/routes/v1/ws_skills.py` | Import `extract_env_vars`; populate field in both preview paths |
-| `backend/cubebox/api/routes/v1/admin_skills.py` | Same |
+| `backend/cubeplex/api/schemas/skill_discovery.py` | Add `env_vars: list[str]` to `CandidatePreviewResponse` |
+| `backend/cubeplex/api/routes/v1/ws_skills.py` | Import `extract_env_vars`; populate field in both preview paths |
+| `backend/cubeplex/api/routes/v1/admin_skills.py` | Same |
 | `frontend/packages/core/src/api/skills.ts` | Add + export `SkillPreviewResponse` interface |
 | `frontend/packages/core/src/index.ts` | Re-export `SkillPreviewResponse` if not auto-exported |
 | `frontend/packages/web/components/skills/CandidateDetailPanel.tsx` | Import shared type; render env_vars row |
@@ -29,7 +29,7 @@
 ## Task 1: Fix frontmatter parser — handle `metadata.openclaw` nesting + extract_env_vars
 
 **Files:**
-- Modify: `backend/cubebox/skills/frontmatter.py`
+- Modify: `backend/cubeplex/skills/frontmatter.py`
 - Test: `backend/tests/unit/test_skill_frontmatter.py`
 
 ### Background
@@ -49,7 +49,7 @@ The current parser only expands top-level `openclaw`/`clawdbot`/`clawdis`. Fix: 
 Add to `backend/tests/unit/test_skill_frontmatter.py`:
 
 ```python
-from cubebox.skills.frontmatter import (
+from cubeplex.skills.frontmatter import (
     InvalidFrontmatterError,
     extract_env_vars,
     parse_skill_md,
@@ -170,7 +170,7 @@ Expected: failures on the 7 new tests.
 
 - [ ] **Step 3: Fix the parser + add extract_env_vars**
 
-In `backend/cubebox/skills/frontmatter.py`:
+In `backend/cubeplex/skills/frontmatter.py`:
 
 **a) Update the alias expansion block** (replace lines 97–102):
 
@@ -224,7 +224,7 @@ Expected: all pass.
 - [ ] **Step 5: Run mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/skills/frontmatter.py
+cd backend && uv run mypy cubeplex/skills/frontmatter.py
 ```
 
 Expected: `Success: no issues found`.
@@ -232,7 +232,7 @@ Expected: `Success: no issues found`.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/skills/frontmatter.py backend/tests/unit/test_skill_frontmatter.py
+git add backend/cubeplex/skills/frontmatter.py backend/tests/unit/test_skill_frontmatter.py
 git commit -m "fix(skills): expand metadata.openclaw alias; add extract_env_vars helper"
 ```
 
@@ -241,9 +241,9 @@ git commit -m "fix(skills): expand metadata.openclaw alias; add extract_env_vars
 ## Task 2: Add env_vars to preview API response
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/skill_discovery.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_skills.py`
-- Modify: `backend/cubebox/api/routes/v1/admin_skills.py`
+- Modify: `backend/cubeplex/api/schemas/skill_discovery.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_skills.py`
+- Modify: `backend/cubeplex/api/routes/v1/admin_skills.py`
 
 ### Background
 
@@ -251,7 +251,7 @@ Both preview endpoints fetch and return SKILL.md content. We now also call `pars
 
 - [ ] **Step 1: Add `env_vars` to schema**
 
-In `backend/cubebox/api/schemas/skill_discovery.py`:
+In `backend/cubeplex/api/schemas/skill_discovery.py`:
 
 ```python
 class CandidatePreviewResponse(BaseModel):
@@ -264,10 +264,10 @@ class CandidatePreviewResponse(BaseModel):
 
 - [ ] **Step 2: Update ws_skills route**
 
-In `backend/cubebox/api/routes/v1/ws_skills.py`, add import (check existing imports first — if `peek_skill_name` is already imported from frontmatter, add `extract_env_vars` to that same import line):
+In `backend/cubeplex/api/routes/v1/ws_skills.py`, add import (check existing imports first — if `peek_skill_name` is already imported from frontmatter, add `extract_env_vars` to that same import line):
 
 ```python
-from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md, peek_skill_name
+from cubeplex.skills.frontmatter import extract_env_vars, parse_skill_md, peek_skill_name
 ```
 
 Add a module-level helper that wraps the extraction with error handling (SKILL.md from remote might be malformed):
@@ -308,10 +308,10 @@ Update remote skill preview return (around line 260):
 
 - [ ] **Step 3: Update admin_skills route**
 
-In `backend/cubebox/api/routes/v1/admin_skills.py`, add import:
+In `backend/cubeplex/api/routes/v1/admin_skills.py`, add import:
 
 ```python
-from cubebox.skills.frontmatter import extract_env_vars, parse_skill_md, peek_skill_name
+from cubeplex.skills.frontmatter import extract_env_vars, parse_skill_md, peek_skill_name
 ```
 
 Add the same thin wrapper (each route file owns its own private wrappers, the shared logic is in frontmatter.py):
@@ -340,7 +340,7 @@ Update `admin_preview_candidate` return:
 - [ ] **Step 4: Run mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/skills/frontmatter.py cubebox/api/schemas/skill_discovery.py cubebox/api/routes/v1/ws_skills.py cubebox/api/routes/v1/admin_skills.py
+cd backend && uv run mypy cubeplex/skills/frontmatter.py cubeplex/api/schemas/skill_discovery.py cubeplex/api/routes/v1/ws_skills.py cubeplex/api/routes/v1/admin_skills.py
 ```
 
 Expected: `Success: no issues found`.
@@ -357,9 +357,9 @@ Expected: all pass.
 
 ```bash
 git add \
-  backend/cubebox/api/schemas/skill_discovery.py \
-  backend/cubebox/api/routes/v1/ws_skills.py \
-  backend/cubebox/api/routes/v1/admin_skills.py
+  backend/cubeplex/api/schemas/skill_discovery.py \
+  backend/cubeplex/api/routes/v1/ws_skills.py \
+  backend/cubeplex/api/routes/v1/admin_skills.py
 git commit -m "feat(skills): expose env_vars in skill preview API response"
 ```
 
@@ -375,7 +375,7 @@ git commit -m "feat(skills): expose env_vars in skill preview API response"
 
 ### Background
 
-Define `SkillPreviewResponse` once in `@cubebox/core/src/api/skills.ts`, export it, and use it in `adminPreviewCandidate` and both detail panels' SWR fetchers. Both panels render a "Requires env" row when `env_vars` is non-empty.
+Define `SkillPreviewResponse` once in `@cubeplex/core/src/api/skills.ts`, export it, and use it in `adminPreviewCandidate` and both detail panels' SWR fetchers. Both panels render a "Requires env" row when `env_vars` is non-empty.
 
 - [ ] **Step 1: Add shared type to core**
 
@@ -414,10 +414,10 @@ export async function adminPreviewCandidate(candidateId: string): Promise<SkillP
 
 In `frontend/packages/web/components/skills/CandidateDetailPanel.tsx`:
 
-**a) Import shared type** (add to existing `@cubebox/core` import):
+**a) Import shared type** (add to existing `@cubeplex/core` import):
 
 ```typescript
-import { createApiClient, useSkillsStore, type SkillCandidateOut, type SkillPreviewResponse } from '@cubebox/core'
+import { createApiClient, useSkillsStore, type SkillCandidateOut, type SkillPreviewResponse } from '@cubeplex/core'
 ```
 
 **b) Replace the local `previewFetcher` type** (lines 44–48) — remove `interface SkillPreview` if you added one; use `SkillPreviewResponse` directly:
@@ -469,7 +469,7 @@ In `frontend/packages/web/components/admin/skills/AdminCandidateDetailPanel.tsx`
 **a) Import shared type**:
 
 ```typescript
-import { useAdminSkillsStore, type SkillCandidateOut, type SkillPreviewResponse } from '@cubebox/core'
+import { useAdminSkillsStore, type SkillCandidateOut, type SkillPreviewResponse } from '@cubeplex/core'
 ```
 
 **b) Replace `previewFetcher`** (lines 40–44):
@@ -517,7 +517,7 @@ async function previewFetcher(url: string): Promise<SkillPreviewResponse> {
 - [ ] **Step 5: Build core package (required before web sees type changes)**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build
+cd frontend && pnpm --filter @cubeplex/core build
 ```
 
 Expected: exits 0.
@@ -525,7 +525,7 @@ Expected: exits 0.
 - [ ] **Step 6: TypeScript check**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core tsc --noEmit && pnpm --filter web tsc --noEmit
+cd frontend && pnpm --filter @cubeplex/core tsc --noEmit && pnpm --filter web tsc --noEmit
 ```
 
 Expected: no errors.

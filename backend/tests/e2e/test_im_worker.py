@@ -12,15 +12,15 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.im.worker import process_one_queue_item
-from cubebox.models.im_connector import (
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.im.worker import process_one_queue_item
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMRunQueueItem,
     IMWebhookReceipt,
 )
-from cubebox.streams.run_manager import RunContext
+from cubeplex.streams.run_manager import RunContext
 from tests.e2e.conftest import _build_database_url
 from tests.e2e.im_fixtures import (
     im_cleanup,

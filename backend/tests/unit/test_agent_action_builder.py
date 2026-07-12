@@ -13,16 +13,16 @@ from unittest.mock import AsyncMock
 
 from pydantic import BaseModel
 
-from cubebox.agents.actions.builder import build_capability_tools
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import (
+from cubeplex.agents.actions.builder import build_capability_tools
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import (
     ActionInvalidInput,
     ActionNotFound,
     ActionPermissionDenied,
     AgentCapability,
     AgentOperation,
 )
-from cubebox.models.membership import Role
+from cubeplex.models.membership import Role
 
 FAKE_CTX = ScopeContext(
     org_id="org_1",

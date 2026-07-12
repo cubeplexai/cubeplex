@@ -43,7 +43,7 @@ export function formatPercent(v: number | null, digits = 0): string {
   return `${(v * 100).toFixed(digits)}%`
 }
 
-import type { TimeseriesResponse, TimeseriesSeries } from '@cubebox/core'
+import type { TimeseriesResponse, TimeseriesSeries } from '@cubeplex/core'
 
 /**
  * Cap a timeseries response to at most `n` series by cost-rank, collapsing the rest

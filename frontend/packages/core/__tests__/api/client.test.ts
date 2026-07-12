@@ -9,7 +9,7 @@ describe('ApiClient', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch
     Object.defineProperty(document, 'cookie', {
       writable: true,
-      value: 'cubebox_csrf=csrf-abc; other=x',
+      value: 'cubeplex_csrf=csrf-abc; other=x',
     })
   })
 
@@ -72,7 +72,7 @@ describe('ApiClient', () => {
     expect((init as RequestInit).headers).not.toHaveProperty('X-Workspace-Id')
   })
 
-  it('injects X-CSRF-Token on POST/PATCH/DELETE from cubebox_csrf cookie', async () => {
+  it('injects X-CSRF-Token on POST/PATCH/DELETE from cubeplex_csrf cookie', async () => {
     const client = createApiClient('')
     await client.post('/api/v1/conversations', {})
     const [, init] = fetchMock.mock.calls[0]
@@ -127,7 +127,7 @@ describe('toApiError', () => {
     expect(err.message).toBe('taken')
   })
 
-  it('parses the cubebox APIException flat envelope (error_code + details)', async () => {
+  it('parses the cubeplex APIException flat envelope (error_code + details)', async () => {
     const res = new Response(
       JSON.stringify({
         status: 'error',

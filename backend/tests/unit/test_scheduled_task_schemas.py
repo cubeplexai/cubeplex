@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cubebox.api.schemas.ws_scheduled_tasks import ScheduledTaskCreate
+from cubeplex.api.schemas.ws_scheduled_tasks import ScheduledTaskCreate
 
 pytestmark = pytest.mark.unit
 

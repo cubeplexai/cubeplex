@@ -3,7 +3,7 @@
 import { use, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { ApiError, createApiClient, getOrgInfo, type OrgInfoResponse } from '@cubebox/core'
+import { ApiError, createApiClient, getOrgInfo, type OrgInfoResponse } from '@cubeplex/core'
 import { LoginForm } from '@/components/auth/LoginForm'
 import { SSOButton } from '@/components/auth/SSOButton'
 

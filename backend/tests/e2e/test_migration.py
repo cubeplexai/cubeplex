@@ -1,12 +1,12 @@
 """E2E migration verification.
 
-These tests run against whatever DB ``cubebox.config`` resolves to. They
+These tests run against whatever DB ``cubeplex.config`` resolves to. They
 are read-only — they only check that the short-public-id baseline migration
 has been applied (tables exist with the expected column shapes).
 
 For the destructive upgrade/downgrade roundtrip verification, see the
 manual procedure documented in plan Task 6 (run alembic against a
-disposable test DB via ``CUBEBOX_DATABASE__NAME=cubebox_p1_test``).
+disposable test DB via ``CUBEPLEX_DATABASE__NAME=cubeplex_p1_test``).
 """
 
 import importlib
@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from cubebox.db.engine import _build_database_url
+from cubeplex.db.engine import _build_database_url
 
 pytestmark = pytest.mark.e2e
 

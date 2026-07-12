@@ -1,7 +1,7 @@
 import pytest
 
-from cubebox.plugins.protocols import CUBEBOX_PLUGIN_API_VERSION, PluginManifest
-from cubebox.plugins.registry import GROUP_AUTH, PluginRegistry
+from cubeplex.plugins.protocols import CUBEPLEX_PLUGIN_API_VERSION, PluginManifest
+from cubeplex.plugins.registry import GROUP_AUTH, PluginRegistry
 
 
 class _StubAuthProvider:
@@ -20,7 +20,7 @@ class _StubAuthProvider:
 def _seed_registry(reg: PluginRegistry, candidates: dict[str, type]) -> None:
     reg._candidates[GROUP_AUTH] = dict(candidates)
     reg._manifests = {
-        "ee": PluginManifest(api_version=CUBEBOX_PLUGIN_API_VERSION, name="ee", version="0.1.0")
+        "ee": PluginManifest(api_version=CUBEPLEX_PLUGIN_API_VERSION, name="ee", version="0.1.0")
     }
 
 

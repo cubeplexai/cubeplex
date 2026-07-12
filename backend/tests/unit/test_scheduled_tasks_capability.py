@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pydantic import ValidationError
 
-from cubebox.agents.actions.capabilities.scheduled_tasks import (
+from cubeplex.agents.actions.capabilities.scheduled_tasks import (
     SCHEDULED_TASKS_CAPABILITY,
     CreateInput,
     UpdateInput,
     _handle_create,
     _handle_update,
 )
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput, AgentOperation
-from cubebox.models.membership import Role
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionInvalidInput, AgentOperation
+from cubeplex.models.membership import Role
 
 
 def _ctx(conversation_id: str | None = "conv-test") -> ScopeContext:
@@ -142,7 +142,7 @@ async def test_handle_create_cron_flattens_to_service_dict() -> None:
         captured.update(data)
         return _fake_task_from_data(data)
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     inp = CreateInput(
         name="morning-reply",
@@ -152,7 +152,7 @@ async def test_handle_create_cron_flattens_to_service_dict() -> None:
     with (
         patch.object(cap._svc, "create", new=fake_create),
         patch(
-            "cubebox.services.schedule_destination.resolve_im_destination_for_conversation",
+            "cubeplex.services.schedule_destination.resolve_im_destination_for_conversation",
             new=AsyncMock(return_value=None),
         ),
     ):
@@ -176,7 +176,7 @@ async def test_handle_create_target_current_conversation_uses_ctx_id() -> None:
         captured.update(data)
         return _fake_task_from_data(data)
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     inp = CreateInput(
         name="x",
@@ -187,7 +187,7 @@ async def test_handle_create_target_current_conversation_uses_ctx_id() -> None:
     with (
         patch.object(cap._svc, "create", new=fake_create),
         patch(
-            "cubebox.services.schedule_destination.resolve_im_destination_for_conversation",
+            "cubeplex.services.schedule_destination.resolve_im_destination_for_conversation",
             new=AsyncMock(return_value=None),
         ),
     ):
@@ -201,7 +201,7 @@ async def test_handle_create_target_current_conversation_uses_ctx_id() -> None:
 @pytest.mark.asyncio
 async def test_handle_create_current_conversation_on_im_upgrades_to_im_channel() -> None:
     """IM-bound conversation: current_conversation → im_channel (not fixed)."""
-    from cubebox.services.schedule_destination import ImLinkSnapshot
+    from cubeplex.services.schedule_destination import ImLinkSnapshot
 
     captured: dict = {}
 
@@ -209,7 +209,7 @@ async def test_handle_create_current_conversation_on_im_upgrades_to_im_channel()
         captured.update(data)
         return _fake_task_from_data(data)
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     im = ImLinkSnapshot(
         im_account_id="imac-1",
@@ -226,7 +226,7 @@ async def test_handle_create_current_conversation_on_im_upgrades_to_im_channel()
     with (
         patch.object(cap._svc, "create", new=fake_create),
         patch(
-            "cubebox.services.schedule_destination.resolve_im_destination_for_conversation",
+            "cubeplex.services.schedule_destination.resolve_im_destination_for_conversation",
             new=AsyncMock(return_value=im),
         ),
     ):
@@ -300,7 +300,7 @@ async def test_handle_update_flattens_schedule() -> None:
         task.last_fired_at = None
         return task
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     inp = UpdateInput(
         task_id="stask-1",

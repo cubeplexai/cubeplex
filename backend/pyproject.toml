@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cubebox"
+name = "cubeplex"
 version = "0.1.0"
-description = "cubebox - AI Agent System Backend with cubepi"
+description = "cubeplex - AI Agent System Backend with cubepi"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -68,17 +68,17 @@ test = [
 ]
 
 [project.scripts]
-cubebox = "cubebox.cli:main"
+cubeplex = "cubeplex.cli:main"
 
-[project.entry-points."cubebox.parsers"]
-text = "cubebox.parsers.plugins.text:TextParser"
-notebook = "cubebox.parsers.plugins.notebook:NotebookParser"
-docling = "cubebox.parsers.plugins.docling:DoclingParser"
+[project.entry-points."cubeplex.parsers"]
+text = "cubeplex.parsers.plugins.text:TextParser"
+notebook = "cubeplex.parsers.plugins.notebook:NotebookParser"
+docling = "cubeplex.parsers.plugins.docling:DoclingParser"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --cov=cubebox --cov-report=term-missing"
+addopts = "-v --cov=cubeplex --cov-report=term-missing"
 filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning"]
 asyncio_mode = "auto"
 markers = [
@@ -92,7 +92,7 @@ markers = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cubebox"]
+packages = ["cubeplex"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -100,7 +100,7 @@ indent-style = "space"
 line-ending = "auto"
 
 [tool.ruff.lint.isort]
-known-first-party = ["cubebox"]
+known-first-party = ["cubeplex"]
 
 [tool.ruff]
 line-length = 100
@@ -138,7 +138,7 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.12"
-files = ["cubebox"]
+files = ["cubeplex"]
 exclude = [
     "scripts/dev/",
     "tests/",
@@ -166,11 +166,11 @@ module = "tests.*"
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = "cubebox.models.mixins"
+module = "cubeplex.models.mixins"
 disable_error_code = ["call-overload"]
 
 [tool.coverage.run]
-source = ["cubebox"]
+source = ["cubeplex"]
 omit = ["*/tests/*", "*/__pycache__/*", "*/.venv/*"]
 
 [tool.coverage.report]

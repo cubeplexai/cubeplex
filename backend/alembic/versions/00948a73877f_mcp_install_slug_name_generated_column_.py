@@ -14,7 +14,7 @@ Fix: index the canonical slug rather than the display string.
 
 Schema: ``slug_name`` is a regular TEXT column kept in sync with
 ``name`` by a SQLAlchemy ``before_insert`` / ``before_update`` event
-listener (see ``cubebox.models.mcp``). A Postgres GENERATED column
+listener (see ``cubeplex.models.mcp``). A Postgres GENERATED column
 would be cleaner but uses regex syntax SQLite (the unit-test driver
 in some paths) doesn't accept; the ORM invariant is the portable form.
 
@@ -43,7 +43,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-# MUST mirror ``cubebox.mcp._constants.slugify_for_namespace`` Python regex.
+# MUST mirror ``cubeplex.mcp._constants.slugify_for_namespace`` Python regex.
 _SLUG_PG_EXPRESSION = (
     "COALESCE(NULLIF(TRIM(BOTH '_' FROM regexp_replace(name, '[^a-zA-Z0-9]+', '_', 'g')), ''), "
     "'mcp')"

@@ -5,8 +5,8 @@ import secrets
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Membership, Organization, OrganizationMembership, OrgRole, Role
-from cubebox.models.user import User
+from cubeplex.models import Membership, Organization, OrganizationMembership, OrgRole, Role
+from cubeplex.models.user import User
 
 
 async def _create_second_user(db_session, ws_id: str):

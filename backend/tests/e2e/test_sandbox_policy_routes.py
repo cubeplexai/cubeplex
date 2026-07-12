@@ -7,8 +7,8 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models.sandbox_policy import SandboxPolicy
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models.sandbox_policy import SandboxPolicy
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -156,7 +156,7 @@ def test_wildcard_credential_host_with_exact_deny_overlap_unit() -> None:
     need to drive through HTTP to validate the overlap rule itself."""
     from types import SimpleNamespace
 
-    from cubebox.services.sandbox_policy_conflicts import (
+    from cubeplex.services.sandbox_policy_conflicts import (
         credential_conflict_warnings,
         deny_targets_for_cred,
     )

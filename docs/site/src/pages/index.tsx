@@ -8,19 +8,19 @@ export default function Home(): React.ReactElement {
   const softwareJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
-    name: 'CubeBox',
+    name: 'CubePlex',
     description: 'Your AI agent workspace — chat, automate, extend.',
-    url: 'https://cubebox.ai',
+    url: 'https://cubeplex.ai',
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'Web',
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-    author: { '@type': 'Organization', name: 'CubeBox', url: 'https://cubebox.ai' },
+    author: { '@type': 'Organization', name: 'CubePlex', url: 'https://cubeplex.ai' },
   };
 
   return (
     <Layout
       title="Your AI agent workspace"
-      description="CubeBox is an AI agent workspace — multi-model chat, skills, memory, MCP tools, and automation in one platform."
+      description="CubePlex is an AI agent workspace — multi-model chat, skills, memory, MCP tools, and automation in one platform."
     >
       <Head>
         <script type="application/ld+json">{JSON.stringify(softwareJsonLd)}</script>

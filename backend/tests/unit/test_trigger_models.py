@@ -1,4 +1,4 @@
-from cubebox.models.trigger import Trigger, TriggerEvent
+from cubeplex.models.trigger import Trigger, TriggerEvent
 
 
 def test_trigger_id_prefix_and_defaults() -> None:

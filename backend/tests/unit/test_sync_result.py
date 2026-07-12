@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from cubebox.sandbox.sync_result import SyncResult
+from cubeplex.sandbox.sync_result import SyncResult
 
 
 def test_noop_default_values():

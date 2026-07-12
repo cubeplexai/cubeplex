@@ -68,7 +68,7 @@ export async function submitSandboxConfirm(
 - [ ] **Step 3: Verify TypeScript**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core run type-check
+cd frontend && pnpm --filter @cubeplex/core run type-check
 ```
 
 Expected: no errors.
@@ -175,7 +175,7 @@ describe('sandbox_confirm_resolved', () => {
 - [ ] **Step 2: Run tests — expect failure**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core exec vitest run --reporter=verbose \
+cd frontend && pnpm --filter @cubeplex/core exec vitest run --reporter=verbose \
   __tests__/stores/messageStore.sandboxConfirm.test.ts
 ```
 
@@ -271,7 +271,7 @@ export { useMessageStore, type MessageStore, type AgentStream, type PendingConfi
 - [ ] **Step 8: Run tests — expect pass**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core exec vitest run --reporter=verbose \
+cd frontend && pnpm --filter @cubeplex/core exec vitest run --reporter=verbose \
   __tests__/stores/messageStore.sandboxConfirm.test.ts
 ```
 
@@ -280,7 +280,7 @@ Expected: 4 tests PASS.
 - [ ] **Step 9: Type-check**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core run type-check
+cd frontend && pnpm --filter @cubeplex/core run type-check
 ```
 
 Expected: no errors.
@@ -309,7 +309,7 @@ git commit -m "feat(sandbox-ui): pendingConfirmMap in messageStore + event handl
 import { useState, useEffect } from 'react'
 import { Check, X, Clock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import type { PendingConfirm } from '@cubebox/core'
+import type { PendingConfirm } from '@cubeplex/core'
 
 interface SandboxConfirmCardProps {
   pending: PendingConfirm
@@ -412,7 +412,7 @@ git commit -m "feat(sandbox-ui): SandboxConfirmCard component"
 - [ ] **Step 1: Add imports and props**
 
 ```typescript
-import type { PendingConfirm } from '@cubebox/core'
+import type { PendingConfirm } from '@cubeplex/core'
 import { SandboxConfirmCard } from './SandboxConfirmCard'
 ```
 
@@ -479,7 +479,7 @@ git commit -m "feat(sandbox-ui): ToolCallItem renders SandboxConfirmCard, hides 
 
 Add to `ToolCallGroupProps` (and destructure in the function signature):
 ```typescript
-import type { PendingConfirm } from '@cubebox/core'
+import type { PendingConfirm } from '@cubeplex/core'
   pendingConfirmMap?: Record<string, PendingConfirm>
   onSandboxConfirm?: (toolCallId: string, decision: 'approve' | 'deny') => Promise<void>
 ```
@@ -505,7 +505,7 @@ Pass `pendingConfirmMap` and `onSandboxConfirm` to all 3 `<ToolCallGroup ... />`
 - [ ] **Step 3: `MessageList` — read from store and build callback**
 
 ```typescript
-import { useMessageStore, submitSandboxConfirm } from '@cubebox/core'
+import { useMessageStore, submitSandboxConfirm } from '@cubeplex/core'
 
 // Inside MessageList({ conversationId }):
 const pendingConfirmMap = useMessageStore((s) => s.pendingConfirmMap)
@@ -549,7 +549,7 @@ Expected: no errors.
 - [ ] **Step 5: Run vitest (both packages)**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core exec vitest run && pnpm --filter web run test
+cd frontend && pnpm --filter @cubeplex/core exec vitest run && pnpm --filter web run test
 ```
 
 Expected: all tests pass.
@@ -567,10 +567,10 @@ git commit -m "feat(sandbox-ui): thread pendingConfirmMap to ToolCallItem"
 
 ## Task 6: Full build verification
 
-- [ ] **Step 1: Build `@cubebox/core`**
+- [ ] **Step 1: Build `@cubeplex/core`**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core run build
+cd frontend && pnpm --filter @cubeplex/core run build
 ```
 
 Expected: exit 0.
@@ -586,7 +586,7 @@ Expected: exit 0.
 - [ ] **Step 3: Run full vitest suite**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core exec vitest run && pnpm --filter web run test
+cd frontend && pnpm --filter @cubeplex/core exec vitest run && pnpm --filter web run test
 ```
 
 Expected: all tests pass.
@@ -608,7 +608,7 @@ git push origin feat/sandbox-confirm-frontend
 - [x] Countdown initialized from `requestedAt + timeout_seconds` — correct even if SSE is delayed
 - [x] All 3 `toolResultMap: {}` sites + all 8 `isStreaming: false` terminal sites reset `pendingConfirmMap`
 - [x] Spinner suppressed (not just card added alongside) when `pendingConfirm` is present
-- [x] `PendingConfirm` exported from `stores/index.ts` and therefore from `@cubebox/core`
+- [x] `PendingConfirm` exported from `stores/index.ts` and therefore from `@cubeplex/core`
 - [x] Test file at `__tests__/stores/` (not `src/__tests__/`) — matches existing core test layout
 - [x] `MessageList` uses existing `createApiClient('')` + `client.setWorkspaceId(workspaceId)` pattern
 - [x] Build/test commands use `pnpm run type-check` and filtered `pnpm --filter ... exec vitest run`

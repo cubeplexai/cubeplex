@@ -2,7 +2,7 @@
 
 import { useTranslations } from 'next-intl'
 import { AlertCircle } from 'lucide-react'
-import type { ErrorEventData } from '@cubebox/core'
+import type { ErrorEventData } from '@cubeplex/core'
 
 export function RunErrorBubble({ data }: { data: ErrorEventData }) {
   const t = useTranslations('runError')

@@ -4,9 +4,9 @@ import json
 
 import httpx
 
-from cubebox.parsers.plugins.docling import DoclingParser
-from cubebox.parsers.protocols import FileParser
-from cubebox.parsers.schema import ErrorOutput, ParseOptions, TextOutput
+from cubeplex.parsers.plugins.docling import DoclingParser
+from cubeplex.parsers.protocols import FileParser
+from cubeplex.parsers.schema import ErrorOutput, ParseOptions, TextOutput
 
 
 def test_satisfies_protocol() -> None:

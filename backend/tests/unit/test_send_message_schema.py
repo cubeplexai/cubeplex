@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from cubebox.api.routes.v1.conversations import SendMessageRequest
+from cubeplex.api.routes.v1.conversations import SendMessageRequest
 
 
 def test_request_accepts_model_key_and_reasoning() -> None:

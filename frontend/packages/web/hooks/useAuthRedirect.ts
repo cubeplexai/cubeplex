@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import type { ApiClient } from '@cubebox/core'
+import type { ApiClient } from '@cubeplex/core'
 
 export function useAuthRedirect(client: ApiClient) {
   const router = useRouter()

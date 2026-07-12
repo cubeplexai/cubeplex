@@ -4,9 +4,9 @@
 - **Status**: DRAFT — pending review
 - **Branch**: main
 - **Related**:
-  - `backend/cubebox/agents/graph.py` — middleware stack
-  - `backend/cubebox/middleware/citations/` — 与 compaction 强耦合，需配套修
-  - `backend/cubebox/streams/run_manager.py` — citation counter seeding（前置 PR）
+  - `backend/cubeplex/agents/graph.py` — middleware stack
+  - `backend/cubeplex/middleware/citations/` — 与 compaction 强耦合，需配套修
+  - `backend/cubeplex/streams/run_manager.py` — citation counter seeding（前置 PR）
 
 ## 1. Problem
 
@@ -53,7 +53,7 @@
 
 ## 3. Scope Decisions
 
-- **采用中间件实现**，不引入新的 graph node。理由：cubebox 用 `langchain.agents.create_agent()`
+- **采用中间件实现**，不引入新的 graph node。理由：cubeplex 用 `langchain.agents.create_agent()`
   工厂构造图；新增 graph node 要改图结构。`awrap_model_call` 是这个 repo 现成的扩展点
   （sandbox / subagent / cost / citation 都走这套），符合架构。
 - **自定义 `CompactionSummary` dataclass**，不引入 `langmem`。三字段结构（summary 文本、
@@ -68,7 +68,7 @@
 
 ## 4. State Model
 
-扩展 LangGraph agent state（`backend/cubebox/agents/state.py`）：
+扩展 LangGraph agent state（`backend/cubeplex/agents/state.py`）：
 
 ```python
 @dataclass
@@ -78,7 +78,7 @@ class CompactionSummary:
     last_summarized_message_id: str | None = None
 
 
-class CubeboxState(AgentState):
+class CubeplexState(AgentState):
     # 既有字段（messages 等）由 AgentState 提供
     compaction: CompactionSummary | None = None
     compaction_until_msg_index: int | None = None
@@ -220,7 +220,7 @@ Summarizer prompt 里硬性要求"逐字保留 `【N-K】`"。落地后：
 
 ## 7. Middleware Wiring
 
-`backend/cubebox/agents/graph.py` 中插入位置：
+`backend/cubeplex/agents/graph.py` 中插入位置：
 
 ```
 TimestampMiddleware
@@ -253,7 +253,7 @@ compaction:
   max_summary_tokens: 1024
 ```
 
-环境变量覆盖（dynaconf 标准 `CUBEBOX_COMPACTION__*`）。
+环境变量覆盖（dynaconf 标准 `CUBEPLEX_COMPACTION__*`）。
 
 ## 9. Failure Modes & Edge Cases
 

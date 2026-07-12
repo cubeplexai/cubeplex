@@ -1,6 +1,6 @@
 """Unit tests for workspace MCP route registration (four-layer surface only)."""
 
-from cubebox.api.app import create_app
+from cubeplex.api.app import create_app
 
 
 def _route_pairs(app: object) -> set[tuple[str, str]]:

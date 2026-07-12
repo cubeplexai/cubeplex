@@ -4,8 +4,8 @@ import secrets
 
 import pytest
 
-from cubebox.api.app import create_app, lifespan
-from cubebox.repositories import OrganizationRepository
+from cubeplex.api.app import create_app, lifespan
+from cubeplex.repositories import OrganizationRepository
 
 pytestmark = pytest.mark.e2e
 

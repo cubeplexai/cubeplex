@@ -2,17 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Land the cubepi-runtime agent core skeleton (`agents/graph_pi.py` + `stream_pi.py` + `convert_pi.py` + `llm/cache_markers_pi.py`) and wire `streams/run_manager.py` to dispatch by `config.agents.runtime`. After M1, the cubepi-runtime path can serve a real LLM-backed conversation end-to-end through cubebox's existing API, with messages persisted via cubepi.PostgresCheckpointer (already wired in M0.5) and prompt-cache markers placed correctly. **No cubebox middleware ported in M1** (that's M3) — the cubepi agent runs without `MemoryMiddleware`/`SandboxMiddleware`/etc., so its behavior is narrower than the langgraph path. Subsequent milestones (M2 tools, M3 middleware) backfill.
+**Goal:** Land the cubepi-runtime agent core skeleton (`agents/graph_pi.py` + `stream_pi.py` + `convert_pi.py` + `llm/cache_markers_pi.py`) and wire `streams/run_manager.py` to dispatch by `config.agents.runtime`. After M1, the cubepi-runtime path can serve a real LLM-backed conversation end-to-end through cubeplex's existing API, with messages persisted via cubepi.PostgresCheckpointer (already wired in M0.5) and prompt-cache markers placed correctly. **No cubeplex middleware ported in M1** (that's M3) — the cubepi agent runs without `MemoryMiddleware`/`SandboxMiddleware`/etc., so its behavior is narrower than the langgraph path. Subsequent milestones (M2 tools, M3 middleware) backfill.
 
 **Architecture:** All new code lives in `*_pi.py` files alongside the existing langgraph implementations. `run_manager.py` chooses the path via `config.agents.runtime`; CI test config sets `cubepi` so the cubepi path is exercised. The langgraph path remains the dev default until M6.
 
-**Tech Stack:** cubepi 0.3 (path dep), Pydantic 2, FastAPI/SSE, pytest + pytest-asyncio, existing cubebox test fixtures.
+**Tech Stack:** cubepi 0.3 (path dep), Pydantic 2, FastAPI/SSE, pytest + pytest-asyncio, existing cubeplex test fixtures.
 
 **Spec:** `docs/superpowers/specs/2026-05-13-cubepi-main-agent-migration-design.md` § M1.
 
 **Baseline (must hold before starting):** All M0 commits landed; `uv run pytest tests/unit -q` shows 452 passing; `uv run alembic current` shows the cubepi-tables migration applied.
 
-**Dependencies on cubepi:** All Spec A items (PR #65) must be in `~/cubepi` working tree. M1 consumes: `cubepi.Provider`, `cubepi.Agent`, `cubepi.Model`, `cubepi.providers.base.{Message, UserMessage, AssistantMessage, ToolResultMessage, TextContent, ThinkingContent, ToolCall}`, `cubepi.providers.base.StreamEvent`, `cubepi.providers.anthropic.{CacheMarkerPolicy, DefaultCacheMarkerPolicy}`, `cubepi.checkpointer.postgres.PostgresCheckpointer`, `cubebox.agents.checkpointer_pi.init_cubepi_checkpointer` (M0.5).
+**Dependencies on cubepi:** All Spec A items (PR #65) must be in `~/cubepi` working tree. M1 consumes: `cubepi.Provider`, `cubepi.Agent`, `cubepi.Model`, `cubepi.providers.base.{Message, UserMessage, AssistantMessage, ToolResultMessage, TextContent, ThinkingContent, ToolCall}`, `cubepi.providers.base.StreamEvent`, `cubepi.providers.anthropic.{CacheMarkerPolicy, DefaultCacheMarkerPolicy}`, `cubepi.checkpointer.postgres.PostgresCheckpointer`, `cubeplex.agents.checkpointer_pi.init_cubepi_checkpointer` (M0.5).
 
 ---
 
@@ -22,11 +22,11 @@
 
 | File | Purpose |
 |---|---|
-| `backend/cubebox/llm/cache_markers_pi.py` | `CubeboxCacheMarkerPolicy` implementing `cubepi.CacheMarkerPolicy` — walks back to last completed AIMessage |
-| `backend/cubebox/agents/convert_pi.py` | `cubepi.Message ↔ cubebox wire format`; also `wire_input_to_cubepi_user_message` for inbound API messages |
-| `backend/cubebox/agents/stream_pi.py` | `convert_cubepi_event_to_sse(cubepi_event) -> list[sse_event_dict]` |
-| `backend/cubebox/agents/graph_pi.py` | `create_cubebox_cubepi_agent(...)` — builds bare cubepi.Agent without cubebox middleware (M3 backfills middleware) |
-| `backend/tests/unit/test_cache_markers_pi.py` | Tests for cubebox cache marker policy |
+| `backend/cubeplex/llm/cache_markers_pi.py` | `CubeplexCacheMarkerPolicy` implementing `cubepi.CacheMarkerPolicy` — walks back to last completed AIMessage |
+| `backend/cubeplex/agents/convert_pi.py` | `cubepi.Message ↔ cubeplex wire format`; also `wire_input_to_cubepi_user_message` for inbound API messages |
+| `backend/cubeplex/agents/stream_pi.py` | `convert_cubepi_event_to_sse(cubepi_event) -> list[sse_event_dict]` |
+| `backend/cubeplex/agents/graph_pi.py` | `create_cubeplex_cubepi_agent(...)` — builds bare cubepi.Agent without cubeplex middleware (M3 backfills middleware) |
+| `backend/tests/unit/test_cache_markers_pi.py` | Tests for cubeplex cache marker policy |
 | `backend/tests/unit/test_convert_pi.py` | cubepi.Message ↔ wire format round-trip tests |
 | `backend/tests/unit/test_stream_pi.py` | Event translation tests for each cubepi event type |
 | `backend/tests/e2e/test_cubepi_path_conversation.py` | End-to-end: send a message through API with `agents.runtime=cubepi`, verify SSE event sequence |
@@ -35,7 +35,7 @@
 
 | File | What changes |
 |---|---|
-| `backend/cubebox/streams/run_manager.py` | Dispatch by `config.agents.runtime`; cubepi path uses `create_cubebox_cubepi_agent` + cubepi.PostgresCheckpointer + Provider via `LLMFactory.build_cubepi_provider` |
+| `backend/cubeplex/streams/run_manager.py` | Dispatch by `config.agents.runtime`; cubepi path uses `create_cubeplex_cubepi_agent` + cubepi.PostgresCheckpointer + Provider via `LLMFactory.build_cubepi_provider` |
 
 ---
 
@@ -46,38 +46,38 @@
 - [ ] **Step 1: cubepi branch has PR #65 fixes**
 
 ```bash
-cd /home/chris/cubepi && git log --oneline feat/cubebox-readiness | head -8
+cd /home/chris/cubepi && git log --oneline feat/cubeplex-readiness | head -8
 ```
 Expected: includes `ec0653b` (loop state fix), `804cb93` (MCP fix), etc.
 
-- [ ] **Step 2: cubebox baseline**
+- [ ] **Step 2: cubeplex baseline**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend && uv run pytest tests/unit -q --tb=no
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend && uv run pytest tests/unit -q --tb=no
 ```
 Expected: 452 passing.
 
 - [ ] **Step 3: alembic at head**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend && uv run alembic current
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend && uv run alembic current
 ```
 Expected: `555c11215b57 (head)` — cubepi tables migration applied.
 
 ---
 
-## Task M1.1: CubeboxCacheMarkerPolicy
+## Task M1.1: CubeplexCacheMarkerPolicy
 
-cubebox's prompt cache discipline marks system + last completed AIMessage. cubepi's `DefaultCacheMarkerPolicy` marks last message (regardless of role). Implement cubebox's policy.
+cubeplex's prompt cache discipline marks system + last completed AIMessage. cubepi's `DefaultCacheMarkerPolicy` marks last message (regardless of role). Implement cubeplex's policy.
 
 **Files:**
-- Create: `backend/cubebox/llm/cache_markers_pi.py`
+- Create: `backend/cubeplex/llm/cache_markers_pi.py`
 - Test: `backend/tests/unit/test_cache_markers_pi.py`
 
 ### Step 1: Write failing tests
 
 ```python
-"""CubeboxCacheMarkerPolicy tests (M1.1)."""
+"""CubeplexCacheMarkerPolicy tests (M1.1)."""
 
 from cubepi.providers.base import (
     AssistantMessage,
@@ -89,7 +89,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.llm.cache_markers_pi import CubeboxCacheMarkerPolicy
+from cubeplex.llm.cache_markers_pi import CubeplexCacheMarkerPolicy
 
 
 def _user(text: str) -> UserMessage:
@@ -112,33 +112,33 @@ def _tool_result(tool_call_id: str, text: str) -> ToolResultMessage:
 
 
 def test_policy_marks_system_and_tools() -> None:
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     assert p.mark_system() is True
     assert p.mark_last_tool() is True
 
 
 def test_indices_empty_list() -> None:
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     assert p.message_breakpoint_indices([]) == []
 
 
 def test_indices_only_user_message_no_assistant_yet() -> None:
     """First turn before model responds: no completed AIMessage → no breakpoint."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     msgs: list[Message] = [_user("hi")]
     assert p.message_breakpoint_indices(msgs) == []
 
 
 def test_indices_picks_last_assistant() -> None:
     """[user, assistant, user] → mark index 1 (the assistant)."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     msgs: list[Message] = [_user("a"), _assistant("b"), _user("c")]
     assert p.message_breakpoint_indices(msgs) == [1]
 
 
 def test_indices_picks_most_recent_assistant() -> None:
     """[user, assistant, user, assistant, user] → mark index 3."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     msgs: list[Message] = [
         _user("a"),
         _assistant("b"),
@@ -151,7 +151,7 @@ def test_indices_picks_most_recent_assistant() -> None:
 
 def test_indices_skips_user_and_tool_result() -> None:
     """[user, assistant(tool_call), tool_result, assistant, user] → mark index 3."""
-    p = CubeboxCacheMarkerPolicy()
+    p = CubeplexCacheMarkerPolicy()
     tc = ToolCall(id="tc1", name="t", arguments={})
     msgs: list[Message] = [
         _user("a"),
@@ -166,7 +166,7 @@ def test_indices_skips_user_and_tool_result() -> None:
 ### Step 2: Run failing tests
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend
 uv run pytest tests/unit/test_cache_markers_pi.py -v
 ```
 Expected: 6 failures (module doesn't exist).
@@ -174,23 +174,23 @@ Expected: 6 failures (module doesn't exist).
 ### Step 3: Implement
 
 ```python
-# backend/cubebox/llm/cache_markers_pi.py
-"""cubebox-side CacheMarkerPolicy implementation for cubepi.AnthropicProvider.
+# backend/cubeplex/llm/cache_markers_pi.py
+"""cubeplex-side CacheMarkerPolicy implementation for cubepi.AnthropicProvider.
 
 Walks back through the message list to find the most recent completed
 AssistantMessage and marks it. The system prompt and last tool definition
-also get markers (cubebox's prompt cache discipline; see backend/CLAUDE.md).
+also get markers (cubeplex's prompt cache discipline; see backend/CLAUDE.md).
 """
 from __future__ import annotations
 
 from cubepi.providers.base import AssistantMessage, Message
 
 
-class CubeboxCacheMarkerPolicy:
+class CubeplexCacheMarkerPolicy:
     """Policy: mark system + last completed AssistantMessage + last tool.
 
     "Completed" here means: any AssistantMessage in the messages list.
-    cubebox builds the request after the assistant has finished streaming,
+    cubeplex builds the request after the assistant has finished streaming,
     so every AssistantMessage in the list is by definition completed.
     """
 
@@ -210,7 +210,7 @@ class CubeboxCacheMarkerPolicy:
 ### Step 4: Run tests + full suite
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend
 uv run pytest tests/unit/test_cache_markers_pi.py -v   # 6 pass
 uv run pytest tests/unit -q --tb=no                    # 458 pass (452 + 6)
 ```
@@ -218,12 +218,12 @@ uv run pytest tests/unit -q --tb=no                    # 458 pass (452 + 6)
 ### Step 5: Commit
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi
-git add backend/cubebox/llm/cache_markers_pi.py backend/tests/unit/test_cache_markers_pi.py
-git commit -m "feat(llm): add CubeboxCacheMarkerPolicy for cubepi.AnthropicProvider (M1.1)
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi
+git add backend/cubeplex/llm/cache_markers_pi.py backend/tests/unit/test_cache_markers_pi.py
+git commit -m "feat(llm): add CubeplexCacheMarkerPolicy for cubepi.AnthropicProvider (M1.1)
 
 Walks back to the last completed AssistantMessage; marks system + last
-tool too. Mirrors the existing langgraph cubebox/llm/cache_markers.py
+tool too. Mirrors the existing langgraph cubeplex/llm/cache_markers.py
 discipline (see backend/CLAUDE.md 'Prompt Cache Discipline')."
 ```
 
@@ -231,24 +231,24 @@ discipline (see backend/CLAUDE.md 'Prompt Cache Discipline')."
 
 ## Task M1.2: convert_pi.py
 
-cubepi messages need conversion to/from cubebox's API wire format. Inbound: HTTP request body's user message text → `cubepi.UserMessage`. Outbound: `cubepi.AssistantMessage` (and other types) → response dict for `agent.state.messages` API surface.
+cubepi messages need conversion to/from cubeplex's API wire format. Inbound: HTTP request body's user message text → `cubepi.UserMessage`. Outbound: `cubepi.AssistantMessage` (and other types) → response dict for `agent.state.messages` API surface.
 
 **Files:**
-- Create: `backend/cubebox/agents/convert_pi.py`
+- Create: `backend/cubeplex/agents/convert_pi.py`
 - Test: `backend/tests/unit/test_convert_pi.py`
 
 ### Discovery
 
-Read the existing `backend/cubebox/agents/convert.py` (the LangChain version) to understand what wire format cubebox uses. Key functions you'll need to mirror:
+Read the existing `backend/cubeplex/agents/convert.py` (the LangChain version) to understand what wire format cubeplex uses. Key functions you'll need to mirror:
 
 ```bash
-grep -n "^def \|render_attachments_hint\|format_message_for_api" /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend/cubebox/agents/convert.py | head
+grep -n "^def \|render_attachments_hint\|format_message_for_api" /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend/cubeplex/agents/convert.py | head
 ```
 
 The wire format (returned to API consumers) is typically:
 ```python
 {
-    "id": "msg-...",        # cubebox public ID
+    "id": "msg-...",        # cubeplex public ID
     "role": "user" | "assistant" | "tool",
     "content": "...",        # rendered text OR list of content blocks
     "metadata": {...},
@@ -261,7 +261,7 @@ Verify by reading `convert.py` directly.
 ### Step 1: Write tests
 
 ```python
-"""convert_pi tests — cubepi.Message ↔ cubebox wire format (M1.2)."""
+"""convert_pi tests — cubepi.Message ↔ cubeplex wire format (M1.2)."""
 
 import pytest
 from cubepi.providers.base import (
@@ -273,7 +273,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.agents.convert_pi import (
+from cubeplex.agents.convert_pi import (
     cubepi_message_to_wire,
     wire_input_to_cubepi_user_message,
 )
@@ -294,7 +294,7 @@ def test_assistant_message_to_wire_text_only() -> None:
 
 
 def test_assistant_message_to_wire_with_tool_call() -> None:
-    """tool_calls land in metadata.tool_calls as cubebox-shaped dicts."""
+    """tool_calls land in metadata.tool_calls as cubeplex-shaped dicts."""
     tc = ToolCall(id="tc1", name="search", arguments={"q": "x"})
     msg = AssistantMessage(
         content=[TextContent(text="calling tool"), tc],
@@ -343,7 +343,7 @@ def test_wire_input_carries_attachments_in_metadata() -> None:
 ### Step 2: Run failing tests
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend
 uv run pytest tests/unit/test_convert_pi.py -v
 ```
 Expected: 6 failures.
@@ -351,10 +351,10 @@ Expected: 6 failures.
 ### Step 3: Implement
 
 ```python
-# backend/cubebox/agents/convert_pi.py
-"""cubepi.Message ↔ cubebox API wire format conversion (M1.2).
+# backend/cubeplex/agents/convert_pi.py
+"""cubepi.Message ↔ cubeplex API wire format conversion (M1.2).
 
-Mirrors cubebox/agents/convert.py (LangChain version). Used by the
+Mirrors cubeplex/agents/convert.py (LangChain version). Used by the
 cubepi-runtime path; M3 will extend with attachment rendering, citations,
 etc. once those middlewares are ported.
 """
@@ -379,7 +379,7 @@ def _join_text(content: list) -> str:
 
 
 def cubepi_message_to_wire(msg: Message) -> dict[str, Any]:
-    """Convert a cubepi.Message into cubebox's API response dict shape."""
+    """Convert a cubepi.Message into cubeplex's API response dict shape."""
     if isinstance(msg, UserMessage):
         return {
             "role": "user",
@@ -449,11 +449,11 @@ uv run pytest tests/unit -q --tb=no             # 464 pass (458 + 6)
 ### Step 5: Commit
 
 ```bash
-git add backend/cubebox/agents/convert_pi.py backend/tests/unit/test_convert_pi.py
+git add backend/cubeplex/agents/convert_pi.py backend/tests/unit/test_convert_pi.py
 git commit -m "feat(agents): add convert_pi for cubepi.Message ↔ wire format (M1.2)
 
 cubepi_message_to_wire: cubepi.{User,Assistant,ToolResult}Message →
-cubebox API response dict shape.
+cubeplex API response dict shape.
 
 wire_input_to_cubepi_user_message: inbound API user text (+optional
 attachments) → cubepi.UserMessage. Attachments stored in metadata for
@@ -464,16 +464,16 @@ M3's AttachmentMiddleware port to render."
 
 ## Task M1.3: stream_pi.py
 
-Translate cubepi `StreamEvent`s into cubebox SSE event dicts. cubepi events: `start`, `text_delta`, `text_start/end`, `thinking_start/delta/end`, `toolcall_start/delta/end`, `done`, `error`. cubebox SSE: `text_delta`, `reasoning`, `tool_call`, `tool_call_delta`, `tool_result`, `usage`, `error`, `done`.
+Translate cubepi `StreamEvent`s into cubeplex SSE event dicts. cubepi events: `start`, `text_delta`, `text_start/end`, `thinking_start/delta/end`, `toolcall_start/delta/end`, `done`, `error`. cubeplex SSE: `text_delta`, `reasoning`, `tool_call`, `tool_call_delta`, `tool_result`, `usage`, `error`, `done`.
 
 **Files:**
-- Create: `backend/cubebox/agents/stream_pi.py`
+- Create: `backend/cubeplex/agents/stream_pi.py`
 - Test: `backend/tests/unit/test_stream_pi.py`
 
 ### Step 1: Write tests
 
 ```python
-"""stream_pi tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
+"""stream_pi tests — cubepi StreamEvent → cubeplex SSE (M1.3)."""
 
 from cubepi.providers.base import (
     AssistantMessage,
@@ -483,7 +483,7 @@ from cubepi.providers.base import (
     Usage,
 )
 
-from cubebox.agents.stream_pi import convert_cubepi_event_to_sse
+from cubeplex.agents.stream_pi import convert_cubepi_event_to_sse
 
 
 def _mk_assistant(text: str = "", tool_calls: list[ToolCall] | None = None) -> AssistantMessage:
@@ -545,7 +545,7 @@ def test_error_translates_to_error() -> None:
 
 
 def test_silent_events_are_dropped() -> None:
-    """text_start/end, thinking_start/end, toolcall_start, start — drop (no cubebox SSE equiv)."""
+    """text_start/end, thinking_start/end, toolcall_start, start — drop (no cubeplex SSE equiv)."""
     for t in ["text_start", "text_end", "thinking_start", "thinking_end", "toolcall_start", "start"]:
         evt = StreamEvent(type=t)
         out = convert_cubepi_event_to_sse(evt)
@@ -562,14 +562,14 @@ Expected: 7 failures.
 ### Step 3: Implement
 
 ```python
-# backend/cubebox/agents/stream_pi.py
-"""cubepi StreamEvent → cubebox SSE event dict translation (M1.3).
+# backend/cubeplex/agents/stream_pi.py
+"""cubepi StreamEvent → cubeplex SSE event dict translation (M1.3).
 
-cubebox's SSE event types (consumed by frontend): text_delta, reasoning,
+cubeplex's SSE event types (consumed by frontend): text_delta, reasoning,
 tool_call, tool_call_delta, tool_result, usage, error, done.
 
 cubepi's provider events are richer: text_start/delta/end, thinking_*,
-toolcall_*, start, done, error. This module maps the subset cubebox cares
+toolcall_*, start, done, error. This module maps the subset cubeplex cares
 about and silently drops the rest.
 
 `tool_result` events come from the agent loop's after_tool_call path,
@@ -585,7 +585,7 @@ from cubepi.providers.base import StreamEvent, ToolCall
 
 
 def convert_cubepi_event_to_sse(evt: StreamEvent) -> list[dict[str, Any]]:
-    """Translate a single cubepi StreamEvent into 0..1 cubebox SSE event dicts."""
+    """Translate a single cubepi StreamEvent into 0..1 cubeplex SSE event dicts."""
     t = evt.type
 
     if t == "text_delta":
@@ -631,13 +631,13 @@ uv run pytest tests/unit -q --tb=no             # 471 pass (464 + 7)
 ### Step 5: Commit
 
 ```bash
-git add backend/cubebox/agents/stream_pi.py backend/tests/unit/test_stream_pi.py
-git commit -m "feat(agents): translate cubepi StreamEvent to cubebox SSE (M1.3)
+git add backend/cubeplex/agents/stream_pi.py backend/tests/unit/test_stream_pi.py
+git commit -m "feat(agents): translate cubepi StreamEvent to cubeplex SSE (M1.3)
 
 Maps text_delta, thinking_delta (→reasoning), toolcall_delta,
 toolcall_end (→tool_call), done, error. Silently drops cubepi-only
 events (text_start/end, thinking_start/end, toolcall_start, start)
-that have no cubebox SSE equivalent.
+that have no cubeplex SSE equivalent.
 
 tool_result events emit from the agent loop's after_tool_call path,
 not the provider stream — M3 wires that."
@@ -645,18 +645,18 @@ not the provider stream — M3 wires that."
 
 ---
 
-## Task M1.4: graph_pi.py — create_cubebox_cubepi_agent
+## Task M1.4: graph_pi.py — create_cubeplex_cubepi_agent
 
-The factory function that builds a cubepi.Agent for cubebox. M1 builds a **bare** agent: no cubebox middleware, no sandbox, no skills, no memory injection. Just LLM + system prompt + Python function tools (if any).
+The factory function that builds a cubepi.Agent for cubeplex. M1 builds a **bare** agent: no cubeplex middleware, no sandbox, no skills, no memory injection. Just LLM + system prompt + Python function tools (if any).
 
 **Files:**
-- Create: `backend/cubebox/agents/graph_pi.py`
+- Create: `backend/cubeplex/agents/graph_pi.py`
 - Test: `backend/tests/unit/test_graph_pi.py`
 
 ### Step 1: Write tests
 
 ```python
-"""graph_pi tests — create_cubebox_cubepi_agent (M1.4)."""
+"""graph_pi tests — create_cubeplex_cubepi_agent (M1.4)."""
 
 import asyncio
 
@@ -665,12 +665,12 @@ from cubepi import Agent
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.providers.base import Model
 
-from cubebox.agents.graph_pi import create_cubebox_cubepi_agent
+from cubeplex.agents.graph_pi import create_cubeplex_cubepi_agent
 
 
 def test_returns_cubepi_agent_instance() -> None:
     provider = FauxProvider()
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubeplex_cubepi_agent(
         provider=provider,
         model_id="test-model",
         provider_name="faux",
@@ -680,7 +680,7 @@ def test_returns_cubepi_agent_instance() -> None:
 
 
 def test_agent_carries_system_prompt() -> None:
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubeplex_cubepi_agent(
         provider=FauxProvider(),
         model_id="test-model",
         provider_name="faux",
@@ -693,7 +693,7 @@ def test_agent_carries_system_prompt() -> None:
 def test_agent_accepts_checkpointer_and_thread_id() -> None:
     from cubepi.checkpointer import MemoryCheckpointer
     cp = MemoryCheckpointer()
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubeplex_cubepi_agent(
         provider=FauxProvider(),
         model_id="test-model",
         provider_name="faux",
@@ -710,7 +710,7 @@ async def test_bare_agent_runs_a_turn() -> None:
     """Smoke: a bare cubepi agent runs an LLM call against FauxProvider."""
     provider = FauxProvider()
     provider.set_responses([faux_assistant_message("hello back")])
-    agent = create_cubebox_cubepi_agent(
+    agent = create_cubeplex_cubepi_agent(
         provider=provider,
         model_id="test-model",
         provider_name="faux",
@@ -731,10 +731,10 @@ Expected: 4 failures.
 ### Step 3: Implement
 
 ```python
-# backend/cubebox/agents/graph_pi.py
-"""cubepi agent factory for cubebox runtime (M1.4).
+# backend/cubeplex/agents/graph_pi.py
+"""cubepi agent factory for cubeplex runtime (M1.4).
 
-Builds a bare cubepi.Agent without cubebox middleware. M3 will add the
+Builds a bare cubepi.Agent without cubeplex middleware. M3 will add the
 11 middleware ports as opt-in *_pi modules and extend this factory to
 compose them.
 """
@@ -747,7 +747,7 @@ from cubepi.agent.types import AgentTool
 from cubepi.providers.base import Provider
 
 
-def create_cubebox_cubepi_agent(
+def create_cubeplex_cubepi_agent(
     *,
     provider: Provider,
     model_id: str,
@@ -757,10 +757,10 @@ def create_cubebox_cubepi_agent(
     checkpointer: Any = None,
     thread_id: str | None = None,
 ) -> Agent:
-    """Build a cubepi.Agent for cubebox's cubepi runtime path.
+    """Build a cubepi.Agent for cubeplex's cubepi runtime path.
 
-    M1: bare agent, no cubebox middleware. M2 will wire tools through
-    cubebox.tools.registry_pi; M3 will compose the 11 cubebox middlewares
+    M1: bare agent, no cubeplex middleware. M2 will wire tools through
+    cubeplex.tools.registry_pi; M3 will compose the 11 cubeplex middlewares
     via the `middleware=[...]` kwarg on Agent.
     """
     return Agent(
@@ -783,39 +783,39 @@ uv run pytest tests/unit -q --tb=no            # 475 pass (471 + 4)
 ### Step 5: Commit
 
 ```bash
-git add backend/cubebox/agents/graph_pi.py backend/tests/unit/test_graph_pi.py
-git commit -m "feat(agents): add create_cubebox_cubepi_agent factory (M1.4)
+git add backend/cubeplex/agents/graph_pi.py backend/tests/unit/test_graph_pi.py
+git commit -m "feat(agents): add create_cubeplex_cubepi_agent factory (M1.4)
 
 Bare cubepi.Agent wrapper: provider + system_prompt + tools + checkpointer.
-No cubebox middleware (M3 backfills). Sufficient for M1's smoke E2E."
+No cubeplex middleware (M3 backfills). Sufficient for M1's smoke E2E."
 ```
 
 ---
 
 ## Task M1.5: run_manager dispatch by runtime flag
 
-`streams/run_manager.py` currently calls `create_cubebox_agent` (langgraph). Add a branch that selects the cubepi path when `config.agents.runtime == "cubepi"`.
+`streams/run_manager.py` currently calls `create_cubeplex_agent` (langgraph). Add a branch that selects the cubepi path when `config.agents.runtime == "cubepi"`.
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 
 ### Discovery
 
 Read the full call site:
 ```bash
-grep -B5 -A50 "create_cubebox_agent" backend/cubebox/streams/run_manager.py
+grep -B5 -A50 "create_cubeplex_agent" backend/cubeplex/streams/run_manager.py
 ```
 
 Note the langgraph path:
 1. Loads LLMFactory, gets a LangChain `llm` via `create_default()`
-2. Calls `create_cubebox_agent(llm=, tools=, system_prompt=, sandbox=, ...)`
+2. Calls `create_cubeplex_agent(llm=, tools=, system_prompt=, sandbox=, ...)`
 3. Iterates `agent.astream(stream_mode=...)` and converts chunks via `convert_messages_chunk`/`convert_updates_chunk`
 4. Pushes events to `event_q`
 
 The cubepi path needs to:
-1. Use `LLMFactory.build_cubepi_provider(provider_config, cache_policy=CubeboxCacheMarkerPolicy())` to get a cubepi.Provider. This requires loading the active ProviderConfig (look at how `create_default()` does it; mirror that data-loading step).
+1. Use `LLMFactory.build_cubepi_provider(provider_config, cache_policy=CubeplexCacheMarkerPolicy())` to get a cubepi.Provider. This requires loading the active ProviderConfig (look at how `create_default()` does it; mirror that data-loading step).
 2. Open `init_cubepi_checkpointer()` async context for the cubepi.PostgresCheckpointer
-3. Build via `create_cubebox_cubepi_agent(provider=, model_id=, provider_name=, system_prompt=, checkpointer=cp, thread_id=conversation_id)`
+3. Build via `create_cubeplex_cubepi_agent(provider=, model_id=, provider_name=, system_prompt=, checkpointer=cp, thread_id=conversation_id)`
 4. Run `await agent.prompt(user_text)` — cubepi.Agent emits events on its event queue; consume them
 5. For each cubepi event, translate via `convert_cubepi_event_to_sse(evt)` and push translated events to `event_q`
 
@@ -828,9 +828,9 @@ Skip — this task is the integration glue; unit testing requires heavy mocking.
 In `streams/run_manager.py`, find the existing langgraph path. Wrap it:
 
 ```python
-from cubebox.config import config as _config
+from cubeplex.config import config as _config
 
-# ... in the run logic, where create_cubebox_agent currently lives:
+# ... in the run logic, where create_cubeplex_agent currently lives:
 
 runtime = _config.agents.runtime if hasattr(_config, "agents") else _config.get("agents.runtime", "langgraph")
 
@@ -846,7 +846,7 @@ if runtime == "cubepi":
     return
 
 # Existing langgraph path follows unchanged:
-from cubebox.agents.graph import create_cubebox_agent
+from cubeplex.agents.graph import create_cubeplex_agent
 # ... existing code ...
 ```
 
@@ -864,13 +864,13 @@ async def _run_cubepi_path(
     event_q,
 ) -> None:
     """Execute a conversation turn via the cubepi runtime (M1)."""
-    from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
-    from cubebox.agents.convert_pi import wire_input_to_cubepi_user_message
-    from cubebox.agents.graph_pi import create_cubebox_cubepi_agent
-    from cubebox.agents.stream_pi import convert_cubepi_event_to_sse
-    from cubebox.db.engine import async_session_maker
-    from cubebox.llm.cache_markers_pi import CubeboxCacheMarkerPolicy
-    from cubebox.llm.factory import LLMFactory
+    from cubeplex.agents.checkpointer_pi import init_cubepi_checkpointer
+    from cubeplex.agents.convert_pi import wire_input_to_cubepi_user_message
+    from cubeplex.agents.graph_pi import create_cubeplex_cubepi_agent
+    from cubeplex.agents.stream_pi import convert_cubepi_event_to_sse
+    from cubeplex.db.engine import async_session_maker
+    from cubeplex.llm.cache_markers_pi import CubeplexCacheMarkerPolicy
+    from cubeplex.llm.factory import LLMFactory
 
     # 1. Pick provider config — mirror what LLMFactory.create_default() does
     async with async_session_maker() as llm_session:
@@ -882,14 +882,14 @@ async def _run_cubepi_path(
         provider_config, model_id = await factory.resolve_default_provider_and_model()
         await llm_session.commit()
 
-    cache_policy = CubeboxCacheMarkerPolicy()
+    cache_policy = CubeplexCacheMarkerPolicy()
     provider = factory.build_cubepi_provider(
         provider_config, cache_policy=cache_policy
     )
 
     # 2. Open cubepi checkpointer
     async with init_cubepi_checkpointer() as cp:
-        agent = create_cubebox_cubepi_agent(
+        agent = create_cubeplex_cubepi_agent(
             provider=provider,
             model_id=model_id,
             provider_name=provider_config.name,
@@ -933,19 +933,19 @@ Read the cubepi `Agent` class carefully and pick the right shape. If the shape d
 ### Step 3: Verify imports + syntax
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend
-uv run python -c "from cubebox.streams.run_manager import RunManager; print('ok')"
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend
+uv run python -c "from cubeplex.streams.run_manager import RunManager; print('ok')"
 ```
 
 ### Step 4: Commit
 
 ```bash
-git add backend/cubebox/streams/run_manager.py
+git add backend/cubeplex/streams/run_manager.py
 git commit -m "feat(streams): dispatch run_manager to cubepi runtime by config flag (M1.5)
 
-When config.agents.runtime == 'cubepi', use create_cubebox_cubepi_agent
-with cubepi.PostgresCheckpointer + build_cubepi_provider + CubeboxCacheMarkerPolicy.
-M1 path has no cubebox middleware (M3 backfills); attachments are noted
+When config.agents.runtime == 'cubepi', use create_cubeplex_cubepi_agent
+with cubepi.PostgresCheckpointer + build_cubepi_provider + CubeplexCacheMarkerPolicy.
+M1 path has no cubeplex middleware (M3 backfills); attachments are noted
 in metadata but not yet rendered.
 
 Existing langgraph path remains unchanged and is the default."
@@ -955,7 +955,7 @@ Existing langgraph path remains unchanged and is the default."
 
 ## Task M1.6: E2E test through the cubepi runtime path
 
-Send a real conversation through the API with `CUBEBOX_AGENTS__RUNTIME=cubepi`. Verify the SSE event sequence matches cubebox's wire shape.
+Send a real conversation through the API with `CUBEPLEX_AGENTS__RUNTIME=cubepi`. Verify the SSE event sequence matches cubeplex's wire shape.
 
 **Files:**
 - Create: `backend/tests/e2e/test_cubepi_path_conversation.py`
@@ -965,7 +965,7 @@ Send a real conversation through the API with `CUBEBOX_AGENTS__RUNTIME=cubepi`. 
 ```python
 """End-to-end smoke test: conversation goes through the cubepi runtime path (M1.6).
 
-Uses the existing E2E client fixture + sets CUBEBOX_AGENTS__RUNTIME=cubepi
+Uses the existing E2E client fixture + sets CUBEPLEX_AGENTS__RUNTIME=cubepi
 via monkeypatch on config. Issues one POST /conversations/{id}/messages
 and asserts the SSE stream contains expected event types.
 """
@@ -985,9 +985,9 @@ async def test_cubepi_path_round_trip_one_turn(
     client, ws_id = member_client
 
     # Force cubepi runtime via env (config.agents.runtime).
-    # NOTE: requires CUBEBOX_AGENTS__RUNTIME to be honored before client lifetime begins;
+    # NOTE: requires CUBEPLEX_AGENTS__RUNTIME to be honored before client lifetime begins;
     # if member_client fixture doesn't pick this up, set it in conftest or run pytest with
-    # CUBEBOX_AGENTS__RUNTIME=cubepi explicitly.
+    # CUBEPLEX_AGENTS__RUNTIME=cubepi explicitly.
 
     # 1. Create a conversation
     resp = await client.post(
@@ -1021,17 +1021,17 @@ async def test_cubepi_path_round_trip_one_turn(
     assert len(text_deltas) > 0, f"no text_delta events: {seen_types!r}"
 ```
 
-NOTE: this test needs `CUBEBOX_AGENTS__RUNTIME=cubepi` set when the test runs. The simplest way: ensure `config.test.yaml` already has `agents.runtime: cubepi` (M0.4 did this) AND verify the test process picks up that config (the `member_client` fixture should use test config). If env doesn't take effect, monkey-patch `config.agents.runtime` directly inside the test.
+NOTE: this test needs `CUBEPLEX_AGENTS__RUNTIME=cubepi` set when the test runs. The simplest way: ensure `config.test.yaml` already has `agents.runtime: cubepi` (M0.4 did this) AND verify the test process picks up that config (the `member_client` fixture should use test config). If env doesn't take effect, monkey-patch `config.agents.runtime` directly inside the test.
 
 ### Step 2: Run
 
 ```bash
-# Note: real_llm marker; needs CUBEBOX_E2E_LLM_* env or skip
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend
+# Note: real_llm marker; needs CUBEPLEX_E2E_LLM_* env or skip
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend
 uv run pytest tests/e2e/test_cubepi_path_conversation.py -v -m real_llm --tb=short
 ```
 
-Expected: PASS if `CUBEBOX_E2E_LLM_*` is set; skip otherwise.
+Expected: PASS if `CUBEPLEX_E2E_LLM_*` is set; skip otherwise.
 
 ### Step 3: Commit
 
@@ -1051,7 +1051,7 @@ text_delta and a final 'done', confirming end-to-end wiring."
 ### Step 1: Full check
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend && make check
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend && make check
 ```
 Expected: format clean, lint clean, type-check clean, all unit tests pass.
 
@@ -1065,14 +1065,14 @@ Expected: ~475 (452 baseline M0 + 6+6+7+4 = 23 new M1 unit tests).
 ### Step 3: Manual smoke
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi/backend
-CUBEBOX_AGENTS__RUNTIME=cubepi uv run python -c "
-from cubebox.config import config
-from cubebox.streams.run_manager import RunManager
-from cubebox.agents.graph_pi import create_cubebox_cubepi_agent
-from cubebox.agents.stream_pi import convert_cubepi_event_to_sse
-from cubebox.agents.convert_pi import cubepi_message_to_wire
-from cubebox.llm.cache_markers_pi import CubeboxCacheMarkerPolicy
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi/backend
+CUBEPLEX_AGENTS__RUNTIME=cubepi uv run python -c "
+from cubeplex.config import config
+from cubeplex.streams.run_manager import RunManager
+from cubeplex.agents.graph_pi import create_cubeplex_cubepi_agent
+from cubeplex.agents.stream_pi import convert_cubepi_event_to_sse
+from cubeplex.agents.convert_pi import cubepi_message_to_wire
+from cubeplex.llm.cache_markers_pi import CubeplexCacheMarkerPolicy
 print('runtime:', config.agents.runtime)
 print('all M1 modules import')
 "
@@ -1082,7 +1082,7 @@ Expected: `runtime: cubepi` + 'all M1 modules import'.
 ### Step 4: Push
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/integrate-cubepi
+cd /home/chris/cubeplex/.worktrees/feat/integrate-cubepi
 git push
 ```
 
@@ -1095,13 +1095,13 @@ Expected: pre-push hooks pass; remote update.
 After all M1 tasks complete:
 
 - [ ] All 4 new `*_pi.py` modules import cleanly
-- [ ] `CubeboxCacheMarkerPolicy` walks back to last `AssistantMessage` (test covers user-only, tool-result-between, multiple assistants)
+- [ ] `CubeplexCacheMarkerPolicy` walks back to last `AssistantMessage` (test covers user-only, tool-result-between, multiple assistants)
 - [ ] `cubepi_message_to_wire` produces stable dicts for all 3 Message types
 - [ ] `convert_cubepi_event_to_sse` covers text_delta, thinking (→reasoning), toolcall (→tool_call/tool_call_delta), done, error; drops silent events
-- [ ] `create_cubebox_cubepi_agent` produces a working bare cubepi.Agent
+- [ ] `create_cubeplex_cubepi_agent` produces a working bare cubepi.Agent
 - [ ] `run_manager.py` dispatches by `config.agents.runtime`
-- [ ] One real-LLM E2E confirms the cubepi path returns SSE matching cubebox's wire shape
-- [ ] No existing cubebox langgraph test regressed
+- [ ] One real-LLM E2E confirms the cubepi path returns SSE matching cubeplex's wire shape
+- [ ] No existing cubeplex langgraph test regressed
 - [ ] M1 PR-update pushed; CI green on cubepi path
 
 ## Spec coverage map (Spec B § M1)

@@ -9,9 +9,9 @@ from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Artifact, Conversation, Membership, Role, Workspace
-from cubebox.objectstore import get_objectstore_client
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Artifact, Conversation, Membership, Role, Workspace
+from cubeplex.objectstore import get_objectstore_client
 from tests.e2e.conftest import (
     _lifespan_context,
     _login_and_attach,

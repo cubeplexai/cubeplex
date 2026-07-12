@@ -2,15 +2,15 @@
 
 import pytest
 
-from cubebox.llm.config import ProviderConfig
-from cubebox.llm.errors import (
+from cubeplex.llm.config import ProviderConfig
+from cubeplex.llm.errors import (
     BrokenPresetError,
     InvalidModelRefError,
     NoDefaultPresetError,
     UnknownPresetError,
 )
-from cubebox.llm.resolver import parse_model_ref, resolve_model_preset, resolve_task_preset
-from cubebox.llm.snapshot import LLMSnapshot, ModelPreset
+from cubeplex.llm.resolver import parse_model_ref, resolve_model_preset, resolve_task_preset
+from cubeplex.llm.snapshot import LLMSnapshot, ModelPreset
 
 
 def _provider(slug: str, model_ids: tuple[str, ...]) -> ProviderConfig:

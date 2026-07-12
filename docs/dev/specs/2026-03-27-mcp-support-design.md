@@ -5,16 +5,16 @@
 
 ## Summary
 
-Add Model Context Protocol (MCP) support to cubebox so that external MCP servers can provide additional tools to the agent. MCP tools are loaded at startup, registered into the existing `ToolRegistry`, and consumed by `DeepAgentExecutor` exactly like built-in tools. MCP failures are isolated and never crash the system.
+Add Model Context Protocol (MCP) support to cubeplex so that external MCP servers can provide additional tools to the agent. MCP tools are loaded at startup, registered into the existing `ToolRegistry`, and consumed by `DeepAgentExecutor` exactly like built-in tools. MCP failures are isolated and never crash the system.
 
 ## Architecture
 
 ```
 config.yaml (mcp.servers)
-    → MCPManager (cubebox/mcp/client.py)
+    → MCPManager (cubeplex/mcp/client.py)
         wraps langchain-mcp-adapters MultiServerMCPClient
         per-server graceful error handling
-    → cubebox/tools/__init__.py
+    → cubeplex/tools/__init__.py
         calls MCPManager.load_tools() at module init
         failures log warning, do not raise
     → ToolRegistry
@@ -49,14 +49,14 @@ Each server entry supports:
 - `enabled`: skip server without removing config
 - `tools` (optional): list of tool names to load from this server; if omitted, all tools are loaded. Useful when a server exposes many tools but only a subset are needed.
 
-### 3. `MCPManager` (`cubebox/mcp/client.py`)
+### 3. `MCPManager` (`cubeplex/mcp/client.py`)
 
 Replaces the existing stub. Responsibilities:
 - Read enabled servers from config
 - Build `MultiServerMCPClient` connection params (same structure as cubemanus `load_config_file()`)
 - `async load_tools() -> list[StructuredTool]`: connect and fetch tools from all servers; if server config has `tools` list, filter to only those names; catch per-server exceptions and log warning, return whatever tools were successfully loaded
 
-### 4. `cubebox/tools/__init__.py`
+### 4. `cubeplex/tools/__init__.py`
 
 At module init (after registering built-in tools), call `MCPManager.load_tools()` if `mcp.enabled` is true. Use `nest_asyncio` + `asyncio.run()` to run the async call synchronously at import time (same pattern as cubemanus). Wrap in try/except — MCP failure logs warning, does not raise.
 
@@ -95,8 +95,8 @@ mcp:
 | `backend/pyproject.toml` | Add `langchain-mcp-adapters` dependency |
 | `backend/config.yaml` | Update `mcp` section with server config format |
 | `backend/config.development.yaml` | Add webtools example config |
-| `backend/cubebox/mcp/client.py` | Implement `MCPManager` |
-| `backend/cubebox/tools/__init__.py` | Load MCP tools at startup |
+| `backend/cubeplex/mcp/client.py` | Implement `MCPManager` |
+| `backend/cubeplex/tools/__init__.py` | Load MCP tools at startup |
 
 No frontend changes. No database changes. No API changes.
 

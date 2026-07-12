@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from cubebox.plugins import (
+from cubeplex.plugins import (
     reset_registry_for_tests,
 )
-from cubebox.plugins.registry import PluginRegistry
+from cubeplex.plugins.registry import PluginRegistry
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "fake_plugin"
 
@@ -78,7 +78,7 @@ async def test_singular_zero_external_uses_default(fresh_registry) -> None:
     reg = PluginRegistry()
     await reg.discover()
     reg.bind_defaults()
-    from cubebox.plugins.defaults.auth import DefaultAuthProvider
+    from cubeplex.plugins.defaults.auth import DefaultAuthProvider
 
     assert isinstance(reg.get_auth_provider(), DefaultAuthProvider)
 
@@ -119,7 +119,7 @@ async def test_singular_selected_builtin_forces_default(
     reg = PluginRegistry()
     await reg.discover()
     reg.bind_defaults(config=_Cfg())
-    from cubebox.plugins.defaults.auth import DefaultAuthProvider
+    from cubeplex.plugins.defaults.auth import DefaultAuthProvider
 
     assert isinstance(reg.get_auth_provider(), DefaultAuthProvider)
 
@@ -186,7 +186,7 @@ async def test_plural_aggregates_default_plus_external(
     sinks = reg.get_audit_sinks()
     from fake_plugin.audit import FakeAuditSink
 
-    from cubebox.plugins.defaults.audit import DefaultAuditSink
+    from cubeplex.plugins.defaults.audit import DefaultAuditSink
 
     types = {type(s) for s in sinks}
     assert DefaultAuditSink in types
@@ -216,7 +216,7 @@ async def test_plural_disabled_filters_out(installed_fake_plugin, fresh_registry
     await reg.discover()
     reg.bind_defaults(config=_Cfg())
     sinks = reg.get_audit_sinks()
-    from cubebox.plugins.defaults.audit import DefaultAuditSink
+    from cubeplex.plugins.defaults.audit import DefaultAuditSink
 
     assert not any(isinstance(s, DefaultAuditSink) for s in sinks)
 
@@ -233,7 +233,7 @@ async def test_missing_manifest_rejects_plugin(tmp_path, fresh_registry) -> None
         'name = "rogue"\n'
         'version = "0.0.1"\n'
         'requires-python = ">=3.12"\n'
-        '[project.entry-points."cubebox.auth_provider"]\n'
+        '[project.entry-points."cubeplex.auth_provider"]\n'
         'rogue = "rogue:R"\n'
         "[build-system]\n"
         'requires = ["setuptools>=61"]\n'
@@ -267,7 +267,7 @@ async def test_api_version_mismatch_rejects(tmp_path, fresh_registry) -> None:
     pkg.mkdir()
     (pkg / "old_pkg").mkdir()
     (pkg / "old_pkg" / "__init__.py").write_text(
-        "from cubebox.plugins import PluginManifest\n"
+        "from cubeplex.plugins import PluginManifest\n"
         "MANIFEST = PluginManifest(api_version=999, name='old', version='0.0.1')\n"
     )
     (pkg / "pyproject.toml").write_text(
@@ -275,7 +275,7 @@ async def test_api_version_mismatch_rejects(tmp_path, fresh_registry) -> None:
         'name = "old-pkg"\n'
         'version = "0.0.1"\n'
         'requires-python = ">=3.12"\n'
-        '[project.entry-points."cubebox.plugin_manifest"]\n'
+        '[project.entry-points."cubeplex.plugin_manifest"]\n'
         'main = "old_pkg:MANIFEST"\n'
         "[build-system]\n"
         'requires = ["setuptools>=61"]\n'
@@ -309,8 +309,8 @@ async def test_external_plugin_named_builtin_rejected(tmp_path, fresh_registry) 
     pkg.mkdir()
     (pkg / "rsv_pkg").mkdir()
     (pkg / "rsv_pkg" / "__init__.py").write_text(
-        "from cubebox.plugins import PluginManifest, CUBEBOX_PLUGIN_API_VERSION\n"
-        "MANIFEST = PluginManifest(api_version=CUBEBOX_PLUGIN_API_VERSION, name='rsv', version='0.0.1')\n"
+        "from cubeplex.plugins import PluginManifest, CUBEPLEX_PLUGIN_API_VERSION\n"
+        "MANIFEST = PluginManifest(api_version=CUBEPLEX_PLUGIN_API_VERSION, name='rsv', version='0.0.1')\n"
         "class A:\n"
         "    async def authenticate(self, r):\n"
         "        return None\n"
@@ -322,9 +322,9 @@ async def test_external_plugin_named_builtin_rejected(tmp_path, fresh_registry) 
         'name = "rsv-pkg"\n'
         'version = "0.0.1"\n'
         'requires-python = ">=3.12"\n'
-        '[project.entry-points."cubebox.plugin_manifest"]\n'
+        '[project.entry-points."cubeplex.plugin_manifest"]\n'
         'main = "rsv_pkg:MANIFEST"\n'
-        '[project.entry-points."cubebox.auth_provider"]\n'
+        '[project.entry-points."cubeplex.auth_provider"]\n'
         'builtin = "rsv_pkg:A"\n'
         "[build-system]\n"
         'requires = ["setuptools>=61"]\n'

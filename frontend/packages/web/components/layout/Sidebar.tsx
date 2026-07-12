@@ -12,7 +12,7 @@ import {
   createApiClient,
   useConversationStore,
   useTopicStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -480,7 +480,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
         collapsed ? 'w-12' : 'w-56',
       )}
     >
-      {/* Brand — shows logo + "cubebox" + collapse button when expanded;
+      {/* Brand — shows logo + "cubeplex" + collapse button when expanded;
           logo only (centered) when collapsed. */}
       <div
         className={cn('border-b border-border', collapsed ? 'px-2 pt-3 pb-2.5' : 'px-3 pt-4 pb-3')}
@@ -496,7 +496,7 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
                 collapsed ? 'max-w-0 opacity-0' : 'max-w-full opacity-100',
               )}
             >
-              cubebox
+              cubeplex
             </span>
           </div>
           {/* Collapse button — desktop only (onCollapse provided). In the

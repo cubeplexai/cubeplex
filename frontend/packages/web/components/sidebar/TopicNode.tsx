@@ -12,7 +12,7 @@ import {
   createApiClient,
   useConversationStore,
   useTopicStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import {
   DropdownMenu,
   DropdownMenuContent,

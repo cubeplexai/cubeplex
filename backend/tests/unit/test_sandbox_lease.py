@@ -16,9 +16,9 @@ from typing import Any
 
 import pytest
 
-from cubebox.api.routes.v1 import ws_browser as ws_browser_routes
-from cubebox.sandbox.base import BrowserEndpoint
-from cubebox.sandbox.manager import SandboxAttachment
+from cubeplex.api.routes.v1 import ws_browser as ws_browser_routes
+from cubeplex.sandbox.base import BrowserEndpoint
+from cubeplex.sandbox.manager import SandboxAttachment
 
 
 @dataclass

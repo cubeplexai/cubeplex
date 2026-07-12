@@ -2,8 +2,8 @@
 
 from uuid import uuid4
 
-from cubebox.parsers.schema import ParseOptions, TextOutput
-from cubebox.sandbox.base import ExecuteResult, Sandbox
+from cubeplex.parsers.schema import ParseOptions, TextOutput
+from cubeplex.sandbox.base import ExecuteResult, Sandbox
 
 
 class _FakeSandbox(Sandbox):

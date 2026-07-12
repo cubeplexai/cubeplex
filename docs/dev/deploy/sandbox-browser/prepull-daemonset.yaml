@@ -27,7 +27,7 @@ spec:
       #   - operator: Exists
       containers:
         - name: prepull
-          image: hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260521-neko8
+          image: hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260521-neko8
           command: ["sleep", "infinity"]
           resources:
             requests:

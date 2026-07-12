@@ -16,11 +16,11 @@
 
 ### Backend — created
 
-- `backend/cubebox/im/conversation_resolver.py` — shared `resolve_im_conversation` helper used by IM inbound + schedule/trigger dispatch.
-- `backend/cubebox/im/run_handoff.py` — `enqueue_im_channel_run` helper: writes a synthetic `IMWebhookReceipt` and an `IMRunQueueItem(status='pending')` so the existing `IMRunQueueWorker` picks them up. Does **not** call `RunManager.start_run` or the platform tailer hook — the worker owns those.
-- `backend/cubebox/services/schedule_target_spec.py` — `ScheduleTargetSpec.validate` pure function shared by Pydantic schemas + agent tools + service layer.
-- `backend/cubebox/tools/builtin/create_scheduled_task.py` — agent tool factory.
-- `backend/cubebox/tools/builtin/create_trigger.py` — agent tool factory.
+- `backend/cubeplex/im/conversation_resolver.py` — shared `resolve_im_conversation` helper used by IM inbound + schedule/trigger dispatch.
+- `backend/cubeplex/im/run_handoff.py` — `enqueue_im_channel_run` helper: writes a synthetic `IMWebhookReceipt` and an `IMRunQueueItem(status='pending')` so the existing `IMRunQueueWorker` picks them up. Does **not** call `RunManager.start_run` or the platform tailer hook — the worker owns those.
+- `backend/cubeplex/services/schedule_target_spec.py` — `ScheduleTargetSpec.validate` pure function shared by Pydantic schemas + agent tools + service layer.
+- `backend/cubeplex/tools/builtin/create_scheduled_task.py` — agent tool factory.
+- `backend/cubeplex/tools/builtin/create_trigger.py` — agent tool factory.
 - `backend/alembic/versions/<rev1>_add_destination_columns_to_scheduled_tasks.py`
 - `backend/alembic/versions/<rev2>_add_destination_columns_to_triggers.py`
 - `backend/tests/e2e/test_scheduled_task_destinations.py`
@@ -30,18 +30,18 @@
 
 ### Backend — modified
 
-- `backend/cubebox/models/scheduled_task.py` — add fields; widen `target_mode` literal.
-- `backend/cubebox/models/trigger.py` — same shape with `conversation_policy`.
-- `backend/cubebox/repositories/conversation.py:98` — add `topic_id` kwarg to `create`.
-- `backend/cubebox/im/inbound.py:218-250` — replace `_make_conversation_id` body with call to `resolve_im_conversation`.
-- `backend/cubebox/schedules/dispatch.py:56-139` — delete `NotImplementedError` at L71-77; wire `topic_id`; add `im_channel` branch.
-- `backend/cubebox/triggers/pipeline.py:37-151` — wire `topic_id`; add `im_channel` branch.
-- `backend/cubebox/api/schemas/ws_scheduled_tasks.py` — new fields + model_validator.
-- `backend/cubebox/api/schemas/trigger.py` — same.
-- `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py:82,116-132` — accept new fields on create + patch; reject target_mode change.
-- `backend/cubebox/api/routes/v1/ws_triggers.py:99,195-240` — same; add list filter params.
-- `backend/cubebox/services/scheduled_task.py` — patch logic uses validator.
-- `backend/cubebox/services/trigger.py` — same.
+- `backend/cubeplex/models/scheduled_task.py` — add fields; widen `target_mode` literal.
+- `backend/cubeplex/models/trigger.py` — same shape with `conversation_policy`.
+- `backend/cubeplex/repositories/conversation.py:98` — add `topic_id` kwarg to `create`.
+- `backend/cubeplex/im/inbound.py:218-250` — replace `_make_conversation_id` body with call to `resolve_im_conversation`.
+- `backend/cubeplex/schedules/dispatch.py:56-139` — delete `NotImplementedError` at L71-77; wire `topic_id`; add `im_channel` branch.
+- `backend/cubeplex/triggers/pipeline.py:37-151` — wire `topic_id`; add `im_channel` branch.
+- `backend/cubeplex/api/schemas/ws_scheduled_tasks.py` — new fields + model_validator.
+- `backend/cubeplex/api/schemas/trigger.py` — same.
+- `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py:82,116-132` — accept new fields on create + patch; reject target_mode change.
+- `backend/cubeplex/api/routes/v1/ws_triggers.py:99,195-240` — same; add list filter params.
+- `backend/cubeplex/services/scheduled_task.py` — patch logic uses validator.
+- `backend/cubeplex/services/trigger.py` — same.
 
 ### Frontend — modified
 
@@ -67,15 +67,15 @@
 
 **Files:**
 - Create: `backend/alembic/versions/<rev>_add_destination_columns_to_scheduled_tasks.py`
-- Modify: `backend/cubebox/models/scheduled_task.py:22-72`
+- Modify: `backend/cubeplex/models/scheduled_task.py:22-72`
 
 - [ ] **Step 1: Update the SQLModel class**
 
 ```python
-# backend/cubebox/models/scheduled_task.py
+# backend/cubeplex/models/scheduled_task.py
 TARGET_MODES = ("fixed", "new_each_run", "im_channel")
 
-class ScheduledTask(CubeboxBase, OrgScopedMixin, table=True):
+class ScheduledTask(CubeplexBase, OrgScopedMixin, table=True):
     # ...existing fields...
     target_mode: Literal["fixed", "new_each_run", "im_channel"] = Field(
         default="new_each_run",
@@ -159,7 +159,7 @@ Expected: `Running upgrade ... -> <rev>` with no errors.
 - [ ] **Step 5: Verify column shape**
 
 ```bash
-psql cubebox_feat_2026_06_23_schedule_trigger_destinations \
+psql cubeplex_feat_2026_06_23_schedule_trigger_destinations \
   -c "\d scheduled_tasks" | tee ../tmp/stask-schema.log | tail -40
 ```
 
@@ -168,7 +168,7 @@ Expected output includes the four new columns and both new check constraints.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/models/scheduled_task.py backend/alembic/versions/*_add_destination_columns_to_scheduled_tasks.py
+git add backend/cubeplex/models/scheduled_task.py backend/alembic/versions/*_add_destination_columns_to_scheduled_tasks.py
 git commit -m "feat(schedules): add topic_id and im_channel destination columns"
 ```
 
@@ -178,13 +178,13 @@ git commit -m "feat(schedules): add topic_id and im_channel destination columns"
 
 **Files:**
 - Create: `backend/alembic/versions/<rev>_add_destination_columns_to_triggers.py`
-- Modify: `backend/cubebox/models/trigger.py:13-72`
+- Modify: `backend/cubeplex/models/trigger.py:13-72`
 
 - [ ] **Step 1: Update the SQLModel class**
 
 ```python
-# backend/cubebox/models/trigger.py
-class Trigger(CubeboxBase, OrgScopedMixin, table=True):
+# backend/cubeplex/models/trigger.py
+class Trigger(CubeplexBase, OrgScopedMixin, table=True):
     # ...existing fields...
     conversation_policy: Literal["new_each_time", "im_channel"] = Field(
         default="new_each_time",
@@ -247,13 +247,13 @@ op.create_index(
 
 ```bash
 cd backend && uv run alembic upgrade head 2>&1 | tee ../tmp/migrate-trig.log | tail -10
-psql cubebox_feat_2026_06_23_schedule_trigger_destinations -c "\d triggers" | tail -40
+psql cubeplex_feat_2026_06_23_schedule_trigger_destinations -c "\d triggers" | tail -40
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/models/trigger.py backend/alembic/versions/*_add_destination_columns_to_triggers.py
+git add backend/cubeplex/models/trigger.py backend/alembic/versions/*_add_destination_columns_to_triggers.py
 git commit -m "feat(triggers): add topic_id and im_channel destination columns"
 ```
 
@@ -262,7 +262,7 @@ git commit -m "feat(triggers): add topic_id and im_channel destination columns"
 ## Task 3 — `ConversationRepository.create` accepts `topic_id`
 
 **Files:**
-- Modify: `backend/cubebox/repositories/conversation.py:98`
+- Modify: `backend/cubeplex/repositories/conversation.py:98`
 - Test: `backend/tests/e2e/test_conversation_repository.py` (existing file)
 
 - [ ] **Step 1: Add the failing test**
@@ -293,7 +293,7 @@ Expected: FAIL with `unexpected keyword argument 'topic_id'`.
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/repositories/conversation.py:98
+# backend/cubeplex/repositories/conversation.py:98
 async def create(
     self,
     title: str,
@@ -321,7 +321,7 @@ cd backend && uv run pytest tests/e2e/test_conversation_repository.py::test_crea
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/repositories/conversation.py backend/tests/e2e/test_conversation_repository.py
+git add backend/cubeplex/repositories/conversation.py backend/tests/e2e/test_conversation_repository.py
 git commit -m "feat(conversations): accept topic_id on repository.create"
 ```
 
@@ -330,8 +330,8 @@ git commit -m "feat(conversations): accept topic_id on repository.create"
 ## Task 4 — Extract `resolve_im_conversation` helper
 
 **Files:**
-- Create: `backend/cubebox/im/conversation_resolver.py`
-- Modify: `backend/cubebox/im/inbound.py:218-250`
+- Create: `backend/cubeplex/im/conversation_resolver.py`
+- Modify: `backend/cubeplex/im/inbound.py:218-250`
 - Test: `backend/tests/unit/test_resolve_im_conversation.py`
 
 - [ ] **Step 1: Write the failing unit test (mocked DB)**
@@ -341,7 +341,7 @@ git commit -m "feat(conversations): accept topic_id on repository.create"
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from cubebox.im.conversation_resolver import resolve_im_conversation
+from cubeplex.im.conversation_resolver import resolve_im_conversation
 
 @pytest.mark.asyncio
 async def test_reuses_link_when_present():
@@ -378,17 +378,17 @@ fields (`topic_id`, `is_group_chat`, `sandbox_mode`) so callers can
 build a correct `RunContext`.
 
 ```python
-# backend/cubebox/im/conversation_resolver.py
+# backend/cubeplex/im/conversation_resolver.py
 from dataclasses import dataclass
 from typing import Literal
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cubebox.models.conversation import Conversation, ConversationParticipant
-from cubebox.models.im_channel_binding import IMChannelBinding
-from cubebox.models.im_connector import IMConnectorAccount
-from cubebox.models.topic import Topic, TopicParticipant
-from cubebox.repositories.im_connector import get_or_create_thread_link
+from cubeplex.models.conversation import Conversation, ConversationParticipant
+from cubeplex.models.im_channel_binding import IMChannelBinding
+from cubeplex.models.im_connector import IMConnectorAccount
+from cubeplex.models.topic import Topic, TopicParticipant
+from cubeplex.repositories.im_connector import get_or_create_thread_link
 
 
 @dataclass(frozen=True)
@@ -559,7 +559,7 @@ Expected: all pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/im/conversation_resolver.py backend/cubebox/im/inbound.py backend/tests/unit/test_resolve_im_conversation.py
+git add backend/cubeplex/im/conversation_resolver.py backend/cubeplex/im/inbound.py backend/tests/unit/test_resolve_im_conversation.py
 git commit -m "refactor(im): extract resolve_im_conversation for reuse by dispatchers"
 ```
 
@@ -568,7 +568,7 @@ git commit -m "refactor(im): extract resolve_im_conversation for reuse by dispat
 ## Task 5 — `ScheduleTargetSpec.validate` pure function
 
 **Files:**
-- Create: `backend/cubebox/services/schedule_target_spec.py`
+- Create: `backend/cubeplex/services/schedule_target_spec.py`
 - Test: `backend/tests/unit/test_schedule_target_spec.py`
 
 - [ ] **Step 1: Write the failing test matrix**
@@ -576,7 +576,7 @@ git commit -m "refactor(im): extract resolve_im_conversation for reuse by dispat
 ```python
 # backend/tests/unit/test_schedule_target_spec.py
 import pytest
-from cubebox.services.schedule_target_spec import (
+from cubeplex.services.schedule_target_spec import (
     ScheduleTargetSpec, ScheduleTargetError,
 )
 
@@ -625,7 +625,7 @@ cd backend && uv run pytest tests/unit/test_schedule_target_spec.py --no-cov 2>&
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/services/schedule_target_spec.py
+# backend/cubeplex/services/schedule_target_spec.py
 from dataclasses import dataclass
 from typing import Literal
 
@@ -688,7 +688,7 @@ cd backend && uv run pytest tests/unit/test_schedule_target_spec.py --no-cov 2>&
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/schedule_target_spec.py backend/tests/unit/test_schedule_target_spec.py
+git add backend/cubeplex/services/schedule_target_spec.py backend/tests/unit/test_schedule_target_spec.py
 git commit -m "feat(schedules): add ScheduleTargetSpec validator shared by API and tools"
 ```
 
@@ -697,12 +697,12 @@ git commit -m "feat(schedules): add ScheduleTargetSpec validator shared by API a
 ## Task 6 — Pydantic schema updates: `ws_scheduled_tasks.py`
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/ws_scheduled_tasks.py`
+- Modify: `backend/cubeplex/api/schemas/ws_scheduled_tasks.py`
 
 - [ ] **Step 1: Update create / patch request models**
 
 ```python
-# backend/cubebox/api/schemas/ws_scheduled_tasks.py
+# backend/cubeplex/api/schemas/ws_scheduled_tasks.py
 TargetMode = Literal["fixed", "new_each_run", "im_channel"]
 
 class ScheduledTaskCreateRequest(BaseModel):
@@ -749,7 +749,7 @@ class ScheduledTaskPatchRequest(BaseModel):
 - [ ] **Step 3: Run schema tests if any exist; otherwise verify imports**
 
 ```bash
-cd backend && uv run python -c "from cubebox.api.schemas.ws_scheduled_tasks import ScheduledTaskCreateRequest" 2>&1
+cd backend && uv run python -c "from cubeplex.api.schemas.ws_scheduled_tasks import ScheduledTaskCreateRequest" 2>&1
 ```
 
 Expected: no traceback.
@@ -757,7 +757,7 @@ Expected: no traceback.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/ws_scheduled_tasks.py
+git add backend/cubeplex/api/schemas/ws_scheduled_tasks.py
 git commit -m "feat(api): add destination fields to scheduled task schemas"
 ```
 
@@ -765,7 +765,7 @@ git commit -m "feat(api): add destination fields to scheduled task schemas"
 
 ## Task 7 — Pydantic schema updates: `trigger.py`
 
-Mirror Task 6 on `backend/cubebox/api/schemas/trigger.py`. Discriminator is `conversation_policy` ∈ `{new_each_time, im_channel}`. Use `TriggerTargetSpec` from Task 5.
+Mirror Task 6 on `backend/cubeplex/api/schemas/trigger.py`. Discriminator is `conversation_policy` ∈ `{new_each_time, im_channel}`. Use `TriggerTargetSpec` from Task 5.
 
 - [ ] **Steps 1-4:** Identical shape to Task 6.
 - [ ] **Step 5: Commit**
@@ -779,8 +779,8 @@ git commit -m "feat(api): add destination fields to trigger schemas"
 ## Task 8 — Schedule REST: accept new fields + reject mode change
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py:82-132`
-- Modify: `backend/cubebox/services/scheduled_task.py` (update method)
+- Modify: `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py:82-132`
+- Modify: `backend/cubeplex/services/scheduled_task.py` (update method)
 
 - [ ] **Step 1: Add failing test for PATCH-mode-change rejection**
 
@@ -864,7 +864,7 @@ git commit -m "feat(api): triggers accept destination fields, lock conversation_
 ## Task 10 — `enqueue_im_channel_run` helper
 
 **Files:**
-- Create: `backend/cubebox/im/run_handoff.py`
+- Create: `backend/cubeplex/im/run_handoff.py`
 
 The helper writes a synthetic `IMWebhookReceipt` and an
 `IMRunQueueItem(status='pending')` and returns. It **does not** call
@@ -877,12 +877,12 @@ pick the row up means we reuse the entire correct outbound pipeline.
 - [ ] **Step 1: Implement**
 
 ```python
-# backend/cubebox/im/run_handoff.py
+# backend/cubeplex/im/run_handoff.py
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from cubebox.models.im_connector import (
+from cubeplex.models.im_connector import (
     IMConnectorAccount, IMIdentityLink, IMRunQueueItem, IMWebhookReceipt,
 )
 
@@ -969,7 +969,7 @@ Verified facts:
 - [ ] **Step 2: Commit**
 
 ```bash
-git add backend/cubebox/im/run_handoff.py
+git add backend/cubeplex/im/run_handoff.py
 git commit -m "feat(im): add enqueue_im_channel_run for synthetic outbound enqueueing"
 ```
 
@@ -978,7 +978,7 @@ git commit -m "feat(im): add enqueue_im_channel_run for synthetic outbound enque
 ## Task 11 — Schedule dispatch: wire topic + add im_channel branch
 
 **Files:**
-- Modify: `backend/cubebox/schedules/dispatch.py:56-139`
+- Modify: `backend/cubeplex/schedules/dispatch.py:56-139`
 
 - [ ] **Step 1: Delete the NotImplementedError block**
 
@@ -1091,7 +1091,7 @@ cd backend && uv run pytest tests/e2e/test_scheduled_tasks*.py --no-cov 2>&1 | t
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/schedules/dispatch.py backend/cubebox/schedules/poller.py
+git add backend/cubeplex/schedules/dispatch.py backend/cubeplex/schedules/poller.py
 git commit -m "feat(schedules): support topic_id and im_channel destinations in dispatcher"
 ```
 
@@ -1100,7 +1100,7 @@ git commit -m "feat(schedules): support topic_id and im_channel destinations in 
 ## Task 12 — Trigger pipeline: wire topic + add im_channel branch
 
 **Files:**
-- Modify: `backend/cubebox/triggers/pipeline.py:37-151`
+- Modify: `backend/cubeplex/triggers/pipeline.py:37-151`
 
 The pipeline already always creates a new conv at `pipeline.py:102`;
 add `topic_id=trigger.topic_id` there for the `new_each_time` path.
@@ -1183,18 +1183,18 @@ git commit -m "feat(triggers): support topic_id and im_channel destinations in p
 ## Task 13 — Agent tool: `create_scheduled_task`
 
 **Files:**
-- Create: `backend/cubebox/tools/builtin/create_scheduled_task.py`
+- Create: `backend/cubeplex/tools/builtin/create_scheduled_task.py`
 - Modify: agent factory wiring (search for `make_view_images_tool` to find the pattern)
 
 - [ ] **Step 1: Implement the factory**
 
 ```python
-# backend/cubebox/tools/builtin/create_scheduled_task.py
+# backend/cubeplex/tools/builtin/create_scheduled_task.py
 from cubepi import tool
 
-from cubebox.models.im_connector import IMThreadLink
-from cubebox.services.scheduled_task import ScheduledTaskService
-from cubebox.services.schedule_target_spec import ScheduleTargetSpec
+from cubeplex.models.im_connector import IMThreadLink
+from cubeplex.services.scheduled_task import ScheduledTaskService
+from cubeplex.services.schedule_target_spec import ScheduleTargetSpec
 
 
 def make_create_scheduled_task_tool(
@@ -1443,7 +1443,7 @@ export interface ScheduledTaskListFilters {
 }
 ```
 
-- [ ] **Step 2: Build @cubebox/core**
+- [ ] **Step 2: Build @cubeplex/core**
 
 ```bash
 cd frontend/packages/core && pnpm build 2>&1 | tail -5

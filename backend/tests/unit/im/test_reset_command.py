@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cubebox.im.reset_command import format_reset_reply, parse_reset_command
+from cubeplex.im.reset_command import format_reset_reply, parse_reset_command
 
 
 class TestParseResetCommand:
@@ -44,7 +44,7 @@ class TestFeishuReexport:
     """Feishu path keeps a stable import for parse_reset_command."""
 
     def test_feishu_reexports_shared_parse(self) -> None:
-        from cubebox.im.feishu.reset_command import parse_reset_command as feishu_parse
-        from cubebox.im.reset_command import parse_reset_command as shared_parse
+        from cubeplex.im.feishu.reset_command import parse_reset_command as feishu_parse
+        from cubeplex.im.reset_command import parse_reset_command as shared_parse
 
         assert feishu_parse is shared_parse

@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubebox.im.dingtalk.gateway import DingtalkGateway
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.dingtalk.gateway import DingtalkGateway
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 def _dm_raw(text: str = "/new") -> dict[str, Any]:
@@ -44,11 +44,11 @@ async def test_new_command_resets_and_skips_ingest() -> None:
     reply = AsyncMock()
     with (
         patch(
-            "cubebox.im.types.lookup_binding_mode",
+            "cubeplex.im.types.lookup_binding_mode",
             new=AsyncMock(return_value="isolated"),
         ),
         patch(
-            "cubebox.im.reset_command.apply_reset_command",
+            "cubeplex.im.reset_command.apply_reset_command",
             new=AsyncMock(return_value="flat"),
         ) as apply_reset,
         patch.object(gw, "_reply_connector", return_value=SimpleNamespace(reply_markdown=reply)),
@@ -85,7 +85,7 @@ async def test_normal_message_still_ingests() -> None:
     gw._access_token = "tok"
 
     with patch(
-        "cubebox.im.types.lookup_binding_mode",
+        "cubeplex.im.types.lookup_binding_mode",
         new=AsyncMock(return_value="isolated"),
     ):
         await gw._handle_inbound(_dm_raw("hello"), account, session_maker, ingest)

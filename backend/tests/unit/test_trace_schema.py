@@ -1,6 +1,6 @@
 """Shape contract for admin trace API responses."""
 
-from cubebox.api.schemas.trace import (
+from cubeplex.api.schemas.trace import (
     LlmCallPayload,
     SpanKind,
     SpanNode,

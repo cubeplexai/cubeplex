@@ -1,10 +1,10 @@
 # Login Page Redesign Implementation Plan
 
-**Goal:** Replace the bare login form with a polished cubebox entry screen while preserving every existing auth flow.
+**Goal:** Replace the bare login form with a polished cubeplex entry screen while preserving every existing auth flow.
 
 **Architecture:** Keep routing and API behavior unchanged. Use the auth layout as the visual shell and keep `LoginForm` as the stateful client component for password, Google, SSO, and verification flows.
 
-**Tech Stack:** Next.js App Router, React 19, Tailwind v4 semantic tokens, next-intl, existing auth helpers from `@cubebox/core`.
+**Tech Stack:** Next.js App Router, React 19, Tailwind v4 semantic tokens, next-intl, existing auth helpers from `@cubeplex/core`.
 
 ## Constraints
 

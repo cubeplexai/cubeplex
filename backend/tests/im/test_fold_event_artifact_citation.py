@@ -5,12 +5,12 @@ Field names follow the Task 0 audit:
 - citation.data: {citation_id, metadata: {url, title, ...}, chunks, tool_call_id}
 """
 
-from cubebox.im.outbound import fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import fold_event
+from cubeplex.im.types import RenderState
 
 
 def _state_with_card() -> RenderState:
-    s = RenderState(bot_name="cubebox", run_id="run_1")
+    s = RenderState(bot_name="cubeplex", run_id="run_1")
     s.card_id = "AAQA"
     # Park last_patch_monotonic far in the past so tests don't trip the
     # patch_interval coalescer just by using small ``now=`` values.
@@ -204,7 +204,7 @@ def test_artifact_without_id_is_dropped() -> None:
 
 
 def test_artifact_when_no_card_emits_card_create() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     op = fold_event(
         {
             "type": "artifact",

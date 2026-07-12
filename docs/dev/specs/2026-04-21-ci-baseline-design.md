@@ -2,7 +2,7 @@
 
 **Status**: Draft · 2026-04-21
 **Owner**: @xfgong
-**Scope**: 建立 cubebox 仓库的基础 CI 流水线，作为 v1 开源发布前所有模块的质量门闸。
+**Scope**: 建立 cubeplex 仓库的基础 CI 流水线，作为 v1 开源发布前所有模块的质量门闸。
 **属于**: v1 开源发布待办 · M-CI（零号事项）
 **Backlog 索引**: `docs/superpowers/specs/2026-04-21-v1-oss-release-backlog.md`
 
@@ -110,7 +110,7 @@ concurrency:
 覆盖现有 `config.test.yaml`。**仓库内零明文**，所有动态值走 dynaconf `@format {env[...]}`。
 
 ```yaml
-# Test Configuration for cubebox
+# Test Configuration for cubeplex
 # Used by CI e2e and local e2e dev.
 # All endpoints, keys, model ids are injected via environment variables.
 # Real values are kept in GitHub Secrets (CI) or local .env (dev).
@@ -128,17 +128,17 @@ test:
   # LLM: provider / base_url / api_key / model id 全部通过 env 注入
   # 仓库内看不到真实 endpoint 或模型名
   llm:
-    default_model: "@format e2e/{env[CUBEBOX_E2E_LLM_MODEL_ID]}"
+    default_model: "@format e2e/{env[CUBEPLEX_E2E_LLM_MODEL_ID]}"
     fallback_models: []
     providers:
       e2e:
-        base_url: "@format {env[CUBEBOX_E2E_LLM_BASE_URL]}"
-        api_key: "@format {env[CUBEBOX_E2E_LLM_API_KEY]}"
+        base_url: "@format {env[CUBEPLEX_E2E_LLM_BASE_URL]}"
+        api_key: "@format {env[CUBEPLEX_E2E_LLM_API_KEY]}"
         api: openai-completions
         extra_body: {}
         extra_headers: {}
         models:
-          - id: "@format {env[CUBEBOX_E2E_LLM_MODEL_ID]}"
+          - id: "@format {env[CUBEPLEX_E2E_LLM_MODEL_ID]}"
             name: "E2E Model"
             input: ["text", "image"]
             context_window: 128000
@@ -155,7 +155,7 @@ test:
     port: 3306
     user: "root"
     password: "testpass"
-    name: "cubebox_test"
+    name: "cubeplex_test"
 
   # Redis: CI service container
   # 如果将来加 redis 配置段，同样走 127.0.0.1
@@ -172,7 +172,7 @@ test:
   objectstore:
     provider: "s3"
     endpoint: "http://127.0.0.1:9000"
-    bucket: "cubebox-test"
+    bucket: "cubeplex-test"
     region: "us-east-1"
     access_key: "rustfsadmin"
     access_secret: "rustfsadmin"
@@ -180,7 +180,7 @@ test:
 
 **变更语义**：
 - 原 `config.test.yaml` 只覆盖 `api` 与 `sandbox.enabled` + 硬编码 domain / image；改完后所有硬编码剥离，domain / image / key 走 base config 的 env pattern
-- `CUBEBOX_SANDBOX__DOMAIN` / `CUBEBOX_SANDBOX__IMAGE` / `CUBEBOX_SANDBOX__API_KEY` 由 base config.yaml 中已有的 `@format {env[...]}` 接收
+- `CUBEPLEX_SANDBOX__DOMAIN` / `CUBEPLEX_SANDBOX__IMAGE` / `CUBEPLEX_SANDBOX__API_KEY` 由 base config.yaml 中已有的 `@format {env[...]}` 接收
 
 ---
 
@@ -190,12 +190,12 @@ test:
 
 | Secret Key | 用途 | 示例值形态 |
 |---|---|---|
-| `CUBEBOX_E2E_LLM_BASE_URL` | LLM provider endpoint | `https://...` |
-| `CUBEBOX_E2E_LLM_API_KEY` | LLM provider API key | `sd-...` |
-| `CUBEBOX_E2E_LLM_MODEL_ID` | 使用的模型 id | `gemma-4-e4b-it` |
-| `CUBEBOX_SANDBOX__DOMAIN` | OpenSandbox 域名 | `xxx:port` |
-| `CUBEBOX_SANDBOX__IMAGE` | Sandbox 镜像 | `hub.xxx/library/...` |
-| `CUBEBOX_SANDBOX__API_KEY` | Sandbox 认证 key | `...` |
+| `CUBEPLEX_E2E_LLM_BASE_URL` | LLM provider endpoint | `https://...` |
+| `CUBEPLEX_E2E_LLM_API_KEY` | LLM provider API key | `sd-...` |
+| `CUBEPLEX_E2E_LLM_MODEL_ID` | 使用的模型 id | `gemma-4-e4b-it` |
+| `CUBEPLEX_SANDBOX__DOMAIN` | OpenSandbox 域名 | `xxx:port` |
+| `CUBEPLEX_SANDBOX__IMAGE` | Sandbox 镜像 | `hub.xxx/library/...` |
+| `CUBEPLEX_SANDBOX__API_KEY` | Sandbox 认证 key | `...` |
 
 **原则**：Secret 名必须与代码中引用的 env var **完全同名**，workflow 直接 `env:` 注入，避免中间映射。
 
@@ -227,11 +227,11 @@ jobs:
       - name: Install backend
         run: cd backend && uv sync --all-extras
       - name: Ruff check
-        run: cd backend && uv run ruff check cubebox/ scripts/ tests/
+        run: cd backend && uv run ruff check cubeplex/ scripts/ tests/
       - name: Ruff format check
-        run: cd backend && uv run ruff format --check cubebox/ scripts/ tests/
+        run: cd backend && uv run ruff format --check cubeplex/ scripts/ tests/
       - name: Mypy (strict)
-        run: cd backend && uv run mypy cubebox/
+        run: cd backend && uv run mypy cubeplex/
       - name: Pytest unit
         run: cd backend && uv run pytest -m "not sandbox and not e2e" --cov-report=xml
       - name: Upload coverage
@@ -268,18 +268,18 @@ jobs:
     timeout-minutes: 25
     env:
       ENV_FOR_DYNACONF: test
-      CUBEBOX_E2E_LLM_BASE_URL: ${{ secrets.CUBEBOX_E2E_LLM_BASE_URL }}
-      CUBEBOX_E2E_LLM_API_KEY: ${{ secrets.CUBEBOX_E2E_LLM_API_KEY }}
-      CUBEBOX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEBOX_E2E_LLM_MODEL_ID }}
-      CUBEBOX_SANDBOX__DOMAIN: ${{ secrets.CUBEBOX_SANDBOX__DOMAIN }}
-      CUBEBOX_SANDBOX__IMAGE: ${{ secrets.CUBEBOX_SANDBOX__IMAGE }}
-      CUBEBOX_SANDBOX__API_KEY: ${{ secrets.CUBEBOX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
     services:
       mysql:
         image: mysql:8.4
         env:
           MYSQL_ROOT_PASSWORD: testpass
-          MYSQL_DATABASE: cubebox_test
+          MYSQL_DATABASE: cubeplex_test
         ports: ["3306:3306"]
         options: >-
           --health-cmd="mysqladmin ping"
@@ -330,7 +330,7 @@ jobs:
         # pytest 可能留下数据；drop + recreate + migrate 保证 playwright 起点干净
         run: |
           mysql -h 127.0.0.1 -P 3306 -uroot -ptestpass \
-            -e "DROP DATABASE cubebox_test; CREATE DATABASE cubebox_test;"
+            -e "DROP DATABASE cubeplex_test; CREATE DATABASE cubeplex_test;"
           cd backend && uv run alembic upgrade head
       - name: Start backend in background
         run: cd backend && uv run python main.py > /tmp/backend.log 2>&1 &
@@ -488,9 +488,9 @@ repos:
 ```makefile
 # 新增：CI 等价检查（供 pre-push 与 workflow 复用）
 check-ci:
-	uv run ruff check cubebox/ scripts/ tests/
-	uv run ruff format --check cubebox/ scripts/ tests/
-	uv run mypy cubebox/
+	uv run ruff check cubeplex/ scripts/ tests/
+	uv run ruff format --check cubeplex/ scripts/ tests/
+	uv run mypy cubeplex/
 	uv run pytest -m "not sandbox and not e2e"
 
 # 新增：一键装 pre-commit + pre-push 钩子
@@ -545,7 +545,7 @@ make pre-commit-install-all
 
 1. 新增 `backend/config.test.yaml` 全量（覆盖现版本，见第 5 节）
 2. 新增 `frontend/.eslintrc.json` + `frontend/.prettierrc` + root `format:check` / `lint` script
-3. 在 `frontend/packages/web` 与 `@cubebox/core` 添加 `lint` / `format:check` script
+3. 在 `frontend/packages/web` 与 `@cubeplex/core` 添加 `lint` / `format:check` script
 4. 在 backend `pyproject.toml` 的 pytest markers 中加 `e2e` marker，区分 unit / e2e
 5. 给现有 e2e 测试打 `@pytest.mark.e2e` 标记
 6. 重写 `backend/.pre-commit-config.yaml`（第 9.3 节，check-only、pre-commit + pre-push 双阶段）
@@ -573,7 +573,7 @@ make pre-commit-install-all
 ## 14. 附录 A · Coverage 基线
 
 **记录日期**: 2026-04-22（首次 4 job CI 全绿当天）
-**Run**: [#24765601392](https://github.com/xfgong/cubebox/actions/runs/24765601392)
+**Run**: [#24765601392](https://github.com/xfgong/cubeplex/actions/runs/24765601392)
 
 - Backend unit: **45.9%**（1607 / 3501 行覆盖）
 - Backend unit + e2e: _待测（e2e job 不产出 coverage.xml，需在后续独立测一次）_

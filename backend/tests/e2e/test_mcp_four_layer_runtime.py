@@ -24,13 +24,13 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.mcp.effective import (
+from cubeplex.db.engine import _build_database_url
+from cubeplex.mcp.effective import (
     MCPEffectiveConnectorService,
     MCPRuntimeConnectorSpec,
 )
-from cubebox.models import Workspace
-from cubebox.repositories.mcp import (
+from cubeplex.models import Workspace
+from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,

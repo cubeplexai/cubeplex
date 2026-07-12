@@ -3,8 +3,8 @@
 import pytest
 from sqlalchemy import select
 
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.seeders.provider_seeder import seed_model_presets_from_config
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.seeders.provider_seeder import seed_model_presets_from_config
 
 
 def _tiered_llm_config() -> dict:
@@ -30,7 +30,7 @@ def _tiered_llm_config() -> dict:
 @pytest.mark.asyncio
 async def test_first_run_writes_tiered_presets(async_session, monkeypatch):
     monkeypatch.setattr(
-        "cubebox.seeders.provider_seeder.settings",
+        "cubeplex.seeders.provider_seeder.settings",
         {"llm": _tiered_llm_config()},
     )
     # Start from a clean system row.
@@ -65,7 +65,7 @@ async def test_first_run_writes_tiered_presets(async_session, monkeypatch):
 @pytest.mark.asyncio
 async def test_second_run_does_not_overwrite_admin_edits(async_session, monkeypatch):
     monkeypatch.setattr(
-        "cubebox.seeders.provider_seeder.settings",
+        "cubeplex.seeders.provider_seeder.settings",
         {"llm": _tiered_llm_config()},
     )
     # Pre-existing admin-edited system row: default points at the lite tier.

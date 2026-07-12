@@ -14,8 +14,8 @@ from __future__ import annotations
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.hitl_resume import finalize_run_meta_if_claim_matches
-from cubebox.streams.run_events import (
+from cubeplex.streams.hitl_resume import finalize_run_meta_if_claim_matches
+from cubeplex.streams.run_events import (
     create_run,
     get_run_meta,
 )

@@ -28,26 +28,26 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.auth.users import UserManager, _slugify_org_name
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import _build_database_url
-from cubebox.models import (
+from cubeplex.auth.users import UserManager, _slugify_org_name
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import (
     Membership as MembershipModel,
 )
-from cubebox.models import (
+from cubeplex.models import (
     OrganizationMembership,
     OrgRole,
     Role,
     User,
 )
-from cubebox.repositories import (
+from cubeplex.repositories import (
     MembershipRepository,
     OrganizationMembershipRepository,
     OrganizationRepository,
     WorkspaceRepository,
 )
-from cubebox.repositories.topic import TopicRepository
-from cubebox.sandbox.manager import SandboxManager
+from cubeplex.repositories.topic import TopicRepository
+from cubeplex.sandbox.manager import SandboxManager
 
 
 class _FakeRaw:

@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cubebox.im.feishu.connector import FeishuConnector
-from cubebox.im.types import InboundEvent
+from cubeplex.im.feishu.connector import FeishuConnector
+from cubeplex.im.types import InboundEvent
 
 
 def _inbound(*, scope_kind: str = "channel", channel_id: str = "oc_g1") -> InboundEvent:

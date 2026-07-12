@@ -2,14 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the cubebox→Feishu text-only output path with a CardKit-based rich-output pipeline that renders markdown, tool calls, artifacts, AskUser/SandboxConfirm callbacks, light SubAgent, TaskProgress, and citations-as-links.
+**Goal:** Replace the cubeplex→Feishu text-only output path with a CardKit-based rich-output pipeline that renders markdown, tool calls, artifacts, AskUser/SandboxConfirm callbacks, light SubAgent, TaskProgress, and citations-as-links.
 
-**Architecture:** Four new modules under `backend/cubebox/im/feishu/` separating typed card state (`card_model`) from pure JSON rendering (`card_renderer`) from CardKit HTTP/SDK IO (`cardkit_client`) from inbound action dispatch (`card_action_router`). The existing `OutboundRunTailer` stays the event loop; `fold_event` mutates a `CardState` instead of concatenating text. One CardKit entity per cubepi run. Hard cutover from the text path; the only legacy survivor is an emergency text fallback if `create_entity` itself fails.
+**Architecture:** Four new modules under `backend/cubeplex/im/feishu/` separating typed card state (`card_model`) from pure JSON rendering (`card_renderer`) from CardKit HTTP/SDK IO (`cardkit_client`) from inbound action dispatch (`card_action_router`). The existing `OutboundRunTailer` stays the event loop; `fold_event` mutates a `CardState` instead of concatenating text. One CardKit entity per cubepi run. Hard cutover from the text path; the only legacy survivor is an emergency text fallback if `create_entity` itself fails.
 
 **Tech Stack:** Python 3.12, FastAPI, `lark_oapi` SDK, pytest + `pytest-asyncio`, `httpx` for direct CardKit HTTP calls (the bundled `lark_oapi` Python SDK predates the CardKit endpoints), `pydantic` for typed state.
 
 **Branch:** `feat/feishu-rich-output-v1`
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/feishu-rich-output-v1` (slot 49, API `:8049`, Web `:3049`)
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/feishu-rich-output-v1` (slot 49, API `:8049`, Web `:3049`)
 **Spec:** [docs/dev/specs/2026-06-14-feishu-rich-output-v1-design.md](../specs/2026-06-14-feishu-rich-output-v1-design.md)
 
 ---
@@ -17,7 +17,7 @@
 ## Event schema reference (binding for ALL event-handling code below)
 
 The Task 0 audit found mismatches between this plan's v0 field-name
-assumptions and the actual cubebox-published shape. The authoritative
+assumptions and the actual cubeplex-published shape. The authoritative
 schema is in
 [docs/dev/notes/2026-06-13-feishu-richer-output-borrow-from-openclaw.md](../notes/2026-06-13-feishu-richer-output-borrow-from-openclaw.md)
 under "Addendum 2026-06-14".
@@ -66,20 +66,20 @@ Tasks 8–11 below use these exact field names. The `ToolStep`,
 ## File structure
 
 **New:**
-- `backend/cubebox/im/feishu/card_model.py` — typed `CardState` and sub-types (pydantic).
-- `backend/cubebox/im/feishu/card_renderer.py` — pure JSON 2.0 serialization + tool display table + markdown style optimizer + citation-link rewriter.
-- `backend/cubebox/im/feishu/cardkit_client.py` — CardKit REST API wrapper: `create_entity`, `stream_text`, `patch_card`, `finalize`. Owns the throttle buckets and retry/backoff.
-- `backend/cubebox/im/feishu/card_action_router.py` — `dispatch(payload) -> ResumeAction` (pure) and the inbound handler that calls cubepi `resume_with_human_input`.
+- `backend/cubeplex/im/feishu/card_model.py` — typed `CardState` and sub-types (pydantic).
+- `backend/cubeplex/im/feishu/card_renderer.py` — pure JSON 2.0 serialization + tool display table + markdown style optimizer + citation-link rewriter.
+- `backend/cubeplex/im/feishu/cardkit_client.py` — CardKit REST API wrapper: `create_entity`, `stream_text`, `patch_card`, `finalize`. Owns the throttle buckets and retry/backoff.
+- `backend/cubeplex/im/feishu/card_action_router.py` — `dispatch(payload) -> ResumeAction` (pure) and the inbound handler that calls cubepi `resume_with_human_input`.
 - `backend/docs/im-feishu-rich-output.md` — operator-facing doc: CardKit scope, debugging.
 - Tests mirroring each new file under `backend/tests/im/feishu/`.
 
 **Modified:**
-- `backend/cubebox/im/types.py` — replace `RenderState` fields.
-- `backend/cubebox/im/outbound.py` — `OutboundOp.kind` union; `fold_event` returns card ops; `OutboundRunTailer._dispatch_op` calls cardkit client.
-- `backend/cubebox/im/feishu/connector.py` — keep reactions, rename text path to `_send_emergency_text`, drop `_build_payload` / `_MARKDOWN_*` / `edit` / `send_text_message`.
-- `backend/cubebox/im/artifacts.py` — `IMArtifactDispatcher` updates `CardState.artifacts` instead of sending standalone messages.
-- `backend/cubebox/api/routes/v1/im_ingress.py` — branch on `event_type == "card.action.trigger"` and route to action router.
-- `backend/cubebox/im/feishu/long_connection.py` — register card-action handler alongside message handler.
+- `backend/cubeplex/im/types.py` — replace `RenderState` fields.
+- `backend/cubeplex/im/outbound.py` — `OutboundOp.kind` union; `fold_event` returns card ops; `OutboundRunTailer._dispatch_op` calls cardkit client.
+- `backend/cubeplex/im/feishu/connector.py` — keep reactions, rename text path to `_send_emergency_text`, drop `_build_payload` / `_MARKDOWN_*` / `edit` / `send_text_message`.
+- `backend/cubeplex/im/artifacts.py` — `IMArtifactDispatcher` updates `CardState.artifacts` instead of sending standalone messages.
+- `backend/cubeplex/api/routes/v1/im_ingress.py` — branch on `event_type == "card.action.trigger"` and route to action router.
+- `backend/cubeplex/im/feishu/long_connection.py` — register card-action handler alongside message handler.
 - `backend/tests/e2e/im_feishu_*.py` — migrate assertions from bubble text to card JSON.
 - `backend/docs/quick-reference.md` — add `cardkit:card:write` scope line.
 
@@ -93,7 +93,7 @@ Tasks 8–11 below use these exact field names. The `ToolStep`,
 **Goal:** Confirm cubepi events carry the fields v1 needs. Document gaps as cubepi-upstream-first follow-ups before any code lands.
 
 **Files:**
-- Inspect: `backend/cubebox/im/outbound.py`, `~/cubepi` (read-only)
+- Inspect: `backend/cubeplex/im/outbound.py`, `~/cubepi` (read-only)
 - Output: append section to `docs/dev/notes/2026-06-13-feishu-richer-output-borrow-from-openclaw.md`
 
 - [ ] **Step 1: Identify required event fields**
@@ -154,7 +154,7 @@ Expected: clean commit; if any gaps found, address them as a separate cubepi ups
 ## Task 1: Add `CardState` data model
 
 **Files:**
-- Create: `backend/cubebox/im/feishu/card_model.py`
+- Create: `backend/cubeplex/im/feishu/card_model.py`
 - Create: `backend/tests/im/feishu/test_card_model.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -163,7 +163,7 @@ Create `backend/tests/im/feishu/test_card_model.py`:
 
 ```python
 """Tests for CardState — pure data shape, no IO."""
-from cubebox.im.feishu.card_model import (
+from cubeplex.im.feishu.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
@@ -172,7 +172,7 @@ from cubebox.im.feishu.card_model import (
 
 
 def test_card_state_defaults_are_empty() -> None:
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     assert state.streaming_content == ""
     assert state.tool_steps == []
     assert state.artifacts == []
@@ -221,7 +221,7 @@ def test_pending_input_question_and_choices() -> None:
 
 
 def test_card_state_advance_seq() -> None:
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     assert state.advance_seq() == 0
     assert state.advance_seq() == 1
     assert state.next_seq == 2
@@ -233,11 +233,11 @@ def test_card_state_advance_seq() -> None:
 cd backend && uv run pytest tests/im/feishu/test_card_model.py -v
 ```
 
-Expected: `ModuleNotFoundError: No module named 'cubebox.im.feishu.card_model'`.
+Expected: `ModuleNotFoundError: No module named 'cubeplex.im.feishu.card_model'`.
 
 - [ ] **Step 3: Implement `card_model.py`**
 
-Create `backend/cubebox/im/feishu/card_model.py`:
+Create `backend/cubeplex/im/feishu/card_model.py`:
 
 ```python
 """Typed card state for outbound Feishu rendering.
@@ -365,7 +365,7 @@ Expected: all 6 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/card_model.py backend/tests/im/feishu/test_card_model.py
+git add backend/cubeplex/im/feishu/card_model.py backend/tests/im/feishu/test_card_model.py
 git commit -m "feat(im-feishu): add CardState typed model for rich-output v1"
 ```
 
@@ -374,7 +374,7 @@ git commit -m "feat(im-feishu): add CardState typed model for rich-output v1"
 ## Task 2: Add `optimize_markdown_style`
 
 **Files:**
-- Create: `backend/cubebox/im/feishu/card_renderer.py` (skeleton + this function)
+- Create: `backend/cubeplex/im/feishu/card_renderer.py` (skeleton + this function)
 - Create: `backend/tests/im/feishu/test_card_renderer_markdown.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -383,7 +383,7 @@ Create `backend/tests/im/feishu/test_card_renderer_markdown.py`:
 
 ```python
 """Tests for optimize_markdown_style — Feishu CardKit markdown sanitization."""
-from cubebox.im.feishu.card_renderer import optimize_markdown_style
+from cubeplex.im.feishu.card_renderer import optimize_markdown_style
 
 
 def test_h1_demotes_to_h4() -> None:
@@ -457,14 +457,14 @@ def test_chinese_bracket_citation_replaced() -> None:
 cd backend && uv run pytest tests/im/feishu/test_card_renderer_markdown.py -v
 ```
 
-Expected: `ModuleNotFoundError: No module named 'cubebox.im.feishu.card_renderer'`.
+Expected: `ModuleNotFoundError: No module named 'cubeplex.im.feishu.card_renderer'`.
 
 - [ ] **Step 3: Implement the skeleton + `optimize_markdown_style`**
 
-Create `backend/cubebox/im/feishu/card_renderer.py`:
+Create `backend/cubeplex/im/feishu/card_renderer.py`:
 
 ```python
-"""Pure CardKit JSON 2.0 rendering for cubebox Feishu output.
+"""Pure CardKit JSON 2.0 rendering for cubeplex Feishu output.
 
 `render(state)` is the only public IO-free entry point. All other
 exports (`optimize_markdown_style`, `TOOL_DISPLAY`, `summarize_args`)
@@ -575,7 +575,7 @@ Expected: all 9 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/card_renderer.py backend/tests/im/feishu/test_card_renderer_markdown.py
+git add backend/cubeplex/im/feishu/card_renderer.py backend/tests/im/feishu/test_card_renderer_markdown.py
 git commit -m "feat(im-feishu): add optimize_markdown_style for CardKit rendering"
 ```
 
@@ -584,7 +584,7 @@ git commit -m "feat(im-feishu): add optimize_markdown_style for CardKit renderin
 ## Task 3: Add `TOOL_DISPLAY` map + `summarize_args`
 
 **Files:**
-- Modify: `backend/cubebox/im/feishu/card_renderer.py` (add tool display)
+- Modify: `backend/cubeplex/im/feishu/card_renderer.py` (add tool display)
 - Create: `backend/tests/im/feishu/test_card_renderer_tools.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -593,7 +593,7 @@ Create `backend/tests/im/feishu/test_card_renderer_tools.py`:
 
 ```python
 """Tests for per-tool icon and one-liner args summarization."""
-from cubebox.im.feishu.card_renderer import (
+from cubeplex.im.feishu.card_renderer import (
     TOOL_DISPLAY,
     default_display,
     summarize_args,
@@ -647,11 +647,11 @@ def test_summarize_args_handles_no_args() -> None:
 cd backend && uv run pytest tests/im/feishu/test_card_renderer_tools.py -v
 ```
 
-Expected: `ImportError: cannot import name 'TOOL_DISPLAY' from 'cubebox.im.feishu.card_renderer'`.
+Expected: `ImportError: cannot import name 'TOOL_DISPLAY' from 'cubeplex.im.feishu.card_renderer'`.
 
 - [ ] **Step 3: Add `TOOL_DISPLAY` and helpers to `card_renderer.py`**
 
-Append to `backend/cubebox/im/feishu/card_renderer.py`:
+Append to `backend/cubeplex/im/feishu/card_renderer.py`:
 
 ```python
 import json
@@ -752,7 +752,7 @@ Expected: all 7 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/card_renderer.py backend/tests/im/feishu/test_card_renderer_tools.py
+git add backend/cubeplex/im/feishu/card_renderer.py backend/tests/im/feishu/test_card_renderer_tools.py
 git commit -m "feat(im-feishu): TOOL_DISPLAY map and per-tool args summarizer"
 ```
 
@@ -761,7 +761,7 @@ git commit -m "feat(im-feishu): TOOL_DISPLAY map and per-tool args summarizer"
 ## Task 4: Add `render(state)` whole-card serializer
 
 **Files:**
-- Modify: `backend/cubebox/im/feishu/card_renderer.py` (add `render` + element builders)
+- Modify: `backend/cubeplex/im/feishu/card_renderer.py` (add `render` + element builders)
 - Create: `backend/tests/im/feishu/test_card_renderer_layout.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -770,17 +770,17 @@ Create `backend/tests/im/feishu/test_card_renderer_layout.py`:
 
 ```python
 """Tests for the whole-card render() — skeleton + element conditional inclusion."""
-from cubebox.im.feishu.card_model import (
+from cubeplex.im.feishu.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
     ToolStep,
 )
-from cubebox.im.feishu.card_renderer import render
+from cubeplex.im.feishu.card_renderer import render
 
 
 def _empty_state() -> CardState:
-    return CardState(bot_name="cubebox", run_id="run_1")
+    return CardState(bot_name="cubeplex", run_id="run_1")
 
 
 def test_empty_card_has_skeleton_and_no_panels() -> None:
@@ -898,10 +898,10 @@ Expected: `ImportError: cannot import name 'render'`.
 
 - [ ] **Step 3: Implement `render` and element builders**
 
-Append to `backend/cubebox/im/feishu/card_renderer.py`:
+Append to `backend/cubeplex/im/feishu/card_renderer.py`:
 
 ```python
-from cubebox.im.feishu.card_model import (
+from cubeplex.im.feishu.card_model import (
     ArtifactItem,
     CardState,
     PendingInput,
@@ -1179,7 +1179,7 @@ Expected: all renderer + model tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/card_renderer.py backend/tests/im/feishu/test_card_renderer_layout.py
+git add backend/cubeplex/im/feishu/card_renderer.py backend/tests/im/feishu/test_card_renderer_layout.py
 git commit -m "feat(im-feishu): whole-card render() with conditional panel inclusion"
 ```
 
@@ -1188,7 +1188,7 @@ git commit -m "feat(im-feishu): whole-card render() with conditional panel inclu
 ## Task 5: Add `CardKitClient` skeleton + create_entity
 
 **Files:**
-- Create: `backend/cubebox/im/feishu/cardkit_client.py`
+- Create: `backend/cubeplex/im/feishu/cardkit_client.py`
 - Create: `backend/tests/im/feishu/test_cardkit_client.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1202,7 +1202,7 @@ from __future__ import annotations
 import pytest
 from httpx import MockTransport, Request, Response
 
-from cubebox.im.feishu.cardkit_client import (
+from cubeplex.im.feishu.cardkit_client import (
     CardKitClient,
     CardKitCreateError,
 )
@@ -1261,11 +1261,11 @@ async def test_create_entity_raises_after_max_retries() -> None:
 cd backend && uv run pytest tests/im/feishu/test_cardkit_client.py -v
 ```
 
-Expected: `ModuleNotFoundError: cubebox.im.feishu.cardkit_client`.
+Expected: `ModuleNotFoundError: cubeplex.im.feishu.cardkit_client`.
 
 - [ ] **Step 3: Implement the client skeleton**
 
-Create `backend/cubebox/im/feishu/cardkit_client.py`:
+Create `backend/cubeplex/im/feishu/cardkit_client.py`:
 
 ```python
 """HTTP wrapper for Feishu CardKit endpoints.
@@ -1284,7 +1284,7 @@ from typing import Any, Callable
 import httpx
 from loguru import logger
 
-from cubebox.im.outbound import _FloodSignal
+from cubeplex.im.outbound import _FloodSignal
 
 _BASE_URL = "https://open.feishu.cn"
 _CREATE_RETRY_DELAYS = (0.2, 1.0, 3.0)
@@ -1394,7 +1394,7 @@ Expected: 3 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/cardkit_client.py backend/tests/im/feishu/test_cardkit_client.py
+git add backend/cubeplex/im/feishu/cardkit_client.py backend/tests/im/feishu/test_cardkit_client.py
 git commit -m "feat(im-feishu): CardKitClient.create_entity with retry"
 ```
 
@@ -1403,7 +1403,7 @@ git commit -m "feat(im-feishu): CardKitClient.create_entity with retry"
 ## Task 6: Add `stream_text`, `patch_card`, `finalize`
 
 **Files:**
-- Modify: `backend/cubebox/im/feishu/cardkit_client.py`
+- Modify: `backend/cubeplex/im/feishu/cardkit_client.py`
 - Modify: `backend/tests/im/feishu/test_cardkit_client.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1444,7 +1444,7 @@ async def test_stream_text_raises_ratelimit_on_230020() -> None:
         await client.stream_text(
             card_id="AAQA", element_id="streaming_content", content="x", sequence=1,
         )
-    from cubebox.im.feishu.cardkit_client import CardKitRateLimit
+    from cubeplex.im.feishu.cardkit_client import CardKitRateLimit
     assert isinstance(info.value, CardKitRateLimit)
 
 
@@ -1493,7 +1493,7 @@ async def test_finalize_gives_up_after_max_attempts() -> None:
         return Response(500, json={"code": 99999, "msg": "down"})
 
     # Speed up the backoff for the test by patching the delay table.
-    from cubebox.im.feishu import cardkit_client as mod
+    from cubeplex.im.feishu import cardkit_client as mod
     original = mod._FINALIZE_RETRY_DELAYS
     mod._FINALIZE_RETRY_DELAYS = (0.0, 0.0)  # type: ignore[misc]
     try:
@@ -1629,7 +1629,7 @@ Expected: all 8 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/cardkit_client.py backend/tests/im/feishu/test_cardkit_client.py
+git add backend/cubeplex/im/feishu/cardkit_client.py backend/tests/im/feishu/test_cardkit_client.py
 git commit -m "feat(im-feishu): CardKitClient stream_text / patch_card / finalize"
 ```
 
@@ -1638,7 +1638,7 @@ git commit -m "feat(im-feishu): CardKitClient stream_text / patch_card / finaliz
 ## Task 7: Replace `RenderState` with new fields
 
 **Files:**
-- Modify: `backend/cubebox/im/types.py`
+- Modify: `backend/cubeplex/im/types.py`
 - Modify: `backend/tests/im/test_types.py` (create if absent)
 
 - [ ] **Step 1: Write the failing test**
@@ -1647,12 +1647,12 @@ Create / open `backend/tests/im/test_types.py`:
 
 ```python
 """Tests for RenderState's new card-oriented shape."""
-from cubebox.im.feishu.card_model import CardState
-from cubebox.im.types import RenderState
+from cubeplex.im.feishu.card_model import CardState
+from cubeplex.im.types import RenderState
 
 
 def test_render_state_owns_card_state() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     assert isinstance(state.card_state, CardState)
     assert state.card_state.run_id == "run_1"
     assert state.card_id is None
@@ -1660,7 +1660,7 @@ def test_render_state_owns_card_state() -> None:
 
 
 def test_render_state_keeps_reaction_id_field() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     assert state.reaction_in_progress_id is None
     state.reaction_in_progress_id = "rx_1"
     assert state.reaction_in_progress_id == "rx_1"
@@ -1676,10 +1676,10 @@ Expected: `TypeError: RenderState.__init__() got an unexpected keyword argument 
 
 - [ ] **Step 3: Replace `RenderState` definition**
 
-Edit `backend/cubebox/im/types.py`. Replace lines 65-86 (the existing `RenderState`) with:
+Edit `backend/cubeplex/im/types.py`. Replace lines 65-86 (the existing `RenderState`) with:
 
 ```python
-from cubebox.im.feishu.card_model import CardState
+from cubeplex.im.feishu.card_model import CardState
 
 
 @dataclass(slots=True)
@@ -1720,7 +1720,7 @@ Expected: both tests pass.
 - [ ] **Step 5: Verify the dataclass changes don't break import elsewhere**
 
 ```bash
-cd backend && uv run python -c "from cubebox.im.types import RenderState; print(RenderState(bot_name='b', run_id='r'))"
+cd backend && uv run python -c "from cubeplex.im.types import RenderState; print(RenderState(bot_name='b', run_id='r'))"
 ```
 
 Expected: prints a dataclass repr without exception.
@@ -1728,7 +1728,7 @@ Expected: prints a dataclass repr without exception.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/im/types.py backend/tests/im/test_types.py
+git add backend/cubeplex/im/types.py backend/tests/im/test_types.py
 git commit -m "feat(im): RenderState carries CardState + card_id + throttle buckets"
 ```
 
@@ -1737,7 +1737,7 @@ git commit -m "feat(im): RenderState carries CardState + card_id + throttle buck
 ## Task 8: Update `OutboundOp` and rewrite `fold_event` for text events
 
 **Files:**
-- Modify: `backend/cubebox/im/outbound.py`
+- Modify: `backend/cubeplex/im/outbound.py`
 - Create: `backend/tests/im/test_fold_event_text.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1746,12 +1746,12 @@ Create `backend/tests/im/test_fold_event_text.py`:
 
 ```python
 """Tests for fold_event handling text_delta events on the new CardState path."""
-from cubebox.im.outbound import OutboundOp, fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import OutboundOp, fold_event
+from cubeplex.im.types import RenderState
 
 
 def _state() -> RenderState:
-    return RenderState(bot_name="cubebox", run_id="run_1")
+    return RenderState(bot_name="cubeplex", run_id="run_1")
 
 
 def test_first_text_delta_emits_card_create() -> None:
@@ -1794,7 +1794,7 @@ Expected: `AttributeError: 'OutboundOp' object has no attribute…` or kind mism
 
 - [ ] **Step 3: Update `OutboundOp` and `fold_event` for text events**
 
-Edit `backend/cubebox/im/outbound.py`:
+Edit `backend/cubeplex/im/outbound.py`:
 
 Replace the `OutboundOp` dataclass (lines 38-45) with:
 
@@ -1859,7 +1859,7 @@ Expected: all 3 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/outbound.py backend/tests/im/test_fold_event_text.py
+git add backend/cubeplex/im/outbound.py backend/tests/im/test_fold_event_text.py
 git commit -m "feat(im): fold_event emits card_create + stream_text"
 ```
 
@@ -1868,7 +1868,7 @@ git commit -m "feat(im): fold_event emits card_create + stream_text"
 ## Task 9: `fold_event` for `tool_call` and `tool_result` events
 
 **Files:**
-- Modify: `backend/cubebox/im/outbound.py`
+- Modify: `backend/cubeplex/im/outbound.py`
 - Create: `backend/tests/im/test_fold_event_tools.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -1876,12 +1876,12 @@ git commit -m "feat(im): fold_event emits card_create + stream_text"
 Create `backend/tests/im/test_fold_event_tools.py`:
 
 ```python
-from cubebox.im.outbound import fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import fold_event
+from cubeplex.im.types import RenderState
 
 
 def _state_with_card() -> RenderState:
-    s = RenderState(bot_name="cubebox", run_id="run_1")
+    s = RenderState(bot_name="cubeplex", run_id="run_1")
     s.card_id = "AAQA"
     return s
 
@@ -1938,7 +1938,7 @@ def test_tool_result_error_marks_failed() -> None:
 
 
 def test_tool_call_when_no_card_created_yet_emits_card_create() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     op = fold_event(
         {"type": "tool_call", "data": {"id": "tc_1", "name": "bash", "args": {}}},
         state,
@@ -1958,11 +1958,11 @@ Expected: assertions on `tool_steps` fail because `fold_event` doesn't handle `t
 
 - [ ] **Step 3: Add `tool_call` and `tool_result` branches**
 
-Inside `fold_event` in `backend/cubebox/im/outbound.py`, add before the trailing `return None`:
+Inside `fold_event` in `backend/cubeplex/im/outbound.py`, add before the trailing `return None`:
 
 ```python
     if etype == "tool_call":
-        from cubebox.im.feishu.card_model import ToolStep
+        from cubeplex.im.feishu.card_model import ToolStep
 
         tool_id = str(data.get("id") or "")
         name = str(data.get("name") or "tool")
@@ -2004,7 +2004,7 @@ Expected: all 4 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/outbound.py backend/tests/im/test_fold_event_tools.py
+git add backend/cubeplex/im/outbound.py backend/tests/im/test_fold_event_tools.py
 git commit -m "feat(im): fold_event handles tool_call and tool_result"
 ```
 
@@ -2013,7 +2013,7 @@ git commit -m "feat(im): fold_event handles tool_call and tool_result"
 ## Task 10: `fold_event` for `artifact` and `citation` events
 
 **Files:**
-- Modify: `backend/cubebox/im/outbound.py`
+- Modify: `backend/cubeplex/im/outbound.py`
 - Create: `backend/tests/im/test_fold_event_artifact_citation.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2021,12 +2021,12 @@ git commit -m "feat(im): fold_event handles tool_call and tool_result"
 Create `backend/tests/im/test_fold_event_artifact_citation.py`:
 
 ```python
-from cubebox.im.outbound import fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import fold_event
+from cubeplex.im.types import RenderState
 
 
 def _state_with_card() -> RenderState:
-    s = RenderState(bot_name="cubebox", run_id="run_1")
+    s = RenderState(bot_name="cubeplex", run_id="run_1")
     s.card_id = "AAQA"
     return s
 
@@ -2081,11 +2081,11 @@ Expected: assertions fail.
 
 - [ ] **Step 3: Add `artifact` and `citation` branches**
 
-Inside `fold_event` in `backend/cubebox/im/outbound.py`, add before the trailing `return None`:
+Inside `fold_event` in `backend/cubeplex/im/outbound.py`, add before the trailing `return None`:
 
 ```python
     if etype == "artifact":
-        from cubebox.im.feishu.card_model import ArtifactItem
+        from cubeplex.im.feishu.card_model import ArtifactItem
 
         action = str(data.get("action") or "created")
         artifact = data.get("artifact") or {}
@@ -2130,7 +2130,7 @@ Expected: both tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/outbound.py backend/tests/im/test_fold_event_artifact_citation.py
+git add backend/cubeplex/im/outbound.py backend/tests/im/test_fold_event_artifact_citation.py
 git commit -m "feat(im): fold_event handles artifact and citation events"
 ```
 
@@ -2139,7 +2139,7 @@ git commit -m "feat(im): fold_event handles artifact and citation events"
 ## Task 11: `fold_event` for `ask_user`, `sandbox_confirm`, `sub_agent_*`, `done`, `error`
 
 **Files:**
-- Modify: `backend/cubebox/im/outbound.py`
+- Modify: `backend/cubeplex/im/outbound.py`
 - Create: `backend/tests/im/test_fold_event_terminal.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2147,12 +2147,12 @@ git commit -m "feat(im): fold_event handles artifact and citation events"
 Create `backend/tests/im/test_fold_event_terminal.py`:
 
 ```python
-from cubebox.im.outbound import fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import fold_event
+from cubeplex.im.types import RenderState
 
 
 def _state_with_card() -> RenderState:
-    s = RenderState(bot_name="cubebox", run_id="run_1")
+    s = RenderState(bot_name="cubeplex", run_id="run_1")
     s.card_id = "AAQA"
     return s
 
@@ -2258,11 +2258,11 @@ Expected: assertions fail.
 
 - [ ] **Step 3: Add the branches**
 
-Inside `fold_event` in `backend/cubebox/im/outbound.py`, before the trailing `return None`:
+Inside `fold_event` in `backend/cubeplex/im/outbound.py`, before the trailing `return None`:
 
 ```python
     if etype == "ask_user":
-        from cubebox.im.feishu.card_model import PendingInput
+        from cubeplex.im.feishu.card_model import PendingInput
 
         raw_choices = data.get("choices") or []
         choices: list[tuple[str, str]] = []
@@ -2282,7 +2282,7 @@ Inside `fold_event` in `backend/cubebox/im/outbound.py`, before the trailing `re
         return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
 
     if etype == "sandbox_confirm":
-        from cubebox.im.feishu.card_model import PendingInput
+        from cubeplex.im.feishu.card_model import PendingInput
 
         question = str(data.get("prompt") or "")
         cmd = str(data.get("command") or "")
@@ -2298,7 +2298,7 @@ Inside `fold_event` in `backend/cubebox/im/outbound.py`, before the trailing `re
         return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
 
     if etype == "sub_agent_start":
-        from cubebox.im.feishu.card_model import SubAgentRow
+        from cubeplex.im.feishu.card_model import SubAgentRow
 
         name = str(data.get("name") or "sub-agent")
         if not any(r.name == name for r in state.card_state.sub_agents):
@@ -2337,7 +2337,7 @@ Expected: all 6 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/outbound.py backend/tests/im/test_fold_event_terminal.py
+git add backend/cubeplex/im/outbound.py backend/tests/im/test_fold_event_terminal.py
 git commit -m "feat(im): fold_event handles ask_user, sandbox_confirm, sub_agent_*, done, error"
 ```
 
@@ -2346,8 +2346,8 @@ git commit -m "feat(im): fold_event handles ask_user, sandbox_confirm, sub_agent
 ## Task 12: Rewire `OutboundRunTailer._dispatch_op` to call CardKitClient + send card init message
 
 **Files:**
-- Modify: `backend/cubebox/im/outbound.py` (rewrite `_dispatch_op` + dispatch loop)
-- Modify: `backend/cubebox/im/feishu/connector.py` (add `send_card_init_message`, `add_waiting_reaction`)
+- Modify: `backend/cubeplex/im/outbound.py` (rewrite `_dispatch_op` + dispatch loop)
+- Modify: `backend/cubeplex/im/feishu/connector.py` (add `send_card_init_message`, `add_waiting_reaction`)
 - Create: `backend/tests/im/test_tailer_dispatch.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2362,9 +2362,9 @@ from typing import Any
 
 import pytest
 
-from cubebox.im.feishu.card_renderer import render
-from cubebox.im.outbound import OutboundOp, OutboundRunTailer
-from cubebox.im.types import RenderState
+from cubeplex.im.feishu.card_renderer import render
+from cubeplex.im.outbound import OutboundOp, OutboundRunTailer
+from cubeplex.im.types import RenderState
 
 
 class _FakeCardKit:
@@ -2413,7 +2413,7 @@ class _FakeConnector:
 
 @pytest.mark.asyncio
 async def test_dispatch_card_create_then_stream_text() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     cardkit = _FakeCardKit()
     connector = _FakeConnector()
     tailer = OutboundRunTailer(
@@ -2445,7 +2445,7 @@ async def test_dispatch_card_create_then_stream_text() -> None:
 
 @pytest.mark.asyncio
 async def test_dispatch_finalize_calls_cardkit_finalize_with_streaming_off() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     state.card_id = "AAQA"
     state.card_state.streaming_content = "done"
     state.card_state.finalized = True
@@ -2477,7 +2477,7 @@ Expected: errors about `cardkit` kwarg / `send_card_init_message` etc.
 
 - [ ] **Step 3: Add `send_card_init_message` to `FeishuConnector`**
 
-Edit `backend/cubebox/im/feishu/connector.py`. Add a new method on `FeishuConnector` (insert near `send_text_message`):
+Edit `backend/cubeplex/im/feishu/connector.py`. Add a new method on `FeishuConnector` (insert near `send_text_message`):
 
 ```python
     async def send_card_init_message(self, card_id: str) -> str | None:
@@ -2545,7 +2545,7 @@ Edit `backend/cubebox/im/feishu/connector.py`. Add a new method on `FeishuConnec
 
 - [ ] **Step 4: Rewrite `OutboundRunTailer.__init__` and `_dispatch_op`**
 
-Edit `backend/cubebox/im/outbound.py`. Replace the `OutboundRunTailer.__init__` signature and its `_dispatch_op` (existing lines ~147-306) with:
+Edit `backend/cubeplex/im/outbound.py`. Replace the `OutboundRunTailer.__init__` signature and its `_dispatch_op` (existing lines ~147-306) with:
 
 ```python
 class OutboundRunTailer:
@@ -2580,7 +2580,7 @@ class OutboundRunTailer:
     # ... run() unchanged structurally — only the dispatch call below changes.
 
     async def _dispatch_op(self, op: OutboundOp, *, is_terminal: bool) -> bool:
-        from cubebox.im.feishu.card_renderer import render
+        from cubeplex.im.feishu.card_renderer import render
 
         state = self._state
         cardkit = self._cardkit
@@ -2704,7 +2704,7 @@ Expected: both tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/im/outbound.py backend/cubebox/im/feishu/connector.py backend/tests/im/test_tailer_dispatch.py
+git add backend/cubeplex/im/outbound.py backend/cubeplex/im/feishu/connector.py backend/tests/im/test_tailer_dispatch.py
 git commit -m "feat(im): tailer dispatches to CardKit ops; connector send_card_init_message"
 ```
 
@@ -2713,8 +2713,8 @@ git commit -m "feat(im): tailer dispatches to CardKit ops; connector send_card_i
 ## Task 13: Update `IMArtifactDispatcher` to mutate `CardState.artifacts`
 
 **Files:**
-- Modify: `backend/cubebox/im/artifacts.py`
-- Modify: `backend/cubebox/im/outbound.py` (revisit artifact branch in `run()`)
+- Modify: `backend/cubeplex/im/artifacts.py`
+- Modify: `backend/cubeplex/im/outbound.py` (revisit artifact branch in `run()`)
 - Create: `backend/tests/im/test_artifact_dispatcher.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2725,8 +2725,8 @@ Create `backend/tests/im/test_artifact_dispatcher.py`:
 """IMArtifactDispatcher updates card_state.artifacts rather than sending a message."""
 import pytest
 
-from cubebox.im.artifacts import IMArtifactDispatcher
-from cubebox.im.feishu.card_model import CardState
+from cubeplex.im.artifacts import IMArtifactDispatcher
+from cubeplex.im.feishu.card_model import CardState
 
 
 class _FakeConnector:
@@ -2736,7 +2736,7 @@ class _FakeConnector:
 
 @pytest.mark.asyncio
 async def test_document_artifact_writes_share_url_to_card_state() -> None:
-    state = CardState(bot_name="cubebox", run_id="run_1")
+    state = CardState(bot_name="cubeplex", run_id="run_1")
     disp = IMArtifactDispatcher(
         connector=_FakeConnector(),
         redis=None,  # unused on the share-url-only path in this test
@@ -2767,7 +2767,7 @@ Expected: TypeError on `card_state=` kwarg.
 
 - [ ] **Step 3: Refactor `IMArtifactDispatcher`**
 
-Edit `backend/cubebox/im/artifacts.py`. Replace the whole module body with:
+Edit `backend/cubeplex/im/artifacts.py`. Replace the whole module body with:
 
 ```python
 """IM-side artifact dispatcher — updates CardState, no standalone messages.
@@ -2787,9 +2787,9 @@ from typing import Any, Awaitable, Callable
 from botocore.exceptions import ClientError
 from loguru import logger
 
-from cubebox.im.feishu.card_model import ArtifactItem, CardState
-from cubebox.objectstore import get_objectstore_client
-from cubebox.services.artifact_share import mint_share_token as _default_mint
+from cubeplex.im.feishu.card_model import ArtifactItem, CardState
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.services.artifact_share import mint_share_token as _default_mint
 
 
 MintShareToken = Callable[..., Awaitable[str]]
@@ -2882,7 +2882,7 @@ class IMArtifactDispatcher:
 
 - [ ] **Step 4: Wire `artifact` branch in `OutboundRunTailer.run`**
 
-In `backend/cubebox/im/outbound.py`'s `run()` loop, after `op = fold_event(...)` returns for an artifact event, also invoke the dispatcher and then re-emit a patch_card. Concretely, change `fold_event` for `artifact` (Task 10) to instead return `None` and let the tailer call the dispatcher directly. The simplest path: keep the existing `fold_event` artifact branch but have the tailer detect after-mutation by checking that `op.kind` is `card_create` / `patch_card`. Since the dispatcher mutates `card_state.artifacts` BEFORE the patch happens, we need to call `dispatcher.handle()` first, THEN dispatch the op.
+In `backend/cubeplex/im/outbound.py`'s `run()` loop, after `op = fold_event(...)` returns for an artifact event, also invoke the dispatcher and then re-emit a patch_card. Concretely, change `fold_event` for `artifact` (Task 10) to instead return `None` and let the tailer call the dispatcher directly. The simplest path: keep the existing `fold_event` artifact branch but have the tailer detect after-mutation by checking that `op.kind` is `card_create` / `patch_card`. Since the dispatcher mutates `card_state.artifacts` BEFORE the patch happens, we need to call `dispatcher.handle()` first, THEN dispatch the op.
 
 Add this branch inside the for-loop of `run()`, right above `delivered = await self._dispatch_op(...)`:
 
@@ -2906,7 +2906,7 @@ Expected: the test passes.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/im/artifacts.py backend/cubebox/im/outbound.py backend/tests/im/test_artifact_dispatcher.py
+git add backend/cubeplex/im/artifacts.py backend/cubeplex/im/outbound.py backend/tests/im/test_artifact_dispatcher.py
 git commit -m "feat(im): IMArtifactDispatcher mutates CardState; tailer triggers patch"
 ```
 
@@ -2915,7 +2915,7 @@ git commit -m "feat(im): IMArtifactDispatcher mutates CardState; tailer triggers
 ## Task 14: Add `card_action_router.dispatch` (pure)
 
 **Files:**
-- Create: `backend/cubebox/im/feishu/card_action_router.py`
+- Create: `backend/cubeplex/im/feishu/card_action_router.py`
 - Create: `backend/tests/im/feishu/test_card_action_router.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -2926,7 +2926,7 @@ Create `backend/tests/im/feishu/test_card_action_router.py`:
 """Tests for card_action_router.dispatch — pure routing logic."""
 import pytest
 
-from cubebox.im.feishu.card_action_router import (
+from cubeplex.im.feishu.card_action_router import (
     ActionPayload,
     InvalidAction,
     ResumeAction,
@@ -3004,7 +3004,7 @@ Expected: module not found.
 
 - [ ] **Step 3: Implement `card_action_router.py`**
 
-Create `backend/cubebox/im/feishu/card_action_router.py`:
+Create `backend/cubeplex/im/feishu/card_action_router.py`:
 
 ```python
 """Pure routing logic for inbound CardKit `card.action.trigger` events.
@@ -3114,7 +3114,7 @@ Expected: all 6 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/card_action_router.py backend/tests/im/feishu/test_card_action_router.py
+git add backend/cubeplex/im/feishu/card_action_router.py backend/tests/im/feishu/test_card_action_router.py
 git commit -m "feat(im-feishu): card_action_router.dispatch + parse_action_payload"
 ```
 
@@ -3123,7 +3123,7 @@ git commit -m "feat(im-feishu): card_action_router.dispatch + parse_action_paylo
 ## Task 15: Wire `card.action.trigger` into the Feishu webhook ingress
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/im_ingress.py`
+- Modify: `backend/cubeplex/api/routes/v1/im_ingress.py`
 - Create: `backend/tests/im/feishu/test_im_ingress_card_action.py`
 
 - [ ] **Step 1: Write the failing test**
@@ -3145,7 +3145,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     resume_calls: list[dict[str, Any]] = []
 
@@ -3196,7 +3196,7 @@ async def test_card_action_dispatch_calls_resume(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_card_action_token_replay_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     resume_calls: list[Any] = []
 
@@ -3238,7 +3238,7 @@ async def test_card_action_token_replay_idempotent(monkeypatch: pytest.MonkeyPat
 async def test_card_action_responder_mismatch_returns_toast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox.api.routes.v1 import im_ingress
+    from cubeplex.api.routes.v1 import im_ingress
 
     async def fake_resume(**_: Any) -> bool:
         raise AssertionError("must not call resume on mismatch")
@@ -3276,29 +3276,29 @@ async def test_card_action_responder_mismatch_returns_toast(
 cd backend && uv run pytest tests/im/feishu/test_im_ingress_card_action.py -v
 ```
 
-Expected: `AttributeError: module 'cubebox.api.routes.v1.im_ingress' has no attribute '_handle_card_action'`.
+Expected: `AttributeError: module 'cubeplex.api.routes.v1.im_ingress' has no attribute '_handle_card_action'`.
 
 - [ ] **Step 3: Add the handler function and stub dependencies**
 
-Edit `backend/cubebox/api/routes/v1/im_ingress.py`. Add at top of the module imports (after the existing imports):
+Edit `backend/cubeplex/api/routes/v1/im_ingress.py`. Add at top of the module imports (after the existing imports):
 
 ```python
-from cubebox.im.feishu.card_action_router import (
+from cubeplex.im.feishu.card_action_router import (
     InvalidAction,
     dispatch as dispatch_card_action,
     parse_action_payload,
 )
-from cubebox.run_manager import resume_paused_run  # cubepi-side resume entry
+from cubeplex.run_manager import resume_paused_run  # cubepi-side resume entry
 ```
 
-If `cubebox.run_manager.resume_paused_run` does not exist, add it as a thin wrapper next to wherever runs are kicked off; verify with:
+If `cubeplex.run_manager.resume_paused_run` does not exist, add it as a thin wrapper next to wherever runs are kicked off; verify with:
 
 ```bash
-grep -rn "def resume_paused_run" backend/cubebox/ || \
+grep -rn "def resume_paused_run" backend/cubeplex/ || \
   echo "MISSING — add a wrapper around cubepi's resume_with_human_input"
 ```
 
-If missing, create `backend/cubebox/run_manager.py` with:
+If missing, create `backend/cubeplex/run_manager.py` with:
 
 ```python
 """Run-level lifecycle wrappers shared by SSE + IM resume paths."""
@@ -3328,7 +3328,7 @@ async def resume_paused_run(
 Now add the Redis helpers and the card-action handler. Append to `im_ingress.py`:
 
 ```python
-from cubebox.redis_client import get_redis_pool
+from cubeplex.redis_client import get_redis_pool
 
 async def _redis_get(key: str) -> str | None:
     pool = await get_redis_pool()
@@ -3436,7 +3436,7 @@ Expected: all 3 tests pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/im_ingress.py backend/cubebox/run_manager.py backend/tests/im/feishu/test_im_ingress_card_action.py
+git add backend/cubeplex/api/routes/v1/im_ingress.py backend/cubeplex/run_manager.py backend/tests/im/feishu/test_im_ingress_card_action.py
 git commit -m "feat(im-feishu): webhook ingress branches on card.action.trigger"
 ```
 
@@ -3445,7 +3445,7 @@ git commit -m "feat(im-feishu): webhook ingress branches on card.action.trigger"
 ## Task 16: Subscribe long-connection to card.action.trigger
 
 **Files:**
-- Modify: `backend/cubebox/im/feishu/long_connection.py`
+- Modify: `backend/cubeplex/im/feishu/long_connection.py`
 
 - [ ] **Step 1: Inspect the existing handler registration**
 
@@ -3453,20 +3453,20 @@ Run:
 
 ```bash
 grep -n "register_p2.*v1\|EventDispatcher\|dispatcher\.on" \
-  backend/cubebox/im/feishu/long_connection.py
+  backend/cubeplex/im/feishu/long_connection.py
 ```
 
 Identify the location where `im.message.receive_v1` is registered. We need to register a `card.action.trigger` handler alongside it.
 
 - [ ] **Step 2: Add the card-action handler**
 
-In `backend/cubebox/im/feishu/long_connection.py`, find the function that builds the `EventDispatcher` (typically `_build_dispatcher` or similar) and add, immediately after the message-handler registration:
+In `backend/cubeplex/im/feishu/long_connection.py`, find the function that builds the `EventDispatcher` (typically `_build_dispatcher` or similar) and add, immediately after the message-handler registration:
 
 ```python
     from lark_oapi.adapter.ws.ws_card import CardActionTriggerEvent
 
     async def _on_card_action(event: CardActionTriggerEvent) -> None:
-        from cubebox.api.routes.v1.im_ingress import _handle_card_action
+        from cubeplex.api.routes.v1.im_ingress import _handle_card_action
         # event.event is the same shape as the webhook event body.
         # Wrap into the {"header": ..., "event": ...} envelope our handler expects.
         raw = {
@@ -3489,7 +3489,7 @@ In `backend/cubebox/im/feishu/long_connection.py`, find the function that builds
 - [ ] **Step 3: Smoke-test the long-connection startup**
 
 ```bash
-cd backend && uv run python -c "from cubebox.im.feishu.long_connection import build_dispatcher; print('ok')" 2>&1 | tail -5
+cd backend && uv run python -c "from cubeplex.im.feishu.long_connection import build_dispatcher; print('ok')" 2>&1 | tail -5
 ```
 
 Expected: prints `ok`. If the SDK import line fails, search and update as noted above before continuing.
@@ -3497,7 +3497,7 @@ Expected: prints `ok`. If the SDK import line fails, search and update as noted 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/long_connection.py
+git add backend/cubeplex/im/feishu/long_connection.py
 git commit -m "feat(im-feishu): long-connection subscribes to card.action.trigger"
 ```
 
@@ -3506,7 +3506,7 @@ git commit -m "feat(im-feishu): long-connection subscribes to card.action.trigge
 ## Task 17: Implement `resume_paused_run` end-to-end
 
 **Files:**
-- Modify: `backend/cubebox/run_manager.py`
+- Modify: `backend/cubeplex/run_manager.py`
 - Create: `backend/tests/test_run_manager_resume.py`
 
 - [ ] **Step 1: Inspect cubepi's resume API**
@@ -3534,7 +3534,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_resume_paused_run_calls_cubepi(monkeypatch: pytest.MonkeyPatch) -> None:
-    from cubebox import run_manager
+    from cubeplex import run_manager
 
     seen: list[dict[str, Any]] = []
 
@@ -3557,7 +3557,7 @@ async def test_resume_paused_run_calls_cubepi(monkeypatch: pytest.MonkeyPatch) -
 async def test_resume_paused_run_returns_false_when_run_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from cubebox import run_manager
+    from cubeplex import run_manager
 
     async def fake_resume(_: str, **__: Any) -> bool:
         return False
@@ -3579,7 +3579,7 @@ Expected: import or attribute error on `_cubepi_resume`.
 
 - [ ] **Step 4: Implement `resume_paused_run`**
 
-Replace the body of `backend/cubebox/run_manager.py` (created in Task 15) with:
+Replace the body of `backend/cubeplex/run_manager.py` (created in Task 15) with:
 
 ```python
 """Run-level lifecycle wrappers shared by SSE + IM resume paths."""
@@ -3636,7 +3636,7 @@ Expected: both tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/run_manager.py backend/tests/test_run_manager_resume.py
+git add backend/cubeplex/run_manager.py backend/tests/test_run_manager_resume.py
 git commit -m "feat(run): resume_paused_run wraps cubepi resume_with_human_input"
 ```
 
@@ -3645,7 +3645,7 @@ git commit -m "feat(run): resume_paused_run wraps cubepi resume_with_human_input
 ## Task 18: Migrate `FeishuConnector` to emergency-text-only legacy path
 
 **Files:**
-- Modify: `backend/cubebox/im/feishu/connector.py`
+- Modify: `backend/cubeplex/im/feishu/connector.py`
 - Modify: `backend/tests/im/feishu/test_connector_emergency.py` (create)
 
 - [ ] **Step 1: Write the failing test**
@@ -3654,7 +3654,7 @@ Create `backend/tests/im/feishu/test_connector_emergency.py`:
 
 ```python
 """Connector retains a single emergency text path; old text streaming gone."""
-from cubebox.im.feishu import connector
+from cubeplex.im.feishu import connector
 
 
 def test_connector_module_does_not_export_build_payload() -> None:
@@ -3685,7 +3685,7 @@ Expected: assertions fail because the legacy attributes still exist.
 
 - [ ] **Step 3: Delete dead methods, rename to `_send_emergency_text`**
 
-Edit `backend/cubebox/im/feishu/connector.py`:
+Edit `backend/cubeplex/im/feishu/connector.py`:
 
 - Delete `_MARKDOWN_TABLE_RE` and `_MARKDOWN_HINT_RE` constants (lines 64-65).
 - Delete the entire `_build_payload` static method (lines 227-238).
@@ -3753,7 +3753,7 @@ Edit `backend/cubebox/im/feishu/connector.py`:
         return str(message_id) if message_id else None
 ```
 
-- Delete the public `send_to_chat` method (now dead — verify nothing in the codebase imports it: `grep -rn "send_to_chat" backend/cubebox`; if anything does, follow up before deleting).
+- Delete the public `send_to_chat` method (now dead — verify nothing in the codebase imports it: `grep -rn "send_to_chat" backend/cubeplex`; if anything does, follow up before deleting).
 
 - Delete `send_text_message` (replaced by `_send_emergency_text`).
 
@@ -3793,7 +3793,7 @@ Expected: all green. If a test references one of the deleted methods, update it 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/im/feishu/connector.py backend/tests/im/feishu/test_connector_emergency.py
+git add backend/cubeplex/im/feishu/connector.py backend/tests/im/feishu/test_connector_emergency.py
 git commit -m "refactor(im-feishu): drop legacy text path; keep _send_emergency_text only"
 ```
 
@@ -3802,7 +3802,7 @@ git commit -m "refactor(im-feishu): drop legacy text path; keep _send_emergency_
 ## Task 19: Write `awaiting_responder` to Redis on AskUser / SandboxConfirm emit
 
 **Files:**
-- Modify: `backend/cubebox/im/outbound.py`
+- Modify: `backend/cubeplex/im/outbound.py`
 - Modify: `backend/tests/im/test_fold_event_terminal.py`
 
 - [ ] **Step 1: Extend the failing test**
@@ -3814,7 +3814,7 @@ Append to `backend/tests/im/test_fold_event_terminal.py`:
 async def test_pending_input_writes_responder_to_redis() -> None:
     import pytest as _pytest
 
-    from cubebox.im.outbound import register_awaiting_responder
+    from cubeplex.im.outbound import register_awaiting_responder
 
     state_record: dict[str, tuple[str, int]] = {}
 
@@ -3845,7 +3845,7 @@ Expected: import error on `register_awaiting_responder`.
 
 - [ ] **Step 3: Implement the registration helper**
 
-In `backend/cubebox/im/outbound.py`, near the module top (after imports):
+In `backend/cubeplex/im/outbound.py`, near the module top (after imports):
 
 ```python
 from typing import Awaitable, Callable
@@ -3874,7 +3874,7 @@ async def register_awaiting_responder(
 
 - [ ] **Step 4: Wire it into the worker — call after dispatching a PendingInput op**
 
-Edit `backend/cubebox/im/worker.py` (or whichever module owns the run-queue worker). Find where the tailer is started for a run; the worker already knows the sender's `open_id` (from the inbound event). After the tailer's `_dispatch_op` returns for a `patch_card` that follows an `ask_user` / `sandbox_confirm`, register the responder.
+Edit `backend/cubeplex/im/worker.py` (or whichever module owns the run-queue worker). Find where the tailer is started for a run; the worker already knows the sender's `open_id` (from the inbound event). After the tailer's `_dispatch_op` returns for a `patch_card` that follows an `ask_user` / `sandbox_confirm`, register the responder.
 
 Concretely, the cleanest seam is inside `OutboundRunTailer.run()`. Add to the for-ev loop in `outbound.py`, immediately after the `delivered = await self._dispatch_op(...)` call:
 
@@ -3904,7 +3904,7 @@ Expected: all 7 tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/im/outbound.py backend/cubebox/im/worker.py backend/tests/im/test_fold_event_terminal.py
+git add backend/cubeplex/im/outbound.py backend/cubeplex/im/worker.py backend/tests/im/test_fold_event_terminal.py
 git commit -m "feat(im): register awaiting_responder when AskUser/SandboxConfirm emits"
 ```
 
@@ -3932,9 +3932,9 @@ from typing import Any
 import pytest
 from httpx import MockTransport, Request, Response
 
-from cubebox.im.feishu.cardkit_client import CardKitClient
-from cubebox.im.outbound import OutboundRunTailer, fold_event
-from cubebox.im.types import RenderState
+from cubeplex.im.feishu.cardkit_client import CardKitClient
+from cubeplex.im.outbound import OutboundRunTailer, fold_event
+from cubeplex.im.types import RenderState
 
 
 class _FakeConnector:
@@ -3979,7 +3979,7 @@ async def test_full_lifecycle_through_real_client() -> None:
         transport=MockTransport(handler),
     )
 
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     conn = _FakeConnector()
     tailer = OutboundRunTailer(
         redis=None,
@@ -4213,8 +4213,8 @@ from __future__ import annotations
 
 import pytest
 
-from cubebox.im.outbound import OutboundOp, OutboundRunTailer
-from cubebox.im.types import RenderState
+from cubeplex.im.outbound import OutboundOp, OutboundRunTailer
+from cubeplex.im.types import RenderState
 
 
 class _FailingCardKit:
@@ -4251,7 +4251,7 @@ class _RecordingConnector:
 
 @pytest.mark.asyncio
 async def test_create_failure_triggers_emergency_text() -> None:
-    state = RenderState(bot_name="cubebox", run_id="run_1")
+    state = RenderState(bot_name="cubeplex", run_id="run_1")
     state.card_state.streaming_content = "Partial answer text"
     cardkit = _FailingCardKit()
     connector = _RecordingConnector()
@@ -4448,7 +4448,7 @@ Expected: green. Per CLAUDE.md E2E posture, run only locally (not CI).
 - [ ] **Step 3: Type-check**
 
 ```bash
-cd backend && uv run mypy cubebox/im
+cd backend && uv run mypy cubeplex/im
 ```
 
 Expected: zero errors.
@@ -4456,7 +4456,7 @@ Expected: zero errors.
 - [ ] **Step 4: Lint and format**
 
 ```bash
-cd backend && uv run ruff check cubebox/im tests/im && uv run ruff format --check cubebox/im tests/im
+cd backend && uv run ruff check cubeplex/im tests/im && uv run ruff format --check cubeplex/im tests/im
 ```
 
 Expected: zero errors.

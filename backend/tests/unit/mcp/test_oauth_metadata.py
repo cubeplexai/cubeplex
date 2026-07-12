@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.oauth.metadata."""
+"""Unit tests for cubeplex.mcp.oauth.metadata."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from typing import Any
 import httpx
 import pytest
 
-from cubebox.mcp.exceptions import OAuthMetadataFetchError, OAuthMetadataNotFound
-from cubebox.mcp.oauth.metadata import OAuthMetadataDiscovery
+from cubeplex.mcp.exceptions import OAuthMetadataFetchError, OAuthMetadataNotFound
+from cubeplex.mcp.oauth.metadata import OAuthMetadataDiscovery
 
 Handler = Callable[[httpx.Request], httpx.Response]
 

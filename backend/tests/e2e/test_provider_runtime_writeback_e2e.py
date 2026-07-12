@@ -18,8 +18,8 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.llm.runtime_writeback import _do_writeback
-from cubebox.models.provider import Model, Provider
+from cubeplex.llm.runtime_writeback import _do_writeback
+from cubeplex.models.provider import Model, Provider
 
 pytestmark = pytest.mark.e2e
 
@@ -34,7 +34,7 @@ async def _seed_provider_with_models(
 ) -> tuple[str, str, str]:
     """Insert a system-scoped (org-NULL) provider + two models. Returns
     (provider_id, model_a_db_id, model_b_db_id)."""
-    from cubebox.utils.slug import slugify
+    from cubeplex.utils.slug import slugify
 
     provider = Provider(
         org_id=None,
@@ -70,7 +70,7 @@ async def _seed_provider_with_models(
 
 
 async def test_auth_error_flips_provider_liveness_fail(db_session: AsyncSession) -> None:
-    from cubebox.utils.slug import slugify
+    from cubeplex.utils.slug import slugify
 
     name = f"rt-writeback-auth-{uuid.uuid4().hex[:8]}"
     provider_id, _, _ = await _seed_provider_with_models(
@@ -94,7 +94,7 @@ async def test_auth_error_flips_provider_liveness_fail(db_session: AsyncSession)
 
 
 async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -> None:
-    from cubebox.utils.slug import slugify
+    from cubeplex.utils.slug import slugify
 
     name = f"rt-writeback-modelnf-{uuid.uuid4().hex[:8]}"
     provider_id, model_a_id, model_b_id = await _seed_provider_with_models(
@@ -127,7 +127,7 @@ async def test_model_not_found_flips_only_that_model(db_session: AsyncSession) -
 
 
 async def test_success_clears_only_a_failed_provider(db_session: AsyncSession) -> None:
-    from cubebox.utils.slug import slugify
+    from cubeplex.utils.slug import slugify
 
     # Provider currently failing -> success clears it back to "ok".
     name_fail = f"rt-writeback-clear-{uuid.uuid4().hex[:8]}"
@@ -148,7 +148,7 @@ async def test_success_clears_only_a_failed_provider(db_session: AsyncSession) -
 
 
 async def test_success_is_noop_for_healthy_provider(db_session: AsyncSession) -> None:
-    from cubebox.utils.slug import slugify
+    from cubeplex.utils.slug import slugify
 
     # Guarded UPDATE: a provider that was never tested (NULL) stays NULL —
     # success must not invent an "ok" out of nowhere.

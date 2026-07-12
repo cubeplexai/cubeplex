@@ -11,9 +11,9 @@ from typing import Any
 
 import pytest
 
-from cubebox.im import artifacts as artifacts_mod
-from cubebox.im.artifacts import IMArtifactDispatcher
-from cubebox.im.card_model import CardState
+from cubeplex.im import artifacts as artifacts_mod
+from cubeplex.im.artifacts import IMArtifactDispatcher
+from cubeplex.im.card_model import CardState
 
 pytestmark = pytest.mark.asyncio
 
@@ -70,7 +70,7 @@ def _dispatcher(connector: _FakeConnector, redis: _FakeRedis) -> IMArtifactDispa
         org_id="org-1",
         workspace_id="ws-1",
         conversation_id="conv-1",
-        card_state=CardState(bot_name="cubebox", run_id="run-1"),
+        card_state=CardState(bot_name="cubeplex", run_id="run-1"),
         run_id="run-1",
         platform="feishu",
         chat_id="oc_chat",

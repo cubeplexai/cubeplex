@@ -9,7 +9,7 @@ import {
   useAdminSkillsStore,
   type SkillCandidateOut,
   type SkillPreviewResponse,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { jsonHeaders } from '@/lib/csrf'
 import { Button } from '@/components/ui/button'

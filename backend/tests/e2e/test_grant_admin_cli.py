@@ -1,4 +1,4 @@
-"""E2E: cubebox admin grant-admin / revoke-admin via subprocess."""
+"""E2E: cubeplex admin grant-admin / revoke-admin via subprocess."""
 
 import os
 import secrets
@@ -7,8 +7,8 @@ import subprocess
 import pytest
 from sqlalchemy import select
 
-from cubebox.models import Organization, OrganizationMembership, OrgRole, User
-from cubebox.repositories import OrganizationMembershipRepository
+from cubeplex.models import Organization, OrganizationMembership, OrgRole, User
+from cubeplex.repositories import OrganizationMembershipRepository
 
 pytestmark = pytest.mark.e2e
 
@@ -17,7 +17,7 @@ def _run_cli(args: list[str]) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env.setdefault("ENV_FOR_DYNACONF", "test")
     return subprocess.run(
-        ["uv", "run", "cubebox", *args],
+        ["uv", "run", "cubeplex", *args],
         capture_output=True,
         text=True,
         env=env,

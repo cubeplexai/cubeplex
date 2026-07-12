@@ -1,6 +1,6 @@
 'use client'
 
-import { useToolDetailStore } from '@cubebox/core'
+import { useToolDetailStore } from '@cubeplex/core'
 
 export function useToolDetail() {
   const isOpen = useToolDetailStore((s) => s.isOpen)

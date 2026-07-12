@@ -11,8 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import OrganizationMembership, User
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import OrganizationMembership, User
 
 pytestmark = pytest.mark.e2e
 

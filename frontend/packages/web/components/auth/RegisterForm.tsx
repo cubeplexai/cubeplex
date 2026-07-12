@@ -4,9 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useTranslations } from 'next-intl'
-import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubebox/core'
-import { useDeploymentMode } from '@cubebox/core/hooks/useDeploymentMode'
-import { validatePassword } from '@cubebox/core/auth'
+import { createApiClient, registerUser, loginUser, useAuthStore } from '@cubeplex/core'
+import { useDeploymentMode } from '@cubeplex/core/hooks/useDeploymentMode'
+import { validatePassword } from '@cubeplex/core/auth'
 import { isInviteAcceptPath } from '@/lib/invitePath'
 
 export function RegisterForm({ nextPath = '/' }: { nextPath?: string }) {

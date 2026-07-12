@@ -1,10 +1,10 @@
 # Feishu IM connector setup
 
-cubebox can bind a Feishu (Lark) bot to a workspace so messages and
+cubeplex can bind a Feishu (Lark) bot to a workspace so messages and
 @-mentions become agent runs, with streamed replies + processing reactions
 + artifact share-links. Two delivery modes are supported:
 
-- **Long connection** (recommended for self-host / dev): cubebox holds an
+- **Long connection** (recommended for self-host / dev): cubeplex holds an
   outbound WebSocket via `lark_oapi.ws.Client`. No public ingress needed.
 - **Webhook**: Feishu POSTs events to `/api/v1/im/feishu/events`. Required
   for cloud deploys behind a public LB.
@@ -23,7 +23,7 @@ cubebox can bind a Feishu (Lark) bot to a workspace so messages and
    - `im:message.p2p_msg` (DMs delivered)
    - `im:message.reaction:write` (processing reactions)
    - `im:chat:readonly` (or `im:chat:read` / `im:chat`) — **REQUIRED**
-     for group Topic titles. CubeBox calls
+     for group Topic titles. CubePlex calls
      `GET /open-apis/im/v1/chats/:chat_id` on first group message to
      resolve the human-readable group name. Without this scope the
      Topic still works but its title stays empty until a name is
@@ -36,15 +36,15 @@ cubebox can bind a Feishu (Lark) bot to a workspace so messages and
      governed scope from `contact:user.base:readonly`.
    - `contact:user.id:readonly` — used by the gate's reverse lookup
      (resolve email → user). Required for the same reason.
-4. **Create the cubebox connector FIRST, then configure the Feishu
+4. **Create the cubeplex connector FIRST, then configure the Feishu
    event subscription.** The ingress route drops events for unknown
    `app_id` with a bare 200 and never echoes the `url_verification`
    challenge — Feishu's "verify request URL" step would fail until the
-   app_id is known to cubebox. So:
+   app_id is known to cubeplex. So:
    1. Copy the App ID + App Secret (and Encrypt Key / Verification
       Token, if you'll use webhook mode) from this page.
-   2. Jump to "Connect the bot to a cubebox workspace" below and POST
-      the credentials to cubebox. The endpoint hydrates `bot_open_id`
+   2. Jump to "Connect the bot to a cubeplex workspace" below and POST
+      the credentials to cubeplex. The endpoint hydrates `bot_open_id`
       and refuses to persist the account if hydration fails — so a
       successful 201 confirms the credentials are good.
    3. Then return here.
@@ -56,7 +56,7 @@ cubebox can bind a Feishu (Lark) bot to a workspace so messages and
      **Encrypt Key** and **Verification Token** you copied in step 4.1
      serve two roles: (a) signature verification on every request (the
      `x-lark-signature` header is HMAC'd with this key); (b) body
-     encryption when you flip the "Event Encryption" toggle. cubebox
+     encryption when you flip the "Event Encryption" toggle. cubeplex
      supports **both modes** — if you enable encryption, the ingress
      route try-decrypts against each enabled account's `encrypt_key`
      and routes by the `app_id` inside the decrypted payload.
@@ -65,7 +65,7 @@ cubebox can bind a Feishu (Lark) bot to a workspace so messages and
      in v1.
 6. Publish a version of the app and grant it to your tenant.
 
-## Connect the bot to a cubebox workspace
+## Connect the bot to a cubeplex workspace
 
 ```http
 POST /api/v1/ws/{workspace_id}/im/accounts
@@ -88,7 +88,7 @@ endpoint at connect time and stores it on the credential. The webhook
 ingress and the long-connection client both read it from there — no further
 hydration on every event.
 
-Restart the cubebox API process (or wait for the next pod restart in cloud
+Restart the cubeplex API process (or wait for the next pod restart in cloud
 deploys) so the long-connection client opens. For webhook mode no restart
 is needed.
 

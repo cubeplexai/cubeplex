@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import { Download } from 'lucide-react'
-import type { AttachmentPanelInfo } from '@cubebox/core'
-import { usePanelStore } from '@cubebox/core'
+import type { AttachmentPanelInfo } from '@cubeplex/core'
+import { usePanelStore } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { ScrollArea } from '@/components/ui/scroll-area'

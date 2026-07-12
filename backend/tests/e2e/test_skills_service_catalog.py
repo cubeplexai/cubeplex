@@ -6,16 +6,16 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.objectstore import get_objectstore_client
-from cubebox.repositories.skill import (
+from cubeplex.objectstore import get_objectstore_client
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,
     WorkspaceSkillBindingRepository,
 )
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService
-from cubebox.skills.storage_paths import global_skill_prefix
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService
+from cubeplex.skills.storage_paths import global_skill_prefix
 
 
 async def _seed_org_ws_user(

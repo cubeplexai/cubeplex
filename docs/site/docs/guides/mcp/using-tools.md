@@ -39,7 +39,7 @@ The agent may call both the GitHub and Linear connectors, then synthesize the re
 
 ## Progressive disclosure
 
-When your workspace has many connectors enabled, CubeBox uses **progressive disclosure** to keep the agent efficient. When the combined tool definitions would take up too much of the model's context window, the system stops loading every tool upfront and instead:
+When your workspace has many connectors enabled, CubePlex uses **progressive disclosure** to keep the agent efficient. When the combined tool definitions would take up too much of the model's context window, the system stops loading every tool upfront and instead:
 
 1. Groups each connector's tools into a named, deferred group rather than loading them all into the agent's context.
 2. Shows the agent a lightweight summary of what each group can do.

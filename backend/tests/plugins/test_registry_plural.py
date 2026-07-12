@@ -1,4 +1,4 @@
-from cubebox.plugins.registry import GROUP_AUDIT, PluginRegistry
+from cubeplex.plugins.registry import GROUP_AUDIT, PluginRegistry
 
 
 class _StubSink:

@@ -25,7 +25,7 @@ Every skill has the following attributes:
 
 A skill's stored source is one of two values, `preinstalled` or `uploaded`:
 
-- **Preinstalled** — skills that ship with CubeBox. These are available by default. An admin can uninstall a preinstalled skill for the org; CubeBox records that decision so it is not restored on the next system update.
+- **Preinstalled** — skills that ship with CubePlex. These are available by default. An admin can uninstall a preinstalled skill for the org; CubePlex records that decision so it is not restored on the next system update.
 - **Uploaded** — custom skills your organization creates and uploads directly. Skills imported from a remote registry (e.g., [skills.sh](https://skills.sh)) are also stored as `uploaded`, with a reference back to the registry they were imported from.
 
 ## Upload a custom skill
@@ -33,7 +33,7 @@ A skill's stored source is one of two values, `preinstalled` or `uploaded`:
 1. Go to **Admin > Skills**.
 2. Click **Upload Skill**.
 3. Select a `.zip` bundle. It must contain a `SKILL.md` at the root whose frontmatter includes `name`, `version`, and `description`. (Each file may be at most 10 MB, and the whole bundle at most 50 MB.) The skill's name, description, and keywords are read from that frontmatter.
-4. Upload it. CubeBox validates the bundle and publishes it.
+4. Upload it. CubePlex validates the bundle and publishes it.
 
 The skill is added to your organization's catalog. To make it available in every workspace, install it org-wide (see "Install and control availability" below). Workspace owners and members can also install catalog skills themselves from the skill discovery interface.
 
@@ -60,7 +60,7 @@ Once a registry is connected (and enabled), its skills surface in the discovery 
 From **Admin > Skills** you control which skills exist in your organization and how they reach workspaces:
 
 - **Install** a skill org-wide so it becomes available to every workspace. Each org-wide install carries an **auto-bind** setting: when on, the skill is automatically enabled in workspaces; when off, a workspace owner must turn it on per workspace. Preinstalled skills default to auto-bind on; uploaded skills default to off.
-- **Uninstall** a skill to remove it from the org. This also removes its per-workspace bindings. Uninstalling a *preinstalled* skill records a tombstone so CubeBox does not restore it on the next system update.
+- **Uninstall** a skill to remove it from the org. This also removes its per-workspace bindings. Uninstalling a *preinstalled* skill records a tombstone so CubePlex does not restore it on the next system update.
 
 Whether a specific workspace can use an org-installed skill is then a per-workspace toggle (managed by the workspace owner from the workspace **Skills** page, or by an admin from the skill's workspace-bindings view). Disabling a skill for a workspace hides it from the agent there; historical conversation output is unaffected.
 

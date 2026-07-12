@@ -1,4 +1,4 @@
-from cubebox.services.sandbox_policy_conflicts import credential_conflict_warnings
+from cubeplex.services.sandbox_policy_conflicts import credential_conflict_warnings
 
 
 class _Cred:

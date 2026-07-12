@@ -10,7 +10,7 @@ import {
   revokeShare,
   type ConversationShare,
   type ShareScope,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'

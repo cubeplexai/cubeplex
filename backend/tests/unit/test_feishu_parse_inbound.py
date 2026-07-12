@@ -2,7 +2,7 @@
 
 import json
 
-from cubebox.im.feishu.connector import FeishuConnector
+from cubeplex.im.feishu.connector import FeishuConnector
 
 GROUP_MENTION = {
     "header": {"event_id": "evgrp01", "event_type": "im.message.receive_v1"},

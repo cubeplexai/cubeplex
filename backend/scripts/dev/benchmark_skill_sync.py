@@ -30,13 +30,13 @@ from fastapi_users.schemas import BaseUserCreate
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.users import UserManager, _slugify_org_name
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.db.engine import async_session_maker
-from cubebox.models import Organization, User, Workspace
-from cubebox.sandbox.lazy import _sync_skills
-from cubebox.skills.cache import SkillCache
-from cubebox.skills.service import SkillCatalogService, SkillPublishService
+from cubeplex.auth.users import UserManager, _slugify_org_name
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.db.engine import async_session_maker
+from cubeplex.models import Organization, User, Workspace
+from cubeplex.sandbox.lazy import _sync_skills
+from cubeplex.skills.cache import SkillCache
+from cubeplex.skills.service import SkillCatalogService, SkillPublishService
 from tests.e2e.conftest import MemSandbox
 
 # Import MemSandbox from test conftest — OK for a dev-only benchmark script.
@@ -194,8 +194,8 @@ async def main() -> None:
         async with async_session_maker() as cleanup_session:
             from sqlalchemy import delete
 
-            from cubebox.models import OrgSkillInstall
-            from cubebox.models.user_sandbox import UserSandbox
+            from cubeplex.models import OrgSkillInstall
+            from cubeplex.models.user_sandbox import UserSandbox
 
             # Delete skill installs scoped to this workspace
             await cleanup_session.execute(

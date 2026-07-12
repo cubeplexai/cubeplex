@@ -1,4 +1,4 @@
-"""Unit tests for cubebox.mcp.oauth.state."""
+"""Unit tests for cubeplex.mcp.oauth.state."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from collections.abc import AsyncIterator
 import fakeredis.aioredis
 import pytest
 
-from cubebox.mcp.exceptions import OAuthStateExpired, OAuthStateInvalid
-from cubebox.mcp.oauth.state import OAuthStatePayload, OAuthStateStore
+from cubeplex.mcp.exceptions import OAuthStateExpired, OAuthStateInvalid
+from cubeplex.mcp.oauth.state import OAuthStatePayload, OAuthStateStore
 
 SECRET = b"unit-test-secret-key-32bytes!!!!"
 

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from cubebox.im.op_dispatcher import OpDispatcher
+from cubeplex.im.op_dispatcher import OpDispatcher
 
 
 class FakeDispatcher:

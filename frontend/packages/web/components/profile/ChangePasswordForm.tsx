@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
-import { createApiClient, changePassword, ApiError } from '@cubebox/core'
+import { createApiClient, changePassword, ApiError } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 
 export function ChangePasswordForm() {

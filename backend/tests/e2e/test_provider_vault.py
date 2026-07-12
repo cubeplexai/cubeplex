@@ -12,11 +12,11 @@ from httpx import AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.credentials.encryption import FernetBackend
-from cubebox.llm.snapshot import load_llm_snapshot
-from cubebox.models import Credential
-from cubebox.models.provider import Provider
-from cubebox.seeders.provider_seeder import seed_system_providers_from_config
+from cubeplex.credentials.encryption import FernetBackend
+from cubeplex.llm.snapshot import load_llm_snapshot
+from cubeplex.models import Credential
+from cubeplex.models.provider import Provider
+from cubeplex.seeders.provider_seeder import seed_system_providers_from_config
 
 pytestmark = pytest.mark.e2e
 
@@ -233,7 +233,7 @@ async def test_seeder_idempotent_with_changed_key(
     """Re-running the seeder with a different api_key updates ciphertext, keeps cred id."""
     backend = FernetBackend([Fernet.generate_key()])
     # Seed once with a sentinel api_key by patching config.llm.providers temporarily.
-    from cubebox.config import config as settings
+    from cubeplex.config import config as settings
 
     # Snapshot original LLM providers, replace with a single test entry.
     original_llm = dict(settings.get("llm", {}))

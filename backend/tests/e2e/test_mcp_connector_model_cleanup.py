@@ -7,9 +7,9 @@ import secrets
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.mcp._constants import server_url_hash
-from cubebox.mcp.effective import MCPEffectiveConnectorService
-from cubebox.models import (
+from cubeplex.mcp._constants import server_url_hash
+from cubeplex.mcp.effective import MCPEffectiveConnectorService
+from cubeplex.models import (
     Credential,
     MCPConnector,
     MCPConnectorTemplate,
@@ -18,7 +18,7 @@ from cubebox.models import (
     User,
     Workspace,
 )
-from cubebox.repositories.mcp import (
+from cubeplex.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,

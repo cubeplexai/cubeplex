@@ -2,7 +2,7 @@
 
 import { Search } from 'lucide-react'
 import { useTranslations } from 'next-intl'
-import type { AdminCatalogFilter, MCPTemplateScope } from '@cubebox/core'
+import type { AdminCatalogFilter, MCPTemplateScope } from '@cubeplex/core'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 

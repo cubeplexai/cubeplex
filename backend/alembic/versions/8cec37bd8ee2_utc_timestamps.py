@@ -4,7 +4,7 @@ Revision ID: 8cec37bd8ee2
 Revises: f3ee19317f6e
 Create Date: 2026-05-29 16:35:01.666600
 
-This migration switches all cubebox datetime columns from
+This migration switches all cubeplex datetime columns from
 ``timestamp without time zone`` to ``timestamp with time zone``.
 
 Hand-edit: every ``op.alter_column`` call carries a manually-added

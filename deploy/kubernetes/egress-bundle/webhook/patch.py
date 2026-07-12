@@ -109,7 +109,7 @@ def build_pod_patch(
             "name": "egress-ca-trust",
             "image": egress_image,  # has update-ca-certificates + the tools
             "command": ["/bin/sh", "-c",
-                        "cp /etc/egress-ca-pub/ca.pem /usr/local/share/ca-certificates/cubebox-egress.crt "
+                        "cp /etc/egress-ca-pub/ca.pem /usr/local/share/ca-certificates/cubeplex-egress.crt "
                         "&& update-ca-certificates"],
             "volumeMounts": [
                 {"name": "egress-ca-pub", "mountPath": "/etc/egress-ca-pub", "readOnly": True},

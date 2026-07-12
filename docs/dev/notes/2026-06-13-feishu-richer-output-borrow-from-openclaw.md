@@ -1,8 +1,8 @@
-# Richer Feishu output for cubebox: borrowing from openclaw-lark
+# Richer Feishu output for cubeplex: borrowing from openclaw-lark
 
 **Date:** 2026-06-13
 **Status:** Investigation note (research only, no code changes proposed yet)
-**Scope:** Why Feishu messages from cubebox lose markdown formatting and widget context, and which patterns from `~/openclaw-lark` are worth borrowing.
+**Scope:** Why Feishu messages from cubeplex lose markdown formatting and widget context, and which patterns from `~/openclaw-lark` are worth borrowing.
 
 ## 1. The gap
 
@@ -19,11 +19,11 @@ Two complaints, both real:
 
 This is by design today; the question is whether we should lift the design.
 
-## 2. How cubebox sends to Feishu today
+## 2. How cubeplex sends to Feishu today
 
 ### 2.1 Wire format
 
-`backend/cubebox/im/feishu/connector.py:227-238`:
+`backend/cubeplex/im/feishu/connector.py:227-238`:
 
 ```python
 @staticmethod
@@ -40,7 +40,7 @@ Every outbound message — placeholder, streaming edit, terminal, error — uses
 
 ### 2.2 Content shape upstream of the connector
 
-`backend/cubebox/im/outbound.py:48-54, 74-114`:
+`backend/cubeplex/im/outbound.py:48-54, 74-114`:
 
 - The tailer folds cubepi run events into a `RenderState` with two fields
   that matter for content: `tool_lines` (one italic line per active tool
@@ -166,7 +166,7 @@ chose summary over verbosity.
 - Must disable streaming mode before the final update — otherwise the
   card stays in a half-locked state.
 
-## 4. Mapping: cubebox events → Feishu card elements
+## 4. Mapping: cubeplex events → Feishu card elements
 
 Concrete mapping the borrow would enable. (Web component names from
 `frontend/packages/web/components/chat/`.)
@@ -243,15 +243,15 @@ which is a separate piece of work.
    existing Feishu tests that grep bubble text will break. Plan to
    migrate the E2E expectations alongside.
 5. **Cubepi pinning.** No cubepi changes needed for this — all of the
-   work is in `backend/cubebox/im/`. Worth verifying the event types
+   work is in `backend/cubeplex/im/`. Worth verifying the event types
    we'll start consuming (`tool_call` with full args/result, artifact
    metadata) are already emitted; the tailer only uses a subset today.
 
 ## Addendum 2026-06-14: cubepi event field audit (Plan Task 0)
 
-Verified against `backend/cubebox/streams/run_manager.py:303-449`
-(`cubepi_dict_to_agent_event`) and `backend/cubebox/agents/schemas.py`.
-The IM tailer consumes events in **cubebox's typed shape after
+Verified against `backend/cubeplex/streams/run_manager.py:303-449`
+(`cubepi_dict_to_agent_event`) and `backend/cubeplex/agents/schemas.py`.
+The IM tailer consumes events in **cubeplex's typed shape after
 translation**, not cubepi's raw `AgentEvent` shape. Every field below is
 authoritative — implementer agents must match these names.
 
@@ -288,7 +288,7 @@ the main `tool_steps` list.
 
 ### Plan field-name diff at a glance
 
-| Plan v0 assumption | Real cubebox-published shape |
+| Plan v0 assumption | Real cubeplex-published shape |
 |---|---|
 | `tool_call.data.id` | `tool_call.data.tool_call_id` |
 | `tool_call.data.args` (dict) | `tool_call.data.arguments` (JSON string) |
@@ -304,7 +304,7 @@ the main `tool_steps` list.
 
 ### Upstream-first follow-ups
 
-None. cubepi already emits everything we need; cubebox already
+None. cubepi already emits everything we need; cubeplex already
 translates it. Plan corrections live entirely in this branch.
 
 ## 7. Suggested next step
@@ -325,10 +325,10 @@ If we want to act on this:
 
 ## 8. References
 
-- `backend/cubebox/im/outbound.py:40-114` — event folding / op kinds
-- `backend/cubebox/im/feishu/connector.py:227-347` — current text-only
+- `backend/cubeplex/im/outbound.py:40-114` — event folding / op kinds
+- `backend/cubeplex/im/feishu/connector.py:227-347` — current text-only
   send / edit
-- `backend/cubebox/im/artifacts.py:43-110` — current image vs share-link
+- `backend/cubeplex/im/artifacts.py:43-110` — current image vs share-link
   artifact handling
 - `frontend/packages/web/components/chat/` — the widget catalog we're
   trying to mirror

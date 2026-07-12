@@ -14,7 +14,7 @@ This skill guides you through building a publishable skill bundle and installing
 
 ## Workflow
 
-A cubebox skill is a **directory** containing `SKILL.md` at its root plus any sibling files the skill needs at runtime. You write that directory in the sandbox, then register it as a skill artifact.
+A cubeplex skill is a **directory** containing `SKILL.md` at its root plus any sibling files the skill needs at runtime. You write that directory in the sandbox, then register it as a skill artifact.
 
 1. **Ground the request** — Ask the user what problem the skill solves, who it is for, and what the agent should do when the skill is active. One paragraph of context is enough.
 
@@ -37,7 +37,7 @@ A cubebox skill is a **directory** containing `SKILL.md` at its root plus any si
 
 3. **Write SKILL.md** at the root of the bundle directory. See **Frontmatter Reference** and **Body Guidelines** below.
 
-4. **Add supporting files** (optional) — Drop scripts, reference docs, and templates into subdirectories of the bundle. Reference them from SKILL.md by their bundle-relative path (e.g. `python scripts/fetch_metrics.py`, `cat reference/schema.md`). When the skill is enabled in a workspace, cubebox syncs the whole directory into the sandbox under `/workspace/.skills/<safe-name>/<version>/` (colons in the canonical name are normalised to `__`), so the agent can read or execute them from there at runtime — use the `path` field returned by `load_skill` rather than constructing it yourself.
+4. **Add supporting files** (optional) — Drop scripts, reference docs, and templates into subdirectories of the bundle. Reference them from SKILL.md by their bundle-relative path (e.g. `python scripts/fetch_metrics.py`, `cat reference/schema.md`). When the skill is enabled in a workspace, cubeplex syncs the whole directory into the sandbox under `/workspace/.skills/<safe-name>/<version>/` (colons in the canonical name are normalised to `__`), so the agent can read or execute them from there at runtime — use the `path` field returned by `load_skill` rather than constructing it yourself.
 
 5. **Register as skill artifact** — Call `save_artifact` with:
 
@@ -113,17 +113,17 @@ The description is loaded into the agent's system prompt at startup and is what 
 
 ### Optional Extensions
 
-Use the `cubebox` block to declare runtime dependencies:
+Use the `cubeplex` block to declare runtime dependencies:
 
 ```yaml
-cubebox:
+cubeplex:
   requires:
     env: [MY_API_KEY, ANOTHER_VAR]   # env vars the skill needs at runtime
 ```
 
 Only `requires.env` is currently consumed — preview and install surface these names so the user knows what credentials to provide. Other keys (`bins`, `primaryEnv`, …) are reserved for future use and have no effect today; don't add them unless the user asks.
 
-Aliases `openclaw`, `clawdbot`, and `clawdis` at the top level are also accepted and behave identically to `cubebox`.
+Aliases `openclaw`, `clawdbot`, and `clawdis` at the top level are also accepted and behave identically to `cubeplex`.
 
 ## Body Guidelines
 

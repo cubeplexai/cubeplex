@@ -3,7 +3,7 @@
 help:
 	@echo "Available commands:"
 	@echo "  make install           - Install frontend dependencies"
-	@echo "  make build-core        - Build @cubebox/core"
+	@echo "  make build-core        - Build @cubeplex/core"
 	@echo "  make build             - Build frontend packages"
 	@echo "  make lint              - Run frontend lint"
 	@echo "  make type-check        - Run frontend type checks"
@@ -20,7 +20,7 @@ install:
 	pnpm install --frozen-lockfile
 
 build-core:
-	pnpm --filter @cubebox/core build
+	pnpm --filter @cubeplex/core build
 
 build:
 	pnpm build

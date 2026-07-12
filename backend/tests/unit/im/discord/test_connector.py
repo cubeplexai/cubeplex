@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from cubebox.im.discord.connector import DiscordConnector
-from cubebox.im.types import DM_SCOPE_KEY
+from cubeplex.im.discord.connector import DiscordConnector
+from cubeplex.im.types import DM_SCOPE_KEY
 
 
 def _make_message(

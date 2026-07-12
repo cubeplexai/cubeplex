@@ -1,6 +1,6 @@
 """Unit tests for IM connector models (Task 1)."""
 
-from cubebox.models.im_connector import (
+from cubeplex.models.im_connector import (
     IMConnectorAccount,
     IMIdentityLink,
     IMRunQueueItem,

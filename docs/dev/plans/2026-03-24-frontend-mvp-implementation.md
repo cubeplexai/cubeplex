@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Perplexity Computer-style web frontend for the cubebox AI agent product, with streaming SSE support, collapsible execution details, and dark/light theme switching.
+**Goal:** Build a Perplexity Computer-style web frontend for the cubeplex AI agent product, with streaming SSE support, collapsible execution details, and dark/light theme switching.
 
 **Architecture:** Monorepo with `packages/core` (pure TS, Zustand stores + SSE API client) and `packages/web` (Next.js App Router + shadcn/ui). Core layer is platform-agnostic for future mini-program reuse. Web layer provides UI and theme management.
 
@@ -13,7 +13,7 @@
 ## File Structure (Pre-Implementation)
 
 ```
-cubebox/frontend/
+cubeplex/frontend/
 ├── package.json                         (workspace root)
 ├── pnpm-workspace.yaml
 ├── packages/
@@ -75,7 +75,7 @@ cubebox/frontend/
 
 ```json
 {
-  "name": "cubebox-frontend",
+  "name": "cubeplex-frontend",
   "version": "0.0.1",
   "private": true,
   "packageManager": "pnpm@10.23.0",
@@ -102,7 +102,7 @@ packages:
 Create `packages/core/package.json`:
 ```json
 {
-  "name": "@cubebox/core",
+  "name": "@cubeplex/core",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -162,7 +162,7 @@ Create `packages/core/tsconfig.json`:
 - [ ] **Step 5: Commit monorepo setup**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add package.json pnpm-workspace.yaml packages/core/package.json packages/core/tsconfig.json
 git commit -m "feat: initialize monorepo structure with core package"
 ```
@@ -280,7 +280,7 @@ export * from './types'
 - [ ] **Step 6: Commit types**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/core/src/
 git commit -m "feat: define core types (Conversation, Message, AgentEvent)"
 ```
@@ -452,7 +452,7 @@ export * from './stream'
 - [ ] **Step 5: Commit API client**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/core/src/api/
 git commit -m "feat: implement core API client (conversations, SSE streaming)"
 ```
@@ -626,7 +626,7 @@ export * from './stores'
 - [ ] **Step 5: Commit stores and update index**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/core/src/stores/ packages/core/src/index.ts
 git commit -m "feat: implement Zustand stores (conversation, message)"
 ```
@@ -644,7 +644,7 @@ git commit -m "feat: implement Zustand stores (conversation, message)"
 - [ ] **Step 1: Initialize Next.js project with shadcn**
 
 ```bash
-cd /home/chris/cubebox/frontend/packages
+cd /home/chris/cubeplex/frontend/packages
 rm -rf web 2>/dev/null || true
 pnpm dlx create-next-app@latest web \
   --typescript \
@@ -655,13 +655,13 @@ pnpm dlx create-next-app@latest web \
   --src-dir=false
 ```
 
-- [ ] **Step 2: Add @cubebox/core as workspace dependency**
+- [ ] **Step 2: Add @cubeplex/core as workspace dependency**
 
 Update `packages/web/package.json`:
 ```json
 {
   "dependencies": {
-    "@cubebox/core": "workspace:*",
+    "@cubeplex/core": "workspace:*",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest"
@@ -672,7 +672,7 @@ Update `packages/web/package.json`:
 - [ ] **Step 3: Add shadcn and next-themes to web**
 
 ```bash
-cd /home/chris/cubebox/frontend/packages/web
+cd /home/chris/cubeplex/frontend/packages/web
 pnpm add next-themes zustand lucide-react
 pnpm dlx shadcn@latest init --defaults
 ```
@@ -680,7 +680,7 @@ pnpm dlx shadcn@latest init --defaults
 - [ ] **Step 4: Install shadcn components for MVP**
 
 ```bash
-cd /home/chris/cubebox/frontend/packages/web
+cd /home/chris/cubeplex/frontend/packages/web
 pnpm dlx shadcn@latest add button input textarea tooltip scroll-area separator badge collapsible
 ```
 
@@ -695,7 +695,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
+        destination: `${process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'}/api/:path*`,
       },
     ]
   },
@@ -707,7 +707,7 @@ export default nextConfig
 - [ ] **Step 6: Commit web setup**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/
 git commit -m "feat: initialize Next.js web project with shadcn/ui"
 ```
@@ -778,7 +778,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'cubebox',
+  title: 'cubeplex',
   description: 'AI Agent System',
 }
 
@@ -842,7 +842,7 @@ Update `packages/web/app/globals.css` (extend the shadcn CSS variables with bran
 - [ ] **Step 4: Commit theme setup**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/lib/ packages/web/app/
 git commit -m "feat: add theme provider and dark/light mode support"
 ```
@@ -920,8 +920,8 @@ Update `packages/web/app/page.tsx`:
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useConversationStore } from '@cubebox/core'
-import { createApiClient } from '@cubebox/core'
+import { useConversationStore } from '@cubeplex/core'
+import { createApiClient } from '@cubeplex/core'
 import { InputBar } from '@/components/layout/InputBar'
 
 export default function WelcomePage() {
@@ -947,7 +947,7 @@ export default function WelcomePage() {
   return (
     <div className="h-screen flex flex-col items-center justify-center bg-background text-foreground">
       <div className="text-center mb-12">
-        <h1 className="text-4xl font-bold mb-2">cubebox</h1>
+        <h1 className="text-4xl font-bold mb-2">cubeplex</h1>
         <p className="text-muted-foreground">AI 智能体系统</p>
       </div>
       <InputBar onSubmit={handleSubmit} />
@@ -959,7 +959,7 @@ export default function WelcomePage() {
 - [ ] **Step 3: Commit welcome page**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/app/page.tsx packages/web/components/layout/InputBar.tsx
 git commit -m "feat: add welcome page with centered input"
 ```
@@ -979,8 +979,8 @@ Create `packages/web/components/layout/Sidebar.tsx`:
 ```tsx
 'use client'
 
-import { useConversationStore } from '@cubebox/core'
-import { createApiClient } from '@cubebox/core'
+import { useConversationStore } from '@cubeplex/core'
+import { createApiClient } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import Link from 'next/link'
@@ -1065,7 +1065,7 @@ Create `packages/web/app/conversations/[id]/page.tsx`:
 
 import { useParams } from 'next/navigation'
 import { useEffect } from 'react'
-import { useConversationStore, createApiClient } from '@cubebox/core'
+import { useConversationStore, createApiClient } from '@cubeplex/core'
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
 import { InputBar } from '@/components/layout/InputBar'
@@ -1095,7 +1095,7 @@ export default function ChatPage() {
 - [ ] **Step 4: Commit layout components**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/components/layout/ packages/web/app/conversations/
 git commit -m "feat: add app shell, sidebar, and chat page layout"
 ```
@@ -1117,7 +1117,7 @@ Create `packages/web/hooks/useMessages.ts`:
 ```ts
 'use client'
 
-import { useMessageStore } from '@cubebox/core'
+import { useMessageStore } from '@cubeplex/core'
 
 export function useMessages(conversationId: string) {
   const messages = useMessageStore((s) => s.messages[conversationId] ?? [])
@@ -1135,7 +1135,7 @@ Create `packages/web/components/chat/ExecutionDetails.tsx`:
 'use client'
 
 import { useState } from 'react'
-import type { AgentEvent } from '@cubebox/core'
+import type { AgentEvent } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
@@ -1235,7 +1235,7 @@ Create `packages/web/components/chat/AssistantMessage.tsx`:
 ```tsx
 'use client'
 
-import type { Message, AgentEvent } from '@cubebox/core'
+import type { Message, AgentEvent } from '@cubeplex/core'
 import { ExecutionDetails } from './ExecutionDetails'
 
 function extractFinalText(events: AgentEvent[] | null): string {
@@ -1277,7 +1277,7 @@ Create `packages/web/components/chat/MessageList.tsx`:
 'use client'
 
 import { useEffect } from 'react'
-import { useMessageStore, useConversationStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, useConversationStore, createApiClient } from '@cubeplex/core'
 import { UserMessage } from './UserMessage'
 import { AssistantMessage } from './AssistantMessage'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -1317,7 +1317,7 @@ export function MessageList({ conversationId }: MessageListProps) {
 - [ ] **Step 6: Commit message components**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/components/chat/ packages/web/hooks/
 git commit -m "feat: add message display components with execution details"
 ```
@@ -1337,7 +1337,7 @@ Create `packages/web/hooks/useConversations.ts`:
 ```ts
 'use client'
 
-import { useConversationStore } from '@cubebox/core'
+import { useConversationStore } from '@cubeplex/core'
 
 export function useConversations() {
   const conversations = useConversationStore((s) => s.conversations)
@@ -1355,7 +1355,7 @@ Update `packages/web/components/layout/InputBar.tsx`:
 'use client'
 
 import { useState } from 'react'
-import { useMessageStore, createApiClient } from '@cubebox/core'
+import { useMessageStore, createApiClient } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ArrowUp, Loader2 } from 'lucide-react'
@@ -1430,7 +1430,7 @@ Update `packages/web/app/conversations/[id]/page.tsx`:
 
 import { useParams } from 'next/navigation'
 import { useEffect } from 'react'
-import { useConversationStore, createApiClient } from '@cubebox/core'
+import { useConversationStore, createApiClient } from '@cubeplex/core'
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
 import { InputBar } from '@/components/layout/InputBar'
@@ -1460,7 +1460,7 @@ export default function ChatPage() {
 - [ ] **Step 4: Commit message sending**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/hooks/ packages/web/components/ packages/web/app/
 git commit -m "feat: integrate message sending with SSE streaming"
 ```
@@ -1511,8 +1511,8 @@ Update `packages/web/components/layout/Sidebar.tsx` to include theme toggle at t
 ```tsx
 'use client'
 
-import { useConversationStore } from '@cubebox/core'
-import { createApiClient } from '@cubebox/core'
+import { useConversationStore } from '@cubeplex/core'
+import { createApiClient } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
@@ -1573,7 +1573,7 @@ export function Sidebar() {
 - [ ] **Step 3: Commit theme toggle**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add packages/web/components/ui/theme-toggle.tsx packages/web/components/layout/Sidebar.tsx
 git commit -m "feat: add theme toggle button"
 ```
@@ -1588,22 +1588,22 @@ git commit -m "feat: add theme toggle button"
 - [ ] **Step 1: Install dependencies**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 pnpm install
 ```
 
 - [ ] **Step 2: Build core package**
 
 ```bash
-cd /home/chris/cubebox/frontend/packages/core
+cd /home/chris/cubeplex/frontend/packages/core
 pnpm build
 ```
 
 - [ ] **Step 3: Start development server**
 
 ```bash
-cd /home/chris/cubebox/frontend/packages/web
-CUBEBOX_API_URL=http://localhost:8000 pnpm dev
+cd /home/chris/cubeplex/frontend/packages/web
+CUBEPLEX_API_URL=http://localhost:8000 pnpm dev
 ```
 
 Expected: Next.js server starts on http://localhost:3000
@@ -1611,7 +1611,7 @@ Expected: Next.js server starts on http://localhost:3000
 - [ ] **Step 4: Verify welcome page**
 
 Open http://localhost:3000, verify:
-- Centered title "cubebox"
+- Centered title "cubeplex"
 - Centered input area with send button
 - Dark theme applied (deep blue background)
 - Theme toggle button visible in sidebar (after creating a conversation)
@@ -1634,7 +1634,7 @@ Click theme toggle button, verify:
 - [ ] **Step 7: Commit final build**
 
 ```bash
-cd /home/chris/cubebox/frontend
+cd /home/chris/cubeplex/frontend
 git add -A
 git commit -m "feat: complete frontend MVP implementation"
 ```
@@ -1646,5 +1646,5 @@ git commit -m "feat: complete frontend MVP implementation"
 - **Each task** should be completed in order; some depend on previous tasks.
 - **Frequent commits** keep changes small and reviewable.
 - **Tests run locally** during development; no automated test suite in MVP.
-- **Environment variable:** Set `CUBEBOX_API_URL=http://localhost:8000` for local development.
+- **Environment variable:** Set `CUBEPLEX_API_URL=http://localhost:8000` for local development.
 - **Package manager:** Always use `pnpm` commands for workspace consistency.

@@ -9,7 +9,7 @@
  *     Paths starting with /api/v1/auth/ or /api/v1/workspaces are left alone
  *     (workspace-neutral).
  *   - X-CSRF-Token is injected on non-GET methods, read from document.cookie
- *     (CSRF_COOKIE_NAME — defaults to "cubebox_csrf"; per-worktree override via
+ *     (CSRF_COOKIE_NAME — defaults to "cubeplex_csrf"; per-worktree override via
  *     NEXT_PUBLIC_CSRF_COOKIE_NAME).
  *
  * 401 observable: any response with status 401 fires all registered

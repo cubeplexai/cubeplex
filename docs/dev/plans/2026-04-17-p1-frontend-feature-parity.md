@@ -18,8 +18,8 @@
 
 ### Backend
 
-- **Modify** `backend/cubebox/auth/users.py` — expand `on_after_register` to create Organization + Workspace + Admin Membership transactionally.
-- **Modify** `backend/cubebox/api/routes/v1/auth.py` — `register` response adds `default_workspace_id`.
+- **Modify** `backend/cubeplex/auth/users.py` — expand `on_after_register` to create Organization + Workspace + Admin Membership transactionally.
+- **Modify** `backend/cubeplex/api/routes/v1/auth.py` — `register` response adds `default_workspace_id`.
 - **Create** `backend/tests/e2e/test_register_bootstrap.py` — verifies register creates org+ws+membership.
 - **Modify** `backend/CLAUDE.md` — document the bootstrap behavior.
 
@@ -84,10 +84,10 @@ from fastapi_users.db import SQLAlchemyUserDatabase
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.api.middleware.rate_limit import limiter
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Membership, Role, User
-from cubebox.repositories import MembershipRepository, WorkspaceRepository
+from cubeplex.api.middleware.rate_limit import limiter
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Membership, Role, User
+from cubeplex.repositories import MembershipRepository, WorkspaceRepository
 
 
 @pytest.fixture(autouse=True)
@@ -131,7 +131,7 @@ async def test_register_creates_org_ws_and_admin_membership(unauthenticated_memo
 @pytest.mark.asyncio
 async def test_register_bootstrap_is_atomic_on_failure(unauthenticated_memory_client, monkeypatch):
     """If org/ws/membership creation blows up, the User row must not be left behind."""
-    from cubebox.repositories import OrganizationRepository
+    from cubeplex.repositories import OrganizationRepository
 
     original_create = OrganizationRepository.create
 
@@ -177,12 +177,12 @@ git commit -m "test(auth): register must bootstrap org+ws+admin-membership"
 ## Task 2: Backend — implement register bootstrap
 
 **Files:**
-- Modify: `backend/cubebox/auth/users.py`
-- Modify: `backend/cubebox/api/routes/v1/auth.py`
+- Modify: `backend/cubeplex/auth/users.py`
+- Modify: `backend/cubeplex/api/routes/v1/auth.py`
 
 - [ ] **Step 1: Update `UserManager` to bootstrap org/ws/membership in `on_after_register`**
 
-Replace `on_after_register` in `backend/cubebox/auth/users.py`:
+Replace `on_after_register` in `backend/cubeplex/auth/users.py`:
 
 ```python
 async def on_after_register(self, user: User, request: Request | None = None) -> None:
@@ -193,8 +193,8 @@ async def on_after_register(self, user: User, request: Request | None = None) ->
     """
     logger.info("User registered: {}", user.email)
     session = self.user_db.session  # SQLAlchemyUserDatabase exposes the AsyncSession
-    from cubebox.models import Role
-    from cubebox.repositories import (
+    from cubeplex.models import Role
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationRepository,
         WorkspaceRepository,
@@ -220,8 +220,8 @@ Wrap the bootstrap block:
 async def on_after_register(self, user: User, request: Request | None = None) -> None:
     logger.info("User registered: {}", user.email)
     session = self.user_db.session  # type: ignore[attr-defined]
-    from cubebox.models import Role
-    from cubebox.repositories import (
+    from cubeplex.models import Role
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationRepository,
         WorkspaceRepository,
@@ -240,7 +240,7 @@ async def on_after_register(self, user: User, request: Request | None = None) ->
         # cascade fails we still raise to surface the original error to the caller.
         from sqlalchemy import delete
 
-        from cubebox.models import Organization, User, Workspace
+        from cubeplex.models import Organization, User, Workspace
 
         try:
             await session.execute(delete(User).where(User.id == user.id))  # type: ignore[arg-type]
@@ -254,7 +254,7 @@ async def on_after_register(self, user: User, request: Request | None = None) ->
 
 - [ ] **Step 2: Update `register` route to include `default_workspace_id`**
 
-In `backend/cubebox/api/routes/v1/auth.py`, change the `register` function return:
+In `backend/cubeplex/api/routes/v1/auth.py`, change the `register` function return:
 
 ```python
 @router.post("/register", status_code=201)
@@ -296,7 +296,7 @@ Expected: format, lint, type-check all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/auth/users.py backend/cubebox/api/routes/v1/auth.py
+git add backend/cubeplex/auth/users.py backend/cubeplex/api/routes/v1/auth.py
 git commit -m "feat(auth): on_after_register auto-creates personal org+ws+admin membership"
 ```
 
@@ -332,7 +332,7 @@ And add a test script to `packages/core/package.json`:
 
 Install dev deps if not already present:
 ```bash
-cd frontend && pnpm --filter @cubebox/core add -D vitest @vitest/ui jsdom
+cd frontend && pnpm --filter @cubeplex/core add -D vitest @vitest/ui jsdom
 ```
 
 - [ ] **Step 2: Write the failing test**
@@ -352,7 +352,7 @@ describe('ApiClient', () => {
     // jsdom: fake cookie
     Object.defineProperty(document, 'cookie', {
       writable: true,
-      value: 'cubebox_csrf=csrf-abc; other=x',
+      value: 'cubeplex_csrf=csrf-abc; other=x',
     })
   })
 
@@ -391,7 +391,7 @@ describe('ApiClient', () => {
     expect((init as RequestInit).headers).not.toHaveProperty('X-Workspace-Id')
   })
 
-  it('injects X-CSRF-Token on POST/PATCH/DELETE from cubebox_csrf cookie', async () => {
+  it('injects X-CSRF-Token on POST/PATCH/DELETE from cubeplex_csrf cookie', async () => {
     const client = createApiClient('')
     await client.post('/api/v1/conversations', {})
     const [, init] = fetchMock.mock.calls[0]
@@ -438,7 +438,7 @@ describe('ApiClient', () => {
 
 - [ ] **Step 3: Run to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: all 9 tests FAIL because `setWorkspaceId`, `postForm`, and `onUnauthorized` don't exist yet.
 
 - [ ] **Step 4: Commit the failing test**
@@ -467,7 +467,7 @@ git commit -m "test(api): ApiClient must inject workspace/csrf headers and obser
  *   - X-Workspace-Id is injected on paths NOT starting with /api/v1/auth/ or
  *     /api/v1/workspaces (those are workspace-neutral).
  *   - X-CSRF-Token is injected on non-GET methods, read from document.cookie
- *     (cubebox_csrf).
+ *     (cubeplex_csrf).
  *
  * 401 observable: any response with status 401 fires all registered
  * onUnauthorized callbacks. Login 400s do NOT fire.
@@ -509,7 +509,7 @@ export function createApiClient(baseUrl: string): ApiClient {
       headers['X-Workspace-Id'] = workspaceId
     }
     if (method !== 'GET') {
-      const csrf = readCookie('cubebox_csrf')
+      const csrf = readCookie('cubeplex_csrf')
       if (csrf) headers['X-CSRF-Token'] = csrf
     }
     return headers
@@ -596,12 +596,12 @@ export async function toApiError(res: Response): Promise<Error> {
 
 - [ ] **Step 2: Run tests**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: all 9 ApiClient tests PASS.
 
 - [ ] **Step 3: Type-check core**
 
-Run: `cd frontend && pnpm --filter @cubebox/core type-check`
+Run: `cd frontend && pnpm --filter @cubeplex/core type-check`
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
@@ -700,7 +700,7 @@ describe('auth API', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test __tests__/api/auth.test.ts`
+Run: `cd frontend && pnpm --filter @cubeplex/core test __tests__/api/auth.test.ts`
 Expected: 6 tests FAIL, module not found.
 
 - [ ] **Step 3: Implement `auth.ts`**
@@ -766,7 +766,7 @@ export * from './stream'
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: all tests PASS.
 
 - [ ] **Step 5: Commit**
@@ -833,7 +833,7 @@ describe('workspaces API', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test __tests__/api/workspaces.test.ts`
+Run: `cd frontend && pnpm --filter @cubeplex/core test __tests__/api/workspaces.test.ts`
 Expected: FAIL, module not found.
 
 - [ ] **Step 3: Implement**
@@ -872,7 +872,7 @@ export * from './workspaces'
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: all tests PASS.
 
 - [ ] **Step 5: Commit**
@@ -931,7 +931,7 @@ export async function* streamMessages(
     'Cache-Control': 'no-cache',
   }
   if (client.workspaceId) headers['X-Workspace-Id'] = client.workspaceId
-  const csrf = readCookie('cubebox_csrf')
+  const csrf = readCookie('cubeplex_csrf')
   if (csrf) headers['X-CSRF-Token'] = csrf
 
   const res = await fetch(
@@ -992,7 +992,7 @@ for await (const event of streamMessages(client, conversationId, content)) {
 
 - [ ] **Step 3: Build the core package**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build`
 Expected: TypeScript compiles cleanly.
 
 - [ ] **Step 4: Type-check web package**
@@ -1059,7 +1059,7 @@ describe('authStore', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test __tests__/stores/authStore.test.ts`
+Run: `cd frontend && pnpm --filter @cubeplex/core test __tests__/stores/authStore.test.ts`
 Expected: FAIL, module not found.
 
 - [ ] **Step 3: Implement**
@@ -1109,7 +1109,7 @@ export * from './authStore'
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test`
+Run: `cd frontend && pnpm --filter @cubeplex/core test`
 Expected: all pass.
 
 - [ ] **Step 5: Commit**
@@ -1191,7 +1191,7 @@ describe('workspaceStore', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test __tests__/stores/workspaceStore.test.ts`
+Run: `cd frontend && pnpm --filter @cubeplex/core test __tests__/stores/workspaceStore.test.ts`
 Expected: FAIL, module not found.
 
 - [ ] **Step 3: Implement**
@@ -1261,7 +1261,7 @@ export * from './workspaceStore'
 
 - [ ] **Step 4: Run tests + build**
 
-Run: `cd frontend && pnpm --filter @cubebox/core test && pnpm --filter @cubebox/core build`
+Run: `cd frontend && pnpm --filter @cubeplex/core test && pnpm --filter @cubeplex/core build`
 Expected: all pass, build succeeds.
 
 - [ ] **Step 5: Commit**
@@ -1293,7 +1293,7 @@ function isProtected(pathname: string): boolean {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
-  const hasAuth = !!request.cookies.get('cubebox_auth')
+  const hasAuth = !!request.cookies.get('cubeplex_auth')
 
   if (!hasAuth && isProtected(pathname)) {
     const url = request.nextUrl.clone()
@@ -1372,7 +1372,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { createApiClient, loginUser, useAuthStore } from '@cubebox/core'
+import { createApiClient, loginUser, useAuthStore } from '@cubeplex/core'
 
 export function LoginForm() {
   const router = useRouter()
@@ -1403,7 +1403,7 @@ export function LoginForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="text-center mb-6">
-        <h1 className="text-xl font-semibold">Sign in to cubebox</h1>
+        <h1 className="text-xl font-semibold">Sign in to cubeplex</h1>
       </div>
       <label className="block">
         <span className="text-sm text-foreground/80">Email</span>
@@ -1491,7 +1491,7 @@ import {
   registerUser,
   loginUser,
   useAuthStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 export function RegisterForm() {
   const router = useRouter()
@@ -1521,7 +1521,7 @@ export function RegisterForm() {
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="text-center mb-6">
-        <h1 className="text-xl font-semibold">Create your cubebox account</h1>
+        <h1 className="text-xl font-semibold">Create your cubeplex account</h1>
       </div>
       <label className="block">
         <span className="text-sm text-foreground/80">Email</span>
@@ -1575,7 +1575,7 @@ export default function RegisterPage() {
 
 - [ ] **Step 3: Smoke-test manually**
 
-Start dev + backend. Navigate `/register`, submit with a fresh email + 10-char password. Confirm redirect to `/w/<id>`. Confirm `cubebox_auth` cookie exists in DevTools. Stop dev.
+Start dev + backend. Navigate `/register`, submit with a fresh email + 10-char password. Confirm redirect to `/w/<id>`. Confirm `cubeplex_auth` cookie exists in DevTools. Stop dev.
 
 - [ ] **Step 4: Commit**
 
@@ -1621,7 +1621,7 @@ export function useWorkspaceContext(): WorkspaceContextValue {
 
 import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import type { ApiClient } from '@cubebox/core'
+import type { ApiClient } from '@cubeplex/core'
 
 export function useAuthRedirect(client: ApiClient) {
   const router = useRouter()
@@ -1650,7 +1650,7 @@ import {
   createApiClient,
   useAuthStore,
   useWorkspaceStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { AppTopBar } from '@/components/layout/AppTopBar'
 
@@ -1683,7 +1683,7 @@ import {
   createApiClient,
   useConversationStore,
   useArtifactStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { WorkspaceContext } from '@/hooks/useWorkspaceContext'
 
 export default function WorkspaceLayout({
@@ -1738,7 +1738,7 @@ git commit -m "feat(web): (app) route group layout + workspace context + 401 red
 
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { useWorkspaceStore } from '@cubebox/core'
+import { useWorkspaceStore } from '@cubeplex/core'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { ChevronDown, Plus } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
@@ -1813,7 +1813,7 @@ import {
   useAuthStore,
   useConversationStore,
   useWorkspaceStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 export function AvatarMenu() {
   const router = useRouter()
@@ -1890,7 +1890,7 @@ export function AppTopBar() {
       <div className="flex h-12 items-center gap-3 px-4">
         <Link href="/" className="flex items-center gap-2">
           <Box className="size-5" />
-          <span className="text-sm font-semibold">cubebox</span>
+          <span className="text-sm font-semibold">cubeplex</span>
         </Link>
         <div className="ml-2">
           <WorkspaceSwitcher />
@@ -1943,7 +1943,7 @@ import {
   createApiClient,
   useConversationStore,
   useMessageStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { InputBar } from '@/components/layout/InputBar'
 import { Box } from 'lucide-react'
 
@@ -1978,7 +1978,7 @@ export default function WorkspaceHomePage({
         <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 mb-5">
           <Box className="size-6 text-primary" strokeWidth={2} />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight mb-1.5">cubebox</h1>
+        <h1 className="text-2xl font-semibold tracking-tight mb-1.5">cubeplex</h1>
         <p className="text-sm text-muted-foreground/70">AI 智能体系统</p>
       </div>
       <div className="w-full max-w-2xl px-4">
@@ -2001,7 +2001,7 @@ import {
   usePanelStore,
   useArtifactStore,
   createApiClient,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { AppShell } from '@/components/layout/AppShell'
 import { MessageList } from '@/components/chat/MessageList'
 import { ArtifactGallery } from '@/components/chat/ArtifactGallery'
@@ -2060,12 +2060,12 @@ import { redirect } from 'next/navigation'
 
 export default async function RootRedirectPage() {
   const cookieStore = await cookies()
-  const authed = !!cookieStore.get('cubebox_auth')
+  const authed = !!cookieStore.get('cubeplex_auth')
   if (!authed) redirect('/login')
 
   // Server-side fetch to pick a workspace. Requires forwarding cookies.
   const cookieHeader = cookieStore.toString()
-  const apiUrl = process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'
+  const apiUrl = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'
   const res = await fetch(`${apiUrl}/api/v1/workspaces`, {
     headers: { cookie: cookieHeader },
     cache: 'no-store',
@@ -2087,7 +2087,7 @@ rmdir frontend/packages/web/app/conversations 2>/dev/null
 
 - [ ] **Step 7: Type-check + build**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter web type-check && pnpm --filter web build`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter web type-check && pnpm --filter web build`
 Expected: all pass.
 
 - [ ] **Step 8: Smoke-test the flow**
@@ -2157,7 +2157,7 @@ git commit -m "fix(web): forward X-Workspace-Id + X-CSRF-Token in SSE proxy rout
 'use client'
 
 import Link from 'next/link'
-import { useWorkspaceStore } from '@cubebox/core'
+import { useWorkspaceStore } from '@cubeplex/core'
 
 export function WorkspaceList() {
   const workspaces = useWorkspaceStore((s) => s.workspaces)
@@ -2199,7 +2199,7 @@ export function WorkspaceList() {
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createApiClient, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useWorkspaceStore } from '@cubeplex/core'
 
 export function WorkspaceCreateForm() {
   const router = useRouter()
@@ -2409,7 +2409,7 @@ test('register → auto-login → land in personal workspace', async ({ page }) 
   await page.getByLabel('Password').fill(PASSWORD)
   await page.getByRole('button', { name: /create account/i }).click()
   await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-  await expect(page.getByRole('heading', { name: 'cubebox' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'cubeplex' })).toBeVisible()
 })
 
 test('login → redirect to workspace; logout → redirect to login', async ({ page, context }) => {
@@ -2627,11 +2627,11 @@ Add a new "Auth & Workspace Model" section to `frontend/CLAUDE.md` above "Common
 
 **Route structure:** `(auth)/{login,register}` for unauthenticated pages; `(app)/{workspaces, w/[wsId]/...}` for authenticated pages. `/` is a server redirect: logged-in → first workspace, else `/login`.
 
-**Middleware (`middleware.ts`):** checks for the `cubebox_auth` cookie. Unauthenticated hits to `/w/*` or `/workspaces` redirect to `/login?next=<path>`. Logged-in hits to `/login` or `/register` redirect to `/`.
+**Middleware (`middleware.ts`):** checks for the `cubeplex_auth` cookie. Unauthenticated hits to `/w/*` or `/workspaces` redirect to `/login?next=<path>`. Logged-in hits to `/login` or `/register` redirect to `/`.
 
 **Active workspace:** the URL segment `[wsId]` is the single source of truth. `useWorkspaceContext()` (in `(app)` tree) reads it. The `ApiClient` instance each page creates via `createApiClient('')` calls `client.setWorkspaceId(wsId)`, which triggers automatic `X-Workspace-Id` injection on workspace-scoped calls.
 
-**CSRF:** double-submit pattern. `ApiClient` reads `cubebox_csrf` from `document.cookie` and adds `X-CSRF-Token` on every non-GET. The backend seeds the cookie on login.
+**CSRF:** double-submit pattern. `ApiClient` reads `cubeplex_csrf` from `document.cookie` and adds `X-CSRF-Token` on every non-GET. The backend seeds the cookie on login.
 
 **Stores:**
 - `authStore` — `{id, email}` of the current user, or `null`. Populated by `loadMe` on `(app)` mount.
@@ -2657,7 +2657,7 @@ Before Task 1, skim the spec's "Non-Goals" and confirm no accidental work sneaks
 
 After Task 22 is committed:
 - Run `cd backend && make check && uv run pytest tests/ -v` — all pass.
-- Run `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/core test && pnpm --filter web type-check && pnpm test:e2e` — all pass.
+- Run `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/core test && pnpm --filter web type-check && pnpm test:e2e` — all pass.
 - Sanity check: `git log --oneline origin/feat/p1-identity-auth-rbac..HEAD` should show ~22 commits scoped to frontend + one backend bootstrap change.
 
 If anything is amiss, fix in a follow-up commit before opening the PR.

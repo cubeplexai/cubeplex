@@ -6,7 +6,7 @@
 
 **Architecture:** `UserSandbox` 加 `deleted_at`（soft-delete）+ `sandbox_id` 改 nullable（容器换代时为 None）；唯一约束 partial WHERE 从 `status IN (...)` 改 `deleted_at IS NULL`。`get_or_create` 复用 terminated/failed 行（原子 claim 守卫防双 provision）。PVC 命名 user-scope 保留 legacy（已授权 carve-out），topic/conversation 走 scope-keyed。ws 用户 API（list/restart/delete）独立于 admin 路由。前端 settings 加 sandboxes tab。
 
-**Tech Stack:** Python 3.12 + FastAPI + SQLModel + Alembic + asyncio; opensandbox SDK（外部边界）; pytest（unit + e2e）; Next.js + React 19 + `@cubebox/core` + SWR + pnpm。
+**Tech Stack:** Python 3.12 + FastAPI + SQLModel + Alembic + asyncio; opensandbox SDK（外部边界）; pytest（unit + e2e）; Next.js + React 19 + `@cubeplex/core` + SWR + pnpm。
 
 ## Global Constraints
 
@@ -18,10 +18,10 @@
 - PVC 隔离 e2e 必须 真 opensandbox provider（MemSandbox 单实例 fake 无法验证多容器 + 多 PVC）
 - Scope-isolated APIs：ws 用户路由（`/api/v1/ws/{ws}/sandboxes`）与 admin 路由（`/api/v1/admin/sandboxes`）分开
 - Docs ship with code：`docs/site/docs/` sandbox 相关文档同 PR 更新（CLAUDE.md 规则 13）
-- 工作目录：`/home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity`
+- 工作目录：`/home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity`
 - 分支：`feat/2026-06-27-sandbox-entity`（多任务执行期间不切回 main）
 - 测试日志：`tee tmp/<task>.log | tail -N`
-- **Subagent cwd**：每个 Bash 调用必须 `cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity &&` 开头；commit 前 `pwd && git branch --show-current` 验证
+- **Subagent cwd**：每个 Bash 调用必须 `cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity &&` 开头；commit 前 `pwd && git branch --show-current` 验证
 - **前置依赖**：Spec 1（sandbox-observability）必须先合并 —— 它引入 `SandboxAttachment` + `UserSandboxSyncEventService`。本 plan 假定它们已在 main
 
 ## 文件结构总览
@@ -30,8 +30,8 @@
 
 | 路径 | 责任 |
 |---|---|
-| `backend/cubebox/api/routes/v1/ws_sandboxes.py` | ws 用户 sandbox 路由（list/restart/delete）|
-| `backend/cubebox/api/schemas/ws_sandbox.py` | `MySandboxOut` 响应模型 |
+| `backend/cubeplex/api/routes/v1/ws_sandboxes.py` | ws 用户 sandbox 路由（list/restart/delete）|
+| `backend/cubeplex/api/schemas/ws_sandbox.py` | `MySandboxOut` 响应模型 |
 | `backend/scripts/dev/cull_dedicated_sandboxes.py` | 部署前 kill 现有 dedicated 容器 |
 | `backend/alembic/versions/XXXX_sandbox_entity_persistence.py` | autogen schema + 手写数据迁移 |
 | `frontend/packages/web/components/workspace-settings/SandboxesPanel.tsx` | settings tab 主面板 |
@@ -44,15 +44,15 @@
 
 | 路径 | 修改要点 |
 |---|---|
-| `backend/cubebox/models/user_sandbox.py` | `deleted_at` + `sandbox_id` nullable + 唯一约束 |
-| `backend/cubebox/sandbox/manager.py` | `build_sandbox_pvc_name` + `_build_user_volume` 签名 + `get_or_create` 复用 terminated + `_provision_new_container`/`_connect_existing`/`_await_provisioning_winner` 抽出 + `_kill_record` clear_sandbox_id + sandbox_id None 守卫 + `touch_active` None 守卫 + `restart_user_sandbox` + `delete_user_sandbox` |
-| `backend/cubebox/repositories/user_sandbox.py` | `mark_terminated` 加 clear_sandbox_id + `get_active_by_scope`/`get_resumable_by_scope` WHERE 改 + `rekey_to_topic` WHERE 改 + 新 `claim_for_provisioning`/`claim_for_kill`/`claim_for_soft_delete`/`soft_delete` |
-| `backend/cubebox/api/schemas/sandbox_policy.py` | `SandboxStatusValue` Literal 补 `failed`/`kill_pending` |
-| `backend/cubebox/api/routes/v1/ws_sandbox.py` + `ws_browser.py` | status/browser 路由 sandbox_id None 守卫 |
-| `backend/cubebox/streams/run_manager.py` | 确认 `_resolve_sandbox_target` 传 scope 不变 |
+| `backend/cubeplex/models/user_sandbox.py` | `deleted_at` + `sandbox_id` nullable + 唯一约束 |
+| `backend/cubeplex/sandbox/manager.py` | `build_sandbox_pvc_name` + `_build_user_volume` 签名 + `get_or_create` 复用 terminated + `_provision_new_container`/`_connect_existing`/`_await_provisioning_winner` 抽出 + `_kill_record` clear_sandbox_id + sandbox_id None 守卫 + `touch_active` None 守卫 + `restart_user_sandbox` + `delete_user_sandbox` |
+| `backend/cubeplex/repositories/user_sandbox.py` | `mark_terminated` 加 clear_sandbox_id + `get_active_by_scope`/`get_resumable_by_scope` WHERE 改 + `rekey_to_topic` WHERE 改 + 新 `claim_for_provisioning`/`claim_for_kill`/`claim_for_soft_delete`/`soft_delete` |
+| `backend/cubeplex/api/schemas/sandbox_policy.py` | `SandboxStatusValue` Literal 补 `failed`/`kill_pending` |
+| `backend/cubeplex/api/routes/v1/ws_sandbox.py` + `ws_browser.py` | status/browser 路由 sandbox_id None 守卫 |
+| `backend/cubeplex/streams/run_manager.py` | 确认 `_resolve_sandbox_target` 传 scope 不变 |
 | `frontend/packages/web/components/workspace-settings/SettingsTabs.tsx` | 加 sandboxes entry |
 | `frontend/packages/web/i18n/...` | `sandbox.scope.*` keys |
-| `@cubebox/core` | `MySandboxOut` 类型 |
+| `@cubeplex/core` | `MySandboxOut` 类型 |
 | `docs/site/docs/` | sandbox 文档更新 |
 
 ### 删除
@@ -101,9 +101,9 @@ import asyncio
 from loguru import logger
 from sqlalchemy import select
 
-from cubebox.db.engine import get_async_engine
-from cubebox.models import UserSandbox
-from cubebox.sandbox.manager import SandboxManager, get_sandbox_manager
+from cubeplex.db.engine import get_async_engine
+from cubeplex.models import UserSandbox
+from cubeplex.sandbox.manager import SandboxManager, get_sandbox_manager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -127,12 +127,12 @@ async def main() -> None:
             try:
                 # Reuse the manager's kill path: connect + kill + mark_terminated.
                 # _kill_record handles 404 (already gone) gracefully.
-                from cubebox.sandbox.manager import build_connection_config  # adjust to actual helper
+                from cubeplex.sandbox.manager import build_connection_config  # adjust to actual helper
                 conn_config = manager._build_connection_config()  # type: ignore[attr-defined]
                 repo = type(manager).__mro__  # not used; _kill_record needs a scoped_repo
                 # NOTE: _kill_record signature is (session, scoped_repo, record, conn_config).
                 # Build a scoped repo the same way manager.get_or_create does.
-                from cubebox.repositories.user_sandbox import UserSandboxRepository
+                from cubeplex.repositories.user_sandbox import UserSandboxRepository
                 scoped = UserSandboxRepository(
                     session, org_id=row.org_id, workspace_id=row.workspace_id,
                 )
@@ -153,7 +153,7 @@ if __name__ == "__main__":
 - [ ] **Step 2: 手跑验证（在 dev DB）**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run python scripts/dev/cull_dedicated_sandboxes.py 2>&1 | tee ../tmp/task-0.1.log | tail -5
 ```
 
@@ -173,7 +173,7 @@ git commit -m "feat(sandbox): cull_dedicated_sandboxes.py — kill existing dedi
 ## Task 1.1: `UserSandbox` 模型加 `deleted_at` + `sandbox_id` nullable + 唯一约束改
 
 **Files:**
-- Modify: `backend/cubebox/models/user_sandbox.py`
+- Modify: `backend/cubeplex/models/user_sandbox.py`
 
 **Interfaces:**
 - Consumes: 无
@@ -181,7 +181,7 @@ git commit -m "feat(sandbox): cull_dedicated_sandboxes.py — kill existing dedi
 
 - [ ] **Step 1: 改模型**
 
-打开 `backend/cubebox/models/user_sandbox.py`。
+打开 `backend/cubeplex/models/user_sandbox.py`。
 
 (a) `sandbox_id` 字段（约 line 42，当前 `sandbox_id: str = Field(max_length=255, unique=True)`）改为：
 
@@ -214,8 +214,8 @@ git commit -m "feat(sandbox): cull_dedicated_sandboxes.py — kill existing dedi
 - [ ] **Step 2: mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/models/user_sandbox.py 2>&1 | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/models/user_sandbox.py 2>&1 | tail -3
 ```
 
 期望：clean。
@@ -223,7 +223,7 @@ cd backend && uv run mypy cubebox/models/user_sandbox.py 2>&1 | tail -3
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/models/user_sandbox.py
+git add backend/cubeplex/models/user_sandbox.py
 git commit -m "feat(sandbox): UserSandbox deleted_at + sandbox_id nullable + unique index → deleted_at IS NULL"
 ```
 
@@ -241,7 +241,7 @@ git commit -m "feat(sandbox): UserSandbox deleted_at + sandbox_id nullable + uni
 - [ ] **Step 1: 生成 migration**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run alembic revision --autogenerate -m "sandbox entity persistence" 2>&1 | tee ../tmp/task-1.2-gen.log | tail -10
 ```
 
@@ -281,7 +281,7 @@ cd backend && uv run alembic revision --autogenerate -m "sandbox entity persiste
 - [ ] **Step 4: 跑 upgrade**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run alembic upgrade head 2>&1 | tee ../tmp/task-1.2-upgrade.log | tail -5
 ```
 
@@ -290,10 +290,10 @@ cd backend && uv run alembic upgrade head 2>&1 | tee ../tmp/task-1.2-upgrade.log
 - [ ] **Step 5: 验证 schema**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run python -c "
 import asyncio
-from cubebox.db.engine import get_async_engine
+from cubeplex.db.engine import get_async_engine
 from sqlalchemy import text
 
 async def main():
@@ -325,7 +325,7 @@ git commit -m "feat(sandbox): alembic migration — deleted_at + sandbox_id null
 ## Task 2.1: `UserSandboxRepository` 新方法 + WHERE 改
 
 **Files:**
-- Modify: `backend/cubebox/repositories/user_sandbox.py`
+- Modify: `backend/cubeplex/repositories/user_sandbox.py`
 
 **Interfaces:**
 - Consumes: Task 1.1 模型
@@ -433,14 +433,14 @@ git commit -m "feat(sandbox): alembic migration — deleted_at + sandbox_id null
 - [ ] **Step 7: mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/repositories/user_sandbox.py 2>&1 | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/repositories/user_sandbox.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add backend/cubebox/repositories/user_sandbox.py
+git add backend/cubeplex/repositories/user_sandbox.py
 git commit -m "feat(sandbox): repo — deleted_at WHERE + claim_for_provisioning/kill/soft_delete + mark_terminated clear_sandbox_id"
 ```
 
@@ -449,7 +449,7 @@ git commit -m "feat(sandbox): repo — deleted_at WHERE + claim_for_provisioning
 ## Task 2.2: `build_sandbox_pvc_name` + `_build_user_volume` 签名改
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/manager.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
 
 **Interfaces:**
 - Consumes: 无
@@ -483,8 +483,8 @@ grep `self._build_user_volume(` 找所有调用点（`get_or_create` 内 + `_pro
 - [ ] **Step 4: mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/sandbox/manager.py 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/sandbox/manager.py 2>&1 | tail -5
 ```
 
 期望：可能有调用点未改的报错（Task 2.3 会改 `get_or_create`），记下来；本 task 只保证 `build_sandbox_pvc_name` + `_build_user_volume` 定义自身 clean。
@@ -492,7 +492,7 @@ cd backend && uv run mypy cubebox/sandbox/manager.py 2>&1 | tail -5
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/manager.py
+git add backend/cubeplex/sandbox/manager.py
 git commit -m "feat(sandbox): build_sandbox_pvc_name + _build_user_volume scope-keyed signature"
 ```
 
@@ -501,7 +501,7 @@ git commit -m "feat(sandbox): build_sandbox_pvc_name + _build_user_volume scope-
 ## Task 2.3: `get_or_create` 复用 terminated 行 + 抽出 `_provision_new_container`/`_connect_existing`/`_await_provisioning_winner`
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/manager.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
 
 **Interfaces:**
 - Consumes: Task 2.1 repo（`get_active_by_scope` 改 WHERE + `claim_for_provisioning`）；Task 2.2 `_build_user_volume`；Spec 1 `SandboxAttachment`
@@ -666,8 +666,8 @@ git commit -m "feat(sandbox): build_sandbox_pvc_name + _build_user_volume scope-
 - [ ] **Step 5: mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/sandbox/manager.py 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/sandbox/manager.py 2>&1 | tail -5
 ```
 
 期望：clean。
@@ -675,7 +675,7 @@ cd backend && uv run mypy cubebox/sandbox/manager.py 2>&1 | tail -5
 - [ ] **Step 6: 跑现有 sandbox 单测（应仍 pass）**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run pytest tests/unit/test_lazy_sandbox_download.py tests/unit/test_lazy_sandbox_sync_lifecycle.py tests/unit/test_manager_egress_injection.py tests/unit/test_sandbox_lease.py --no-cov 2>&1 | tee ../tmp/task-2.3.log | tail -10
 ```
 
@@ -684,7 +684,7 @@ cd backend && uv run pytest tests/unit/test_lazy_sandbox_download.py tests/unit/
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/manager.py
+git add backend/cubeplex/sandbox/manager.py
 git commit -m "feat(sandbox): get_or_create revives terminated/failed rows via atomic claim"
 ```
 
@@ -693,7 +693,7 @@ git commit -m "feat(sandbox): get_or_create revives terminated/failed rows via a
 ## Task 2.4: `_kill_record` clear_sandbox_id + sandbox_id None 守卫 + touch_active None 守卫
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/manager.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
 
 **Interfaces:**
 - Consumes: Task 2.1 `mark_terminated(clear_sandbox_id=)`
@@ -726,15 +726,15 @@ git commit -m "feat(sandbox): get_or_create revives terminated/failed rows via a
 - [ ] **Step 4: mypy + 单测**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/sandbox/manager.py 2>&1 | tail -3 && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/sandbox/manager.py 2>&1 | tail -3 && \
 uv run pytest tests/unit/test_sandbox_lease.py tests/unit/test_manager_egress_injection.py --no-cov 2>&1 | tail -5
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/manager.py
+git add backend/cubeplex/sandbox/manager.py
 git commit -m "fix(sandbox): _kill_record clear_sandbox_id + touch_active/sandbox_id None guards"
 ```
 
@@ -743,8 +743,8 @@ git commit -m "fix(sandbox): _kill_record clear_sandbox_id + touch_active/sandbo
 ## Task 2.5: `SandboxStatusValue` Literal 补全 + ws_browser 路由 None 守卫
 
 **Files:**
-- Modify: `backend/cubebox/api/schemas/sandbox_policy.py`
-- Modify: `backend/cubebox/api/routes/v1/ws_browser.py`
+- Modify: `backend/cubeplex/api/schemas/sandbox_policy.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_browser.py`
 
 **Interfaces:**
 - Consumes: Task 1.1 sandbox_id nullable
@@ -774,14 +774,14 @@ SandboxStatusValue = Literal[
 - [ ] **Step 4: mypy + 单测**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/api/schemas/sandbox_policy.py cubebox/api/routes/v1/ws_browser.py 2>&1 | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/api/schemas/sandbox_policy.py cubeplex/api/routes/v1/ws_browser.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/sandbox_policy.py backend/cubebox/api/routes/v1/ws_browser.py
+git add backend/cubeplex/api/schemas/sandbox_policy.py backend/cubeplex/api/routes/v1/ws_browser.py
 git commit -m "fix(sandbox): SandboxStatusValue complete (pausing/resuming/failed/kill_pending) + ws_browser sandbox_id None guard"
 ```
 
@@ -792,7 +792,7 @@ git commit -m "fix(sandbox): SandboxStatusValue complete (pausing/resuming/faile
 ## Task 3.1: `restart_user_sandbox` + `delete_user_sandbox`
 
 **Files:**
-- Modify: `backend/cubebox/sandbox/manager.py`
+- Modify: `backend/cubeplex/sandbox/manager.py`
 
 **Interfaces:**
 - Consumes: Task 2.1 `claim_for_kill` / `claim_for_soft_delete` / `soft_delete`；Task 2.4 `_kill_record`
@@ -800,7 +800,7 @@ git commit -m "fix(sandbox): SandboxStatusValue complete (pausing/resuming/faile
 
 - [ ] **Step 1: 加 `SandboxConflictError`**
 
-在 `backend/cubebox/sandbox/base.py`（或 `manager.py` 顶部）加：
+在 `backend/cubeplex/sandbox/base.py`（或 `manager.py` 顶部）加：
 
 ```python
 class SandboxConflictError(SandboxError):
@@ -883,14 +883,14 @@ class SandboxConflictError(SandboxError):
 - [ ] **Step 4: mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/sandbox/manager.py cubebox/sandbox/base.py 2>&1 | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/sandbox/manager.py cubeplex/sandbox/base.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/sandbox/manager.py backend/cubebox/sandbox/base.py
+git add backend/cubeplex/sandbox/manager.py backend/cubeplex/sandbox/base.py
 git commit -m "feat(sandbox): restart_user_sandbox + delete_user_sandbox with claim guards"
 ```
 
@@ -901,9 +901,9 @@ git commit -m "feat(sandbox): restart_user_sandbox + delete_user_sandbox with cl
 ## Task 4.1: `MySandboxOut` schema + `ws_sandboxes.py` 三路由
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/ws_sandbox.py`
-- Create: `backend/cubebox/api/routes/v1/ws_sandboxes.py`
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`（挂载 router）
+- Create: `backend/cubeplex/api/schemas/ws_sandbox.py`
+- Create: `backend/cubeplex/api/routes/v1/ws_sandboxes.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`（挂载 router）
 
 **Interfaces:**
 - Consumes: Task 3.1 `restart_user_sandbox` / `delete_user_sandbox`；项目实际 dep `require_member` / `current_active_user`
@@ -911,7 +911,7 @@ git commit -m "feat(sandbox): restart_user_sandbox + delete_user_sandbox with cl
 
 - [ ] **Step 1: 写 `MySandboxOut`**
 
-`backend/cubebox/api/schemas/ws_sandbox.py`:
+`backend/cubeplex/api/schemas/ws_sandbox.py`:
 
 ```python
 """Response models for ws user sandbox routes (/api/v1/ws/{ws}/sandboxes)."""
@@ -936,30 +936,30 @@ class MySandboxOut(BaseModel):
 
 - [ ] **Step 2: 写路由**
 
-`backend/cubebox/api/routes/v1/ws_sandboxes.py`，按 spec §6.4。**先 grep 确认实际 dep 名**：
+`backend/cubeplex/api/routes/v1/ws_sandboxes.py`，按 spec §6.4。**先 grep 确认实际 dep 名**：
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-grep -rn "require_member\|current_active_user\|RequestContext" backend/cubebox/auth/dependencies.py | head
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+grep -rn "require_member\|current_active_user\|RequestContext" backend/cubeplex/auth/dependencies.py | head
 ```
 
 用实际 dep 名。路由实现按 spec §6.4（list 含 scope_title batch 解析 §6.3；restart / delete 调 manager）。`_verify_ownership` 按 §6.5。
 
 - [ ] **Step 3: 挂载 router**
 
-`backend/cubebox/api/routes/v1/__init__.py` 加：
+`backend/cubeplex/api/routes/v1/__init__.py` 加：
 
 ```python
-from cubebox.api.routes.v1 import ws_sandboxes
+from cubeplex.api.routes.v1 import ws_sandboxes
 router.include_router(ws_sandboxes.router)
 ```
 
 - [ ] **Step 4: 路由注册验证**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run python -c "
-from cubebox.app import create_app  # adjust to actual app factory
+from cubeplex.app import create_app  # adjust to actual app factory
 app = create_app()
 routes = [r.path for r in app.routes if hasattr(r,'path') and '/sandboxes' in r.path]
 print(routes)
@@ -971,14 +971,14 @@ print(routes)
 - [ ] **Step 5: mypy**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/api/routes/v1/ws_sandboxes.py cubebox/api/schemas/ws_sandbox.py 2>&1 | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/api/routes/v1/ws_sandboxes.py cubeplex/api/schemas/ws_sandbox.py 2>&1 | tail -3
 ```
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/ws_sandbox.py backend/cubebox/api/routes/v1/ws_sandboxes.py backend/cubebox/api/routes/v1/__init__.py
+git add backend/cubeplex/api/schemas/ws_sandbox.py backend/cubeplex/api/routes/v1/ws_sandboxes.py backend/cubeplex/api/routes/v1/__init__.py
 git commit -m "feat(api): ws user sandbox routes — list/restart/delete + scope_title batch"
 ```
 
@@ -986,7 +986,7 @@ git commit -m "feat(api): ws user sandbox routes — list/restart/delete + scope
 
 # Phase 5 — 前端 + 文档
 
-## Task 5.1: `@cubebox/core` 类型 + `useMySandboxes` hook
+## Task 5.1: `@cubeplex/core` 类型 + `useMySandboxes` hook
 
 **Files:**
 - Modify: `frontend/packages/core/src/`（加 `MySandboxOut` 类型）
@@ -998,7 +998,7 @@ git commit -m "feat(api): ws user sandbox routes — list/restart/delete + scope
 
 - [ ] **Step 1: 加类型**
 
-在 `@cubebox/core` 合适位置（参考其它 API 类型）加 `MySandboxOut`：
+在 `@cubeplex/core` 合适位置（参考其它 API 类型）加 `MySandboxOut`：
 
 ```ts
 export interface MySandboxOut {
@@ -1020,7 +1020,7 @@ export interface MySandboxOut {
 - [ ] **Step 3: build core**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm --filter @cubebox/core build 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm --filter @cubeplex/core build 2>&1 | tail -5
 ```
 
 - [ ] **Step 4: Commit**
@@ -1062,7 +1062,7 @@ git commit -m "feat(web): MySandboxOut type + useMySandboxes hook"
 - [ ] **Step 6: lint + build**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm lint 2>&1 | tail -5 && pnpm --filter web build 2>&1 | tail -5
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm lint 2>&1 | tail -5 && pnpm --filter web build 2>&1 | tail -5
 ```
 
 - [ ] **Step 7: Commit**
@@ -1086,7 +1086,7 @@ git commit -m "feat(web): SandboxesPanel + SandboxCard + StatusBadge + settings 
 - [ ] **Step 1: 确认无引用**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 grep -rn "SandboxStatusCard\|/sandbox\b" frontend/packages/web/ 2>/dev/null | grep -v node_modules | grep -v "/sandbox-env\|panel/sandbox\|/sandboxes"
 ```
 
@@ -1143,7 +1143,7 @@ git commit -m "chore(web): remove orphan /sandbox page + update sandbox docs"
 - [ ] **Step 5: 全 unit sweep**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run pytest tests/unit -k "sandbox or sandbox_pvc or claim or none_guard or sync_lifecycle" --no-cov 2>&1 | tee ../tmp/task-6.1.log | tail -10
 ```
 
@@ -1173,7 +1173,7 @@ cd backend && uv run pytest tests/unit -k "sandbox or sandbox_pvc or claim or no
 - [ ] **Step 10: PR2 + Spec 1 regression**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run pytest tests/e2e/test_skills_sync_cold_start_e2e.py tests/e2e/test_skills_sync_manifest_hit_e2e.py tests/e2e/test_skills_sync_diff_e2e.py tests/e2e/test_skills_sync_failure_e2e.py tests/e2e/test_skills_sync_pause_resume_e2e.py tests/e2e/test_sandbox_sync_event_recording_e2e.py tests/e2e/test_admin_sandbox_routes_e2e.py --no-cov 2>&1 | tee ../tmp/task-6.2-regression.log | tail -10
 ```
 
@@ -1194,7 +1194,7 @@ cd backend && uv run pytest tests/e2e/test_skills_sync_cold_start_e2e.py tests/e
 - [ ] **Step 3: 跑**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm --filter web e2e test_sandboxes_panel 2>&1 | tail -10
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm --filter web e2e test_sandboxes_panel 2>&1 | tail -10
 ```
 
 ---
@@ -1206,34 +1206,34 @@ cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnp
 - [ ] **Step 1: mypy 全 backend**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
-cd backend && uv run mypy cubebox/ 2>&1 | tee ../tmp/final-mypy.log | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd backend && uv run mypy cubeplex/ 2>&1 | tee ../tmp/final-mypy.log | tail -3
 ```
 
 - [ ] **Step 2: 全 unit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run pytest tests/unit --no-cov 2>&1 | tee ../tmp/final-unit.log | tail -5
 ```
 
 - [ ] **Step 3: 全 sandbox e2e**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run pytest tests/e2e -k "sandbox or sync" --no-cov 2>&1 | tee ../tmp/final-e2e.log | tail -10
 ```
 
 - [ ] **Step 4: frontend lint + build + e2e**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm lint 2>&1 | tail -3 && pnpm --filter web build 2>&1 | tail -3
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity/frontend && pnpm lint 2>&1 | tail -3 && pnpm --filter web build 2>&1 | tail -3
 ```
 
 - [ ] **Step 5: pre-commit**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/2026-06-27-sandbox-entity && \
+cd /home/chris/cubeplex/.worktrees/feat/2026-06-27-sandbox-entity && \
 cd backend && uv run pre-commit run --all-files 2>&1 | tee ../tmp/final-precommit.log | tail -10
 ```
 

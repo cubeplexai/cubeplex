@@ -10,15 +10,15 @@
 
 **Spec:** [docs/dev/specs/2026-06-02-hitl-checkpointed-respond-design.md](../specs/2026-06-02-hitl-checkpointed-respond-design.md)
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/hitl-checkpointed-respond` (slot 52; API `127.0.0.1:8052`, web `127.0.0.1:3052`, DB `cubebox_feat_hitl_checkpointed_respond` / `cubebox_test_feat_hitl_checkpointed_respond`). Always `cat .worktree.env` first; all backend commands run from `backend/` and tests respect `CUBEBOX_DATABASE__NAME` automatically via `tests/conftest.py`.
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/hitl-checkpointed-respond` (slot 52; API `127.0.0.1:8052`, web `127.0.0.1:3052`, DB `cubeplex_feat_hitl_checkpointed_respond` / `cubeplex_test_feat_hitl_checkpointed_respond`). Always `cat .worktree.env` first; all backend commands run from `backend/` and tests respect `CUBEPLEX_DATABASE__NAME` automatically via `tests/conftest.py`.
 
 ---
 
-## Upstream prerequisite (cubepi) + coordinated cubebox migration
+## Upstream prerequisite (cubepi) + coordinated cubeplex migration
 
-Per CLAUDE.md / user memory: "cubepi 是自研组件，上游优先". The plan needs a small cubepi change before anything else, because cubebox cannot recover the `run_id` of a paused conversation across worker death without it (the existing `cubepi_threads.pending_request` JSONB has no field that ties the pending back to a run_id; `AskRequest` has no `details` to smuggle it through; the spec/plan's `pending_hitl.run_id` requirement is otherwise unmeetable).
+Per CLAUDE.md / user memory: "cubepi 是自研组件，上游优先". The plan needs a small cubepi change before anything else, because cubeplex cannot recover the `run_id` of a paused conversation across worker death without it (the existing `cubepi_threads.pending_request` JSONB has no field that ties the pending back to a run_id; `AskRequest` has no `details` to smuggle it through; the spec/plan's `pending_hitl.run_id` requirement is otherwise unmeetable).
 
-**Two coordinated PRs — cubepi first, then cubebox.**
+**Two coordinated PRs — cubepi first, then cubeplex.**
 
 ### Step A: Cubepi PR (lands first)
 
@@ -27,26 +27,26 @@ Per CLAUDE.md / user memory: "cubepi 是自研组件，上游优先". The plan n
 - `hitl_span(kind, **attrs)` already stamps `hitl.question_id`, `hitl.tool_name`, `hitl.tool_call_id`, `hitl.timeout_seconds`, `hitl.from_resume`, `hitl.outcome`, `hitl.duration_seconds` (see `cubepi/hitl/channel.py:181-291`). After the channel gains `run_id`, extend `_await_answer` to pass `run_id=self._run_id` into `hitl_span` so traces carry it as `hitl.run_id`. Makes paused/resumed conversations groupable in trace storage by run_id.
 - Add `hitl.detached: bool` attribute on the span's finally block — set when the outcome resolved via `HitlDetached` exception (vs `answer`/`cancelled`/`timed_out`). Lets traces distinguish "auto-detached for durable resume" from "real cancel/timeout".
 
-**API surface changes** (apply to ALL checkpointers — PostgresCheckpointer, MySQLCheckpointer, SQLiteCheckpointer, MemoryCheckpointer — for Protocol parity; cubebox only uses Postgres, but cubepi's own tests + third-party users exercise the others):
+**API surface changes** (apply to ALL checkpointers — PostgresCheckpointer, MySQLCheckpointer, SQLiteCheckpointer, MemoryCheckpointer — for Protocol parity; cubeplex only uses Postgres, but cubepi's own tests + third-party users exercise the others):
 
 - **`save_pending_request(thread_id, request, run_id=None)`** gains an optional `run_id` keyword. When non-None, writes `pending_request` AND `run_id` in ONE atomic statement (UPDATE for SQL backends; single dict assignment for Memory).
 - **`load_pending_request(thread_id)` signature is UNCHANGED** — still returns `HitlRequest | None`. Keeps `Agent.load_pending_hitl_request` callers source-compatible.
 - NEW `async def load_pending_run_id(thread_id: str) -> str | None` on all checkpointers — separate read of just the new column/slot.
 - **No separate `set_pending_run_id` method.** A two-step write (pending now, run_id later) leaves a crash window where pending exists with `run_id=NULL`. Folding run_id into `save_pending_request` removes the window entirely.
-- **`CheckpointedChannel.__init__(..., run_id: str | None = None)`** gains a `run_id` parameter. The channel passes it to every `save_pending_request` call from `_on_pending_set`. cubebox constructs the channel inside `_build_agent_for_conversation` where run_id is known.
+- **`CheckpointedChannel.__init__(..., run_id: str | None = None)`** gains a `run_id` parameter. The channel passes it to every `save_pending_request` call from `_on_pending_set`. cubeplex constructs the channel inside `_build_agent_for_conversation` where run_id is known.
 
 **Per-backend storage changes:**
 
 | Backend | Storage | Schema change |
 |---|---|---|
-| `PostgresCheckpointer` | `cubepi_threads.run_id TEXT NULL` | Cubebox-owned alembic revision (Step B). `EXPECTED_SCHEMA_VERSION` in `cubepi/checkpointer/postgres/models.py` bumps 2 → 3. |
-| `MySQLCheckpointer` | `cubepi_threads.run_id VARCHAR(64) NULL` | Host-owned alembic (per cubepi/checkpointer/mysql/README.md — cubepi ships `cubepi_metadata` + `write_schema_version_op()` helpers; downstream hosts wire them into their own alembic chain). `EXPECTED_SCHEMA_VERSION` in `cubepi/checkpointer/mysql/models.py` bumps 2 → 3. cubebox doesn't ship MySQL but cubepi's own tests do — must be kept green. |
+| `PostgresCheckpointer` | `cubepi_threads.run_id TEXT NULL` | Cubeplex-owned alembic revision (Step B). `EXPECTED_SCHEMA_VERSION` in `cubepi/checkpointer/postgres/models.py` bumps 2 → 3. |
+| `MySQLCheckpointer` | `cubepi_threads.run_id VARCHAR(64) NULL` | Host-owned alembic (per cubepi/checkpointer/mysql/README.md — cubepi ships `cubepi_metadata` + `write_schema_version_op()` helpers; downstream hosts wire them into their own alembic chain). `EXPECTED_SCHEMA_VERSION` in `cubepi/checkpointer/mysql/models.py` bumps 2 → 3. cubeplex doesn't ship MySQL but cubepi's own tests do — must be kept green. |
 | `SQLiteCheckpointer` | `thread_pending_request.run_id TEXT NULL` (the pending lives in its own table, not `cubepi_threads`) | `__aenter__` does DDL inline (`CREATE TABLE IF NOT EXISTS thread_pending_request (...)`). Update the CREATE statement AND add a one-shot migration block (`PRAGMA table_info(thread_pending_request)` → `ALTER TABLE ... ADD COLUMN run_id TEXT`) for existing DBs. No schema_version concept — SQLite checkpointer doesn't gate on a version row. |
 | `MemoryCheckpointer` | sibling dict `self._pending_run_id: dict[str, str]` keyed by thread_id | No DDL — just initialize in `__init__` and clear in `aclose()` / when pending is cleared. |
 
 **Other prerequisites:**
 
-- **Bump `EXPECTED_SCHEMA_VERSION` to 3** in BOTH `cubepi/checkpointer/postgres/models.py` AND `cubepi/checkpointer/mysql/models.py` (per-backend constants today — verified). `__aenter__` reads the `cubepi_schema_version` row on connect; on v2-database / v3-cubepi mismatch the policy is "refuse with a clear error message pointing at `alembic upgrade head`". (SQLite has no version check; Memory has no DDL.) Document the policy in the cubepi CHANGELOG so cubebox knows the cubebox-side alembic (Step B) must set the version itself.
+- **Bump `EXPECTED_SCHEMA_VERSION` to 3** in BOTH `cubepi/checkpointer/postgres/models.py` AND `cubepi/checkpointer/mysql/models.py` (per-backend constants today — verified). `__aenter__` reads the `cubepi_schema_version` row on connect; on v2-database / v3-cubepi mismatch the policy is "refuse with a clear error message pointing at `alembic upgrade head`". (SQLite has no version check; Memory has no DDL.) Document the policy in the cubepi CHANGELOG so cubeplex knows the cubeplex-side alembic (Step B) must set the version itself.
 - **Test coverage**: cubepi's existing checkpointer test matrix already runs `save_pending_request` + `load_pending_request` round-trips against all four backends. Extend those to:
   - `save_pending_request(req, run_id="r1")` then `load_pending_run_id() == "r1"`.
   - `save_pending_request(req)` (no kwarg, legacy compat) then `load_pending_run_id() is None`.
@@ -54,9 +54,9 @@ Per CLAUDE.md / user memory: "cubepi 是自研组件，上游优先". The plan n
 
 - Push, get merged, tag a new cubepi rev.
 
-### Step B: Cubebox migration + pin bump (lands BEFORE any task in this plan)
+### Step B: Cubeplex migration + pin bump (lands BEFORE any task in this plan)
 
-cubebox owns `cubepi_threads` via its own alembic chain (see existing revision `fdcc495b3704_cubepi_v1_to_v2_pending_request.py`). The pin bump without a coordinated cubebox migration leaves existing databases on v2 — `PostgresCheckpointer.__aenter__` will hard-fail at startup until the column lands.
+cubeplex owns `cubepi_threads` via its own alembic chain (see existing revision `fdcc495b3704_cubepi_v1_to_v2_pending_request.py`). The pin bump without a coordinated cubeplex migration leaves existing databases on v2 — `PostgresCheckpointer.__aenter__` will hard-fail at startup until the column lands.
 
 - New alembic revision in `backend/alembic/versions/` (e.g. `<hash>_cubepi_v2_to_v3_pending_run_id.py`):
 
@@ -78,11 +78,11 @@ cubebox owns `cubepi_threads` via its own alembic chain (see existing revision `
       op.drop_column("cubepi_threads", "run_id")
   ```
 
-- Bump cubepi pin in `cubebox/uv.lock` (NOT `pyproject.toml` — per CLAUDE.md memory "cubepi is a pinned git dep" via uv.lock rev).
+- Bump cubepi pin in `cubeplex/uv.lock` (NOT `pyproject.toml` — per CLAUDE.md memory "cubepi is a pinned git dep" via uv.lock rev).
 
-- Verify the deploy order: **migration must run before any worker picks up the new pin**. Standard cubebox deploy is migration-first via `alembic upgrade head` (see `backend/Makefile` / startup script); confirm this is the case before rolling out.
+- Verify the deploy order: **migration must run before any worker picks up the new pin**. Standard cubeplex deploy is migration-first via `alembic upgrade head` (see `backend/Makefile` / startup script); confirm this is the case before rolling out.
 
-The rest of the plan assumes both steps are live. `cp.load_pending_request(cid)` still returns `HitlRequest | None` (unchanged). To get run_id, call `await cp.load_pending_run_id(cid)` separately — used by the answer routes' run_id fallback, the bootstrap pending_hitl serializer, and cancel_paused_run. The write side stays atomic via `CheckpointedChannel` carrying run_id into `save_pending_request`; cubebox never makes a separate run_id write, so no crash window exists between the two columns.
+The rest of the plan assumes both steps are live. `cp.load_pending_request(cid)` still returns `HitlRequest | None` (unchanged). To get run_id, call `await cp.load_pending_run_id(cid)` separately — used by the answer routes' run_id fallback, the bootstrap pending_hitl serializer, and cancel_paused_run. The write side stays atomic via `CheckpointedChannel` carrying run_id into `save_pending_request`; cubeplex never makes a separate run_id write, so no crash window exists between the two columns.
 
 ---
 
@@ -90,17 +90,17 @@ The rest of the plan assumes both steps are live. `cp.load_pending_request(cid)`
 
 **Backend — modify**
 
-- `backend/cubebox/streams/run_events.py` — add `"paused_hitl"` to the status state machine; new `claim_resume` Lua + Python wrapper; teach `start_run` / `_CLAIM_ACTIVE_LUA` to reject when existing meta is `paused_hitl` AND when DB pending is non-null; teach the stale-run sweeper to skip `paused_hitl`; **extend `_FORCE_CLAIM_STALE_LUA` to also protect `paused_hitl` rows** (today it force-claims anything that isn't `running` — would silently overwrite a paused conversation).
-- `backend/cubebox/schedules/dispatch.py` — `ConversationBusyError` detection must distinguish "running, retry" from "paused HITL, do not retry" so the scheduled-task poller doesn't burn its retry budget on a conversation the user has to unblock.
-- `backend/cubebox/streams/run_manager.py` — move `async with init_checkpointer() as cp:` upward to wrap section 6+; swap `InMemoryChannel` → `CheckpointedChannel(checkpointer=cp, thread_id=conversation_id, run_id=run_id, default_timeout=None)`; extend `_on_event` with the auto-detach hook; add `_classify_terminal_status` helper; extract `_build_agent_for_conversation()` factory; add `_run_cubepi_respond_path` + `_execute_respond_run`; add `resume_run_with_answer` + `cancel_paused_run`; remove `dispatch_ask_user_answer` / `dispatch_hitl_answer` and the `ask_user_answer`/`hitl_answer` arms of `_handle_control`. (run_id durability is atomic via the channel; no separate set_pending_run_id call needed.) **Existing `_trace_meta` dict (around line 1807) gains `run_id` and `turn_kind="prompt"` keys** so the `invoke_agent` span groups paused/resumed turns by run_id alongside the new respond/abort paths.
-- `backend/cubebox/middleware/sandbox.py` — drop `timeout=180.0` from `channel.approve(...)`.
-- `backend/cubebox/api/routes/v1/conversations.py` — answer routes call `resume_run_with_answer`; cancel route detects paused state and routes through `cancel_paused_run`; **steer / cancel_steer / cancel / answer routes must all replace the `status != "running"` precheck** (lines 1051, 1091, 1127, 1165, 1205) with paused-state-aware branches — current behavior returns `no_active_run` for `paused_hitl`, which silently breaks every user action on a paused conversation; conversation bootstrap/status response includes `pending_hitl`.
-- `backend/cubebox/api/schemas/conversations.py` (or wherever bootstrap response lives) — `pending_hitl` payload schema (TS-mirrored union from spec §7).
-- `backend/cubebox/agents/schemas.py` — extend `SandboxConfirmResolvedEvent` doc + accept `"policy_overridden"` as a `decision` value (no code change; doc only).
+- `backend/cubeplex/streams/run_events.py` — add `"paused_hitl"` to the status state machine; new `claim_resume` Lua + Python wrapper; teach `start_run` / `_CLAIM_ACTIVE_LUA` to reject when existing meta is `paused_hitl` AND when DB pending is non-null; teach the stale-run sweeper to skip `paused_hitl`; **extend `_FORCE_CLAIM_STALE_LUA` to also protect `paused_hitl` rows** (today it force-claims anything that isn't `running` — would silently overwrite a paused conversation).
+- `backend/cubeplex/schedules/dispatch.py` — `ConversationBusyError` detection must distinguish "running, retry" from "paused HITL, do not retry" so the scheduled-task poller doesn't burn its retry budget on a conversation the user has to unblock.
+- `backend/cubeplex/streams/run_manager.py` — move `async with init_checkpointer() as cp:` upward to wrap section 6+; swap `InMemoryChannel` → `CheckpointedChannel(checkpointer=cp, thread_id=conversation_id, run_id=run_id, default_timeout=None)`; extend `_on_event` with the auto-detach hook; add `_classify_terminal_status` helper; extract `_build_agent_for_conversation()` factory; add `_run_cubepi_respond_path` + `_execute_respond_run`; add `resume_run_with_answer` + `cancel_paused_run`; remove `dispatch_ask_user_answer` / `dispatch_hitl_answer` and the `ask_user_answer`/`hitl_answer` arms of `_handle_control`. (run_id durability is atomic via the channel; no separate set_pending_run_id call needed.) **Existing `_trace_meta` dict (around line 1807) gains `run_id` and `turn_kind="prompt"` keys** so the `invoke_agent` span groups paused/resumed turns by run_id alongside the new respond/abort paths.
+- `backend/cubeplex/middleware/sandbox.py` — drop `timeout=180.0` from `channel.approve(...)`.
+- `backend/cubeplex/api/routes/v1/conversations.py` — answer routes call `resume_run_with_answer`; cancel route detects paused state and routes through `cancel_paused_run`; **steer / cancel_steer / cancel / answer routes must all replace the `status != "running"` precheck** (lines 1051, 1091, 1127, 1165, 1205) with paused-state-aware branches — current behavior returns `no_active_run` for `paused_hitl`, which silently breaks every user action on a paused conversation; conversation bootstrap/status response includes `pending_hitl`.
+- `backend/cubeplex/api/schemas/conversations.py` (or wherever bootstrap response lives) — `pending_hitl` payload schema (TS-mirrored union from spec §7).
+- `backend/cubeplex/agents/schemas.py` — extend `SandboxConfirmResolvedEvent` doc + accept `"policy_overridden"` as a `decision` value (no code change; doc only).
 
 **Backend — create**
 
-- `backend/cubebox/streams/hitl_resume.py` — small module owning the `claim_resume` Lua + Python wrapper + the dangling-pending cleanup helpers (keeps `run_manager.py` from growing further).
+- `backend/cubeplex/streams/hitl_resume.py` — small module owning the `claim_resume` Lua + Python wrapper + the dangling-pending cleanup helpers (keeps `run_manager.py` from growing further).
 
 **Backend — tests**
 
@@ -129,7 +129,7 @@ The rest of the plan assumes both steps are live. `cp.load_pending_request(cid)`
 ## Task 1: Add `paused_hitl` to the run-status state machine
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_events.py`
+- Modify: `backend/cubeplex/streams/run_events.py`
 - Test: `backend/tests/unit/test_run_events_paused_hitl.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -138,7 +138,7 @@ The rest of the plan assumes both steps are live. `cp.load_pending_request(cid)`
 # backend/tests/unit/test_run_events_paused_hitl.py
 import pytest
 import pytest_asyncio
-from cubebox.streams.run_events import (
+from cubeplex.streams.run_events import (
     create_run, get_active_run, update_run_meta, is_stale_meta,
 )
 
@@ -148,7 +148,7 @@ pytestmark = pytest.mark.asyncio
 @pytest_asyncio.fixture
 async def redis_client():
     import redis.asyncio as redis
-    from cubebox.config import config
+    from cubeplex.config import config
     c = redis.from_url(config.get("redis.url", "redis://localhost:6379"))
     yield c
     await c.close()
@@ -172,7 +172,7 @@ async def test_paused_hitl_status_round_trips(redis_client):
 
 async def test_paused_hitl_is_not_stale(redis_client):
     """paused_hitl rows have no freshness expectation; sweeper must skip them."""
-    from cubebox.streams.run_events import RunMeta
+    from cubeplex.streams.run_events import RunMeta
     meta = RunMeta(
         run_id="r1", conversation_id="c1", status="paused_hitl",
         started_at="2026-06-02T00:00:00Z",
@@ -212,14 +212,14 @@ async def test_force_claim_stale_protects_paused_hitl(redis_client):
 - [ ] **Step 2: Run test to verify it fails**
 
 ```
-cd /home/chris/cubebox/.worktrees/feat/hitl-checkpointed-respond/backend
+cd /home/chris/cubeplex/.worktrees/feat/hitl-checkpointed-respond/backend
 uv run pytest tests/unit/test_run_events_paused_hitl.py -v
 ```
 Expected: both tests FAIL (`paused_hitl` not a valid status; `is_stale_meta` doesn't special-case it).
 
 - [ ] **Step 3: Implement**
 
-In `backend/cubebox/streams/run_events.py`:
+In `backend/cubeplex/streams/run_events.py`:
 
 ```python
 # Module-level constant near the existing _APPEND_EVENT_LUA comment:
@@ -259,7 +259,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_events.py backend/tests/unit/test_run_events_paused_hitl.py
+git add backend/cubeplex/streams/run_events.py backend/tests/unit/test_run_events_paused_hitl.py
 git commit -m "feat(runs): add paused_hitl status to run state machine"
 ```
 
@@ -268,7 +268,7 @@ git commit -m "feat(runs): add paused_hitl status to run state machine"
 ## Task 2: `claim_resume` Lua + Python wrapper
 
 **Files:**
-- Create: `backend/cubebox/streams/hitl_resume.py`
+- Create: `backend/cubeplex/streams/hitl_resume.py`
 - Test: `backend/tests/unit/test_hitl_claim_resume.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -277,8 +277,8 @@ git commit -m "feat(runs): add paused_hitl status to run state machine"
 # backend/tests/unit/test_hitl_claim_resume.py
 import pytest
 import pytest_asyncio
-from cubebox.streams.run_events import create_run, update_run_meta
-from cubebox.streams.hitl_resume import claim_resume, ClaimResumeOutcome
+from cubeplex.streams.run_events import create_run, update_run_meta
+from cubeplex.streams.hitl_resume import claim_resume, ClaimResumeOutcome
 
 pytestmark = pytest.mark.asyncio
 
@@ -286,7 +286,7 @@ pytestmark = pytest.mark.asyncio
 @pytest_asyncio.fixture
 async def redis_client():
     import redis.asyncio as redis
-    from cubebox.config import config
+    from cubeplex.config import config
     c = redis.from_url(config.get("redis.url", "redis://localhost:6379"))
     yield c
     await c.close()
@@ -370,7 +370,7 @@ Expected: import error / module-not-found.
 - [ ] **Step 3: Implement**
 
 ```python
-# backend/cubebox/streams/hitl_resume.py
+# backend/cubeplex/streams/hitl_resume.py
 """Single-flight resume claim for paused HITL conversations.
 
 See docs/dev/specs/2026-06-02-hitl-checkpointed-respond-design.md §5.
@@ -385,7 +385,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
-from cubebox.streams.run_events import _active_run_key, _run_meta_key
+from cubeplex.streams.run_events import _active_run_key, _run_meta_key
 
 
 class ClaimResumeOutcome(str, enum.Enum):
@@ -497,7 +497,7 @@ Expected: 4 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/hitl_resume.py backend/tests/unit/test_hitl_claim_resume.py
+git add backend/cubeplex/streams/hitl_resume.py backend/tests/unit/test_hitl_claim_resume.py
 git commit -m "feat(runs): add claim_resume single-flight Lua CAS for paused HITL"
 ```
 
@@ -506,7 +506,7 @@ git commit -m "feat(runs): add claim_resume single-flight Lua CAS for paused HIT
 ## Task 3: Extend `start_run` to reject paused_hitl and consult DB pending
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (in `start_run`)
+- Modify: `backend/cubeplex/streams/run_manager.py` (in `start_run`)
 - Test: `backend/tests/unit/test_run_manager_start_run_paused.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -524,7 +524,7 @@ async def test_start_run_rejects_when_db_pending_non_null(monkeypatch):
     """Worker crashed mid-pause: Redis says 'stale' (or row missing) but
     DB still has pending. start_run must reject — the conversation is
     NOT done."""
-    from cubebox.streams.run_manager import RunManager, RunContext
+    from cubeplex.streams.run_manager import RunManager, RunContext
 
     rm = ... # build minimal RunManager (see existing tests for pattern)
     # Stub checkpointer.load_pending_request to return a non-null pending.
@@ -534,7 +534,7 @@ async def test_start_run_rejects_when_db_pending_non_null(monkeypatch):
     _fake_pending.question_id = "q1"
     cp_mock.load_pending_request = AsyncMock(return_value=_fake_pending)
     monkeypatch.setattr(
-        "cubebox.streams.run_manager.init_checkpointer",
+        "cubeplex.streams.run_manager.init_checkpointer",
         lambda: _fake_cm(cp_mock),
     )
     # ... simulate no active row in Redis
@@ -556,13 +556,13 @@ Expected: FAIL — start_run currently only checks Redis.
 
 - [ ] **Step 3: Implement**
 
-In `backend/cubebox/streams/run_manager.py` `start_run`, after the existing `get_active_run` conflict check:
+In `backend/cubeplex/streams/run_manager.py` `start_run`, after the existing `get_active_run` conflict check:
 
 ```python
 # Additional DB-pending guard: a worker crash between pending persist and
 # Redis transition can leave DB pending while Redis appears unlocked.
 # DB is authoritative for "is this conversation paused". See spec §4.
-from cubebox.agents.checkpointer import init_checkpointer  # already imported
+from cubeplex.agents.checkpointer import init_checkpointer  # already imported
 async with init_checkpointer() as _cp:
     _db_pending = await _cp.load_pending_request(conversation_id)
 if _db_pending is not None:
@@ -590,7 +590,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_manager_start_run_paused.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_manager_start_run_paused.py
 git commit -m "feat(runs): start_run rejects conversations with pending HITL"
 ```
 
@@ -599,8 +599,8 @@ git commit -m "feat(runs): start_run rejects conversations with pending HITL"
 ## Task 4: Swap to CheckpointedChannel + remove 180-second timeout
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (section 6 channel construction; move `async with init_checkpointer()` up)
-- Modify: `backend/cubebox/middleware/sandbox.py:446` (drop `timeout=180.0`)
+- Modify: `backend/cubeplex/streams/run_manager.py` (section 6 channel construction; move `async with init_checkpointer()` up)
+- Modify: `backend/cubeplex/middleware/sandbox.py:446` (drop `timeout=180.0`)
 - Test: `backend/tests/unit/test_sandbox_confirm_gate.py` (MODIFY — drop 180.0 assertion)
 
 - [ ] **Step 1: Update the failing existing test + stub signature**
@@ -636,7 +636,7 @@ Expected: FAIL — code still passes 180.0.
 
 - [ ] **Step 3: Implement — sandbox middleware**
 
-In `backend/cubebox/middleware/sandbox.py:440-448`:
+In `backend/cubeplex/middleware/sandbox.py:440-448`:
 
 ```python
 # OLD:
@@ -662,7 +662,7 @@ The `except HitlTimedOut` block stays — kept as defence even though no current
 
 - [ ] **Step 4: Implement — run_manager channel swap**
 
-In `backend/cubebox/streams/run_manager.py` `_run_cubepi_path`:
+In `backend/cubeplex/streams/run_manager.py` `_run_cubepi_path`:
 
 (a) Move `async with init_checkpointer() as cp:` (currently around line 1691) up to BEFORE section 6 (currently around line 1527). Re-indent sections 6, 7, 8 and the agent run body under the new scope. The existing inner `async with init_checkpointer() as cp:` block goes away (its contents are now under the outer one).
 
@@ -699,8 +699,8 @@ Expected: all PASS. Confirm timeout assertion change holds.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/middleware/sandbox.py \
-        backend/cubebox/streams/run_manager.py \
+git add backend/cubeplex/middleware/sandbox.py \
+        backend/cubeplex/streams/run_manager.py \
         backend/tests/unit/test_sandbox_confirm_gate.py
 git commit -m "feat(hitl): switch to CheckpointedChannel and remove 180s timeout"
 ```
@@ -710,7 +710,7 @@ git commit -m "feat(hitl): switch to CheckpointedChannel and remove 180s timeout
 ## Task 5: Auto-detach hook on `HitlRequestEvent`
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (extend `_on_event` listener)
+- Modify: `backend/cubeplex/streams/run_manager.py` (extend `_on_event` listener)
 - Test: `backend/tests/unit/test_run_manager_auto_detach.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -729,7 +729,7 @@ async def test_on_event_schedules_detach_on_hitl_request():
     a HitlRequestEvent fires."""
     from cubepi.agent.types import HitlRequestEvent
     from cubepi.hitl.types import HitlRequest, ApproveRequest
-    from cubebox.streams.run_manager import _build_auto_detach_listener
+    from cubeplex.streams.run_manager import _build_auto_detach_listener
 
     agent = MagicMock()
     agent.detach = AsyncMock()
@@ -756,7 +756,7 @@ async def test_on_event_does_not_detach_on_other_events():
     We use a simple sentinel object since cubepi event types vary in
     construction shape (Message, etc.) and we only care about the
     isinstance check."""
-    from cubebox.streams.run_manager import _build_auto_detach_listener
+    from cubeplex.streams.run_manager import _build_auto_detach_listener
 
     agent = MagicMock()
     agent.detach = AsyncMock()
@@ -776,7 +776,7 @@ Expected: FAIL — `_build_auto_detach_listener` doesn't exist.
 
 - [ ] **Step 3: Implement**
 
-In `backend/cubebox/streams/run_manager.py`, add module-level helper above `_run_cubepi_path`:
+In `backend/cubeplex/streams/run_manager.py`, add module-level helper above `_run_cubepi_path`:
 
 ```python
 class _AutoDetachListener:
@@ -827,7 +827,7 @@ Expected: 2 PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_manager_auto_detach.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_manager_auto_detach.py
 git commit -m "feat(hitl): auto-detach worker on HitlRequestEvent"
 ```
 
@@ -836,8 +836,8 @@ git commit -m "feat(hitl): auto-detach worker on HitlRequestEvent"
 ## Task 6: `_classify_terminal_status` helper + dangling-pending cleanup
 
 **Files:**
-- Modify: `backend/cubebox/streams/hitl_resume.py` (add helper)
-- Modify: `backend/cubebox/streams/run_manager.py` (terminal block uses helper)
+- Modify: `backend/cubeplex/streams/hitl_resume.py` (add helper)
+- Modify: `backend/cubeplex/streams/run_manager.py` (terminal block uses helper)
 - Test: `backend/tests/unit/test_run_manager_classify_terminal_status.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -847,7 +847,7 @@ git commit -m "feat(hitl): auto-detach worker on HitlRequestEvent"
 import pytest
 from unittest.mock import MagicMock
 
-from cubebox.streams.hitl_resume import classify_terminal_status, TerminalClassification
+from cubeplex.streams.hitl_resume import classify_terminal_status, TerminalClassification
 
 
 def _fake_pending(qid: str):
@@ -910,7 +910,7 @@ Expected: FAIL — symbol not defined.
 
 - [ ] **Step 3: Implement**
 
-Append to `backend/cubebox/streams/hitl_resume.py`:
+Append to `backend/cubeplex/streams/hitl_resume.py`:
 
 ```python
 @dataclass(frozen=True)
@@ -941,7 +941,7 @@ def classify_terminal_status(
 In `run_manager.py`'s `_run_cubepi_path` terminal block (after `agent.prompt()` returns, inside the `finally` or `else`):
 
 ```python
-from cubebox.streams.hitl_resume import classify_terminal_status
+from cubeplex.streams.hitl_resume import classify_terminal_status
 
 final_pending = await agent.load_pending_hitl_request()
 classification = classify_terminal_status(
@@ -969,8 +969,8 @@ Expected: all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/hitl_resume.py \
-        backend/cubebox/streams/run_manager.py \
+git add backend/cubeplex/streams/hitl_resume.py \
+        backend/cubeplex/streams/run_manager.py \
         backend/tests/unit/test_run_manager_classify_terminal_status.py
 git commit -m "feat(hitl): classify terminal status with dangling-pending cleanup"
 ```
@@ -980,7 +980,7 @@ git commit -m "feat(hitl): classify terminal status with dangling-pending cleanu
 ## Task 7: Extract `_build_agent_for_conversation` factory
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (extract method)
+- Modify: `backend/cubeplex/streams/run_manager.py` (extract method)
 - Test: `backend/tests/unit/test_run_manager_build_agent.py` (NEW — smoke test the factory)
 
 - [ ] **Step 1: Write the failing test (smoke)**
@@ -1015,7 +1015,7 @@ Expected: 1 skipped.
 
 - [ ] **Step 3: Implement the factory**
 
-In `backend/cubebox/streams/run_manager.py`, extract sections 1–8 (provider + middleware + tools + channel + agent build) of `_run_cubepi_path` into:
+In `backend/cubeplex/streams/run_manager.py`, extract sections 1–8 (provider + middleware + tools + channel + agent build) of `_run_cubepi_path` into:
 
 ```python
 async def _build_agent_for_conversation(
@@ -1083,7 +1083,7 @@ Expected: all PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/tests/unit/test_run_manager_build_agent.py
+git add backend/cubeplex/streams/run_manager.py backend/tests/unit/test_run_manager_build_agent.py
 git commit -m "refactor(runs): extract _build_agent_for_conversation factory"
 ```
 
@@ -1092,12 +1092,12 @@ git commit -m "refactor(runs): extract _build_agent_for_conversation factory"
 ## Task 8: `_run_cubepi_respond_path` + `_execute_respond_run`
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Test: covered by Task 9's integration test
 
 - [ ] **Step 1: Implement `_run_cubepi_respond_path`**
 
-In `backend/cubebox/streams/run_manager.py`, add a sibling to `_run_cubepi_path`:
+In `backend/cubeplex/streams/run_manager.py`, add a sibling to `_run_cubepi_path`:
 
 ```python
 async def _run_cubepi_respond_path(
@@ -1119,7 +1119,7 @@ async def _run_cubepi_respond_path(
 ) -> None:
     """Resume a paused HITL conversation. Reuses the run_id of the paused
     turn; events stream into the same Redis key."""
-    from cubebox.streams.hitl_resume import classify_terminal_status
+    from cubeplex.streams.hitl_resume import classify_terminal_status
     # ... boilerplate similar to _run_cubepi_path: extra_ref_holder,
     # SSE queue, drainer, citation seed, etc.
 
@@ -1262,15 +1262,15 @@ async def _execute_respond_run(
 - [ ] **Step 3: Compile-check**
 
 ```
-cd /home/chris/cubebox/.worktrees/feat/hitl-checkpointed-respond/backend
-uv run mypy cubebox/streams/run_manager.py cubebox/streams/hitl_resume.py
+cd /home/chris/cubeplex/.worktrees/feat/hitl-checkpointed-respond/backend
+uv run mypy cubeplex/streams/run_manager.py cubeplex/streams/hitl_resume.py
 ```
 Expected: zero errors. Fix any.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/cubebox/streams/hitl_resume.py
+git add backend/cubeplex/streams/run_manager.py backend/cubeplex/streams/hitl_resume.py
 git commit -m "feat(hitl): add respond path that resumes paused conversations"
 ```
 
@@ -1279,8 +1279,8 @@ git commit -m "feat(hitl): add respond path that resumes paused conversations"
 ## Task 9: `resume_run_with_answer` method + answer routes
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (add method)
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` (`submit_ask_user_answer`, sandbox confirm answer route)
+- Modify: `backend/cubeplex/streams/run_manager.py` (add method)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` (`submit_ask_user_answer`, sandbox confirm answer route)
 - Test: `backend/tests/unit/test_run_manager_resume_run_with_answer.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -1295,11 +1295,11 @@ pytestmark = pytest.mark.asyncio
 
 
 async def test_resume_returns_404_when_no_pending(monkeypatch):
-    from cubebox.streams.run_manager import RunManager
+    from cubeplex.streams.run_manager import RunManager
     rm = ... # minimal RunManager
     cp_mock = AsyncMock()
     cp_mock.load_pending_request = AsyncMock(return_value=None)
-    monkeypatch.setattr("cubebox.streams.run_manager.init_checkpointer", lambda: _fake_cm(cp_mock))
+    monkeypatch.setattr("cubeplex.streams.run_manager.init_checkpointer", lambda: _fake_cm(cp_mock))
     with pytest.raises(LookupError):  # mapped to 404 at the route
         await rm.resume_run_with_answer(
             conversation_id="c1", run_id="r1",
@@ -1314,7 +1314,7 @@ async def test_resume_returns_409_on_qid_mismatch(monkeypatch):
     cp_mock.load_pending_request = AsyncMock(return_value=pending)
     # ... patch + call rm.resume_run_with_answer with question_id="q-wrong"
     # ResumeStaleAnswer is the explicit exception type; the route maps it to 409.
-    from cubebox.streams.run_manager import ResumeStaleAnswer
+    from cubeplex.streams.run_manager import ResumeStaleAnswer
     with pytest.raises(ResumeStaleAnswer):
         await rm.resume_run_with_answer(
             conversation_id="c1", run_id="r1",
@@ -1342,7 +1342,7 @@ uv run pytest tests/unit/test_run_manager_resume_run_with_answer.py -v
 
 - [ ] **Step 3: Implement**
 
-In `backend/cubebox/streams/run_manager.py`:
+In `backend/cubeplex/streams/run_manager.py`:
 
 ```python
 class ResumeStaleAnswer(Exception): ...
@@ -1361,7 +1361,7 @@ async def resume_run_with_answer(
     ctx: RunContext,
 ) -> str:
     """See spec §5."""
-    from cubebox.streams.hitl_resume import claim_resume, ClaimResumeOutcome
+    from cubeplex.streams.hitl_resume import claim_resume, ClaimResumeOutcome
 
     # 1. Authoritative: DB pending. (load_pending_request shape unchanged
     #    per cubepi prerequisite — only the new run_id column gets its own
@@ -1410,7 +1410,7 @@ async def resume_run_with_answer(
 
 - [ ] **Step 4: Wire the routes**
 
-In `backend/cubebox/api/routes/v1/conversations.py`:
+In `backend/cubeplex/api/routes/v1/conversations.py`:
 
 **Remove the existing `status != "running"` precheck on lines 1165 + 1205** (the two answer routes) — paused_hitl is exactly the state that should accept answers. Same precheck on the cancel route (line 1051) gets handled in Task 10; steer/cancel_steer (1091, 1127) get handled there too.
 
@@ -1482,8 +1482,8 @@ Expected: all PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py \
-        backend/cubebox/api/routes/v1/conversations.py \
+git add backend/cubeplex/streams/run_manager.py \
+        backend/cubeplex/api/routes/v1/conversations.py \
         backend/tests/unit/test_run_manager_resume_run_with_answer.py
 git commit -m "feat(hitl): resume_run_with_answer + 404/409 route mapping"
 ```
@@ -1493,8 +1493,8 @@ git commit -m "feat(hitl): resume_run_with_answer + 404/409 route mapping"
 ## Task 10: `cancel_paused_run` for paused-state cancellation
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py`
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` (cancel route)
+- Modify: `backend/cubeplex/streams/run_manager.py`
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` (cancel route)
 - Test: `backend/tests/unit/test_run_manager_cancel_paused.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -1544,10 +1544,10 @@ async def cancel_paused_run(
     composer stays locked. Reuse the existing publish_stream_event
     builder + convert_agent_event_to_sse chain.
     """
-    from cubebox.streams.hitl_resume import (
+    from cubeplex.streams.hitl_resume import (
         claim_resume, finalize_run_meta_if_claim_matches, ClaimResumeOutcome,
     )
-    from cubebox.agents.stream import convert_agent_event_to_sse
+    from cubeplex.agents.stream import convert_agent_event_to_sse
 
     # Need started_at for claim_resume's rebuild branch (long-pause case).
     async with init_checkpointer() as cp:
@@ -1675,8 +1675,8 @@ uv run pytest tests/unit/test_run_manager_cancel_paused.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py \
-        backend/cubebox/api/routes/v1/conversations.py \
+git add backend/cubeplex/streams/run_manager.py \
+        backend/cubeplex/api/routes/v1/conversations.py \
         backend/tests/unit/test_run_manager_cancel_paused.py
 git commit -m "feat(hitl): cancel_paused_run via claim_resume + abort_pending"
 ```
@@ -1686,8 +1686,8 @@ git commit -m "feat(hitl): cancel_paused_run via claim_resume + abort_pending"
 ## Task 11: Remove dispatched answer plumbing
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (delete `dispatch_ask_user_answer`, `dispatch_hitl_answer`, `_deliver_ask_user_answer`, `_deliver_hitl_answer`; delete the `ask_user_answer` + `hitl_answer` arms of `_handle_control`)
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` (remove any remaining call to those dispatch methods — should be replaced by Task 9)
+- Modify: `backend/cubeplex/streams/run_manager.py` (delete `dispatch_ask_user_answer`, `dispatch_hitl_answer`, `_deliver_ask_user_answer`, `_deliver_hitl_answer`; delete the `ask_user_answer` + `hitl_answer` arms of `_handle_control`)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` (remove any remaining call to those dispatch methods — should be replaced by Task 9)
 - **Delete: `backend/tests/unit/test_run_manager_ask_user_answer.py`** (123 lines; tests the deleted method directly)
 - **Delete: `backend/tests/unit/test_run_manager_hitl_answer.py`** (91 lines; tests the deleted method directly)
 
@@ -1696,14 +1696,14 @@ git commit -m "feat(hitl): cancel_paused_run via claim_resume + abort_pending"
 - [ ] **Step 1: Verify no other callers exist**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/hitl-checkpointed-respond
-grep -rn "dispatch_ask_user_answer\|dispatch_hitl_answer\|_deliver_ask_user_answer\|_deliver_hitl_answer\|publish_control.*ask_user_answer\|publish_control.*hitl_answer" backend/cubebox backend/tests
+cd /home/chris/cubeplex/.worktrees/feat/hitl-checkpointed-respond
+grep -rn "dispatch_ask_user_answer\|dispatch_hitl_answer\|_deliver_ask_user_answer\|_deliver_hitl_answer\|publish_control.*ask_user_answer\|publish_control.*hitl_answer" backend/cubeplex backend/tests
 ```
 Expected after Tasks 9–10: matches inside `run_manager.py` itself (the definitions) AND the two test files listed above; no other external callers. The test files are deleted in step 2.
 
 - [ ] **Step 2: Delete the methods + control arms + obsolete tests**
 
-In `backend/cubebox/streams/run_manager.py`, delete the four methods listed above and the corresponding `elif type_ == "ask_user_answer"` / `elif type_ == "hitl_answer"` branches in `_handle_control`. Remove now-unused imports.
+In `backend/cubeplex/streams/run_manager.py`, delete the four methods listed above and the corresponding `elif type_ == "ask_user_answer"` / `elif type_ == "hitl_answer"` branches in `_handle_control`. Remove now-unused imports.
 
 ```bash
 git rm backend/tests/unit/test_run_manager_ask_user_answer.py
@@ -1721,7 +1721,7 @@ Expected: all PASS (no test relies on the removed methods).
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/cubebox/api/routes/v1/conversations.py
+git add backend/cubeplex/streams/run_manager.py backend/cubeplex/api/routes/v1/conversations.py
 git commit -m "refactor(hitl): drop Redis-pubsub answer dispatch (replaced by resume_run_with_answer)"
 ```
 
@@ -1730,8 +1730,8 @@ git commit -m "refactor(hitl): drop Redis-pubsub answer dispatch (replaced by re
 ## Task 12: Synthetic resolved event on dangling cleanup
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py` (`_emit_synthetic_resolved` real impl)
-- Modify: `backend/cubebox/agents/schemas.py` (doc-only: extend `decision` field docstring to mention `"policy_overridden"`)
+- Modify: `backend/cubeplex/streams/run_manager.py` (`_emit_synthetic_resolved` real impl)
+- Modify: `backend/cubeplex/agents/schemas.py` (doc-only: extend `decision` field docstring to mention `"policy_overridden"`)
 - Test: `backend/tests/unit/test_run_manager_dangling_cleanup_event.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -1741,7 +1741,7 @@ git commit -m "refactor(hitl): drop Redis-pubsub answer dispatch (replaced by re
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from cubebox.agents.schemas import SandboxConfirmResolvedEvent, AskUserResolvedEvent
+from cubeplex.agents.schemas import SandboxConfirmResolvedEvent, AskUserResolvedEvent
 
 pytestmark = pytest.mark.asyncio
 
@@ -1753,7 +1753,7 @@ async def test_dangling_sandbox_cleanup_emits_resolved_event():
     rest of the run uses — NOT a raw dict (publish_stream_event accesses
     event.type and event.data)."""
     publish = AsyncMock()
-    from cubebox.streams.run_manager import _emit_synthetic_resolved
+    from cubeplex.streams.run_manager import _emit_synthetic_resolved
     pending = MagicMock()
     pending.payload.kind = "approve"
     pending.payload.tool_call_id = "tc1"
@@ -1769,7 +1769,7 @@ async def test_dangling_sandbox_cleanup_emits_resolved_event():
 
 async def test_dangling_ask_cleanup_emits_resolved_event():
     publish = AsyncMock()
-    from cubebox.streams.run_manager import _emit_synthetic_resolved
+    from cubeplex.streams.run_manager import _emit_synthetic_resolved
     pending = MagicMock()
     pending.payload.kind = "ask"
     await _emit_synthetic_resolved(publish, pending, "q1")
@@ -1788,9 +1788,9 @@ async def test_dangling_cleanup_raises_on_unknown_kind():
     """Future cubepi kind (e.g. 'confirm') must surface loudly, not silently
     drop the synthetic event — otherwise the frontend card sticks."""
     publish = AsyncMock()
-    from cubebox.streams.run_manager import _emit_synthetic_resolved
+    from cubeplex.streams.run_manager import _emit_synthetic_resolved
     pending = MagicMock()
-    pending.payload.kind = "confirm"  # cubepi ConfirmRequest, not used by cubebox today
+    pending.payload.kind = "confirm"  # cubepi ConfirmRequest, not used by cubeplex today
     with pytest.raises(ValueError, match="unhandled HITL kind"):
         await _emit_synthetic_resolved(publish, pending, "q1")
 ```
@@ -1803,7 +1803,7 @@ uv run pytest tests/unit/test_run_manager_dangling_cleanup_event.py -v
 
 - [ ] **Step 3: Implement**
 
-In `backend/cubebox/streams/run_manager.py`:
+In `backend/cubeplex/streams/run_manager.py`:
 
 ```python
 async def _emit_synthetic_resolved(
@@ -1821,7 +1821,7 @@ async def _emit_synthetic_resolved(
 
     See spec §6 "Dangling pending cleanup".
     """
-    from cubebox.agents.schemas import (
+    from cubeplex.agents.schemas import (
         SandboxConfirmResolvedEvent, AskUserResolvedEvent,
     )
 
@@ -1853,7 +1853,7 @@ async def _emit_synthetic_resolved(
             },
         )
     else:
-        # ConfirmRequest (kind='confirm') is unused by cubebox today. If a
+        # ConfirmRequest (kind='confirm') is unused by cubeplex today. If a
         # future caller introduces it, fail loud rather than silently leave
         # the frontend with a stuck card.
         raise ValueError(f"unhandled HITL kind in dangling cleanup: {kind!r}")
@@ -1862,7 +1862,7 @@ async def _emit_synthetic_resolved(
 ```
 
 Update the `SandboxConfirmResolvedEvent` docstring in
-`backend/cubebox/agents/schemas.py` to enumerate `"policy_overridden"`
+`backend/cubeplex/agents/schemas.py` to enumerate `"policy_overridden"`
 as a possible `decision` value. The `AskUserResolvedEvent` schema is
 unchanged — we ride on `cancelled=True` + `reason` rather than adding
 a new `outcome` field that would diverge from the live SSE path.
@@ -1876,8 +1876,8 @@ uv run pytest tests/unit/test_run_manager_dangling_cleanup_event.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py \
-        backend/cubebox/agents/schemas.py \
+git add backend/cubeplex/streams/run_manager.py \
+        backend/cubeplex/agents/schemas.py \
         backend/tests/unit/test_run_manager_dangling_cleanup_event.py
 git commit -m "feat(hitl): emit synthetic resolved event when dangling pending is cleaned"
 ```
@@ -1887,8 +1887,8 @@ git commit -m "feat(hitl): emit synthetic resolved event when dangling pending i
 ## Task 13: `pending_hitl` in conversation bootstrap
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` (bootstrap endpoint)
-- Modify: `backend/cubebox/api/schemas/conversations.py` (or where bootstrap response is typed) — add `PendingHitl` union
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` (bootstrap endpoint)
+- Modify: `backend/cubeplex/api/schemas/conversations.py` (or where bootstrap response is typed) — add `PendingHitl` union
 - Test: `backend/tests/unit/test_conversations_bootstrap_pending_hitl.py` (NEW)
 
 - [ ] **Step 1: Write the failing test**
@@ -1923,7 +1923,7 @@ uv run pytest tests/unit/test_conversations_bootstrap_pending_hitl.py -v
 
 - [ ] **Step 3: Implement**
 
-In `backend/cubebox/api/schemas/conversations.py` (or correct file):
+In `backend/cubeplex/api/schemas/conversations.py` (or correct file):
 
 ```python
 from typing import Literal
@@ -1962,7 +1962,7 @@ PendingHitl = PendingHitlAskUser | PendingHitlSandboxConfirm
 In the bootstrap endpoint, after assembling the existing response:
 
 ```python
-from cubebox.streams.run_events import get_active_run
+from cubeplex.streams.run_events import get_active_run
 
 async with init_checkpointer() as cp:
     pending_req = await cp.load_pending_request(conversation_id)
@@ -1986,7 +1986,7 @@ if pending_req is not None:
 return {..., "pending_hitl": pending_hitl}
 ```
 
-Where `_serialize_pending_hitl` lives in `cubebox/streams/hitl_resume.py`:
+Where `_serialize_pending_hitl` lives in `cubeplex/streams/hitl_resume.py`:
 
 ```python
 def _as_dict(obj: Any) -> dict[str, Any]:
@@ -2002,7 +2002,7 @@ def serialize_pending_hitl(pending: Any, *, run_id: str) -> dict[str, Any]:
     - JSONB round-trip leaving inner objects as dicts (not Pydantic models)
     - ApproveRequest.details being None (cubepi default)
     """
-    from cubebox.utils.time import utc_isoformat  # project convention
+    from cubeplex.utils.time import utc_isoformat  # project convention
     from datetime import UTC, datetime
 
     requested_at = utc_isoformat(datetime.fromtimestamp(pending.created_at, UTC))
@@ -2038,7 +2038,7 @@ def serialize_pending_hitl(pending: Any, *, run_id: str) -> dict[str, Any]:
             "requested_at": requested_at,
             "questions": questions_out,
         }
-    # confirm kind: unused by cubebox today. Raise so a future caller doesn't
+    # confirm kind: unused by cubeplex today. Raise so a future caller doesn't
     # silently get a half-built response.
     raise ValueError(f"unsupported pending HITL kind: {kind}")
 ```
@@ -2078,7 +2078,7 @@ to `save_pending_request` in one atomic SQL statement. Both the prompt
 path (Task 6) and the respond path (Task 8) build the channel via
 `_build_agent_for_conversation(..., run_id=run_id, ...)`; when the
 agent enters HITL, `_on_pending_set` writes pending + run_id together.
-No separate cubebox call is required after `agent.load_pending_hitl_request()`
+No separate cubeplex call is required after `agent.load_pending_hitl_request()`
 to "persist the run_id" — it was already persisted atomically when the
 pending appeared.
 
@@ -2091,9 +2091,9 @@ uv run pytest tests/unit/test_conversations_bootstrap_pending_hitl.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/conversations.py \
-        backend/cubebox/api/schemas/conversations.py \
-        backend/cubebox/streams/hitl_resume.py \
+git add backend/cubeplex/api/routes/v1/conversations.py \
+        backend/cubeplex/api/schemas/conversations.py \
+        backend/cubeplex/streams/hitl_resume.py \
         backend/tests/unit/test_conversations_bootstrap_pending_hitl.py
 git commit -m "feat(api): pending_hitl in conversation bootstrap"
 ```
@@ -2111,7 +2111,7 @@ git commit -m "feat(api): pending_hitl in conversation bootstrap"
 - [ ] **Step 1: Locate composer**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/hitl-checkpointed-respond/frontend
+cd /home/chris/cubeplex/.worktrees/feat/hitl-checkpointed-respond/frontend
 grep -rln "send.*message\|Composer\|composer" packages/web/components/chat | head -5
 ```
 Use the matching file for step 3.
@@ -2479,7 +2479,7 @@ git commit -m "test(hitl): e2e pause/resume — happy path, long-pause, policy c
 ## Task 17: Scheduled-task dispatch handles `paused_hitl`
 
 **Files:**
-- Modify: `backend/cubebox/schedules/dispatch.py` (around line 110 — the `"already" in str(exc)` matcher that maps `RuntimeError` to `ConversationBusyError`)
+- Modify: `backend/cubeplex/schedules/dispatch.py` (around line 110 — the `"already" in str(exc)` matcher that maps `RuntimeError` to `ConversationBusyError`)
 - Test: `backend/tests/unit/test_schedules_dispatch_paused.py` (NEW)
 
 The scheduled-task poller today catches `RuntimeError` from `start_run` and treats it as transient busy (5-minute retry up to `_max_busy_retries`). After Task 3, `start_run` raises a new `RuntimeError("Conversation ... has a pending HITL request ...; answer or cancel before starting a new turn")`. The poller will busy-retry on paused conversations until exhaustion — wasted retries on a state only the user can clear.
@@ -2496,7 +2496,7 @@ async def test_paused_hitl_dispatch_records_paused_not_busy():
     """A paused_hitl conversation must not be busy-retried; the scheduled
     occurrence should mark itself paused/skipped (terminal for this fire),
     and the next fire happens on the normal schedule, not after 5 min."""
-    from cubebox.schedules import dispatch
+    from cubeplex.schedules import dispatch
     # ... build minimal scheduler context; simulate start_run raising
     # RuntimeError with the new "has a pending HITL request" message.
     # Assert occurrence is marked something like "skipped_paused", NOT busy.
@@ -2510,7 +2510,7 @@ uv run pytest tests/unit/test_schedules_dispatch_paused.py -v
 
 - [ ] **Step 3: Implement**
 
-In `backend/cubebox/schedules/dispatch.py` around the existing busy-detection logic:
+In `backend/cubeplex/schedules/dispatch.py` around the existing busy-detection logic:
 
 ```python
 except RuntimeError as exc:
@@ -2539,7 +2539,7 @@ uv run pytest tests/unit/test_schedules_dispatch_paused.py -v
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/schedules/dispatch.py backend/tests/unit/test_schedules_dispatch_paused.py
+git add backend/cubeplex/schedules/dispatch.py backend/tests/unit/test_schedules_dispatch_paused.py
 git commit -m "feat(schedules): skip paused_hitl conversations instead of busy-retry"
 ```
 
@@ -2562,7 +2562,7 @@ cd frontend && pnpm test:run
 - [ ] **Step 3: Lint / type-check**
 
 ```
-cd backend && uv run mypy cubebox
+cd backend && uv run mypy cubeplex
 cd frontend && pnpm typecheck
 ```
 Expected: zero errors.
@@ -2571,11 +2571,11 @@ Expected: zero errors.
 
 ```bash
 # Backend
-cd /home/chris/cubebox/.worktrees/feat/hitl-checkpointed-respond/backend
+cd /home/chris/cubeplex/.worktrees/feat/hitl-checkpointed-respond/backend
 uv run python main.py &
 
 # Frontend
-cd /home/chris/cubebox/.worktrees/feat/hitl-checkpointed-respond/frontend
+cd /home/chris/cubeplex/.worktrees/feat/hitl-checkpointed-respond/frontend
 pnpm dev
 ```
 Visit `http://<host>:3052`, trigger an ask_user flow in a chat, close the tab, reopen after 10 minutes, answer, watch the agent continue. (Run on a remote-accessible bind per the user's memory — `0.0.0.0`.)
@@ -2593,10 +2593,10 @@ git commit -m "chore: address mypy/typecheck/lint follow-ups"
 
 After all tasks are complete, before opening the PR, verify:
 
-- [ ] `grep -rn "InMemoryChannel" backend/cubebox/streams` returns nothing.
-- [ ] `grep -rn "timeout=180" backend/cubebox` returns nothing (tests/fixtures may keep 180.0 as fixture data — that's fine).
-- [ ] `grep -rn "dispatch_ask_user_answer\|dispatch_hitl_answer" backend/cubebox` returns nothing.
-- [ ] `grep -rn "paused_hitl" backend/cubebox frontend/packages` returns hits in all the expected files: `run_events.py`, `run_manager.py`, `hitl_resume.py`, conversation bootstrap, messageStore.
+- [ ] `grep -rn "InMemoryChannel" backend/cubeplex/streams` returns nothing.
+- [ ] `grep -rn "timeout=180" backend/cubeplex` returns nothing (tests/fixtures may keep 180.0 as fixture data — that's fine).
+- [ ] `grep -rn "dispatch_ask_user_answer\|dispatch_hitl_answer" backend/cubeplex` returns nothing.
+- [ ] `grep -rn "paused_hitl" backend/cubeplex frontend/packages` returns hits in all the expected files: `run_events.py`, `run_manager.py`, `hitl_resume.py`, conversation bootstrap, messageStore.
 - [ ] Conversation bootstrap response shape matches spec §7 `PendingHitl` union exactly.
 - [ ] Manually verified pause/answer flow on the worktree's frontend.
 - [ ] Codex review loop (`.claude/skills/pr-codex-review-loop/`) run after pushing the PR.

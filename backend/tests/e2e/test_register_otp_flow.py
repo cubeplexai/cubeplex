@@ -55,7 +55,7 @@ async def test_register_otp_flow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Full happy path: register -> verify-otp -> logged-in -> me has is_verified + needs_onboarding."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: True)
     email = f"otp-happy-{secrets.token_hex(4)}@example.com"
     password = "StrongPass1!"
 
@@ -68,7 +68,7 @@ async def test_register_otp_flow(
     body = resp.json()
     assert body["verification_required"] is True
     # Register does NOT set auth cookie
-    assert unauthenticated_memory_client.cookies.get("cubebox_auth_1") is None
+    assert unauthenticated_memory_client.cookies.get("cubeplex_auth_1") is None
 
     # Read OTP from Redis
     code = await _read_otp(redis_client, email)
@@ -81,7 +81,7 @@ async def test_register_otp_flow(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"ok": True}
-    assert unauthenticated_memory_client.cookies.get("cubebox_auth_1") is not None
+    assert unauthenticated_memory_client.cookies.get("cubeplex_auth_1") is not None
 
     # GET /me should show is_verified + needs_onboarding
     me = await unauthenticated_memory_client.get("/api/v1/auth/me")
@@ -99,7 +99,7 @@ async def test_verify_otp_replay_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Second verify with same code returns 400 (key deleted on first success)."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: True)
     email = f"otp-replay-{secrets.token_hex(4)}@example.com"
 
     resp = await unauthenticated_memory_client.post(
@@ -138,7 +138,7 @@ async def test_verify_otp_wrong_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Wrong OTP code returns 400 with remaining_attempts."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: True)
     email = f"otp-wrong-{secrets.token_hex(4)}@example.com"
 
     resp = await unauthenticated_memory_client.post(
@@ -164,7 +164,7 @@ async def test_verify_otp_max_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """5 wrong attempts exhausts OTP, returns otp_max_attempts and key is deleted."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: True)
     email = f"otp-max-{secrets.token_hex(4)}@example.com"
 
     resp = await unauthenticated_memory_client.post(
@@ -199,7 +199,7 @@ async def test_resend_otp_cooldown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resend within cooldown returns 429 otp_cooldown."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: True)
     email = f"otp-cooldown-{secrets.token_hex(4)}@example.com"
 
     resp = await unauthenticated_memory_client.post(
@@ -223,7 +223,7 @@ async def test_resend_otp_unknown_email(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Resend for non-existent email returns 200 (no email enumeration)."""
-    monkeypatch.setattr("cubebox.auth.email_otp.is_email_verification_enabled", lambda: True)
+    monkeypatch.setattr("cubeplex.auth.email_otp.is_email_verification_enabled", lambda: True)
     resp = await unauthenticated_memory_client.post(
         "/api/v1/auth/resend-otp",
         json={"email": "nonexistent@example.com"},

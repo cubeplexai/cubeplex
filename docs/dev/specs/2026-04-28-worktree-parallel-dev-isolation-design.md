@@ -13,7 +13,7 @@ agents) run dev servers and E2E tests in parallel:
   conflict across worktrees.
 - **Backend E2E:** Tests share Redis (the `_flush_test_redis` autouse fixture
   in `backend/tests/e2e/conftest.py` calls `FLUSHDB` on every e2e test) and
-  share MySQL (single `cubebox_test` database). Two worktrees running
+  share MySQL (single `cubeplex_test` database). Two worktrees running
   `make test` simultaneously corrupt each other's state.
 - **Alembic versions:** Two worktrees on different branches modifying the
   schema race against the single `alembic_version` row in the shared DB.
@@ -45,7 +45,7 @@ Today there are 9 active worktrees and the pain is real.
 ## High-level architecture
 
 ```
-main repo  /home/chris/cubebox/
+main repo  /home/chris/cubeplex/
   scripts/
     new-worktree         # wraps `git worktree add` + `worktree-env init`
     worktree-env         # init / show / doctor / destroy / clean-orphans
@@ -55,7 +55,7 @@ main repo  /home/chris/cubebox/
       .worktree.env      # script-managed, gitignored, single source of truth
       backend/.env       # user-managed, copied from main on first init
       backend/config.development.local.yaml  # same
-  backend/cubebox/config.py                # +5 lines: load .worktree.env
+  backend/cubeplex/config.py                # +5 lines: load .worktree.env
   frontend/packages/web/next.config.ts     # +3 lines: load .worktree.env
   frontend/playwright.config.ts            # +3 lines: load .worktree.env
   AGENTS.md                                # +section explaining workflow
@@ -106,7 +106,7 @@ def allocate(branch_name: str, registry: dict) -> int:
   full backwards compatibility.
 - **Slug rules:** lowercase, replace `/_.` with `-`, collapse repeats,
   strip leading/trailing `-`. DB schema name uses underscores
-  (`cubebox_<slug_with_underscores>`).
+  (`cubeplex_<slug_with_underscores>`).
 - **Slot range 0–99** gives 100 worktrees. Plenty for one developer.
   `clean-orphans` reclaims slots from removed worktrees.
 
@@ -115,26 +115,26 @@ def allocate(branch_name: str, registry: dict) -> int:
 ```
 frontend_port  = 3000 + offset
 backend_port   = 8000 + offset
-db_dev_schema  = f"cubebox_{slug_with_underscores}"
-db_test_schema = f"cubebox_test_{slug_with_underscores}"
-redis_prefix   = f"cubebox-{slug}"
+db_dev_schema  = f"cubeplex_{slug_with_underscores}"
+db_test_schema = f"cubeplex_test_{slug_with_underscores}"
+redis_prefix   = f"cubeplex-{slug}"
 ```
 
 ### `.worktree.env` example
 
 ```
 # Worktree: feat/m7-file-upload (slot 37)
-CUBEBOX_WORKTREE_NAME=feat-m7-file-upload
-CUBEBOX_WORKTREE_SLOT=37
+CUBEPLEX_WORKTREE_NAME=feat-m7-file-upload
+CUBEPLEX_WORKTREE_SLOT=37
 
 # Backend
-CUBEBOX_API__HOST=127.0.0.1
-CUBEBOX_API__PORT=8037
-CUBEBOX_DATABASE__NAME=cubebox_feat_m7_file_upload
-CUBEBOX_REDIS__KEY_PREFIX=cubebox-feat-m7-file-upload
+CUBEPLEX_API__HOST=127.0.0.1
+CUBEPLEX_API__PORT=8037
+CUBEPLEX_DATABASE__NAME=cubeplex_feat_m7_file_upload
+CUBEPLEX_REDIS__KEY_PREFIX=cubeplex-feat-m7-file-upload
 
 # Frontend (Next dev / SSR rewrite / Playwright)
-CUBEBOX_API_URL=http://localhost:8037
+CUBEPLEX_API_URL=http://localhost:8037
 PORT=3037
 BASE_URL=http://localhost:3037
 ```
@@ -166,11 +166,11 @@ Single Python script, runs from any worktree. Resolves the main repo via
 
 | Subcommand | Behavior |
 |---|---|
-| `init` | Read branch from `git`, slugify, allocate slot, atomically update `registry.json`, copy `backend/.env` and `config.development.local.yaml` from main if missing in current worktree, write `.worktree.env`, create dev+test MySQL schemas (`CREATE DATABASE IF NOT EXISTS`), run `alembic upgrade head` against dev schema (failure → exit non-zero, schema is **not** rolled back), then run `show`. **Order matters:** `.worktree.env` is written before alembic runs so `backend/cubebox/config.py` resolves to the worktree's dev schema when alembic loads the app config. Idempotent. |
+| `init` | Read branch from `git`, slugify, allocate slot, atomically update `registry.json`, copy `backend/.env` and `config.development.local.yaml` from main if missing in current worktree, write `.worktree.env`, create dev+test MySQL schemas (`CREATE DATABASE IF NOT EXISTS`), run `alembic upgrade head` against dev schema (failure → exit non-zero, schema is **not** rolled back), then run `show`. **Order matters:** `.worktree.env` is written before alembic runs so `backend/cubeplex/config.py` resolves to the worktree's dev schema when alembic loads the app config. Idempotent. |
 | `show` | Pretty-print all values from `.worktree.env`. Used by humans and agents. |
 | `doctor` | Verify dev+test schemas exist, alembic head matches latest revision, `.worktree.env` is consistent with registry, backend port is free *or* held by this worktree's process, Redis is reachable, MySQL is reachable. |
 | `destroy` | Drop dev+test schemas (`DROP DATABASE IF EXISTS`), `SCAN + DEL` keys matching `${redis_prefix}:*`, remove this worktree's entry from registry, delete `.worktree.env`. Does **not** run `git worktree remove` and does **not** touch `backend/.env`. |
-| `clean-orphans` | List registry entries whose `path` no longer exists or is no longer in `git worktree list`; list MySQL `cubebox_*` schemas not referenced by any current worktree. Prompt for confirmation, then drop schemas and prune registry entries. |
+| `clean-orphans` | List registry entries whose `path` no longer exists or is no longer in `git worktree list`; list MySQL `cubeplex_*` schemas not referenced by any current worktree. Prompt for confirmation, then drop schemas and prune registry entries. |
 
 ### Atomic registry update
 
@@ -180,7 +180,7 @@ Linux which is enough.
 
 ## Configuration loader hooks
 
-### Backend — `backend/cubebox/config.py`
+### Backend — `backend/cubeplex/config.py`
 
 Insert before line 26 (`config = dynaconf.Dynaconf(...)`):
 
@@ -208,7 +208,7 @@ dotenv.config({
 ```
 
 Loaded before the existing `next.config` so the rewrite rule
-`process.env.CUBEBOX_API_URL ?? 'http://localhost:8000'` picks up
+`process.env.CUBEPLEX_API_URL ?? 'http://localhost:8000'` picks up
 the worktree's backend port.
 
 ### Frontend — `frontend/playwright.config.ts`
@@ -231,10 +231,10 @@ allocated `PORT` and `BASE_URL`.
 **Backend E2E** uses `httpx` `TestClient` against the in-process ASGI app.
 No port involved. But the app reads:
 
-- `config.database.name` → from `CUBEBOX_DATABASE__NAME` → worktree's
+- `config.database.name` → from `CUBEPLEX_DATABASE__NAME` → worktree's
   dedicated dev schema. The test conftest connects to this schema.
 - `config.redis.key_prefix` → routed through `app.state.redis_key_prefix`
-  (set in `backend/cubebox/api/app.py:128–130`) → all stream / cache /
+  (set in `backend/cubeplex/api/app.py:128–130`) → all stream / cache /
   rate-limit keys are namespaced. The autouse `_flush_test_redis` fixture
   calls `FLUSHDB` which deletes only keys in the connected DB **but** all
   key access elsewhere goes through the prefix, so two parallel worktrees
@@ -255,8 +255,8 @@ the same Redis DB, one worktree's `FLUSHDB` deletes the other's keys.
 keys matching the worktree's prefix:
 
 ```python
-prefix = _cubebox_config.get("redis.key_prefix", "cubebox")
-env_suffix = _cubebox_config.get("env", "test")
+prefix = _cubeplex_config.get("redis.key_prefix", "cubeplex")
+env_suffix = _cubeplex_config.get("env", "test")
 pattern = f"{prefix}:{env_suffix}:*"
 async for key in client.scan_iter(match=pattern, count=500):
     await client.delete(key)
@@ -270,7 +270,7 @@ This is required for parallel E2E. It's a small change in
 - CI checks out main on a clean GitHub runner. No `.worktrees/`, no
   `.worktree.env`. The dotenv loaders all no-op (path doesn't exist).
 - `config.test.yaml` continues to set `port: 8001`, `database.name:
-  cubebox_test`, default Redis prefix.
+  cubeplex_test`, default Redis prefix.
 - The new `_flush_test_redis` prefix-scoped delete behaves identically to
   `FLUSHDB` when only one worktree (the runner) uses the DB, because the
   scan covers all keys under the single prefix.
@@ -331,10 +331,10 @@ when you `curl` or check ports manually, you must use the allocated ones.
    allocation, alembic upgrade, redis prefix scan-delete. Note: `init`
    loads its own `.worktree.env` into `os.environ` before invoking
    `alembic upgrade head` as a subprocess, so the subprocess inherits the
-   worktree's `CUBEBOX_DATABASE__NAME` and writes migrations to the right
+   worktree's `CUBEPLEX_DATABASE__NAME` and writes migrations to the right
    schema.
 2. Write `scripts/new-worktree` (bash, ~15 lines).
-3. Patch `backend/cubebox/config.py` with the dotenv preamble.
+3. Patch `backend/cubeplex/config.py` with the dotenv preamble.
 4. Patch `frontend/packages/web/next.config.ts` and
    `frontend/playwright.config.ts` with their dotenv preambles.
 5. Patch `backend/tests/e2e/conftest.py` `_flush_test_redis` to use

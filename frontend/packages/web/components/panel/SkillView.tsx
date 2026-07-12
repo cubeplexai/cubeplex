@@ -4,7 +4,7 @@ import useSWR from 'swr'
 import { useTranslations } from 'next-intl'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { SkillContent } from '@cubebox/core'
+import type { SkillContent } from '@cubeplex/core'
 import { proseClasses } from '@/lib/utils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 

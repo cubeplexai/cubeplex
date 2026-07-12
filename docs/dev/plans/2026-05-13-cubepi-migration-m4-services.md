@@ -16,7 +16,7 @@
 
 When `config.agents.runtime == "cubepi"`, `_get_history_messages` reads via cubepi checkpointer instead of langgraph.
 
-**File:** `backend/cubebox/api/routes/v1/conversations.py`
+**File:** `backend/cubeplex/api/routes/v1/conversations.py`
 
 **Approach:**
 ```python
@@ -28,8 +28,8 @@ async def _get_history_messages(raw_request: Request, conversation_id: str) -> d
 
 
 async def _get_history_messages_cubepi(conversation_id: str) -> dict[str, object]:
-    from cubebox.agents.checkpointer_pi import init_cubepi_checkpointer
-    from cubebox.agents.convert_pi import cubepi_message_to_wire
+    from cubeplex.agents.checkpointer_pi import init_cubepi_checkpointer
+    from cubeplex.agents.convert_pi import cubepi_message_to_wire
 
     async with init_cubepi_checkpointer() as cp:
         data = await cp.load(conversation_id)
@@ -52,7 +52,7 @@ Move existing body of `_get_history_messages` into `_get_history_messages_langgr
 
 `services/conversation_title.py` currently does a one-shot LLM call via `LLMFactory.create_default()` (LangChain). Port to use `LLMFactory.build_cubepi_provider()` + direct provider stream when `config.agents.runtime == "cubepi"`.
 
-**File:** `backend/cubebox/services/conversation_title.py`
+**File:** `backend/cubeplex/services/conversation_title.py`
 
 **Approach**: dispatch at the LLM-call site. Read existing flow; identify the place that does `llm.ainvoke(messages)` or similar. Branch:
 

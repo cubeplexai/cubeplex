@@ -9,7 +9,7 @@ import {
   type AdminCatalogFilter,
   type AdminCatalogRow,
   type MCPTemplateScope,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { MCPToolbar } from '@/components/mcp/MCPToolbar'
 import { MCPCatalogList } from '@/components/mcp/MCPCatalogList'
 import { MCPAdminDetailPanel } from '@/components/mcp/MCPAdminDetailPanel'

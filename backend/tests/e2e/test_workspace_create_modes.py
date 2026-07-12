@@ -56,7 +56,7 @@ async def test_single_tenant_forces_singleton_org(
 
 async def test_multi_tenant_validates_membership(member_client_org_a, session_factory):
     """User from org_a posts under non-member org_id → 403."""
-    from cubebox.repositories import OrganizationRepository
+    from cubeplex.repositories import OrganizationRepository
 
     client_a, _ = member_client_org_a
 

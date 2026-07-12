@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from cubebox.models.memory import MemoryScope, MemorySourceType, MemoryType
-from cubebox.services import memory_consolidation as mc
+from cubeplex.models.memory import MemoryScope, MemorySourceType, MemoryType
+from cubeplex.services import memory_consolidation as mc
 
 
 class _Item:
@@ -107,7 +107,7 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
         cp.load = AsyncMock(return_value=MagicMock(messages=[]))
         yield cp
 
-    monkeypatch.setattr("cubebox.agents.checkpointer.shared_checkpointer", _fake_init_checkpointer)
+    monkeypatch.setattr("cubeplex.agents.checkpointer.shared_checkpointer", _fake_init_checkpointer)
 
     # Lock helpers — return a token so we pass acquire_lock guard.
     monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
@@ -141,7 +141,7 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.shared_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_init_checkpointer_nonempty,
     )
 
@@ -153,7 +153,7 @@ async def test_run_consolidation_uses_tracer_oneshot_when_provided(monkeypatch):
         async def list(self, **_kw):
             return []
 
-    monkeypatch.setattr("cubebox.repositories.memory.MemoryRepository", _StubRepo)
+    monkeypatch.setattr("cubeplex.repositories.memory.MemoryRepository", _StubRepo)
 
     # Session maker that just yields a MagicMock async-context.
     @contextlib.asynccontextmanager
@@ -199,7 +199,7 @@ async def test_run_consolidation_fallback_uses_provider_generate(monkeypatch):
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.shared_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_init_checkpointer_nonempty,
     )
     monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
@@ -214,7 +214,7 @@ async def test_run_consolidation_fallback_uses_provider_generate(monkeypatch):
         async def list(self, **_kw):
             return []
 
-    monkeypatch.setattr("cubebox.repositories.memory.MemoryRepository", _StubRepo)
+    monkeypatch.setattr("cubeplex.repositories.memory.MemoryRepository", _StubRepo)
 
     @contextlib.asynccontextmanager
     async def _fake_session_maker():
@@ -266,7 +266,7 @@ async def test_run_consolidation_fallback_treats_provider_error_as_failed_pass(
         yield cp
 
     monkeypatch.setattr(
-        "cubebox.agents.checkpointer.shared_checkpointer",
+        "cubeplex.agents.checkpointer.shared_checkpointer",
         _fake_init_checkpointer_nonempty,
     )
     monkeypatch.setattr(mc, "acquire_lock", AsyncMock(return_value="tok"))
@@ -283,7 +283,7 @@ async def test_run_consolidation_fallback_treats_provider_error_as_failed_pass(
         async def list(self, **_kw):
             return []
 
-    monkeypatch.setattr("cubebox.repositories.memory.MemoryRepository", _StubRepo)
+    monkeypatch.setattr("cubeplex.repositories.memory.MemoryRepository", _StubRepo)
 
     @contextlib.asynccontextmanager
     async def _fake_session_maker():

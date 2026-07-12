@@ -42,14 +42,14 @@ curl -fsS --noproxy '*' -c "$CK" -b "$CK" \
   --data-urlencode "username=$EMAIL" --data-urlencode "password=$PASS" \
   --data-urlencode "grant_type=password" \
   "$B/api/v1/auth/login" >/dev/null
-grep -q "cubebox_auth" "$CK" \
-  || fail "no cubebox_auth (check auth.cookie_secure=false on HTTP)"
+grep -q "cubeplex_auth" "$CK" \
+  || fail "no cubeplex_auth (check auth.cookie_secure=false on HTTP)"
 echo "  ok"
 
 step "4. GET /auth/me — receive csrf cookie"
 curl -fsS --noproxy '*' -c "$CK" -b "$CK" "$B/api/v1/auth/me" >/dev/null
-grep -q "cubebox_csrf" "$CK" || fail "no cubebox_csrf in jar"
-CSRF=$(awk -F'\t' '$6=="cubebox_csrf"{print $7}' "$CK" | tail -1)
+grep -q "cubeplex_csrf" "$CK" || fail "no cubeplex_csrf in jar"
+CSRF=$(awk -F'\t' '$6=="cubeplex_csrf"{print $7}' "$CK" | tail -1)
 [[ -n "$CSRF" ]] || fail "csrf cookie present but empty"
 echo "  ok"
 

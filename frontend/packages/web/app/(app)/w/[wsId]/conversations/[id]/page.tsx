@@ -9,7 +9,7 @@ import {
   useConversationStore,
   useMessageStore,
   usePanelStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 
 import { thinkingFromReasoning } from '@/lib/reasoning-control'

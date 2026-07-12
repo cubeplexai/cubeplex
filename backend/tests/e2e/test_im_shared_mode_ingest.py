@@ -18,12 +18,12 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
-from cubebox.im.bot_settings import IMBotSettings, store_bot_settings
-from cubebox.im.inbound import ingest_inbound_event
-from cubebox.im.types import InboundEvent
-from cubebox.models.conversation import Conversation
-from cubebox.models.im_connector import IMConnectorAccount, IMThreadLink
-from cubebox.models.topic import Topic, TopicParticipant
+from cubeplex.im.bot_settings import IMBotSettings, store_bot_settings
+from cubeplex.im.inbound import ingest_inbound_event
+from cubeplex.im.types import InboundEvent
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.im_connector import IMConnectorAccount, IMThreadLink
+from cubeplex.models.topic import Topic, TopicParticipant
 from tests.e2e.conftest import _build_database_url
 from tests.e2e.im_fixtures import (
     im_cleanup,

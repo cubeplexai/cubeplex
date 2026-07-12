@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from cubebox.skills.sync_diff import compute_skill_sync_diff
+from cubeplex.skills.sync_diff import compute_skill_sync_diff
 
 
 @dataclass

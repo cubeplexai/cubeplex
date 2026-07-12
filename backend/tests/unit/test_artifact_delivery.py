@@ -6,7 +6,7 @@ undownloadable blob instead of a working iframe share-link.
 
 import pytest
 
-from cubebox.im.artifact_delivery import artifact_outbound_kind, outbound_size_cap
+from cubeplex.im.artifact_delivery import artifact_outbound_kind, outbound_size_cap
 
 
 @pytest.mark.parametrize(

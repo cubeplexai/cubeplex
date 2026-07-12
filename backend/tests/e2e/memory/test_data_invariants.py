@@ -4,16 +4,16 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import User
-from cubebox.models.memory import (
+from cubeplex.models import User
+from cubeplex.models.memory import (
     MemoryItem,
     MemoryScope,
     MemorySourceType,
     MemoryType,
 )
-from cubebox.models.workspace import Workspace
-from cubebox.repositories.memory import MemoryRepository
-from cubebox.services.memory import CreateMemoryInput, MemoryService
+from cubeplex.models.workspace import Workspace
+from cubeplex.repositories.memory import MemoryRepository
+from cubeplex.services.memory import CreateMemoryInput, MemoryService
 
 
 async def test_consolidation_source_type_persists(

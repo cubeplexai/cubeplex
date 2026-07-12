@@ -10,7 +10,7 @@ import {
   useMemberStore,
   useWorkspaceStore,
   type WsMember,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/shared/EmptyState'
 import {

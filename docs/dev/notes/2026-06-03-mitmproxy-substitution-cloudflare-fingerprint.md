@@ -128,7 +128,7 @@ curl_cffi `session.close()` 后建新 session：
 ## 相关文件
 
 - `deploy/egress-bundle/addon/inject.py` — 替换逻辑，未改
-- `backend/cubebox/services/egress_exchange.py` — exchange 服务，未改
+- `backend/cubeplex/services/egress_exchange.py` — exchange 服务，未改
 - 用户在 sandbox 镜像里 patch 的 twitter-cli 文件：
   `/opt/venv/lib/python3.12/site-packages/twitter_cli/client.py` 的 `_api_request`
   改为每次新建 `cffi_req.Session(impersonate=...)`

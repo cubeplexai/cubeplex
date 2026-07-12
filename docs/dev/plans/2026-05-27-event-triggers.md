@@ -6,9 +6,9 @@
 > `feat/event-triggers`; never switch to main or merge mid-execution. Run only
 > the changed-module tests per task; reserve the full suite for the pre-PR
 > sweep (Task 13). All paths are relative to the worktree root
-> `/home/chris/cubebox/.worktrees/feat/event-triggers`. Read `.worktree.env`
+> `/home/chris/cubeplex/.worktrees/feat/event-triggers`. Read `.worktree.env`
 > first — this slot runs the backend on port 8033 and DB
-> `cubebox_feat_event_triggers`; tests auto-route to `cubebox_test_<slug>` via
+> `cubeplex_feat_event_triggers`; tests auto-route to `cubeplex_test_<slug>` via
 > `tests/conftest.py`, so plain `uv run pytest` is safe.
 
 ## Goal
@@ -50,7 +50,7 @@ POST /api/v1/ws/{ws}/triggers/{trigger_id}/ingest   (public, HMAC-auth)
 ```
 
 New tables `triggers` (`_PREFIX="trig"`) and `trigger_events`
-(`_PREFIX="trev"`), both `CubeboxBase + OrgScopedMixin`. Scope-isolated
+(`_PREFIX="trev"`), both `CubeplexBase + OrgScopedMixin`. Scope-isolated
 workspace CRUD + event-log + replay routes under `require_member`; the
 `ingest` route is the only one not member-guarded (HMAC instead).
 
@@ -60,18 +60,18 @@ workspace CRUD + event-log + replay routes under `require_member`; the
 
 | File | Purpose |
 |---|---|
-| `backend/cubebox/models/trigger.py` | `Trigger` + `TriggerEvent` SQLModels, enums |
-| `backend/cubebox/repositories/trigger.py` | `TriggerRepository`, `TriggerEventRepository` (scoped) |
-| `backend/cubebox/triggers/__init__.py` | package marker |
-| `backend/cubebox/triggers/events.py` | `NormalizedEvent` dataclass + `dedup_key` derivation |
-| `backend/cubebox/triggers/signature.py` | HMAC sign/verify + `verify_with_rotation` + timestamp window |
-| `backend/cubebox/triggers/filter.py` | declarative AND/OR + JSONPath matcher (pure) |
-| `backend/cubebox/triggers/template.py` | whitelisted prompt-template render with `<external_input>` wrap |
-| `backend/cubebox/triggers/rate_limit.py` | Redis token-bucket per trigger |
-| `backend/cubebox/triggers/pipeline.py` | `TriggerPipeline.fire` (`new_each_time`, retry/DLQ, counter bumps) |
-| `backend/cubebox/triggers/ingest.py` | ingest orchestration (verify→dedup→ratelimit→filter→enqueue) |
-| `backend/cubebox/api/routes/v1/ws_triggers.py` | workspace CRUD + events + replay + rotate-secret |
-| `backend/cubebox/api/routes/v1/trigger_ingest.py` | public `/ingest` route |
+| `backend/cubeplex/models/trigger.py` | `Trigger` + `TriggerEvent` SQLModels, enums |
+| `backend/cubeplex/repositories/trigger.py` | `TriggerRepository`, `TriggerEventRepository` (scoped) |
+| `backend/cubeplex/triggers/__init__.py` | package marker |
+| `backend/cubeplex/triggers/events.py` | `NormalizedEvent` dataclass + `dedup_key` derivation |
+| `backend/cubeplex/triggers/signature.py` | HMAC sign/verify + `verify_with_rotation` + timestamp window |
+| `backend/cubeplex/triggers/filter.py` | declarative AND/OR + JSONPath matcher (pure) |
+| `backend/cubeplex/triggers/template.py` | whitelisted prompt-template render with `<external_input>` wrap |
+| `backend/cubeplex/triggers/rate_limit.py` | Redis token-bucket per trigger |
+| `backend/cubeplex/triggers/pipeline.py` | `TriggerPipeline.fire` (`new_each_time`, retry/DLQ, counter bumps) |
+| `backend/cubeplex/triggers/ingest.py` | ingest orchestration (verify→dedup→ratelimit→filter→enqueue) |
+| `backend/cubeplex/api/routes/v1/ws_triggers.py` | workspace CRUD + events + replay + rotate-secret |
+| `backend/cubeplex/api/routes/v1/trigger_ingest.py` | public `/ingest` route |
 
 **Frontend**
 
@@ -107,14 +107,14 @@ everywhere.
 
 ## Task 1 — Models: `Trigger` + `TriggerEvent` + prefixes
 
-Write `backend/cubebox/models/trigger.py`. Add `PREFIX_TRIGGER = "trig"` and
-`PREFIX_TRIGGER_EVENT = "trev"` to `backend/cubebox/models/public_id.py`.
+Write `backend/cubeplex/models/trigger.py`. Add `PREFIX_TRIGGER = "trig"` and
+`PREFIX_TRIGGER_EVENT = "trev"` to `backend/cubeplex/models/public_id.py`.
 
-`Trigger(CubeboxBase, OrgScopedMixin, table=True)`, `__tablename__="triggers"`,
+`Trigger(CubeplexBase, OrgScopedMixin, table=True)`, `__tablename__="triggers"`,
 `__table_args__ = (org_scope_index("triggers"),)`. Declare
 `_PREFIX: ClassVar[str] = PREFIX_TRIGGER` in the class body (matching
 `credential.py` / `conversation.py`) — the constant alone won't drive
-`CubeboxBase` id generation. `TriggerEvent` likewise sets
+`CubeplexBase` id generation. `TriggerEvent` likewise sets
 `_PREFIX: ClassVar[str] = PREFIX_TRIGGER_EVENT`. Fields:
 - `name: str = Field(max_length=128)`
 - `enabled: bool = Field(default=True, index=True)`
@@ -152,7 +152,7 @@ Write `backend/cubebox/models/trigger.py`. Add `PREFIX_TRIGGER = "trig"` and
   - `events_failed: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default="0"))`
   - `events_dedup_dropped: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default="0"))`
 
-`TriggerEvent(CubeboxBase, OrgScopedMixin, table=True)`,
+`TriggerEvent(CubeplexBase, OrgScopedMixin, table=True)`,
 `__tablename__="trigger_events"`, `__table_args__`:
 `(org_scope_index("trigger_events"), Index("uq_trigger_event_dedup", "trigger_id", "dedup_key", unique=True))`, fields:
 - `trigger_id: str = Field(foreign_key="triggers.id", max_length=20, index=True)`
@@ -163,8 +163,8 @@ Write `backend/cubebox/models/trigger.py`. Add `PREFIX_TRIGGER = "trig"` and
 - `payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))`
 - `resulting_run_id: str | None`, `resulting_conversation_id: str | None`
 
-Export both from `backend/cubebox/models/__init__.py` (`from
-cubebox.models.trigger import Trigger, TriggerEvent` + add to `__all__`).
+Export both from `backend/cubeplex/models/__init__.py` (`from
+cubeplex.models.trigger import Trigger, TriggerEvent` + add to `__all__`).
 
 **Test** `backend/tests/unit/test_trigger_models.py`: assert
 `Trigger(...).id.startswith("trig-")`, `TriggerEvent(...).id.startswith("trev-")`,
@@ -197,7 +197,7 @@ Expected: upgrade runs clean; `alembic check` prints `No new upgrade operations 
 
 ## Task 3 — Scoped repositories
 
-Write `backend/cubebox/repositories/trigger.py`:
+Write `backend/cubeplex/repositories/trigger.py`:
 - `TriggerRepository(ScopedRepository[Trigger])` with `model = Trigger`; add
   `list_enabled()` and `get_for_ingest(trigger_id)` (returns the row only if it
   exists *and* `enabled`, else `None` — the caller maps both to a flat 404).
@@ -206,7 +206,7 @@ Write `backend/cubebox/repositories/trigger.py`:
   that catches `sqlalchemy.exc.IntegrityError` on the unique constraint
   (rollback + return `None` = duplicate), `set_terminal(event_id, status, *, run_id=None, conversation_id=None, last_error=None)`, and `list_for_trigger(trigger_id, *, limit, offset)`.
 
-Export both from `backend/cubebox/repositories/__init__.py`.
+Export both from `backend/cubeplex/repositories/__init__.py`.
 
 **Test** `backend/tests/e2e/test_trigger_repository.py` (hits the DB → e2e dir):
 create a trigger, insert a `TriggerEvent`, re-insert the same
@@ -220,7 +220,7 @@ Expected: `2 passed`.
 
 ## Task 4 — HMAC signature + timestamp window + dual-secret verify (pure)
 
-Write `backend/cubebox/triggers/signature.py`:
+Write `backend/cubeplex/triggers/signature.py`:
 - `sign(secret: str, timestamp: str, raw_body: bytes) -> str` →
   `hmac.new(secret.encode(), f"{timestamp}.".encode() + raw_body, hashlib.sha256).hexdigest()`.
 - `verify(secret: str, timestamp: str, raw_body: bytes, provided: str) -> bool` →
@@ -276,7 +276,7 @@ Expected: all pass (~10 cases).
 
 ## Task 5 — Dedup key + NormalizedEvent (pure)
 
-Write `backend/cubebox/triggers/events.py`:
+Write `backend/cubeplex/triggers/events.py`:
 - `@dataclass NormalizedEvent` with `event_id, source_type, trigger_id,
   event_type, occurred_at, subject, payload, dedup_key` per the spec.
 - `derive_dedup_key(raw_body: bytes, event_id_header: str | None) -> str`:
@@ -295,7 +295,7 @@ Expected: `3 passed`.
 
 ## Task 6 — Declarative AND/OR + JSONPath filter matcher (pure)
 
-Write `backend/cubebox/triggers/filter.py`. Resolves OQ-3.
+Write `backend/cubeplex/triggers/filter.py`. Resolves OQ-3.
 
 `matches(filter_tree: dict | None, payload: dict) -> bool`. `None` → `True`
 (no filter = match all). Node shapes:
@@ -349,7 +349,7 @@ Expected: all parameterized cases pass.
 
 ## Task 7 — Prompt template render with `<external_input>` wrapping (pure)
 
-Write `backend/cubebox/triggers/template.py`. Resolves OQ-4.
+Write `backend/cubeplex/triggers/template.py`. Resolves OQ-4.
 
 `render(template: str, payload: dict, *, payload_fields: list[str],
 source_label: str) -> str`:
@@ -406,7 +406,7 @@ Expected: all cases pass.
 
 ## Task 8 — Redis token-bucket rate limit (per-trigger only)
 
-Write `backend/cubebox/triggers/rate_limit.py`. Resolves OQ-9 — only the
+Write `backend/cubeplex/triggers/rate_limit.py`. Resolves OQ-9 — only the
 per-trigger bucket is built; org-level run/cost ceilings are deferred to the
 project-wide CostMiddleware.
 
@@ -432,7 +432,7 @@ Expected: `2 passed`.
 
 ## Task 9 — Event → run pipeline (`new_each_time` only, counter bumps)
 
-Write `backend/cubebox/triggers/pipeline.py`. Resolves OQ-8 (only
+Write `backend/cubeplex/triggers/pipeline.py`. Resolves OQ-8 (only
 `new_each_time` in v1; no `pinned`, no busy-queue) and OQ-1 (counter bumps in
 the dispatch path instead of a TTL/reaper).
 
@@ -491,7 +491,7 @@ Expected: `3 passed`.
 
 ## Task 10 — Scope-isolated workspace CRUD + events + replay + rotate-secret routes
 
-Write `backend/cubebox/api/routes/v1/ws_triggers.py`. Router
+Write `backend/cubeplex/api/routes/v1/ws_triggers.py`. Router
 `APIRouter(prefix="/ws/{workspace_id}/triggers", tags=["triggers"])`, every
 handler `ctx: Annotated[RequestContext, Depends(require_member)]`. Routes:
 
@@ -522,7 +522,7 @@ handler `ctx: Annotated[RequestContext, Depends(require_member)]`. Routes:
 - `POST "/{id}/events/{eid}/replay"` — re-fires a `dead_lettered` event
   through `TriggerPipeline.fire`; `409` if the event isn't `dead_lettered`.
 
-Mount in `app.py` and export from `backend/cubebox/api/routes/v1/__init__.py`.
+Mount in `app.py` and export from `backend/cubeplex/api/routes/v1/__init__.py`.
 This lands before the ingest route so the ingest E2E (Task 11) can create
 triggers + secrets + rotate through this API.
 
@@ -552,10 +552,10 @@ Expected: all pass.
 
 ## Task 11 — Public ingest route + orchestration
 
-Write `backend/cubebox/triggers/ingest.py` `handle_ingest(...)` and
-`backend/cubebox/api/routes/v1/trigger_ingest.py`. Router
+Write `backend/cubeplex/triggers/ingest.py` `handle_ingest(...)` and
+`backend/cubeplex/api/routes/v1/trigger_ingest.py`. Router
 `APIRouter(prefix="/ws/{workspace_id}/triggers", tags=["trigger-ingest"])`,
-`POST "/{trigger_id}/ingest"`. Mount in `backend/cubebox/api/app.py`
+`POST "/{trigger_id}/ingest"`. Mount in `backend/cubeplex/api/app.py`
 (`app.include_router(trigger_ingest.router, prefix="/api/v1")`). No
 `require_member` — auth is the HMAC. Order exactly per spec §"Inbound webhook
 ingestion":
@@ -650,7 +650,7 @@ Expected: all pass (one test per bullet, all green).
 
 Scope-isolated workspace UI for managing triggers. Mirrors the shape of the
 member-management plan's frontend tasks: a typed API module + Zustand store in
-`@cubebox/core`, Next App Router proxy routes that forward to the backend with
+`@cubeplex/core`, Next App Router proxy routes that forward to the backend with
 the user's session cookie, scoped pages under `/w/[wsId]/triggers`, and a
 Playwright smoke that exercises the full happy path. No admin variant — admin
 visibility is a future scope-isolated page (`/api/v1/admin/triggers` +
@@ -742,15 +742,15 @@ Expected: 1 spec, all steps pass.
 ## Task 13 — Pre-PR sweep (lint, types, full backend tests)
 
 ```bash
-cd backend && uv run ruff check cubebox tests && uv run ruff format --check cubebox tests
+cd backend && uv run ruff check cubeplex tests && uv run ruff format --check cubeplex tests
 ```
 Expected: `All checks passed!` and no formatting diffs.
 
 ```bash
-cd backend && uv run mypy cubebox
+cd backend && uv run mypy cubeplex
 ```
-Expected: `Success: no issues found` (or no new errors in `cubebox/triggers`,
-`cubebox/models/trigger.py`, the two new repos/routes).
+Expected: `Success: no issues found` (or no new errors in `cubeplex/triggers`,
+`cubeplex/models/trigger.py`, the two new repos/routes).
 
 ```bash
 cd backend && uv run pytest tests/unit/test_trigger_*.py tests/e2e/test_trigger_*.py tests/e2e/test_ws_triggers.py -q
@@ -772,7 +772,7 @@ All ten spec OQs are resolved (see `docs/dev/specs/2026-05-27-event-triggers-des
 
 - **Connectors (layer 2)** — generic webhook ingest only. GitHub App / Stripe /
   Linear / Slack-as-connector are each their own spec + PR after v1 lands.
-  Users wanting "issues trigger an agent" today must paste cubebox's per-trigger
+  Users wanting "issues trigger an agent" today must paste cubeplex's per-trigger
   ingest URL + secret into the source provider's webhook settings by hand.
 - **`target_type="managed_agent"`** — schema column + `target_ref` reserved;
   `pipeline.fire` records a `failed` event for it. Implemented when #153 lands.

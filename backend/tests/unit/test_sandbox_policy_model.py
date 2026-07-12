@@ -1,5 +1,5 @@
-from cubebox.models.public_id import PREFIX_SANDBOX_POLICY
-from cubebox.models.sandbox_policy import SandboxPolicy
+from cubeplex.models.public_id import PREFIX_SANDBOX_POLICY
+from cubeplex.models.sandbox_policy import SandboxPolicy
 
 
 def test_prefix_value() -> None:

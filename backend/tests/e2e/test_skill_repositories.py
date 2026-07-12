@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.repositories.skill import (
+from cubeplex.repositories.skill import (
     OrgSkillInstallRepository,
     SkillRepository,
     SkillVersionRepository,

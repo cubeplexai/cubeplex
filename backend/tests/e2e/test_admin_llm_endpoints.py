@@ -5,7 +5,7 @@ from httpx import AsyncClient
 
 pytestmark = pytest.mark.e2e  # ensure marker even though conftest auto-adds
 
-# Tracks the cubebox nested vendor catalog (cubebox/llm/catalog/data/vendors.yaml).
+# Tracks the cubeplex nested vendor catalog (cubeplex/llm/catalog/data/vendors.yaml).
 # Bump if vendors are added/removed.
 EXPECTED_VENDOR_COUNT = 23
 
@@ -102,8 +102,8 @@ async def test_probe_dryrun_returns_step_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pre-save /providers/test composes liveness + model probe into one ProbeResult."""
-    from cubebox.services import provider_probe
-    from cubebox.services.provider_probe import ProbeResult, ProbeStep
+    from cubeplex.services import provider_probe
+    from cubeplex.services.provider_probe import ProbeResult, ProbeStep
 
     async def _fake_liveness(**_: object) -> ProbeStep:
         return ProbeStep(name="liveness", status="pass", latency_ms=7, detail="ok")
@@ -140,8 +140,8 @@ async def test_liveness_dryrun_does_not_persist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pre-save /providers/liveness writes no row and changes no provider."""
-    from cubebox.services import provider_probe
-    from cubebox.services.provider_probe import ProbeStep
+    from cubeplex.services import provider_probe
+    from cubeplex.services.provider_probe import ProbeStep
 
     async def _fake_liveness(**_: object) -> ProbeStep:
         return ProbeStep(name="liveness", status="pass", latency_ms=5)
@@ -175,8 +175,8 @@ async def test_saved_model_test_persists_status_and_fingerprint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Saved /{id}/models/{mid}/test persists model status, liveness, and fingerprint."""
-    from cubebox.services import provider_probe
-    from cubebox.services.provider_probe import ProbeResult, ProbeStep
+    from cubeplex.services import provider_probe
+    from cubeplex.services.provider_probe import ProbeResult, ProbeStep
 
     async def _fake_liveness(**_: object) -> ProbeStep:
         return ProbeStep(name="liveness", status="pass", latency_ms=9)
@@ -272,7 +272,7 @@ async def test_test_stream_emits_events(
 ) -> None:
     """POST /providers/{id}/test/stream streams liveness + per-model + done SSE events."""
     client, _ws_id = admin_client
-    from cubebox.services import provider_probe
+    from cubeplex.services import provider_probe
 
     async def stub_liveness(*a: object, **k: object) -> provider_probe.ProbeStep:
         return provider_probe.ProbeStep(name="liveness", status="pass", latency_ms=10)

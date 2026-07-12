@@ -17,7 +17,7 @@ def _unique_app_id(tag: str) -> str:
 pytestmark = pytest.mark.asyncio
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+@patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_workspace_connect_list_delete_feishu_account(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -71,7 +71,7 @@ async def test_workspace_connect_list_delete_feishu_account(
     assert not any(a["id"] == account["id"] for a in listed_after.json()["accounts"])
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+@patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_admin_can_list_and_toggle_enabled(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -120,7 +120,7 @@ async def test_admin_can_list_and_toggle_enabled(
     await async_client.delete(f"/api/v1/ws/{DEFAULT_WS_ID}/im/accounts/{account_id}")
 
 
-@patch("cubebox.services.im_connector.IMConnectorService._hydrate_bot_info")
+@patch("cubeplex.services.im_connector.IMConnectorService._hydrate_bot_info")
 async def test_workspace_delete_refuses_account_from_sibling_workspace(
     mock_hydrate: Any,
     async_client: httpx.AsyncClient,
@@ -139,7 +139,7 @@ async def test_workspace_delete_refuses_account_from_sibling_workspace(
 
     from sqlalchemy import text
 
-    from cubebox.db.engine import async_session_maker
+    from cubeplex.db.engine import async_session_maker
     from tests.e2e.conftest import DEFAULT_WS_ID
 
     app_id = _unique_app_id("isol")

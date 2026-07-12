@@ -21,7 +21,7 @@ grows quickly:
 - **Diluted attention / worse tool selection.** Published benchmarks show tool-selection accuracy
   drops as the toolset grows; the model has to scan dozens of near-identical schemas to pick one.
 
-cubebox already solved the same shape of problem for **skills**: by default the system prompt
+cubeplex already solved the same shape of problem for **skills**: by default the system prompt
 carries only a compact "Available skills" index (name + one-line description), and the model
 calls `load_skill(name)` to pull the full instructions into context on demand. This spec applies
 the same idea to MCP: expose a compact catalog of connected servers by default, and expand a
@@ -52,25 +52,25 @@ given server's full tool set only when the model asks.
   expanded during a run is acceptable but not required for v1.
 - No per-tool (sub-group) disclosure in v1 — the unit of expansion is a whole group (= MCP server
   in v1).
-- No non-MCP group types in v1 — the cubepi primitive is generic, but cubebox v1 only maps MCP
+- No non-MCP group types in v1 — the cubepi primitive is generic, but cubeplex v1 only maps MCP
   servers to groups.
 
-## Current state in cubebox (how MCP tools reach the prompt today)
+## Current state in cubeplex (how MCP tools reach the prompt today)
 
 The flow, end to end:
 
 1. **Discovery (already cached in DB).** When a connector is installed/refreshed, its tool list is
    discovered and stored on `MCPConnectorInstall.tools_cache`
-   (`backend/cubebox/models/mcp.py`, a `list[dict]` of tool definitions including
+   (`backend/cubeplex/models/mcp.py`, a `list[dict]` of tool definitions including
    `input_schema`). Server/handshake metadata lives in `discovery_metadata`. Per-tool citation
    config lives in `tool_citations`. So **we already have each server's tool schemas in Postgres
    without doing live discovery at prompt-assembly time** — important for building an index cheaply.
 
-2. **Per-run load.** `RunManager._run_cubepi_path` (`backend/cubebox/streams/run_manager.py`,
+2. **Per-run load.** `RunManager._run_cubepi_path` (`backend/cubeplex/streams/run_manager.py`,
    ~line 1039) calls `load_workspace_mcp_tools_for_cubepi`
-   (`backend/cubebox/mcp/cubepi_runtime.py`). That function:
+   (`backend/cubeplex/mcp/cubepi_runtime.py`). That function:
    - asks `MCPEffectiveConnectorService.list_runtime_specs(...)` for one
-     `MCPRuntimeConnectorSpec` per *usable* install (`backend/cubebox/mcp/effective.py`, line 305),
+     `MCPRuntimeConnectorSpec` per *usable* install (`backend/cubeplex/mcp/effective.py`, line 305),
    - resolves auth headers per server,
    - calls `cubepi.mcp.load_mcp_tools_http(...)` to fetch the live tool list,
    - namespaces each tool as `{slug}__{tool_name}` (length-capped at 64), and
@@ -86,16 +86,16 @@ The flow, end to end:
 
 4. **System-prompt assembly.** `BASE_SYSTEM_PROMPT` + optional per-workspace `AgentConfig` prompt
    + (if any skills enabled) the **skills index** rendered from `SKILLS_PROMPT_TEMPLATE`
-   (`backend/cubebox/prompts/skills.py`) — a sorted bullet list of `` `name` — description ``. This
+   (`backend/cubeplex/prompts/skills.py`) — a sorted bullet list of `` `name` — description ``. This
    index is appended as a *stable suffix* of the system prompt so it stays cache-safe.
 
 ### The skills precedent (the analog to copy)
 
 - **Index in the prompt.** `run_manager.py` ~line 1799 fetches enabled skills and appends a sorted
   bullet list via `SKILLS_PROMPT_TEMPLATE`. Sorting is what keeps it byte-identical across turns.
-- **`load_skill` tool.** `backend/cubebox/tools/builtin/load_skill.py` returns the SKILL.md content
+- **`load_skill` tool.** `backend/cubeplex/tools/builtin/load_skill.py` returns the SKILL.md content
   as a JSON tool result (`LoadSkillOutput`).
-- **`SkillsMiddleware`.** `backend/cubebox/middleware/skills.py` watches `after_tool_call` for
+- **`SkillsMiddleware`.** `backend/cubeplex/middleware/skills.py` watches `after_tool_call` for
   `load_skill`, stashes loaded content into `agent._extra["loaded_skills"]` (via an `extra_ref`
   closure), and on every subsequent model call appends each loaded skill's body to the system
   prompt in `transform_system_prompt` — **sorted by name** for determinism.
@@ -109,7 +109,7 @@ grows by appending — never reorders — so earlier cache segments stay valid.
 
 The "load a compact index, expand on demand" pattern is now the mainstream answer to tool/context
 bloat. Three families of prior art, from provider-side features to self-hosted agent runtimes.
-What's transferable to cubebox:
+What's transferable to cubeplex:
 
 - **Anthropic Tool Search Tool / deferred tools (GA Feb 2026).** You register all tools but mark
   most with `defer_loading: true`; only a search tool plus a few always-on tools are in context.
@@ -118,7 +118,7 @@ What's transferable to cubebox:
   large accuracy gains on big tool libraries (Opus 4.5 79.5% → 88.1%). Scales to ~10k tools.
   *Transferable:* validates the index-then-expand shape and confirms expansion should pull only a
   small relevant subset, not everything. *Caveat for us:* this is a provider-side feature on the
-  Anthropic API; cubebox runs through cubepi's provider abstraction and multiple providers
+  Anthropic API; cubeplex runs through cubepi's provider abstraction and multiple providers
   (OpenAI-compatible, deepseek), so we cannot depend on it being present everywhere. Our
   host-level mechanism must work provider-agnostically.
 
@@ -126,7 +126,7 @@ What's transferable to cubebox:
   the host need not forward every discovered tool to the model; it can filter, search, or disclose
   progressively before anything hits context. Standard MCP setups can eat up to ~72% of the
   context window on definitions alone, with tool-selection accuracy dropping as the set grows.
-  *Transferable:* cubebox **is** the host here (`RunManager` assembles the tool list), so we own
+  *Transferable:* cubeplex **is** the host here (`RunManager` assembles the tool list), so we own
   this lever directly — exactly where the skills index already sits.
 
 - **Cloudflare "Code Mode" (search + execute, ~1,000 tokens for 2,500+ endpoints).** Tools are
@@ -150,7 +150,7 @@ What's transferable to cubebox:
     direct — 3 tiny servers don't need deferral, 1 giant server does.
   - **Stateless catalog**: rebuilt from the current tool-defs list every assembly, never cached
     across turns. Lesson from OpenClaw #84141: a session-keyed catalog that drifts from the live
-    registry silently drops tools. cubebox avoids the same drift differently (live loader on expand,
+    registry silently drops tools. cubeplex avoids the same drift differently (live loader on expand,
     not cached-schema synthesis), but the failure mode is worth defending against.
   - **BM25 retrieval** over tokenized tool name + description + parameter names, with substring
     fallback. Needed because their catalog is hundreds of individual tools with no readable index.
@@ -172,7 +172,7 @@ What's transferable to cubebox:
   per-turn LLM or vector retrieval adds latency/cost we avoid with a readable catalog.
 
 Recommendation drawn from the research: build a **host-side, provider-agnostic** index-then-expand
-mechanism in **cubepi** (the agent runtime) as a `DeferredToolGroup` primitive, with cubebox
+mechanism in **cubepi** (the agent runtime) as a `DeferredToolGroup` primitive, with cubeplex
 providing the MCP-specific mapping. Use context-window-percentage thresholds (hermes-agent's
 approach). Keep semantic retrieval and code-mode as documented later-stage options.
 
@@ -190,10 +190,10 @@ large builtin suites) require no runtime changes — only a new mapping from sou
 matches how users think about MCP ("I connected Linear"), keeps the catalog short, and reuses the
 existing per-server namespacing/citation plumbing wholesale.
 
-### 0. Layering: cubepi primitive + cubebox mapping
+### 0. Layering: cubepi primitive + cubeplex mapping
 
 The core mechanism lives in **cubepi** (the agent runtime) as a `DeferredToolGroup` abstraction.
-cubebox provides the application-specific wiring.
+cubeplex provides the application-specific wiring.
 
 **cubepi provides (generic, tool-source-agnostic):**
 - `DeferredToolGroup` data structure: `group_id`, `display_name`, `description`, `tool_names`
@@ -205,7 +205,7 @@ cubebox provides the application-specific wiring.
 - `DeferredToolsMiddleware`: `after_tool_call` records expansion order in `extra`;
   `transform_system_prompt` appends expanded schema text in expansion order (append-only).
 
-**cubebox provides (MCP-specific):**
+**cubeplex provides (MCP-specific):**
 - Mapping `MCPRuntimeConnectorSpec` → `DeferredToolGroup` (group_id = `mcp:{slug}`, tool_names
   from `tools_cache`, loader = filtered `load_workspace_mcp_tools_for_cubepi`).
 - Threshold decision: which servers to defer (context-window-percentage gate, see §config below).
@@ -265,7 +265,7 @@ used to go** (after `load_skill`), so the cache-prefix tool ordering rule is res
 The model learns about this tool the same way it learns about `load_skill`: the catalog text tells
 it to call `expand_tools(group_id)`.
 
-**cubepi owns the tool definition and dispatch.** cubebox only registers the deferred groups
+**cubepi owns the tool definition and dispatch.** cubeplex only registers the deferred groups
 (with their loaders); the expand tool itself is generic and knows nothing about MCP.
 
 ### 3. `DeferredToolsMiddleware` (the cache-safe injector, in cubepi)
@@ -289,7 +289,7 @@ text to the system-prompt suffix is the same trick skills already use and is pro
 does not register a callable `AgentTool`. The naive shortcut — register *all* groups' tools as
 real `AgentTool`s up front and merely **omit collapsed groups from the catalog text** — does
 **not** save anything. Those tools still flow through `tools=all_tools` into
-`create_cubebox_agent`, so the model still receives every collapsed group's full schema in the
+`create_cubeplex_agent`, so the model still receives every collapsed group's full schema in the
 tool block and pays the identical cache-write/cache-read and attention cost as today. Hiding a
 tool in the prose while still shipping its schema in `tools=` is not disclosure at all. So
 pre-register-all is **rejected**: it is the status quo with a shorter catalog, not a cost win.
@@ -324,14 +324,14 @@ issue), not just a single API call. The scope:
 - `DeferredToolsMiddleware` (expansion-order tracking + system-prompt suffix injection)
 - Mid-run tool-set mutation (add `AgentTool`s to a live agent's context)
 
-If cubepi cannot ship all of this before cubebox v1, the **fallback** is to keep the tool set
+If cubepi cannot ship all of this before cubeplex v1, the **fallback** is to keep the tool set
 fixed for the lifetime of a single agent run: expansions requested during a run take effect on the
 **next** run (next user turn), where the tool set is rebuilt to include all groups expanded so far.
 This still delivers the savings (collapsed groups are never in `tools=`) at the cost of a one-turn
 delay before a just-expanded group is callable. Either way, pre-register-all is not on the table —
 it saves nothing.
 
-### 4. Where it plugs into assembly (cubebox side)
+### 4. Where it plugs into assembly (cubeplex side)
 
 - `run_manager.py` system-prompt section (~line 1799, beside the skills index): add the catalog
   suffix when disclosure is active.
@@ -341,7 +341,7 @@ it saves nothing.
   never the collapsed ones. For each non-expanded MCP server, register a `DeferredToolGroup` with
   cubepi via `agent.register_deferred_group(...)`.
 - cubepi auto-registers the `expand_tools` builtin when deferred groups exist (no manual slot
-  management in cubebox).
+  management in cubeplex).
 - cubepi auto-appends `DeferredToolsMiddleware` when deferred groups are registered.
 - Citations: keep `mcp_citation_configs` populated for expanded servers exactly as today; the
   `CitationMiddleware` (~line 1163) is unchanged.
@@ -387,7 +387,7 @@ Mostly reuses existing columns; minimal additions.
 **v1:**
 - **cubepi: `DeferredToolGroup` primitive** — registration API, `expand_tools` builtin, catalog
   rendering, `DeferredToolsMiddleware`, mid-run tool injection. Generic, tool-source-agnostic.
-- **cubebox: MCP → DeferredToolGroup mapping** — MCP servers as groups, catalog descriptions from
+- **cubeplex: MCP → DeferredToolGroup mapping** — MCP servers as groups, catalog descriptions from
   `discovery_metadata`, tool names from `tools_cache`, loader via filtered live MCP discovery.
 - Catalog includes per-group tool name lists (not schemas, not descriptions).
 - Config-gated: `enabled` (`auto`/`on`/`off`) + `threshold_pct` (context-window percentage) +
@@ -395,7 +395,7 @@ Mostly reuses existing columns; minimal additions.
 - **True deferral / register-on-first-expand**: collapsed groups' tools are never in `tools=`;
   expanding a group registers its tools as callable for the rest of the conversation. If cubepi
   cannot ship the full `DeferredToolGroup` feature in time, ship the next-turn fallback (expansions
-  take effect on the following user turn) with cubebox-side middleware, and land the cubepi feature
+  take effect on the following user turn) with cubeplex-side middleware, and land the cubepi feature
   as a follow-up. Pre-register-all is explicitly **not** a v1 option — it saves no cache/attention
   cost.
 
@@ -442,7 +442,7 @@ fall back to fake-server-only unit coverage.
 - **Catalog content** → group_id + one-line description + all tool names (no tool descriptions, no
   schemas). Tool names are the highest signal-to-noise element.
 - **cubepi layering** → core mechanism (`DeferredToolGroup`, `expand_tools`, middleware) lives in
-  cubepi; cubebox provides MCP → group mapping + threshold logic + loader callbacks.
+  cubepi; cubeplex provides MCP → group mapping + threshold logic + loader callbacks.
 - **What does `expand_tools` return?** → Tool names + descriptions only; middleware injects schema
   text into the system-prompt suffix (matching skills pattern).
 
@@ -474,12 +474,12 @@ fall back to fake-server-only unit coverage.
 
 - Prompt-cache discipline: `backend/docs/prompt-cache-discipline.md`
 - Agent system design: `backend/docs/agent-system-design.md`
-- Skills index/middleware/tool: `backend/cubebox/prompts/skills.py`,
-  `backend/cubebox/middleware/skills.py`, `backend/cubebox/tools/builtin/load_skill.py`
-- MCP runtime loader: `backend/cubebox/mcp/cubepi_runtime.py`
-- MCP effective service + runtime spec: `backend/cubebox/mcp/effective.py`
-- MCP install model (`tools_cache`, `discovery_metadata`, `slug_name`): `backend/cubebox/models/mcp.py`
-- Tool/prompt assembly: `backend/cubebox/streams/run_manager.py` (~lines 900, 1034, 1799)
+- Skills index/middleware/tool: `backend/cubeplex/prompts/skills.py`,
+  `backend/cubeplex/middleware/skills.py`, `backend/cubeplex/tools/builtin/load_skill.py`
+- MCP runtime loader: `backend/cubeplex/mcp/cubepi_runtime.py`
+- MCP effective service + runtime spec: `backend/cubeplex/mcp/effective.py`
+- MCP install model (`tools_cache`, `discovery_metadata`, `slug_name`): `backend/cubeplex/models/mcp.py`
+- Tool/prompt assembly: `backend/cubeplex/streams/run_manager.py` (~lines 900, 1034, 1799)
 - Prior MCP specs: `docs/dev/specs/2026-05-14-mcp-tools-redesign-design.md`,
   `docs/dev/specs/2026-05-15-mcp-management-four-layer-design.md`,
   `docs/dev/specs/2026-05-14-mcp-tool-citations-design.md`

@@ -16,16 +16,16 @@
 
 | File | Responsibility |
 |------|---------------|
-| `backend/cubebox/api/routes/v1/public_artifacts.py` | Public (no-auth) download endpoint: validate OTK, stream file |
+| `backend/cubeplex/api/routes/v1/public_artifacts.py` | Public (no-auth) download endpoint: validate OTK, stream file |
 | `backend/tests/e2e/test_otk_preview.py` | E2E tests for OTK issue + consume + one-time + expiry |
 
 ### Backend (modified files)
 
 | File | Change |
 |------|--------|
-| `backend/cubebox/api/routes/v1/artifacts.py` | Add `POST .../preview-token` endpoint |
-| `backend/cubebox/api/routes/v1/__init__.py` | Export `public_artifacts` |
-| `backend/cubebox/api/app.py` | Register `public_artifacts.router` |
+| `backend/cubeplex/api/routes/v1/artifacts.py` | Add `POST .../preview-token` endpoint |
+| `backend/cubeplex/api/routes/v1/__init__.py` | Export `public_artifacts` |
+| `backend/cubeplex/api/app.py` | Register `public_artifacts.router` |
 | `backend/config.yaml` | Add `api.public_url: ""` config key |
 
 ### Frontend (modified files)
@@ -57,7 +57,7 @@ In `backend/config.yaml`, add `public_url: ""` under the existing `api:` section
     public_url: ""
 ```
 
-This is overridable via `CUBEBOX_API__PUBLIC_URL` (dynaconf convention).
+This is overridable via `CUBEPLEX_API__PUBLIC_URL` (dynaconf convention).
 
 - [ ] **Step 2: Commit**
 
@@ -74,11 +74,11 @@ EOF
 ## Task 2: Add the `POST preview-token` endpoint (authenticated)
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/artifacts.py`
+- Modify: `backend/cubeplex/api/routes/v1/artifacts.py`
 
 - [ ] **Step 1: Add the preview-token endpoint**
 
-Add these imports at the top of `backend/cubebox/api/routes/v1/artifacts.py`:
+Add these imports at the top of `backend/cubeplex/api/routes/v1/artifacts.py`:
 
 ```python
 import secrets
@@ -87,8 +87,8 @@ from urllib.parse import quote
 import orjson
 from fastapi import Request
 
-from cubebox.cache import redis_dep, RedisHandle
-from cubebox.config import config
+from cubeplex.cache import redis_dep, RedisHandle
+from cubeplex.config import config
 ```
 
 Then add this endpoint after the existing `download_artifact` function (after line 148, before the `preview_artifact_file` function):
@@ -155,13 +155,13 @@ async def create_preview_token(
 Run from `backend/`:
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/backend && uv run ruff check cubebox/api/routes/v1/artifacts.py
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/backend && uv run ruff check cubeplex/api/routes/v1/artifacts.py
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/artifacts.py
+git add backend/cubeplex/api/routes/v1/artifacts.py
 git commit -m "$(cat <<'EOF'
 feat(api): add POST preview-token endpoint for Office OTK
 EOF
@@ -173,11 +173,11 @@ EOF
 ## Task 3: Add the public download endpoint (no auth)
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/public_artifacts.py`
+- Create: `backend/cubeplex/api/routes/v1/public_artifacts.py`
 
 - [ ] **Step 1: Create the public artifacts router**
 
-Create `backend/cubebox/api/routes/v1/public_artifacts.py`:
+Create `backend/cubeplex/api/routes/v1/public_artifacts.py`:
 
 ```python
 """Public (unauthenticated) artifact download via one-time token."""
@@ -190,8 +190,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
 from loguru import logger
 
-from cubebox.cache import RedisHandle, redis_dep
-from cubebox.objectstore import get_objectstore_client
+from cubeplex.cache import RedisHandle, redis_dep
+from cubeplex.objectstore import get_objectstore_client
 
 router = APIRouter(prefix="/public/artifacts", tags=["public-artifacts"])
 
@@ -251,13 +251,13 @@ async def public_download(
 - [ ] **Step 2: Verify lint passes**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/backend && uv run ruff check cubebox/api/routes/v1/public_artifacts.py
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/backend && uv run ruff check cubeplex/api/routes/v1/public_artifacts.py
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/public_artifacts.py
+git add backend/cubeplex/api/routes/v1/public_artifacts.py
 git commit -m "$(cat <<'EOF'
 feat(api): add public one-time artifact download endpoint
 EOF
@@ -269,29 +269,29 @@ EOF
 ## Task 4: Register the public router
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/__init__.py`
-- Modify: `backend/cubebox/api/app.py`
+- Modify: `backend/cubeplex/api/routes/v1/__init__.py`
+- Modify: `backend/cubeplex/api/app.py`
 
 - [ ] **Step 1: Export from routes __init__**
 
-In `backend/cubebox/api/routes/v1/__init__.py`, add the import and export.
+In `backend/cubeplex/api/routes/v1/__init__.py`, add the import and export.
 
-Add to imports (after the existing `from cubebox.api.routes.v1.artifacts import router as artifacts_router` line):
+Add to imports (after the existing `from cubeplex.api.routes.v1.artifacts import router as artifacts_router` line):
 
 ```python
-from cubebox.api.routes.v1 import public_artifacts
+from cubeplex.api.routes.v1 import public_artifacts
 ```
 
 Add `"public_artifacts"` to the `__all__` list.
 
 - [ ] **Step 2: Register in app.py**
 
-In `backend/cubebox/api/app.py`, inside `create_app()`, add the router import and registration.
+In `backend/cubeplex/api/app.py`, inside `create_app()`, add the router import and registration.
 
 Add `public_artifacts` to the existing import block (around line 393-409):
 
 ```python
-from cubebox.api.routes.v1 import (
+from cubeplex.api.routes.v1 import (
     ...
     public_artifacts,
     ...
@@ -307,7 +307,7 @@ app.include_router(public_artifacts.router, prefix="/api/v1")
 - [ ] **Step 3: Verify the app starts without errors**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/backend && uv run python -c "from cubebox.api.app import create_app; app = create_app(); print('OK:', [r.path for r in app.routes if 'public' in getattr(r, 'path', '')])"
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/backend && uv run python -c "from cubeplex.api.app import create_app; app = create_app(); print('OK:', [r.path for r in app.routes if 'public' in getattr(r, 'path', '')])"
 ```
 
 Expected: prints a list containing `/api/v1/public/artifacts/dl/{token}/{filename}`.
@@ -315,7 +315,7 @@ Expected: prints a list containing `/api/v1/public/artifacts/dl/{token}/{filenam
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/__init__.py backend/cubebox/api/app.py
+git add backend/cubeplex/api/routes/v1/__init__.py backend/cubeplex/api/app.py
 git commit -m "$(cat <<'EOF'
 feat(api): register public artifacts router
 EOF
@@ -348,17 +348,17 @@ from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.config import config as _cubebox_config
-from cubebox.db.engine import _build_database_url
-from cubebox.models import Artifact, Conversation, Membership, Workspace
-from cubebox.objectstore import get_objectstore_client
+from cubeplex.config import config as _cubeplex_config
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import Artifact, Conversation, Membership, Workspace
+from cubeplex.objectstore import get_objectstore_client
 from tests.e2e.conftest import (
     DEFAULT_WS_ID,
     _lifespan_context,
     _login_and_attach,
     _make_isolated_user,
 )
-from cubebox.models import Role
+from cubeplex.models import Role
 from tests.e2e.helpers import csrf_cookie_name
 
 
@@ -525,7 +525,7 @@ class TestOTKPublicDownload:
 - [ ] **Step 2: Run the tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/backend && uv run pytest tests/e2e/test_otk_preview.py -v
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/backend && uv run pytest tests/e2e/test_otk_preview.py -v
 ```
 
 Expected: all tests pass.
@@ -647,8 +647,8 @@ Create `frontend/packages/web/components/panel/artifact/OfficePreview.tsx`:
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
-import type { Artifact } from '@cubebox/core'
-import { createApiClient, requestPreviewToken } from '@cubebox/core'
+import type { Artifact } from '@cubeplex/core'
+import { createApiClient, requestPreviewToken } from '@cubeplex/core'
 import { useTranslations } from 'next-intl'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { getArtifactIcon } from './artifactIcons'
@@ -774,7 +774,7 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
 - [ ] **Step 2: Verify types**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/frontend && pnpm type-check
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/frontend && pnpm type-check
 ```
 
 - [ ] **Step 3: Commit**
@@ -825,7 +825,7 @@ In the `PreviewContent` function, add Office file check **before** the `switch` 
 - [ ] **Step 2: Verify types**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/frontend && pnpm type-check
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/frontend && pnpm type-check
 ```
 
 - [ ] **Step 3: Commit**
@@ -845,7 +845,7 @@ EOF
 - [ ] **Step 1: Run backend lint + type-check**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/backend && make format && make lint && make type-check
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/backend && make format && make lint && make type-check
 ```
 
 Fix any issues found.
@@ -853,7 +853,7 @@ Fix any issues found.
 - [ ] **Step 2: Run backend E2E tests**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/backend && uv run pytest tests/e2e/test_otk_preview.py -v
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/backend && uv run pytest tests/e2e/test_otk_preview.py -v
 ```
 
 All 5 tests must pass.
@@ -861,7 +861,7 @@ All 5 tests must pass.
 - [ ] **Step 3: Run frontend type-check + build**
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/frontend && pnpm type-check && pnpm build
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/frontend && pnpm type-check && pnpm build
 ```
 
 - [ ] **Step 4: Start dev servers and test in browser**
@@ -869,8 +869,8 @@ cd /home/chris/cubebox/.worktrees/feat/office-preview-token/frontend && pnpm typ
 Start backend and frontend:
 
 ```bash
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/backend && python main.py &
-cd /home/chris/cubebox/.worktrees/feat/office-preview-token/frontend && pnpm dev &
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/backend && python main.py &
+cd /home/chris/cubeplex/.worktrees/feat/office-preview-token/frontend && pnpm dev &
 ```
 
 Note: this worktree uses port **8037** (backend) and **3037** (frontend). Open `http://localhost:3037` in a browser.

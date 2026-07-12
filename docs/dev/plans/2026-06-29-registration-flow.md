@@ -6,46 +6,46 @@
 
 **Architecture:** Three backend pure/service modules (`password_policy.py`, `email_otp.py`, refactored bootstrap helpers) feed thin route changes in `auth.py` plus a new `onboarding.py` router. `OrgInviteToken` is a new table. The frontend adds an `<OtpInput>` + `/verify-otp` page, an `<OnboardingForm>` + `/onboarding` page, an org-invite accept page, threads `next` through the whole flow, and removes the magic-link UI + `/setup`. Backend is the authority for password and OTP; the frontend mirrors password rules for UX only.
 
-**Tech Stack:** FastAPI + fastapi-users v15, SQLModel + Alembic, Redis (aioredis), slowapi, dynaconf, Jinja2 email templates; Next.js + React 19, next-intl, Zustand, `@cubebox/core`.
+**Tech Stack:** FastAPI + fastapi-users v15, SQLModel + Alembic, Redis (aioredis), slowapi, dynaconf, Jinja2 email templates; Next.js + React 19, next-intl, Zustand, `@cubeplex/core`.
 
 ## Global Constraints
 
 - Type annotations everywhere (mypy strict backend, strict TS frontend). Line length 100.
 - Datetimes tz-aware: `Column(DateTime(timezone=True), ...)`, `datetime.now(UTC)`, `utc_isoformat()` on DB→API. New tz column migrations hand-add `postgresql_using="<col> AT TIME ZONE 'UTC'"` on each `alter_column`.
-- New business table → public ID prefix in `backend/cubebox/models/public_id.py`; `default_factory=generate_public_id(PREFIX_X)`.
+- New business table → public ID prefix in `backend/cubeplex/models/public_id.py`; `default_factory=generate_public_id(PREFIX_X)`.
 - Migrations: `alembic revision --autogenerate -m "..."` only; do not hand-edit migration files.
 - Dependencies via `uv add` (backend) / `pnpm add` (frontend) only.
 - Scope-isolated APIs/pages: no `?scope=` / `mode?` props. Org-admin routes under `/admin/...` with `require_org_admin` + `resolve_current_org_id`; the org-invite **accept** endpoint is auth-scoped (not org-admin) at `/api/v1/orgs/invites/accept`.
 - No backwards-compat shims: magic-link verify routes, `/system/setup`, and the `/setup` page are removed cleanly.
 - OTP: `secrets.choice` for generation; Redis TTL; success deletes key; `max_attempts` guard; per-email rate limit + resend cooldown; no email enumeration (non-existent emails return success-shape). Org-invite role limited to `ADMIN`/`MEMBER` (never `OWNER`).
-- Worktree discipline: read `.worktree.env` first; backend port 8001, frontend port 3001, DB `cubebox_feat_2026_06_29_registration_flow`, redis key prefix `cubebox-feat-2026-06-29-registration-flow`.
-- `@cubebox/core` must build (`pnpm --filter @cubebox/core build`) before web sees API/type changes.
+- Worktree discipline: read `.worktree.env` first; backend port 8001, frontend port 3001, DB `cubeplex_feat_2026_06_29_registration_flow`, redis key prefix `cubeplex-feat-2026-06-29-registration-flow`.
+- `@cubeplex/core` must build (`pnpm --filter @cubeplex/core build`) before web sees API/type changes.
 - Pipe noisy output through `tee tmp/<task>.log` then `tail`; grep the saved log on failure, don't re-run.
 - Docs ship with code: update the matching `docs/site/docs/` page in the same PR.
 
 ## File Structure
 
 **Backend — new files:**
-- `backend/cubebox/auth/password_policy.py` — pure password rule functions + `validate_password`. Single source of truth.
-- `backend/cubebox/auth/email_otp.py` — OTP service (issue/verify/resend) over Redis; no HTTP.
-- `backend/cubebox/api/routes/v1/onboarding.py` — `POST /api/v1/onboarding` router.
-- `backend/cubebox/api/routes/v1/org_invites.py` — org-invite create (admin) + accept (auth) router.
-- `backend/cubebox/models/org_invite_token.py` — `OrgInviteToken` SQLModel table.
-- `backend/cubebox/repositories/org_invite_token.py` — `OrgInviteTokenRepository` (issue/consume).
-- `backend/cubebox/templates/email/email_otp_verification.{html,txt}` — OTP email template.
+- `backend/cubeplex/auth/password_policy.py` — pure password rule functions + `validate_password`. Single source of truth.
+- `backend/cubeplex/auth/email_otp.py` — OTP service (issue/verify/resend) over Redis; no HTTP.
+- `backend/cubeplex/api/routes/v1/onboarding.py` — `POST /api/v1/onboarding` router.
+- `backend/cubeplex/api/routes/v1/org_invites.py` — org-invite create (admin) + accept (auth) router.
+- `backend/cubeplex/models/org_invite_token.py` — `OrgInviteToken` SQLModel table.
+- `backend/cubeplex/repositories/org_invite_token.py` — `OrgInviteTokenRepository` (issue/consume).
+- `backend/cubeplex/templates/email/email_otp_verification.{html,txt}` — OTP email template.
 - `backend/tests/unit/test_password_policy.py`, `backend/tests/unit/test_email_otp.py`.
 - `backend/tests/e2e/test_register_otp_flow.py`, `test_register_smtp_disabled.py`, `test_login_unverified_blocked.py`, `test_password_policy_e2e.py`, `test_onboarding.py`, `test_invite_onboarding.py`.
 
 **Backend — modified files:**
 - `backend/config.yaml`, `backend/config.test.yaml`, `backend/config.development.yaml`, `backend/config.production.yaml` — new `auth.password_policy` + `auth.email_verification` keys.
-- `backend/cubebox/models/public_id.py` — add `PREFIX_ORG_INVITE = "oinv"`.
-- `backend/cubebox/models/__init__.py` — export `OrgInviteToken`.
-- `backend/cubebox/api/routes/v1/__init__.py` + `backend/cubebox/app.py` — register onboarding + org_invites routers.
-- `backend/cubebox/auth/users.py` — override `validate_password`; refactor bootstrap into shared helpers; remove magic-link `request_verify` sending; `on_after_register` defers bootstrap when verification enabled.
-- `backend/cubebox/api/routes/v1/auth.py` — remove `get_verify_router`; add `verification_required` to register response; add `/verify-otp` + `/resend-otp`; add `email_not_verified` 403 in login; replace `needs_org_setup` with `needs_onboarding` in `_me_payload`; route change-password through the policy.
-- `backend/cubebox/api/routes/v1/system.py` — retire `POST /system/setup`; keep `/system/info` (drop `needs_org_setup`, keep deployment_mode/version/sandbox).
-- `backend/cubebox/api/schemas/system.py` — drop `needs_org_setup` from `SystemInfoResponse` (or keep as deprecated false); see Task 9.
-- `backend/cubebox/i18n/messages/{en,zh}/LC_MESSAGES/messages.po` — new message keys.
+- `backend/cubeplex/models/public_id.py` — add `PREFIX_ORG_INVITE = "oinv"`.
+- `backend/cubeplex/models/__init__.py` — export `OrgInviteToken`.
+- `backend/cubeplex/api/routes/v1/__init__.py` + `backend/cubeplex/app.py` — register onboarding + org_invites routers.
+- `backend/cubeplex/auth/users.py` — override `validate_password`; refactor bootstrap into shared helpers; remove magic-link `request_verify` sending; `on_after_register` defers bootstrap when verification enabled.
+- `backend/cubeplex/api/routes/v1/auth.py` — remove `get_verify_router`; add `verification_required` to register response; add `/verify-otp` + `/resend-otp`; add `email_not_verified` 403 in login; replace `needs_org_setup` with `needs_onboarding` in `_me_payload`; route change-password through the policy.
+- `backend/cubeplex/api/routes/v1/system.py` — retire `POST /system/setup`; keep `/system/info` (drop `needs_org_setup`, keep deployment_mode/version/sandbox).
+- `backend/cubeplex/api/schemas/system.py` — drop `needs_org_setup` from `SystemInfoResponse` (or keep as deprecated false); see Task 9.
+- `backend/cubeplex/i18n/messages/{en,zh}/LC_MESSAGES/messages.po` — new message keys.
 
 **Frontend — new files:**
 - `frontend/packages/core/src/api/onboarding.ts`, `frontend/packages/core/src/api/orgInvites.ts`, `frontend/packages/core/src/auth/passwordPolicy.ts`.
@@ -81,7 +81,7 @@
 8. **Task 8** — Refactor bootstrap into shared helpers in `users.py` (no deps; pure refactor).
 9. **Task 9** — Onboarding router + retire `/system/setup` + `needs_onboarding` in `_me_payload` (depends 1, 8).
 10. **Task 10** — Backend i18n keys + e2e tests for OTP/password/login-gate/onboarding/invite (depends 5, 7, 9).
-11. **Task 11** — Frontend `@cubebox/core` API/types + `passwordPolicy` mirror (depends 5, 9 backend shapes).
+11. **Task 11** — Frontend `@cubeplex/core` API/types + `passwordPolicy` mirror (depends 5, 9 backend shapes).
 12. **Task 12** — `<OtpInput>` + `/verify-otp` page (depends 11).
 13. **Task 13** — `RegisterForm` `next`-threading + `LoginForm` `email_not_verified` + `VerificationBanner` (depends 11).
 14. **Task 14** — `<OnboardingForm>` + `/onboarding` page + `(app)/layout` guard + delete `/setup` (depends 11).
@@ -107,7 +107,7 @@
 In `backend/config.yaml`, inside the `auth:` block (after the `rate_limit:` sub-block, before the closing of `auth:`), add:
 
 ```yaml
-    password_policy: "high"   # "high" | "low", default high. ENV: CUBEBOX_AUTH__PASSWORD_POLICY
+    password_policy: "high"   # "high" | "low", default high. ENV: CUBEPLEX_AUTH__PASSWORD_POLICY
     email_verification:
       enabled: "auto"         # "auto" | "true" | "false". auto = enabled iff email.backend == "smtp"
       code_length: 6          # OTP digit count
@@ -148,9 +148,9 @@ In the `auth:` block (currently `jwt_secret`/`csrf_secret`/`cookie_secure`), add
 
 Run:
 ```bash
-cd backend && uv run python -c "from cubebox.config import config; print(config.get('auth.password_policy')); print(config.get('auth.email_verification.enabled')); print(config.get('auth.email_verification.code_length'))"
+cd backend && uv run python -c "from cubeplex.config import config; print(config.get('auth.password_policy')); print(config.get('auth.email_verification.enabled')); print(config.get('auth.email_verification.code_length'))"
 ```
-Expected: prints `high`, `auto` (or `true` under test env), `6`. (Run from worktree; `.worktree.env` sets `CUBEBOX_ENV` etc. — if `config` resolves the wrong env, run `uv run python -c "..."` after `source .worktree.env`.) If a KeyError/AttributeError appears, the nested key path is wrong — dynaconf reads `auth.email_verification.code_length` as nested dict, confirm the YAML indentation is 6 spaces under `email_verification:`.
+Expected: prints `high`, `auto` (or `true` under test env), `6`. (Run from worktree; `.worktree.env` sets `CUBEPLEX_ENV` etc. — if `config` resolves the wrong env, run `uv run python -c "..."` after `source .worktree.env`.) If a KeyError/AttributeError appears, the nested key path is wrong — dynaconf reads `auth.email_verification.code_length` as nested dict, confirm the YAML indentation is 6 spaces under `email_verification:`.
 
 - [ ] **Step 6: Commit**
 
@@ -164,7 +164,7 @@ git commit -m "feat(config): add auth.password_policy + auth.email_verification 
 ### Task 2: Password policy pure module
 
 **Files:**
-- Create: `backend/cubebox/auth/password_policy.py`
+- Create: `backend/cubeplex/auth/password_policy.py`
 - Test: `backend/tests/unit/test_password_policy.py`
 
 **Interfaces:**
@@ -177,7 +177,7 @@ git commit -m "feat(config): add auth.password_policy + auth.email_verification 
 `backend/tests/unit/test_password_policy.py`:
 
 ```python
-from cubebox.auth.password_policy import (
+from cubeplex.auth.password_policy import (
     HIGH_RULES,
     LOW_RULES,
     PasswordPolicy,
@@ -237,17 +237,17 @@ def test_rules_constants():
 ```bash
 cd backend && uv run pytest tests/unit/test_password_policy.py -v --no-cov 2>&1 | tee tmp/password_policy.log | tail -5
 ```
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.auth.password_policy'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.auth.password_policy'`.
 
 - [ ] **Step 3: Write the implementation**
 
-`backend/cubebox/auth/password_policy.py`:
+`backend/cubeplex/auth/password_policy.py`:
 
 ```python
 """Password policy — pure functions, single source of truth.
 
 The backend is authoritative for password strength. The frontend mirrors
-these rules for pre-submit UX only (see @cubebox/core passwordPolicy).
+these rules for pre-submit UX only (see @cubeplex/core passwordPolicy).
 """
 
 from __future__ import annotations
@@ -313,7 +313,7 @@ def validate_password(password: str, policy: PasswordPolicy) -> PasswordValidati
 
 
 def get_password_policy() -> PasswordPolicy:
-    from cubebox.config import config
+    from cubeplex.config import config
 
     raw = str(config.get("auth.password_policy", "high")).lower()
     try:
@@ -336,14 +336,14 @@ Expected: PASS (all tests green).
 - [ ] **Step 5: Run mypy on the new module**
 
 ```bash
-cd backend && uv run mypy cubebox/auth/password_policy.py 2>&1 | tee tmp/mypy_password_policy.log | tail -5
+cd backend && uv run mypy cubeplex/auth/password_policy.py 2>&1 | tee tmp/mypy_password_policy.log | tail -5
 ```
 Expected: no errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/auth/password_policy.py backend/tests/unit/test_password_policy.py
+git add backend/cubeplex/auth/password_policy.py backend/tests/unit/test_password_policy.py
 git commit -m "feat(auth): add password_policy pure module + unit tests"
 ```
 
@@ -352,8 +352,8 @@ git commit -m "feat(auth): add password_policy pure module + unit tests"
 ### Task 3: Wire password policy into UserManager + register/change-password
 
 **Files:**
-- Modify: `backend/cubebox/auth/users.py` (add `validate_password` override on `UserManager`)
-- Modify: `backend/cubebox/api/routes/v1/auth.py` (register catch → `weak_password` 400 with errors; change-password `ChangePasswordRequest` drop `min_length`, route through policy → `weak_password` 400 with errors)
+- Modify: `backend/cubeplex/auth/users.py` (add `validate_password` override on `UserManager`)
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` (register catch → `weak_password` 400 with errors; change-password `ChangePasswordRequest` drop `min_length`, route through policy → `weak_password` 400 with errors)
 - Test: `backend/tests/e2e/test_password_policy_e2e.py` (deferred to Task 10; this task adds a focused unit-level check via the existing register e2e fixture shape — but the real e2e is in Task 10). For this task, verify via an inline manual curl against the worktree app or skip to Task 10. **This task's deliverable is the wiring + a mypy/lint pass + the unit test already in Task 2 still green.**
 
 **Interfaces:**
@@ -363,7 +363,7 @@ git commit -m "feat(auth): add password_policy pure module + unit tests"
 
 - [ ] **Step 1: Add the `validate_password` override to `UserManager`**
 
-In `backend/cubebox/auth/users.py`, inside `class UserManager(BaseUserManager[User, str]):`, immediately after `parse_id` (before `on_after_register`), add:
+In `backend/cubeplex/auth/users.py`, inside `class UserManager(BaseUserManager[User, str]):`, immediately after `parse_id` (before `on_after_register`), add:
 
 ```python
     async def validate_password(
@@ -372,7 +372,7 @@ In `backend/cubebox/auth/users.py`, inside `class UserManager(BaseUserManager[Us
         user: User | None = None,
     ) -> None:
         """Override the fastapi-users no-op. Backend is authoritative."""
-        from cubebox.auth.password_policy import validate_password_from_config
+        from cubeplex.auth.password_policy import validate_password_from_config
 
         result = validate_password_from_config(password)
         if not result.ok:
@@ -387,11 +387,11 @@ from fastapi_users import BaseUserManager, FastAPIUsers
 from fastapi_users.exceptions import InvalidPasswordException, UserAlreadyExists
 ```
 
-(Check whether `UserAlreadyExists` is already imported in `auth.py` rather than `users.py` — the override lives in `users.py`; only add `InvalidPasswordException` there. Confirm with `grep -n "InvalidPasswordException" backend/cubebox/auth/users.py`.)
+(Check whether `UserAlreadyExists` is already imported in `auth.py` rather than `users.py` — the override lives in `users.py`; only add `InvalidPasswordException` there. Confirm with `grep -n "InvalidPasswordException" backend/cubeplex/auth/users.py`.)
 
 - [ ] **Step 2: Update the register endpoint to surface `weak_password`**
 
-In `backend/cubebox/api/routes/v1/auth.py`, the `register` handler currently catches `InvalidPasswordException` and returns a generic `register_invalid_password` message. Replace that branch to return the structured errors. The `except InvalidPasswordException` block (currently ~line 60) becomes:
+In `backend/cubeplex/api/routes/v1/auth.py`, the `register` handler currently catches `InvalidPasswordException` and returns a generic `register_invalid_password` message. Replace that branch to return the structured errors. The `except InvalidPasswordException` block (currently ~line 60) becomes:
 
 ```python
     except InvalidPasswordException as exc:
@@ -406,7 +406,7 @@ In `backend/cubebox/api/routes/v1/auth.py`, the `register` handler currently cat
 
 - [ ] **Step 3: Update change-password to route through the policy with structured errors**
 
-In `backend/cubebox/api/routes/v1/auth.py`:
+In `backend/cubeplex/api/routes/v1/auth.py`:
 
 (a) Change `ChangePasswordRequest` to drop the hardcoded `min_length`:
 
@@ -430,14 +430,14 @@ class ChangePasswordRequest(BaseModel):
 - [ ] **Step 4: mypy + import sanity**
 
 ```bash
-cd backend && uv run mypy cubebox/auth/users.py cubebox/api/routes/v1/auth.py 2>&1 | tee tmp/mypy_auth.log | tail -5
+cd backend && uv run mypy cubeplex/auth/users.py cubeplex/api/routes/v1/auth.py 2>&1 | tee tmp/mypy_auth.log | tail -5
 ```
 Expected: no new errors. (`InvalidPasswordException.reason` is typed `Any` in fastapi-users, so the `isinstance` check is fine.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/auth/users.py backend/cubebox/api/routes/v1/auth.py
+git add backend/cubeplex/auth/users.py backend/cubeplex/api/routes/v1/auth.py
 git commit -m "feat(auth): enforce configurable password policy at register + change-password"
 ```
 
@@ -448,7 +448,7 @@ git commit -m "feat(auth): enforce configurable password policy at register + ch
 ### Task 4: OTP service module (Redis-backed) + unit tests
 
 **Files:**
-- Create: `backend/cubebox/auth/email_otp.py`
+- Create: `backend/cubeplex/auth/email_otp.py`
 - Test: `backend/tests/unit/test_email_otp.py`
 
 **Interfaces:**
@@ -458,7 +458,7 @@ git commit -m "feat(auth): enforce configurable password policy at register + ch
   - `verify_otp(email: str, code: str) -> VerifyResult` — compare; success deletes key; tracks attempts.
   - `VerifyResult` dataclass: `{ok: bool, reason: str | None, remaining_attempts: int | None}`. reason ∈ `None` (success) / `"invalid_otp"` / `"expired_or_unknown"` / `"max_attempts_reached"`.
   - Redis keys (all prefixed with the app `redis_key_prefix`): `email_otp:{email}` (hash, TTL `code_ttl_seconds`), `email_otp_sent:{email}` (string, TTL `resend_cooldown_seconds`), `email_otp_rl:{email}` (counter, TTL 3600).
-- Consumes: `get_redis()` from `cubebox.cache`, `get_email_service()` from `cubebox.services.email`, config keys from Task 1.
+- Consumes: `get_redis()` from `cubeplex.cache`, `get_email_service()` from `cubeplex.services.email`, config keys from Task 1.
 
 - [ ] **Step 1: Write the failing unit test (fake Redis at the internal boundary)**
 
@@ -469,7 +469,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from cubebox.auth.email_otp import verify_otp, VerifyResult
+from cubeplex.auth.email_otp import verify_otp, VerifyResult
 
 
 class FakeRedis:
@@ -517,7 +517,7 @@ class FakeRedis:
 async def test_verify_success_deletes_key():
     fake = FakeRedis()
     await fake.hset("email_otp:a@b.com", mapping={"code": "123456", "attempts": "0"})
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "123456")
     assert isinstance(res, VerifyResult)
     assert res.ok is True
@@ -528,7 +528,7 @@ async def test_verify_success_deletes_key():
 async def test_verify_wrong_code_increments_attempts():
     fake = FakeRedis()
     await fake.hset("email_otp:a@b.com", mapping={"code": "123456", "attempts": "0"})
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "000000")
     assert res.ok is False
     assert res.reason == "invalid_otp"
@@ -538,7 +538,7 @@ async def test_verify_wrong_code_increments_attempts():
 @pytest.mark.asyncio
 async def test_verify_missing_key_expired():
     fake = FakeRedis()
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "123456")
     assert res.ok is False
     assert res.reason == "expired_or_unknown"
@@ -548,7 +548,7 @@ async def test_verify_missing_key_expired():
 async def test_verify_max_attempts_invalidates():
     fake = FakeRedis()
     await fake.hset("email_otp:a@b.com", mapping={"code": "123456", "attempts": "4"})
-    with patch("cubebox.auth.email_otp.get_redis", return_value=fake):
+    with patch("cubeplex.auth.email_otp.get_redis", return_value=fake):
         res = await verify_otp("a@b.com", "000000")
     assert res.ok is False
     assert res.reason == "max_attempts_reached"
@@ -562,11 +562,11 @@ async def test_verify_max_attempts_invalidates():
 ```bash
 cd backend && uv run pytest tests/unit/test_email_otp.py -v --no-cov 2>&1 | tee tmp/email_otp.log | tail -5
 ```
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.auth.email_otp'`.
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.auth.email_otp'`.
 
 - [ ] **Step 3: Write the implementation**
 
-`backend/cubebox/auth/email_otp.py`:
+`backend/cubeplex/auth/email_otp.py`:
 
 ```python
 """Email OTP verification service — Redis-backed, no HTTP.
@@ -584,9 +584,9 @@ from dataclasses import dataclass
 
 from redis.asyncio import Redis
 
-from cubebox.cache import get_redis
-from cubebox.config import config
-from cubebox.services.email import get_email_service
+from cubeplex.cache import get_redis
+from cubeplex.config import config
+from cubeplex.services.email import get_email_service
 
 _OTP_KEY = "email_otp:{email}"
 _SENT_KEY = "email_otp_sent:{email}"
@@ -669,7 +669,7 @@ async def issue_otp(email: str) -> str:
 
     await get_email_service().send(
         to=email,
-        subject="Your cubebox verification code",
+        subject="Your cubeplex verification code",
         template="email_otp_verification",
         context={"code": code, "ttl_minutes": str(_ttl() // 60)},
     )
@@ -711,14 +711,14 @@ Expected: PASS.
 - [ ] **Step 5: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/auth/email_otp.py 2>&1 | tee tmp/mypy_email_otp.log | tail -5
+cd backend && uv run mypy cubeplex/auth/email_otp.py 2>&1 | tee tmp/mypy_email_otp.log | tail -5
 ```
 Expected: no errors. (If `get_redis` return type is `redis_asyncio.Redis`, the `Redis` annotation is fine.)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/auth/email_otp.py backend/tests/unit/test_email_otp.py
+git add backend/cubeplex/auth/email_otp.py backend/tests/unit/test_email_otp.py
 git commit -m "feat(auth): add Redis-backed email OTP service + unit tests"
 ```
 
@@ -727,10 +727,10 @@ git commit -m "feat(auth): add Redis-backed email OTP service + unit tests"
 ### Task 5: OTP endpoints + register response + login gate + remove magic-link + OTP template
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/auth.py` (remove `get_verify_router` include; register response `verification_required`; new `/verify-otp` + `/resend-otp`; login `email_not_verified` 403)
-- Modify: `backend/cubebox/auth/users.py` (remove the `request_verify` call in `on_after_register`; remove `on_after_request_verify` magic-link body)
-- Create: `backend/cubebox/templates/email/email_otp_verification.html`, `email_otp_verification.txt`
-- Delete: `backend/cubebox/templates/email/email_verification.html`, `email_verification.txt`
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` (remove `get_verify_router` include; register response `verification_required`; new `/verify-otp` + `/resend-otp`; login `email_not_verified` 403)
+- Modify: `backend/cubeplex/auth/users.py` (remove the `request_verify` call in `on_after_register`; remove `on_after_request_verify` magic-link body)
+- Create: `backend/cubeplex/templates/email/email_otp_verification.html`, `email_otp_verification.txt`
+- Delete: `backend/cubeplex/templates/email/email_verification.html`, `email_verification.txt`
 - Test: `backend/tests/e2e/test_register_otp_flow.py`, `test_register_smtp_disabled.py`, `test_login_unverified_blocked.py` (full e2e in Task 10; this task lands the routes + a smoke check)
 
 **Interfaces:**
@@ -743,16 +743,16 @@ git commit -m "feat(auth): add Redis-backed email OTP service + unit tests"
 
 - [ ] **Step 1: Create the OTP email template**
 
-`backend/cubebox/templates/email/email_otp_verification.txt`:
+`backend/cubeplex/templates/email/email_otp_verification.txt`:
 ```
-Your cubebox verification code is: {{ code }}
+Your cubeplex verification code is: {{ code }}
 
 It expires in {{ ttl_minutes }} minutes. If you didn't request this, ignore this email.
 ```
 
-`backend/cubebox/templates/email/email_otp_verification.html`:
+`backend/cubeplex/templates/email/email_otp_verification.html`:
 ```html
-<p>Your cubebox verification code is:</p>
+<p>Your cubeplex verification code is:</p>
 <p style="font-size:24px;font-weight:bold;letter-spacing:4px">{{ code }}</p>
 <p>It expires in {{ ttl_minutes }} minutes. If you didn't request this, ignore this email.</p>
 ```
@@ -760,33 +760,33 @@ It expires in {{ ttl_minutes }} minutes. If you didn't request this, ignore this
 - [ ] **Step 2: Delete the magic-link email templates**
 
 ```bash
-git rm backend/cubebox/templates/email/email_verification.html backend/cubebox/templates/email/email_verification.txt
+git rm backend/cubeplex/templates/email/email_verification.html backend/cubeplex/templates/email/email_verification.txt
 ```
 
 - [ ] **Step 3: Remove magic-link verify router + handlers from `auth.py`**
 
-In `backend/cubebox/api/routes/v1/auth.py`, delete the line:
+In `backend/cubeplex/api/routes/v1/auth.py`, delete the line:
 
 ```python
 router.include_router(fastapi_users.get_verify_router(UserRead), prefix="")
 ```
 
-(Confirm with `grep -n "get_verify_router" backend/cubebox/api/routes/v1/auth.py` — should now be empty.)
+(Confirm with `grep -n "get_verify_router" backend/cubeplex/api/routes/v1/auth.py` — should now be empty.)
 
 - [ ] **Step 4: Remove magic-link sending from `users.py`**
 
-In `backend/cubebox/auth/users.py`:
+In `backend/cubeplex/auth/users.py`:
 
 (a) In `on_after_register`, delete the trailing block that calls `self.request_verify(user, request)` (the `if not user.is_verified:` block at the end of `on_after_register`). Register no longer auto-sends any verification email; the OTP is issued by the `/register` endpoint via `issue_otp` when verification is enabled.
 
-(b) Replace the `on_after_request_verify` method body so it no longer sends a magic-link email (the route is gone; keep the method as a no-op override to satisfy fastapi-users' abstract base, or delete it if the base allows — verify by `grep -n "on_after_request_verify" backend/cubebox/`. If fastapi-users requires it, make it a no-op `pass`). Simplest: delete the method entirely if no remaining route triggers it. Confirm nothing else references it.
+(b) Replace the `on_after_request_verify` method body so it no longer sends a magic-link email (the route is gone; keep the method as a no-op override to satisfy fastapi-users' abstract base, or delete it if the base allows — verify by `grep -n "on_after_request_verify" backend/cubeplex/`. If fastapi-users requires it, make it a no-op `pass`). Simplest: delete the method entirely if no remaining route triggers it. Confirm nothing else references it.
 
 - [ ] **Step 5: Update the register endpoint to issue OTP + return `verification_required`**
 
-In `backend/cubebox/api/routes/v1/auth.py`, replace the `register` handler's tail (the `default_ws = ...; return {...}` part, ~lines 67-72) with:
+In `backend/cubeplex/api/routes/v1/auth.py`, replace the `register` handler's tail (the `default_ws = ...; return {...}` part, ~lines 67-72) with:
 
 ```python
-    from cubebox.auth.email_otp import is_email_verification_enabled, issue_otp
+    from cubeplex.auth.email_otp import is_email_verification_enabled, issue_otp
 
     verification_required = False
     if is_email_verification_enabled():
@@ -805,13 +805,13 @@ In `backend/cubebox/api/routes/v1/auth.py`, replace the `register` handler's tai
     }
 ```
 
-Add `from loguru import logger` to the imports if not already present (check `grep -n "^from loguru" backend/cubebox/api/routes/v1/auth.py`).
+Add `from loguru import logger` to the imports if not already present (check `grep -n "^from loguru" backend/cubeplex/api/routes/v1/auth.py`).
 
 Note: when verification is enabled, `on_after_register` (Task 8/9) must NOT run bootstrap — that's enforced in Task 8/9. For this task the register path still calls `user_manager.create` which triggers `on_after_register`; Task 8 makes `on_after_register` a no-op bootstrap when verification is enabled. To keep Task 5 independently testable, also guard here: the OTP gate simply defers the cookie — register never set a cookie anyway.
 
 - [ ] **Step 6: Add `/verify-otp` and `/resend-otp` endpoints**
 
-In `backend/cubebox/api/routes/v1/auth.py`, add (after the `register` handler, before `login`):
+In `backend/cubeplex/api/routes/v1/auth.py`, add (after the `register` handler, before `login`):
 
 ```python
 class VerifyOtpRequest(BaseModel):
@@ -833,7 +833,7 @@ async def verify_otp_endpoint(
     request: Request,
     body: Annotated[VerifyOtpRequest, Body()],
 ) -> dict[str, object]:
-    from cubebox.auth.email_otp import verify_otp
+    from cubeplex.auth.email_otp import verify_otp
 
     result = await verify_otp(body.email, body.code)
     if result.ok:
@@ -855,7 +855,7 @@ async def resend_otp_endpoint(
     request: Request,
     body: Annotated[ResendOtpRequest, Body()],
 ) -> dict[str, bool]:
-    from cubebox.auth.email_otp import _CooldownError, _RateLimitError, issue_otp
+    from cubeplex.auth.email_otp import _CooldownError, _RateLimitError, issue_otp
 
     try:
         await issue_otp(body.email)
@@ -875,14 +875,14 @@ async def resend_otp_endpoint(
     return {"ok": True}
 ```
 
-(Confirm `config` is imported in `auth.py` — it is used elsewhere; check `grep -n "from cubebox.config import config" backend/cubebox/api/routes/v1/auth.py`. `BaseModel` import: check `grep -n "from pydantic" backend/cubebox/api/routes/v1/auth.py`.)
+(Confirm `config` is imported in `auth.py` — it is used elsewhere; check `grep -n "from cubeplex.config import config" backend/cubeplex/api/routes/v1/auth.py`. `BaseModel` import: check `grep -n "from pydantic" backend/cubeplex/api/routes/v1/auth.py`.)
 
 - [ ] **Step 7: Add the `email_not_verified` 403 gate to `login`**
 
-In `backend/cubebox/api/routes/v1/auth.py`, in the `login` handler, immediately after the `if user is None or not user.is_active:` block (which raises bad credentials) and **before** the SSO enforcement block, add:
+In `backend/cubeplex/api/routes/v1/auth.py`, in the `login` handler, immediately after the `if user is None or not user.is_active:` block (which raises bad credentials) and **before** the SSO enforcement block, add:
 
 ```python
-    from cubebox.auth.email_otp import is_email_verification_enabled
+    from cubeplex.auth.email_otp import is_email_verification_enabled
 
     if is_email_verification_enabled() and not user.is_verified:
         raise HTTPException(
@@ -894,14 +894,14 @@ In `backend/cubebox/api/routes/v1/auth.py`, in the `login` handler, immediately 
 - [ ] **Step 8: mypy + import sanity**
 
 ```bash
-cd backend && uv run mypy cubebox/api/routes/v1/auth.py cubebox/auth/users.py 2>&1 | tee tmp/mypy_task5.log | tail -5
+cd backend && uv run mypy cubeplex/api/routes/v1/auth.py cubeplex/auth/users.py 2>&1 | tee tmp/mypy_task5.log | tail -5
 ```
 Expected: no new errors.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/auth.py backend/cubebox/auth/users.py backend/cubebox/templates/email/
+git add backend/cubeplex/api/routes/v1/auth.py backend/cubeplex/auth/users.py backend/cubeplex/templates/email/
 git commit -m "feat(auth): OTP verify/resend endpoints + login email_not_verified gate; remove magic-link"
 ```
 
@@ -912,10 +912,10 @@ git commit -m "feat(auth): OTP verify/resend endpoints + login email_not_verifie
 ### Task 6: OrgInviteToken model + prefix + migration + repository
 
 **Files:**
-- Modify: `backend/cubebox/models/public_id.py` (add `PREFIX_ORG_INVITE`)
-- Create: `backend/cubebox/models/org_invite_token.py`
-- Modify: `backend/cubebox/models/__init__.py` (export)
-- Create: `backend/cubebox/repositories/org_invite_token.py`
+- Modify: `backend/cubeplex/models/public_id.py` (add `PREFIX_ORG_INVITE`)
+- Create: `backend/cubeplex/models/org_invite_token.py`
+- Modify: `backend/cubeplex/models/__init__.py` (export)
+- Create: `backend/cubeplex/repositories/org_invite_token.py`
 - Create: alembic migration (autogen)
 
 **Interfaces:**
@@ -924,7 +924,7 @@ git commit -m "feat(auth): OTP verify/resend endpoints + login email_not_verifie
 
 - [ ] **Step 1: Add the public ID prefix**
 
-In `backend/cubebox/models/public_id.py`, add to the prefix constants:
+In `backend/cubeplex/models/public_id.py`, add to the prefix constants:
 
 ```python
 PREFIX_ORG_INVITE: str = "oinv"
@@ -932,7 +932,7 @@ PREFIX_ORG_INVITE: str = "oinv"
 
 - [ ] **Step 2: Create the model**
 
-`backend/cubebox/models/org_invite_token.py`:
+`backend/cubeplex/models/org_invite_token.py`:
 
 ```python
 """Org-scoped invite token — single-use, time-limited org invitation.
@@ -947,7 +947,7 @@ from sqlalchemy import Column, DateTime, Index
 from sqlmodel import Field, SQLModel
 from uuid_utils import uuid7
 
-from cubebox.models.public_id import PREFIX_ORG_INVITE, generate_public_id
+from cubeplex.models.public_id import PREFIX_ORG_INVITE, generate_public_id
 
 
 def _default_expiry() -> datetime:
@@ -982,20 +982,20 @@ class OrgInviteToken(SQLModel, table=True):
     )
 ```
 
-(Confirm `generate_public_id` is importable from `cubebox.models.public_id` — yes per Task 2 grep. Confirm FK table name `organizations.id`: `grep -n "__tablename__" backend/cubebox/models/organization.py`.)
+(Confirm `generate_public_id` is importable from `cubeplex.models.public_id` — yes per Task 2 grep. Confirm FK table name `organizations.id`: `grep -n "__tablename__" backend/cubeplex/models/organization.py`.)
 
 - [ ] **Step 3: Export the model**
 
-In `backend/cubebox/models/__init__.py`, add the import (near the `InviteToken` import) and the name to `__all__`:
+In `backend/cubeplex/models/__init__.py`, add the import (near the `InviteToken` import) and the name to `__all__`:
 
 ```python
-from cubebox.models.org_invite_token import OrgInviteToken
+from cubeplex.models.org_invite_token import OrgInviteToken
 ```
 and `"OrgInviteToken",` in `__all__`.
 
 - [ ] **Step 4: Create the repository**
 
-`backend/cubebox/repositories/org_invite_token.py` (mirror `invite_token.py`):
+`backend/cubeplex/repositories/org_invite_token.py` (mirror `invite_token.py`):
 
 ```python
 """Org invite token repository — single-use + time-limited."""
@@ -1005,7 +1005,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import OrgInviteToken
+from cubeplex.models import OrgInviteToken
 
 
 class OrgInviteTokenRepository:
@@ -1041,7 +1041,7 @@ class OrgInviteTokenRepository:
         return tok
 ```
 
-Add `OrgInviteTokenRepository` to `backend/cubebox/repositories/__init__.py` exports (check the existing `InviteTokenRepository` export line and mirror it: `grep -n "InviteTokenRepository" backend/cubebox/repositories/__init__.py`).
+Add `OrgInviteTokenRepository` to `backend/cubeplex/repositories/__init__.py` exports (check the existing `InviteTokenRepository` export line and mirror it: `grep -n "InviteTokenRepository" backend/cubeplex/repositories/__init__.py`).
 
 - [ ] **Step 5: Generate the migration**
 
@@ -1062,7 +1062,7 @@ Expected: `Running upgrade <prev> -> <new>, add org_invite_tokens table`.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/models/public_id.py backend/cubebox/models/org_invite_token.py backend/cubebox/models/__init__.py backend/cubebox/repositories/org_invite_token.py backend/cubebox/repositories/__init__.py backend/cubebox/migrations/versions/
+git add backend/cubeplex/models/public_id.py backend/cubeplex/models/org_invite_token.py backend/cubeplex/models/__init__.py backend/cubeplex/repositories/org_invite_token.py backend/cubeplex/repositories/__init__.py backend/cubeplex/migrations/versions/
 git commit -m "feat(model): add OrgInviteToken table + repository + migration"
 ```
 
@@ -1071,18 +1071,18 @@ git commit -m "feat(model): add OrgInviteToken table + repository + migration"
 ### Task 7: Org-invite create (admin) + accept (auth) endpoints
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/org_invites.py`
-- Modify: `backend/cubebox/api/app.py` (register the router)
+- Create: `backend/cubeplex/api/routes/v1/org_invites.py`
+- Modify: `backend/cubeplex/api/app.py` (register the router)
 
 **Interfaces:**
-- Consumes: `OrgInviteTokenRepository` (Task 6), `require_org_admin` + `resolve_current_org_id` (`cubebox.auth.dependencies`), `OrganizationMembershipRepository.grant`, `OrgRole`.
+- Consumes: `OrgInviteTokenRepository` (Task 6), `require_org_admin` + `resolve_current_org_id` (`cubeplex.auth.dependencies`), `OrganizationMembershipRepository.grant`, `OrgRole`.
 - Produces API:
   - `POST /api/v1/admin/orgs/invites` `{role}` (org-admin; org resolved via `resolve_current_org_id`) → 201 `{token, expires_at, role}`. `role` ∈ `admin`/`member` only; `owner` → 400.
   - `POST /api/v1/orgs/invites/accept` `{token}` (auth required) → 200 `{org_id, role}`. Consumes token, grants `OrganizationMembership(role=invite role)` if the user isn't already a member; idempotent if already a member (does not re-grant, does not fail).
 
 - [ ] **Step 1: Create the router**
 
-`backend/cubebox/api/routes/v1/org_invites.py`:
+`backend/cubeplex/api/routes/v1/org_invites.py`:
 
 ```python
 """Org-scoped invite routes.
@@ -1098,11 +1098,11 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.dependencies import current_active_user, require_org_admin, resolve_current_org_id
-from cubebox.db import get_session
-from cubebox.models import OrgRole, User
-from cubebox.repositories import OrganizationMembershipRepository, OrgInviteTokenRepository
-from cubebox.utils.time import utc_isoformat
+from cubeplex.auth.dependencies import current_active_user, require_org_admin, resolve_current_org_id
+from cubeplex.db import get_session
+from cubeplex.models import OrgRole, User
+from cubeplex.repositories import OrganizationMembershipRepository, OrgInviteTokenRepository
+from cubeplex.utils.time import utc_isoformat
 
 router = APIRouter(tags=["org-invites"])
 
@@ -1175,28 +1175,28 @@ router.include_router(_ADMIN_ROUTER)
 router.include_router(_ACCEPT_ROUTER)
 ```
 
-(Confirm `OrganizationMembershipRepository.get_role(*, user_id, org_id)` and `.grant(*, user_id, org_id, role)` signatures — yes per the existing `accept_invite` in `workspaces.py`. Confirm `OrgInviteTokenRepository` is exported from `cubebox.repositories` — Task 6 Step 4 adds it. Confirm `current_active_user` import path — yes.)
+(Confirm `OrganizationMembershipRepository.get_role(*, user_id, org_id)` and `.grant(*, user_id, org_id, role)` signatures — yes per the existing `accept_invite` in `workspaces.py`. Confirm `OrgInviteTokenRepository` is exported from `cubeplex.repositories` — Task 6 Step 4 adds it. Confirm `current_active_user` import path — yes.)
 
 - [ ] **Step 2: Register the router in `app.py`**
 
-In `backend/cubebox/api/app.py`, near the other `include_router` calls (after `workspaces_router`), add:
+In `backend/cubeplex/api/app.py`, near the other `include_router` calls (after `workspaces_router`), add:
 
 ```python
-    from cubebox.api.routes.v1 import org_invites as org_invites_routes
+    from cubeplex.api.routes.v1 import org_invites as org_invites_routes
     app.include_router(org_invites_routes.router, prefix="/api/v1")
 ```
 
 - [ ] **Step 3: mypy**
 
 ```bash
-cd backend && uv run mypy cubebox/api/routes/v1/org_invites.py 2>&1 | tee tmp/mypy_org_invites.log | tail -5
+cd backend && uv run mypy cubeplex/api/routes/v1/org_invites.py 2>&1 | tee tmp/mypy_org_invites.log | tail -5
 ```
 Expected: no errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/org_invites.py backend/cubebox/api/app.py
+git add backend/cubeplex/api/routes/v1/org_invites.py backend/cubeplex/api/app.py
 git commit -m "feat(org-invites): admin create + auth accept endpoints"
 ```
 
@@ -1207,7 +1207,7 @@ git commit -m "feat(org-invites): admin create + auth accept endpoints"
 ### Task 8: Refactor bootstrap into shared helpers in `users.py`
 
 **Files:**
-- Modify: `backend/cubebox/auth/users.py`
+- Modify: `backend/cubeplex/auth/users.py`
 
 **Interfaces:**
 - Produces module-level helpers (used by Task 9's onboarding router):
@@ -1218,7 +1218,7 @@ git commit -m "feat(org-invites): admin create + auth accept endpoints"
 
 - [ ] **Step 1: Extract `_bootstrap_org_and_workspace`**
 
-In `backend/cubebox/auth/users.py`, add a module-level function (place it near `_install_preinstalled_skills`, before the `UserManager` class):
+In `backend/cubeplex/auth/users.py`, add a module-level function (place it near `_install_preinstalled_skills`, before the `UserManager` class):
 
 ```python
 async def _bootstrap_org_and_workspace(
@@ -1230,10 +1230,10 @@ async def _bootstrap_org_and_workspace(
     workspace_name: str,
 ) -> tuple[Organization, "Workspace"]:
     """Full first-owner bootstrap: org + workspace + memberships + AgentConfig + MCP + skills."""
-    from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
-    from cubebox.models import OrgRole, Role
-    from cubebox.models.agent_config import AgentConfig
-    from cubebox.repositories import (
+    from cubeplex.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
+    from cubeplex.models import OrgRole, Role
+    from cubeplex.models.agent_config import AgentConfig
+    from cubeplex.repositories import (
         MembershipRepository,
         OrganizationMembershipRepository,
         OrganizationRepository,
@@ -1255,7 +1255,7 @@ async def _bootstrap_org_and_workspace(
     return org, ws
 ```
 
-Add the `Workspace` type import at module top (or use a string forward-ref + import inside — shown as forward-ref `"Workspace"`; add `from cubebox.models import Workspace` to the top imports if not present: `grep -n "from cubebox.models import" backend/cubebox/auth/users.py`). Use a top-level import to satisfy mypy.
+Add the `Workspace` type import at module top (or use a string forward-ref + import inside — shown as forward-ref `"Workspace"`; add `from cubeplex.models import Workspace` to the top imports if not present: `grep -n "from cubeplex.models import" backend/cubeplex/auth/users.py`). Use a top-level import to satisfy mypy.
 
 - [ ] **Step 2: Extract `_bootstrap_workspace_in_org`**
 
@@ -1268,10 +1268,10 @@ async def _bootstrap_workspace_in_org(
     workspace_name: str,
 ) -> "Workspace":
     """Create a workspace in an existing org for a user who already has an org membership."""
-    from cubebox.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
-    from cubebox.models import Role
-    from cubebox.models.agent_config import AgentConfig
-    from cubebox.repositories import MembershipRepository, WorkspaceRepository
+    from cubeplex.mcp.workspace_bootstrap import enroll_workspace_in_org_wide_mcp
+    from cubeplex.models import Role
+    from cubeplex.models.agent_config import AgentConfig
+    from cubeplex.repositories import MembershipRepository, WorkspaceRepository
 
     ws = await WorkspaceRepository(session).create(org_id=org_id, name=workspace_name)
     await MembershipRepository(session).grant(user_id=user_id, workspace_id=ws.id, role=Role.ADMIN)
@@ -1320,7 +1320,7 @@ In `_on_register_single_tenant`, the subsequent-user branch (after `singleton_or
 - [ ] **Step 5: mypy + existing register e2e still green (single_tenant path)**
 
 ```bash
-cd backend && uv run mypy cubebox/auth/users.py 2>&1 | tee tmp/mypy_task8.log | tail -5
+cd backend && uv run mypy cubeplex/auth/users.py 2>&1 | tee tmp/mypy_task8.log | tail -5
 cd backend && uv run pytest tests/e2e/test_single_tenant_register.py --no-cov 2>&1 | tee tmp/task8_st_register.log | tail -5
 ```
 Expected: mypy clean; single_tenant register e2e still passes (subsequent users still get a Personal workspace + `_default_workspace_id`). The multi_tenant register e2e (legacy `register → /w/{wsId}`) will now **break** because multi_tenant no longer auto-creates a workspace — that's expected and is updated in Task 10 (the legacy test is replaced by the onboarding flow). If other multi_tenant e2e rely on auto-bootstrap, note them for Task 10.
@@ -1328,7 +1328,7 @@ Expected: mypy clean; single_tenant register e2e still passes (subsequent users 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/auth/users.py
+git add backend/cubeplex/auth/users.py
 git commit -m "refactor(auth): extract bootstrap helpers; defer multi_tenant bootstrap to onboarding"
 ```
 
@@ -1337,11 +1337,11 @@ git commit -m "refactor(auth): extract bootstrap helpers; defer multi_tenant boo
 ### Task 9: Onboarding router + retire /system/setup + needs_onboarding
 
 **Files:**
-- Create: `backend/cubebox/api/routes/v1/onboarding.py`
-- Modify: `backend/cubebox/api/app.py` (register onboarding router)
-- Modify: `backend/cubebox/api/routes/v1/system.py` (remove `post_setup`; keep `/info`, drop `needs_org_setup` from response)
-- Modify: `backend/cubebox/api/schemas/system.py` (drop `needs_org_setup` from `SystemInfoResponse`; delete `SetupRequest`/`SetupResponse`)
-- Modify: `backend/cubebox/api/routes/v1/auth.py` (`_me_payload`: replace `needs_org_setup` with `needs_onboarding`)
+- Create: `backend/cubeplex/api/routes/v1/onboarding.py`
+- Modify: `backend/cubeplex/api/app.py` (register onboarding router)
+- Modify: `backend/cubeplex/api/routes/v1/system.py` (remove `post_setup`; keep `/info`, drop `needs_org_setup` from response)
+- Modify: `backend/cubeplex/api/schemas/system.py` (drop `needs_org_setup` from `SystemInfoResponse`; delete `SetupRequest`/`SetupResponse`)
+- Modify: `backend/cubeplex/api/routes/v1/auth.py` (`_me_payload`: replace `needs_org_setup` with `needs_onboarding`)
 
 **Interfaces:**
 - Consumes: `_bootstrap_org_and_workspace`, `_bootstrap_workspace_in_org` (Task 8); `OrganizationMembershipRepository.get_role`; `OrganizationRepository.create` (raises `IntegrityError` on slug collision); `resolve_current_org_id` is **not** used (onboarding acts on the caller's own memberships).
@@ -1352,7 +1352,7 @@ git commit -m "refactor(auth): extract bootstrap helpers; defer multi_tenant boo
 
 - [ ] **Step 1: Create the onboarding router**
 
-`backend/cubebox/api/routes/v1/onboarding.py`:
+`backend/cubeplex/api/routes/v1/onboarding.py`:
 
 ```python
 """Post-registration onboarding: provision the caller's first org/workspace.
@@ -1372,9 +1372,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.auth.dependencies import current_active_user
-from cubebox.db import get_session
-from cubebox.models import Membership, OrganizationMembership, User
+from cubeplex.auth.dependencies import current_active_user
+from cubeplex.db import get_session
+from cubeplex.models import Membership, OrganizationMembership, User
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
@@ -1409,8 +1409,8 @@ async def complete_onboarding(
     user: Annotated[User, Depends(current_active_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> OnboardingResponse:
-    from cubebox.auth.users import _bootstrap_org_and_workspace, _bootstrap_workspace_in_org
-    from cubebox.repositories import OrganizationMembershipRepository
+    from cubeplex.auth.users import _bootstrap_org_and_workspace, _bootstrap_workspace_in_org
+    from cubeplex.repositories import OrganizationMembershipRepository
 
     om_repo = OrganizationMembershipRepository(session)
     # Any org membership?
@@ -1481,35 +1481,35 @@ async def complete_onboarding(
     return OnboardingResponse(workspace_id=ws.id)
 ```
 
-(Confirm `Membership` model is exported from `cubebox.models` — yes. Confirm `_bootstrap_org_and_workspace`/`_bootstrap_workspace_in_org` flush but do not commit — the onboarding handler commits once after success. Check whether the helpers call `_install_preinstalled_skills_safe` which may flush; that's fine, the final commit covers it. If the helpers commit internally, remove that — they currently only `flush`. Verify with the Task 8 code: yes, only `flush`.)
+(Confirm `Membership` model is exported from `cubeplex.models` — yes. Confirm `_bootstrap_org_and_workspace`/`_bootstrap_workspace_in_org` flush but do not commit — the onboarding handler commits once after success. Check whether the helpers call `_install_preinstalled_skills_safe` which may flush; that's fine, the final commit covers it. If the helpers commit internally, remove that — they currently only `flush`. Verify with the Task 8 code: yes, only `flush`.)
 
 - [ ] **Step 2: Register the onboarding router**
 
-In `backend/cubebox/api/app.py`, add near the other includes:
+In `backend/cubeplex/api/app.py`, add near the other includes:
 
 ```python
-    from cubebox.api.routes.v1 import onboarding as onboarding_routes
+    from cubeplex.api.routes.v1 import onboarding as onboarding_routes
     app.include_router(onboarding_routes.router, prefix="/api/v1")
 ```
 
 - [ ] **Step 3: Retire `POST /system/setup`; simplify `/system/info`**
 
-In `backend/cubebox/api/routes/v1/system.py`:
+In `backend/cubeplex/api/routes/v1/system.py`:
 - Delete the entire `post_setup` function.
 - In `get_system_info`, remove the `needs_setup` computation and the `needs_org_setup=needs_setup` field. Keep `deployment_mode`, `version`, `sandbox_enabled`. Remove now-unused imports (`acquire_setup_lock`, `org_count`, the repo imports, `IntegrityError`, `OrgRole`, `Role`, `AgentConfig`, `SetupRequest`/`SetupResponse`).
 
-In `backend/cubebox/api/schemas/system.py`:
+In `backend/cubeplex/api/schemas/system.py`:
 - Remove `needs_org_setup: bool` from `SystemInfoResponse`.
 - Delete `SetupRequest` and `SetupResponse` classes (and the `_SLUG_RE`/`field_validator` if now unused — keep `_SLUG_RE` only if still referenced; it won't be, so remove it and the `re` import).
 
 - [ ] **Step 4: Replace `needs_org_setup` with `needs_onboarding` in `_me_payload`**
 
-In `backend/cubebox/api/routes/v1/auth.py`, `_me_payload`:
+In `backend/cubeplex/api/routes/v1/auth.py`, `_me_payload`:
 - Replace the `needs_setup` logic (the `mode == "single_tenant"` branch computing `needs_setup` from org_count / membership) with a unified `needs_onboarding` computation:
 
 ```python
     # needs_onboarding = user has no workspace membership yet (pending wizard).
-    from cubebox.models import Membership
+    from cubeplex.models import Membership
 
     ws_membership_count = (
         await session.execute(
@@ -1527,14 +1527,14 @@ In `backend/cubebox/api/routes/v1/auth.py`, `_me_payload`:
 - [ ] **Step 5: mypy + import sanity**
 
 ```bash
-cd backend && uv run mypy cubebox/api/routes/v1/onboarding.py cubebox/api/routes/v1/system.py cubebox/api/routes/v1/auth.py cubebox/api/schemas/system.py 2>&1 | tee tmp/mypy_task9.log | tail -5
+cd backend && uv run mypy cubeplex/api/routes/v1/onboarding.py cubeplex/api/routes/v1/system.py cubeplex/api/routes/v1/auth.py cubeplex/api/schemas/system.py 2>&1 | tee tmp/mypy_task9.log | tail -5
 ```
 Expected: no new errors.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/onboarding.py backend/cubebox/api/app.py backend/cubebox/api/routes/v1/system.py backend/cubebox/api/schemas/system.py backend/cubebox/api/routes/v1/auth.py
+git add backend/cubeplex/api/routes/v1/onboarding.py backend/cubeplex/api/app.py backend/cubeplex/api/routes/v1/system.py backend/cubeplex/api/schemas/system.py backend/cubeplex/api/routes/v1/auth.py
 git commit -m "feat(onboarding): POST /onboarding router; retire /system/setup; needs_onboarding in /me"
 ```
 
@@ -1543,7 +1543,7 @@ git commit -m "feat(onboarding): POST /onboarding router; retire /system/setup; 
 ### Task 10: Backend i18n keys + e2e tests
 
 **Files:**
-- Modify: `backend/cubebox/i18n/messages/en/LC_MESSAGES/messages.po`, `backend/cubebox/i18n/messages/zh/LC_MESSAGES/messages.po`
+- Modify: `backend/cubeplex/i18n/messages/en/LC_MESSAGES/messages.po`, `backend/cubeplex/i18n/messages/zh/LC_MESSAGES/messages.po`
 - Create: `backend/tests/e2e/test_register_otp_flow.py`, `test_register_smtp_disabled.py`, `test_login_unverified_blocked.py`, `test_password_policy_e2e.py`, `test_onboarding.py`, `test_invite_onboarding.py`
 - Modify: existing multi_tenant register e2e that assumed auto-bootstrap (update to drive the onboarding wizard) — find via `grep -rln "register" backend/tests/e2e/ | xargs grep -l "multi_tenant\|/w/"`.
 
@@ -1556,7 +1556,7 @@ In both `en` and `zh` `messages.po`, add entries for:
 - `login_email_not_verified` — en: "Please verify your email before signing in." zh: "请先验证邮箱再登录。"
 - `register_invalid_password` — keep (still used? No — Task 3 replaced it with `weak_password`. Remove the unused key only if nothing references it; safer to leave it.)
 
-Compile: `cd backend && uv run python -m msgfmt ...` is not needed if the i18n loader reads `.po` directly — check `grep -rn "msgfmt\|\.mo\|mofile\|gettext" backend/cubebox/i18n/`. If `.mo` files are committed, regenerate them.
+Compile: `cd backend && uv run python -m msgfmt ...` is not needed if the i18n loader reads `.po` directly — check `grep -rn "msgfmt\|\.mo\|mofile\|gettext" backend/cubeplex/i18n/`. If `.mo` files are committed, regenerate them.
 
 - [ ] **Step 2: Read conftest fixtures**
 
@@ -1567,7 +1567,7 @@ Use the exact fixture names + the CSRF-get-before-login pattern the existing `te
 
 - [ ] **Step 3: `test_register_otp_flow.py`** — verification ON (config.test.yaml forces `enabled: true`): register returns `verification_required: true` and sets **no** cookie; OTP code is recoverable from the log backend output (the `LogEmailBackend` prints the rendered email to stdout — capture via `caplog`/fixture that reads the log, or read the Redis `email_otp:{email}` hash via the test's redis handle to get the code); `/verify-otp` with the code → 200 `{ok: true}`; a second verify with the same code → 400 (key deleted); `/login` now sets a cookie; `GET /me` → `is_verified: true`, `needs_onboarding: true`. Also: wrong code → 400 `invalid_otp` with `remaining_attempts`; `max_attempts` wrong guesses → 400 `otp_max_attempts` + key deleted; resend within cooldown → 429 `otp_cooldown`. **No fire-and-forget sleeps** — poll Redis for the `email_otp_sent:{email}` key TTL or just assert on the immediate 429.
 
-- [ ] **Step 4: `test_register_smtp_disabled.py`** — temporarily override `app.state`/config so `is_email_verification_enabled()` returns False (set `CUBEBOX_AUTH__EMAIL_VERIFICATION__ENABLED=false` via the test app config override, or monkeypatch `cubebox.auth.email_otp.is_email_verification_enabled`): register returns `verification_required: false`; `is_verified` becomes true; `/login` works without an OTP step.
+- [ ] **Step 4: `test_register_smtp_disabled.py`** — temporarily override `app.state`/config so `is_email_verification_enabled()` returns False (set `CUBEPLEX_AUTH__EMAIL_VERIFICATION__ENABLED=false` via the test app config override, or monkeypatch `cubeplex.auth.email_otp.is_email_verification_enabled`): register returns `verification_required: false`; `is_verified` becomes true; `/login` works without an OTP step.
 
 - [ ] **Step 5: `test_login_unverified_blocked.py`** — register (verification ON) → do NOT verify → `/login` → 403 `email_not_verified`; then verify → `/login` → 200.
 
@@ -1602,13 +1602,13 @@ Expected: all green. On failure, `grep -nE "FAILED|Error" tmp/task10_e2e.log`.
 - [ ] **Step 11: Commit**
 
 ```bash
-git add backend/cubebox/i18n/ backend/tests/e2e/test_register_otp_flow.py backend/tests/e2e/test_register_smtp_disabled.py backend/tests/e2e/test_login_unverified_blocked.py backend/tests/e2e/test_password_policy_e2e.py backend/tests/e2e/test_onboarding.py backend/tests/e2e/test_invite_onboarding.py <updated legacy tests>
+git add backend/cubeplex/i18n/ backend/tests/e2e/test_register_otp_flow.py backend/tests/e2e/test_register_smtp_disabled.py backend/tests/e2e/test_login_unverified_blocked.py backend/tests/e2e/test_password_policy_e2e.py backend/tests/e2e/test_onboarding.py backend/tests/e2e/test_invite_onboarding.py <updated legacy tests>
 git commit -m "test(auth): e2e for OTP/password/onboarding/invite registration flows"
 ```
 
 ---
 
-### Task 11: Frontend `@cubebox/core` API/types + password policy mirror
+### Task 11: Frontend `@cubeplex/core` API/types + password policy mirror
 
 **Files:**
 - Modify: `frontend/packages/core/src/api/auth.ts` (`RegisterResult.verification_required`; `MeResult.needs_onboarding` replaces `needs_org_setup`; add `verifyOtp`/`resendOtp`; remove `verifyEmail`/`requestVerifyToken`)
@@ -1766,10 +1766,10 @@ export function validatePassword(
 - [ ] **Step 7: Build core + typecheck**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/core build 2>&1 | tee tmp/core_build.log | tail -5
-cd frontend && pnpm --filter @cubebox/core typecheck 2>&1 | tee tmp/core_typecheck.log | tail -5
+cd frontend && pnpm --filter @cubeplex/core build 2>&1 | tee tmp/core_build.log | tail -5
+cd frontend && pnpm --filter @cubeplex/core typecheck 2>&1 | tee tmp/core_typecheck.log | tail -5
 ```
-Expected: build + typecheck clean. (If `typecheck` script doesn't exist, run `pnpm --filter @cubebox/core exec tsc --noEmit`.)
+Expected: build + typecheck clean. (If `typecheck` script doesn't exist, run `pnpm --filter @cubeplex/core exec tsc --noEmit`.)
 
 - [ ] **Step 8: Commit**
 
@@ -1810,7 +1810,7 @@ git commit -m "feat(core): OTP/onboarding/orgInvite APIs + needs_onboarding + pa
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { createApiClient, loginUser, resendOtp, useAuthStore, verifyOtp } from '@cubebox/core'
+import { createApiClient, loginUser, resendOtp, useAuthStore, verifyOtp } from '@cubeplex/core'
 import { OtpInput } from '@/components/auth/OtpInput'
 
 const RESEND_COOLDOWN = 60
@@ -1920,8 +1920,8 @@ Add to `frontend/packages/web/messages/en.json` and `zh.json` under `auth`: `ver
 - [ ] **Step 5: Lint + typecheck**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web lint 2>&1 | tee tmp/verify_otp_lint.log | tail -5
-cd frontend && pnpm --filter @cubebox/web typecheck 2>&1 | tee tmp/verify_otp_tc.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web lint 2>&1 | tee tmp/verify_otp_lint.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web typecheck 2>&1 | tee tmp/verify_otp_tc.log | tail -5
 ```
 Expected: clean.
 
@@ -1997,7 +1997,7 @@ export function isInviteAcceptPath(path: string): boolean {
 }
 ```
 
-Add password pre-validation UX: before calling `registerUser`, compute `validatePassword(password, 'high')` and if `!ok`, set a translated error and abort. (Backend is authoritative; this is just UX.) Import `validatePassword` from `@cubebox/core/auth/passwordPolicy`.
+Add password pre-validation UX: before calling `registerUser`, compute `validatePassword(password, 'high')` and if `!ok`, set a translated error and abort. (Backend is authoritative; this is just UX.) Import `validatePassword` from `@cubeplex/core/auth/passwordPolicy`.
 
 - [ ] **Step 2: `LoginForm` `email_not_verified` handling**
 
@@ -2010,8 +2010,8 @@ In `frontend/packages/web/components/auth/LoginForm.tsx`, mirror the `extractSso
 - [ ] **Step 4: Lint + typecheck**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web lint 2>&1 | tee tmp/task13_lint.log | tail -5
-cd frontend && pnpm --filter @cubebox/web typecheck 2>&1 | tee tmp/task13_tc.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web lint 2>&1 | tee tmp/task13_lint.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web typecheck 2>&1 | tee tmp/task13_tc.log | tail -5
 ```
 
 - [ ] **Step 5: Commit**
@@ -2052,7 +2052,7 @@ git commit -m "feat(web): thread next through register; login email_not_verified
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuthStore } from '@cubebox/core'
+import { useAuthStore } from '@cubeplex/core'
 import { OnboardingForm } from '@/components/onboarding/OnboardingForm'
 
 export default function OnboardingPage() {
@@ -2093,9 +2093,9 @@ git rm -r frontend/packages/web/app/\(setup\)/setup frontend/packages/web/compon
 - [ ] **Step 5: Lint + typecheck + build**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web lint 2>&1 | tee tmp/task14_lint.log | tail -5
-cd frontend && pnpm --filter @cubebox/web typecheck 2>&1 | tee tmp/task14_tc.log | tail -5
-cd frontend && pnpm --filter @cubebox/web build 2>&1 | tee tmp/task14_build.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web lint 2>&1 | tee tmp/task14_lint.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web typecheck 2>&1 | tee tmp/task14_tc.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web build 2>&1 | tee tmp/task14_build.log | tail -5
 ```
 
 - [ ] **Step 6: Commit**
@@ -2127,7 +2127,7 @@ git commit -m "feat(web): /onboarding wizard (full + workspace-only); replace /s
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useTranslations } from 'next-intl'
-import { acceptOrgInvite, createApiClient, useAuthStore } from '@cubebox/core'
+import { acceptOrgInvite, createApiClient, useAuthStore } from '@cubeplex/core'
 
 export default function AcceptOrgInvitePage() {
   const t = useTranslations('auth')
@@ -2168,8 +2168,8 @@ export default function AcceptOrgInvitePage() {
 - [ ] **Step 3: Lint + typecheck**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web lint 2>&1 | tee tmp/task15_lint.log | tail -5
-cd frontend && pnpm --filter @cubebox/web typecheck 2>&1 | tee tmp/task15_tc.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web lint 2>&1 | tee tmp/task15_lint.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web typecheck 2>&1 | tee tmp/task15_tc.log | tail -5
 ```
 
 - [ ] **Step 4: Commit**
@@ -2221,9 +2221,9 @@ Find the auth/registration doc page via the docs-overhaul mapping: `grep -rln "r
 - [ ] **Step 7: Run the Playwright suite + lint/build**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web lint 2>&1 | tee tmp/task16_lint.log | tail -5
-cd frontend && pnpm --filter @cubebox/web build 2>&1 | tee tmp/task16_build.log | tail -5
-cd frontend && pnpm --filter @cubebox/web exec playwright test registration-otp registration-invite unverified-login otp-input 2>&1 | tee tmp/task16_pw.log | tail -15
+cd frontend && pnpm --filter @cubeplex/web lint 2>&1 | tee tmp/task16_lint.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web build 2>&1 | tee tmp/task16_build.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web exec playwright test registration-otp registration-invite unverified-login otp-input 2>&1 | tee tmp/task16_pw.log | tail -15
 ```
 Expected: green. (Backend must be running on :8001 with the test config; `.worktree.env` sets ports.)
 
@@ -2231,7 +2231,7 @@ Expected: green. (Backend must be running on :8001 with the test config; `.workt
 
 ```bash
 cd backend && uv run pytest --no-cov 2>&1 | tee tmp/full_backend.log | tail -10
-cd frontend && pnpm --filter @cubebox/web build 2>&1 | tee tmp/full_build.log | tail -5
+cd frontend && pnpm --filter @cubeplex/web build 2>&1 | tee tmp/full_build.log | tail -5
 ```
 
 - [ ] **Step 9: Commit**

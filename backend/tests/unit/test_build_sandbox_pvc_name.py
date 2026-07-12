@@ -14,12 +14,12 @@ with the creator's user-scope sandbox (the cross-scope storage leak from spec
 
 from __future__ import annotations
 
-from cubebox.sandbox.manager import (
+from cubeplex.sandbox.manager import (
     build_sandbox_pvc_name,
     build_user_pvc_name,
 )
 
-_PREFIX = "cubebox-user"
+_PREFIX = "cubeplex-user"
 
 
 def test_user_scope_delegates_to_build_user_pvc_name() -> None:

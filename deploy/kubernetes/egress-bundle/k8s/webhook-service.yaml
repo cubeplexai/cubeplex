@@ -5,7 +5,7 @@ metadata:
   namespace: opensandbox
   labels:
     app: egress-webhook
-    app.kubernetes.io/part-of: cubebox-egress
+    app.kubernetes.io/part-of: cubeplex-egress
 spec:
   selector:
     app: egress-webhook

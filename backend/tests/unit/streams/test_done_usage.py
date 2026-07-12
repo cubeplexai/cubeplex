@@ -1,6 +1,6 @@
 """DoneEvent carries accumulated turn usage."""
 
-from cubebox.agents.schemas import DoneEvent, UsageEvent
+from cubeplex.agents.schemas import DoneEvent, UsageEvent
 
 
 def test_done_event_accepts_usage_payload() -> None:

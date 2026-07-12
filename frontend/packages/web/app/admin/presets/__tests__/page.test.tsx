@@ -1,11 +1,11 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { NextIntlClientProvider } from 'next-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ApiClient } from '@cubebox/core'
-import * as core from '@cubebox/core'
+import type { ApiClient } from '@cubeplex/core'
+import * as core from '@cubeplex/core'
 
 import en from '../../../../messages/en.json'
-import { CSRF_COOKIE_NAME } from '@cubebox/core'
+import { CSRF_COOKIE_NAME } from '@cubeplex/core'
 import AdminPresetsPage from '../page'
 import { PresetEditor } from '../PresetEditor'
 import type { AdminModelPresetsResponse } from '@/lib/api/presets'
@@ -19,7 +19,7 @@ const fakeClient = {
   get: vi.fn(),
 } as unknown as ApiClient
 
-vi.mock('@cubebox/core', async (importOriginal) => {
+vi.mock('@cubeplex/core', async (importOriginal) => {
   const actual = await importOriginal<typeof core>()
   return {
     ...actual,

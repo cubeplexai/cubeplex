@@ -4,7 +4,7 @@
 
 **Goal:** Harden `TodoListMiddleware` so multi-step work uses a consistent checklist protocol, with aligned prompts, enforced todo invariants, ordered stale/finalization guards, bounded correction retries, and a low-cost closeout reminder.
 
-**Architecture:** Keep the implementation centered in `cubebox/middleware/todo.py`. The middleware should validate submitted `write_todos` payloads, reason about the last committed todo state for stale/finalization guards, and share one `_after_model_impl()` between sync and async hooks. Blocking guards must return `jump_to` state updates so the graph actually re-routes instead of continuing on the default edge. Guard feedback should use `SystemMessage`, not fabricated `ToolMessage` IDs, and the closeout nudge should live in the `write_todos` tool result path so each tool call still produces exactly one tool response.
+**Architecture:** Keep the implementation centered in `cubeplex/middleware/todo.py`. The middleware should validate submitted `write_todos` payloads, reason about the last committed todo state for stale/finalization guards, and share one `_after_model_impl()` between sync and async hooks. Blocking guards must return `jump_to` state updates so the graph actually re-routes instead of continuing on the default edge. Guard feedback should use `SystemMessage`, not fabricated `ToolMessage` IDs, and the closeout nudge should live in the `write_todos` tool result path so each tool call still produces exactly one tool response.
 
 **Tech Stack:** Python 3.12, LangGraph, LangChain middleware, Pydantic, pytest
 
@@ -18,13 +18,13 @@
 
 | File | Change |
 |------|--------|
-| `cubebox/middleware/todo.py` | Align prompt text, add invariant validation, add guard bookkeeping state, implement ordered `_after_model_impl()`, share logic between `after_model` and `aafter_model`, and emit the structural 3+ item reminder from `_write_todos()` |
+| `cubeplex/middleware/todo.py` | Align prompt text, add invariant validation, add guard bookkeeping state, implement ordered `_after_model_impl()`, share logic between `after_model` and `aafter_model`, and emit the structural 3+ item reminder from `_write_todos()` |
 | `tests/unit/test_middleware_todo.py` | Add prompt-alignment, validation, stale guard, finalization guard, retry escalation, atomic transition, and tool-result reminder tests |
 | `tests/unit/test_graph.py` | Add a checkpointer-backed persistence test proving `todos` survive across invocations |
 
 ### No New Runtime Files
 
-Keep everything in `cubebox/middleware/todo.py` for v1. Do not split middleware into helper modules during this pass.
+Keep everything in `cubeplex/middleware/todo.py` for v1. Do not split middleware into helper modules during this pass.
 
 ### Codebase Notes
 
@@ -36,7 +36,7 @@ Keep everything in `cubebox/middleware/todo.py` for v1. Do not split middleware 
 ## Task 1: Align Prompt Contract and Enforce Todo List Invariants
 
 **Files:**
-- Modify: `cubebox/middleware/todo.py`
+- Modify: `cubeplex/middleware/todo.py`
 - Test: `tests/unit/test_middleware_todo.py`
 
 - [ ] **Step 1: Write failing tests for prompt alignment and list validation**
@@ -49,7 +49,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
-from cubebox.middleware.todo import (
+from cubeplex.middleware.todo import (
     TodoListMiddleware,
     WRITE_TODOS_SYSTEM_PROMPT,
     WRITE_TODOS_TOOL_DESCRIPTION,
@@ -159,7 +159,7 @@ Expected: FAIL because the current prompts still allow multiple `in_progress` ta
 - [ ] **Step 3: Update the prompt strings to match the v1 invariants**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 WRITE_TODOS_TOOL_DESCRIPTION = """Use this tool to create and manage a structured task list for your current work session.
 ...
 1. **Task States**:
@@ -186,7 +186,7 @@ WRITE_TODOS_SYSTEM_PROMPT = """## `write_todos`
 - [ ] **Step 4: Implement todo validation helpers**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 def _submitted_write_todos_calls(last_ai_msg: AIMessage) -> list[dict[str, Any]]:
     return [tc for tc in (last_ai_msg.tool_calls or []) if tc["name"] == "write_todos"]
 
@@ -233,7 +233,7 @@ def _todo_validation_errors(last_ai_msg: AIMessage) -> list[ToolMessage]:
 - [ ] **Step 5: Route validation through a shared `_after_model_impl()` entry point**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 def _last_ai_message(messages: list[Any]) -> AIMessage | None:
     return next((msg for msg in reversed(messages) if isinstance(msg, AIMessage)), None)
 
@@ -261,7 +261,7 @@ def _after_model_impl(self, state: PlanningState[ResponseT]) -> dict[str, Any] |
 - [ ] **Step 6: Delegate both `after_model()` and `aafter_model()` to the shared implementation**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 @override
 def after_model(
     self,
@@ -290,7 +290,7 @@ Expected: PASS for prompt alignment, invariant validation, and the existing para
 - [ ] **Step 8: Commit**
 
 ```bash
-git add cubebox/middleware/todo.py tests/unit/test_middleware_todo.py
+git add cubeplex/middleware/todo.py tests/unit/test_middleware_todo.py
 git commit -m "feat: align and validate todo invariants"
 ```
 
@@ -299,7 +299,7 @@ git commit -m "feat: align and validate todo invariants"
 ## Task 2: Add Ordered Stale and Finalization Guards
 
 **Files:**
-- Modify: `cubebox/middleware/todo.py`
+- Modify: `cubeplex/middleware/todo.py`
 - Test: `tests/unit/test_middleware_todo.py`
 
 - [ ] **Step 1: Write failing tests for stale/finalization guard behavior**
@@ -392,7 +392,7 @@ Expected: FAIL because there are no stale/finalization guards, no `SystemMessage
 - [ ] **Step 3: Extend middleware state with retry and blocked-run bookkeeping**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 class PlanningState(AgentState[ResponseT]):
     todos: Annotated[NotRequired[list[Todo]], OmitFromInput]
     todo_guard_retries: Annotated[NotRequired[dict[str, int]], OmitFromInput]
@@ -414,7 +414,7 @@ def _non_todo_tool_calls(last_ai_msg: AIMessage) -> list[dict[str, Any]]:
 - [ ] **Step 4: Implement guard helpers using `SystemMessage`, not synthetic `ToolMessage` IDs**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 def _guard_retry_update(
     state: PlanningState[ResponseT],
     guard_type: str,
@@ -473,7 +473,7 @@ def _reset_guard_retries() -> dict[str, int]:
 - [ ] **Step 5: Implement ordered guard checks against the last committed todo state**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 def _after_model_impl(self, state: PlanningState[ResponseT]) -> dict[str, Any] | None:
     messages = state.get("messages", [])
     if not messages:
@@ -534,7 +534,7 @@ def _after_model_impl(self, state: PlanningState[ResponseT]) -> dict[str, Any] |
 - [ ] **Step 6: Declare jump destinations on both sync and async hooks**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 @override
 def after_model(
     self,
@@ -569,7 +569,7 @@ Expected: PASS for stale guard, finalization guard, same-iteration `write_todos`
 - [ ] **Step 8: Commit**
 
 ```bash
-git add cubebox/middleware/todo.py tests/unit/test_middleware_todo.py
+git add cubeplex/middleware/todo.py tests/unit/test_middleware_todo.py
 git commit -m "feat: add ordered todo guard checks"
 ```
 
@@ -578,7 +578,7 @@ git commit -m "feat: add ordered todo guard checks"
 ## Task 3: Add Retry Escalation and Structural Closeout Reminder
 
 **Files:**
-- Modify: `cubebox/middleware/todo.py`
+- Modify: `cubeplex/middleware/todo.py`
 - Test: `tests/unit/test_middleware_todo.py`
 
 - [ ] **Step 1: Write failing tests for escalation and closeout reminder behavior**
@@ -676,7 +676,7 @@ Expected: FAIL because retry escalation is not fully exercised and `_write_todos
 - [ ] **Step 3: Implement the structural 3+ item reminder in the tool result path**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 def _closeout_nudge(todos: list[Todo]) -> str | None:
     if len(todos) < 3:
         return None
@@ -705,7 +705,7 @@ def _build_todo_tool_message(
 - [ ] **Step 4: Verify retry semantics stay consecutive by design**
 
 ```python
-# cubebox/middleware/todo.py
+# cubeplex/middleware/todo.py
 # No separate code path is needed here beyond the existing reset behavior:
 # successful, non-guarded iterations clear todo_guard_retries intentionally
 # because the budget tracks consecutive correction failures rather than
@@ -720,7 +720,7 @@ Expected: PASS for escalation, atomic transitions, and the 3+ item reminder emit
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cubebox/middleware/todo.py tests/unit/test_middleware_todo.py
+git add cubeplex/middleware/todo.py tests/unit/test_middleware_todo.py
 git commit -m "feat: add todo closeout reminder and escalation"
 ```
 
@@ -739,7 +739,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
-from cubebox.agents.graph import create_cubebox_agent
+from cubeplex.agents.graph import create_cubeplex_agent
 
 
 class _TodoWritingLLM:
@@ -769,7 +769,7 @@ class _TodoWritingLLM:
 async def test_agent_persists_todos_across_invocations():
     llm = _TodoWritingLLM()
     checkpointer = MemorySaver()
-    agent = create_cubebox_agent(llm=llm, tools=[], checkpointer=checkpointer)
+    agent = create_cubeplex_agent(llm=llm, tools=[], checkpointer=checkpointer)
     config = {"configurable": {"thread_id": "todo-thread"}}
 
     await agent.ainvoke({"messages": [HumanMessage(content="First")]}, config=config)
@@ -812,7 +812,7 @@ git commit -m "test: cover todo state persistence"
 ## Task 5: Final Verification
 
 **Files:**
-- Modify: `cubebox/middleware/todo.py`
+- Modify: `cubeplex/middleware/todo.py`
 - Modify: `tests/unit/test_middleware_todo.py`
 - Modify: `tests/unit/test_graph.py`
 
@@ -828,13 +828,13 @@ Expected: PASS with no regressions in unrelated middleware tests.
 
 - [ ] **Step 3: Inspect the final diff**
 
-Run: `git diff -- cubebox/middleware/todo.py tests/unit/test_middleware_todo.py tests/unit/test_graph.py`
+Run: `git diff -- cubeplex/middleware/todo.py tests/unit/test_middleware_todo.py tests/unit/test_graph.py`
 Expected: Diff shows prompt alignment, invariant validation, shared sync/async guard logic, `SystemMessage`-based guard feedback, structural reminder in `_write_todos()`, and persistence coverage only.
 
 - [ ] **Step 4: Commit only if verification required follow-up fixes**
 
 ```bash
-git add cubebox/middleware/todo.py tests/unit/test_middleware_todo.py tests/unit/test_graph.py
+git add cubeplex/middleware/todo.py tests/unit/test_middleware_todo.py tests/unit/test_graph.py
 git commit -m "feat: harden todo workflow reliability"
 ```
 

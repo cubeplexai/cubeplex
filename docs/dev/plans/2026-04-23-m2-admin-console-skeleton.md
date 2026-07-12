@@ -17,8 +17,8 @@
 ### Create
 
 ```
-backend/cubebox/api/routes/v1/admin.py            # GET /admin/me; mounts manifest sub-router (already from M0)
-backend/cubebox/api/schemas/admin.py              # AdminMeResponse pydantic model
+backend/cubeplex/api/routes/v1/admin.py            # GET /admin/me; mounts manifest sub-router (already from M0)
+backend/cubeplex/api/schemas/admin.py              # AdminMeResponse pydantic model
 backend/tests/test_admin_me.py                    # /admin/me admin / member / no-membership cases
 backend/tests/test_require_org_admin.py           # dependency + repo method coverage
 
@@ -48,10 +48,10 @@ frontend/packages/web/components/ui/tabs.tsx       # via npx shadcn add tabs
 ### Modify
 
 ```
-backend/cubebox/auth/dependencies.py               # Add require_org_admin
-backend/cubebox/repositories/membership.py         # Add user_has_role_in_org method
-backend/cubebox/api/app.py                         # Mount admin router
-backend/cubebox/api/routes/v1/workspaces.py        # GET /workspaces add last_activity_at field
+backend/cubeplex/auth/dependencies.py               # Add require_org_admin
+backend/cubeplex/repositories/membership.py         # Add user_has_role_in_org method
+backend/cubeplex/api/app.py                         # Mount admin router
+backend/cubeplex/api/routes/v1/workspaces.py        # GET /workspaces add last_activity_at field
 
 frontend/packages/web/app/(app)/layout.tsx         # Drop AppTopBar; mount Sidebar around children
 frontend/packages/web/app/(app)/w/[wsId]/layout.tsx # No structural change (already minimal); just confirm Sidebar isn't double-rendered
@@ -84,7 +84,7 @@ If it prompts for confirmation, accept defaults. The file lands at `components/u
 - [ ] **Step 2: Verify import works**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit 2>&1 | head -5
+cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit 2>&1 | head -5
 ```
 Expected: no errors mentioning `tabs.tsx`.
 
@@ -100,13 +100,13 @@ git commit -m "chore(ui): add shadcn tabs component for admin console"
 ### Task 2: Backend `MembershipRepository.user_has_role_in_org`
 
 **Files:**
-- Modify: `backend/cubebox/repositories/membership.py`
+- Modify: `backend/cubeplex/repositories/membership.py`
 - Create: `backend/tests/test_membership_org_role.py`
 
 - [ ] **Step 1: Inspect current MembershipRepository structure**
 
 ```bash
-sed -n '1,60p' backend/cubebox/repositories/membership.py
+sed -n '1,60p' backend/cubeplex/repositories/membership.py
 ```
 
 Note the existing async session pattern + `get_role(user_id, workspace_id)` method.
@@ -122,8 +122,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.models import Role
-from cubebox.repositories import MembershipRepository, OrganizationRepository, WorkspaceRepository
+from cubeplex.models import Role
+from cubeplex.repositories import MembershipRepository, OrganizationRepository, WorkspaceRepository
 
 
 @pytest.mark.asyncio
@@ -180,7 +180,7 @@ Expected: FAIL with `AttributeError: 'MembershipRepository' object has no attrib
 
 - [ ] **Step 4: Implement the method**
 
-Append to `backend/cubebox/repositories/membership.py` (inside `MembershipRepository` class):
+Append to `backend/cubeplex/repositories/membership.py` (inside `MembershipRepository` class):
 
 ```python
     async def user_has_role_in_org(
@@ -197,7 +197,7 @@ Append to `backend/cubebox/repositories/membership.py` (inside `MembershipReposi
         """
         from sqlalchemy import select
 
-        from cubebox.models import Membership, Workspace
+        from cubeplex.models import Membership, Workspace
 
         stmt = (
             select(Membership.user_id)
@@ -225,7 +225,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/repositories/membership.py backend/tests/test_membership_org_role.py
+git add backend/cubeplex/repositories/membership.py backend/tests/test_membership_org_role.py
 git commit -m "feat(repos): MembershipRepository.user_has_role_in_org for org-level admin gate"
 ```
 
@@ -234,7 +234,7 @@ git commit -m "feat(repos): MembershipRepository.user_has_role_in_org for org-le
 ### Task 3: Backend `require_org_admin` dependency
 
 **Files:**
-- Modify: `backend/cubebox/auth/dependencies.py`
+- Modify: `backend/cubeplex/auth/dependencies.py`
 - Create: `backend/tests/test_require_org_admin.py`
 
 - [ ] **Step 1: Write failing tests**
@@ -249,9 +249,9 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
-from cubebox.auth.dependencies import require_org_admin
-from cubebox.auth.context import RequestContext
-from cubebox.models import Role
+from cubeplex.auth.dependencies import require_org_admin
+from cubeplex.auth.context import RequestContext
+from cubeplex.models import Role
 
 
 @pytest.mark.asyncio
@@ -286,7 +286,7 @@ Expected: FAIL with ImportError.
 
 - [ ] **Step 3: Implement `require_org_admin`**
 
-Append to `backend/cubebox/auth/dependencies.py`:
+Append to `backend/cubeplex/auth/dependencies.py`:
 
 ```python
 async def require_org_admin(
@@ -325,7 +325,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/auth/dependencies.py backend/tests/test_require_org_admin.py
+git add backend/cubeplex/auth/dependencies.py backend/tests/test_require_org_admin.py
 git commit -m "feat(auth): require_org_admin dependency (v1 = any-workspace admin in current org)"
 ```
 
@@ -334,9 +334,9 @@ git commit -m "feat(auth): require_org_admin dependency (v1 = any-workspace admi
 ### Task 4: Backend `GET /api/v1/admin/me` endpoint
 
 **Files:**
-- Create: `backend/cubebox/api/schemas/admin.py`
-- Create: `backend/cubebox/api/routes/v1/admin.py`
-- Modify: `backend/cubebox/api/app.py` (mount router)
+- Create: `backend/cubeplex/api/schemas/admin.py`
+- Create: `backend/cubeplex/api/routes/v1/admin.py`
+- Modify: `backend/cubeplex/api/app.py` (mount router)
 - Create: `backend/tests/test_admin_me.py`
 
 - [ ] **Step 1: Write failing test**
@@ -387,7 +387,7 @@ Expected: FAIL.
 - [ ] **Step 3: Define response schema**
 
 ```python
-# backend/cubebox/api/schemas/admin.py
+# backend/cubeplex/api/schemas/admin.py
 """Admin route response schemas."""
 
 from pydantic import BaseModel
@@ -402,7 +402,7 @@ class AdminMeResponse(BaseModel):
 - [ ] **Step 4: Define current-org dependency + admin router**
 
 ```python
-# backend/cubebox/api/routes/v1/admin.py
+# backend/cubeplex/api/routes/v1/admin.py
 """Admin routes: /admin/me + manifest mount.
 
 The /admin/me endpoint returns 200 with is_admin=true|false (NOT 403)
@@ -415,11 +415,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.api.schemas.admin import AdminMeResponse
-from cubebox.auth.users import current_active_user
-from cubebox.db import get_session
-from cubebox.models import Role, User
-from cubebox.repositories import MembershipRepository, OrganizationRepository
+from cubeplex.api.schemas.admin import AdminMeResponse
+from cubeplex.auth.users import current_active_user
+from cubeplex.db import get_session
+from cubeplex.models import Role, User
+from cubeplex.repositories import MembershipRepository, OrganizationRepository
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -435,7 +435,7 @@ async def _resolve_current_org_id(
     """
     from sqlalchemy import select
 
-    from cubebox.models import Membership, Workspace
+    from cubeplex.models import Membership, Workspace
 
     stmt = (
         select(Workspace.org_id)
@@ -475,10 +475,10 @@ async def get_admin_me(
 
 - [ ] **Step 5: Mount router in app.py**
 
-In `backend/cubebox/api/app.py`, find the section where routers are included (typically near `include_router(workspaces.router, ...)`). Add:
+In `backend/cubeplex/api/app.py`, find the section where routers are included (typically near `include_router(workspaces.router, ...)`). Add:
 
 ```python
-from cubebox.api.routes.v1 import admin
+from cubeplex.api.routes.v1 import admin
 app.include_router(admin.router, prefix="/api/v1")
 ```
 
@@ -492,7 +492,7 @@ Expected: PASS (3 tests). If `admin_user_cookie` fixture is missing, scaffold it
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/admin.py backend/cubebox/api/routes/v1/admin.py backend/cubebox/api/app.py backend/tests/test_admin_me.py
+git add backend/cubeplex/api/schemas/admin.py backend/cubeplex/api/routes/v1/admin.py backend/cubeplex/api/app.py backend/tests/test_admin_me.py
 git commit -m "feat(api): GET /api/v1/admin/me returning is_admin + org info"
 ```
 
@@ -501,15 +501,15 @@ git commit -m "feat(api): GET /api/v1/admin/me returning is_admin + org info"
 ### Task 5: Backend `GET /api/v1/workspaces` add `last_activity_at`
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/workspaces.py`
-- Modify: `backend/cubebox/api/schemas/workspace.py` (or wherever WorkspaceResponse lives)
+- Modify: `backend/cubeplex/api/routes/v1/workspaces.py`
+- Modify: `backend/cubeplex/api/schemas/workspace.py` (or wherever WorkspaceResponse lives)
 - Create: `backend/tests/test_workspaces_last_activity.py`
 
 - [ ] **Step 1: Locate the existing GET workspaces handler + schema**
 
 ```bash
-grep -n "GET\|@router.get\|workspaces" backend/cubebox/api/routes/v1/workspaces.py | head
-grep -rn "class Workspace.*Response\|WorkspaceRead" backend/cubebox/api/schemas/ 2>/dev/null
+grep -n "GET\|@router.get\|workspaces" backend/cubeplex/api/routes/v1/workspaces.py | head
+grep -rn "class Workspace.*Response\|WorkspaceRead" backend/cubeplex/api/schemas/ 2>/dev/null
 ```
 
 - [ ] **Step 2: Write failing test**
@@ -546,7 +546,7 @@ Expected: FAIL.
 
 - [ ] **Step 4: Add `last_activity_at` to response schema + computation**
 
-In the workspace schema (e.g. `backend/cubebox/api/schemas/workspace.py`):
+In the workspace schema (e.g. `backend/cubeplex/api/schemas/workspace.py`):
 
 ```python
 class WorkspaceResponse(BaseModel):
@@ -557,19 +557,19 @@ class WorkspaceResponse(BaseModel):
     last_activity_at: str | None = None  # ISO-8601 UTC; null if no conversations yet
 ```
 
-In the GET handler in `backend/cubebox/api/routes/v1/workspaces.py`, compute via aggregate over `Conversation.updated_at`:
+In the GET handler in `backend/cubeplex/api/routes/v1/workspaces.py`, compute via aggregate over `Conversation.updated_at`:
 
 ```python
 from sqlalchemy import func, select
 
-from cubebox.models import Conversation
-from cubebox.utils.time import utc_isoformat  # project standard for UTC-tagged ISO
+from cubeplex.models import Conversation
+from cubeplex.utils.time import utc_isoformat  # project standard for UTC-tagged ISO
 
 
 async def list_workspaces(...) -> list[WorkspaceResponse]:
     # ... existing code that fetches the user's workspaces ...
 
-    # cubebox doesn't have a Message table — messages live in LangGraph
+    # cubeplex doesn't have a Message table — messages live in LangGraph
     # checkpointer thread state. But Conversation.updated_at is bumped by
     # ConversationRepository.update_timestamp() on every message round-trip
     # (called from POST /api/v1/ws/{ws}/conversations/{id}/messages).
@@ -607,7 +607,7 @@ cd backend && uv run pytest tests/test_workspaces_last_activity.py -v
 ```
 Expected: PASS.
 
-- [ ] **Step 6: Update frontend `Workspace` type in `@cubebox/core`**
+- [ ] **Step 6: Update frontend `Workspace` type in `@cubeplex/core`**
 
 In `frontend/packages/core/src/stores/workspaceStore.ts`, add to the `Workspace` type:
 
@@ -624,7 +624,7 @@ export type Workspace = {
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/api/schemas/workspace.py backend/cubebox/api/routes/v1/workspaces.py backend/tests/test_workspaces_last_activity.py frontend/packages/core/src/stores/workspaceStore.ts
+git add backend/cubeplex/api/schemas/workspace.py backend/cubeplex/api/routes/v1/workspaces.py backend/tests/test_workspaces_last_activity.py frontend/packages/core/src/stores/workspaceStore.ts
 git commit -m "feat(workspaces): expose last_activity_at for sidebar sort + frontend type"
 ```
 
@@ -638,9 +638,9 @@ git commit -m "feat(workspaces): expose last_activity_at for sidebar sort + fron
 - [ ] **Step 1: Verify SWR is installed**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web list swr 2>&1 | head -5
+cd frontend && pnpm --filter @cubeplex/web list swr 2>&1 | head -5
 ```
-If absent: `cd frontend && pnpm --filter @cubebox/web add swr`
+If absent: `cd frontend && pnpm --filter @cubeplex/web add swr`
 
 - [ ] **Step 2: Implement the hook**
 
@@ -714,7 +714,7 @@ git commit -m "feat(web): useAdminAccess hook backed by /admin/me"
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useState, useMemo } from 'react'
-import { useWorkspaceStore } from '@cubebox/core'
+import { useWorkspaceStore } from '@cubeplex/core'
 import { Folder, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -793,7 +793,7 @@ export function WorkspacesSection() {
 - [ ] **Step 2: Type-check**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit 2>&1 | head -10
+cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit 2>&1 | head -10
 ```
 Expected: no errors.
 
@@ -827,7 +827,7 @@ import {
   useAuthStore,
   useConversationStore,
   useWorkspaceStore,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 import { useAdminAccess } from '@/hooks/useAdminAccess'
 import { Shield, LogOut } from 'lucide-react'
 
@@ -908,7 +908,7 @@ export function AvatarPopover() {
 - [ ] **Step 2: Type-check**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit 2>&1 | head -10
+cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit 2>&1 | head -10
 ```
 Expected: no errors.
 
@@ -943,7 +943,7 @@ Replace the contents of `frontend/packages/web/components/layout/Sidebar.tsx` wi
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useConversationStore, createApiClient } from '@cubebox/core'
+import { useConversationStore, createApiClient } from '@cubeplex/core'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2, Box } from 'lucide-react'
@@ -992,7 +992,7 @@ export function Sidebar() {
           <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0">
             <Box className="size-3.5 text-white" strokeWidth={2.5} />
           </div>
-          <span className="text-sm font-semibold tracking-tight">cubebox</span>
+          <span className="text-sm font-semibold tracking-tight">cubeplex</span>
         </div>
         <Link href={newChatHref}>
           <Button variant="default" className="w-full gap-2" size="sm">
@@ -1048,7 +1048,7 @@ export function Sidebar() {
 - [ ] **Step 3: Type-check**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit 2>&1 | head -10
+cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit 2>&1 | head -10
 ```
 Expected: no errors.
 
@@ -1078,7 +1078,7 @@ Replace `frontend/packages/web/app/(app)/layout.tsx` with:
 'use client'
 
 import { useEffect, useMemo } from 'react'
-import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubebox/core'
+import { createApiClient, useAuthStore, useWorkspaceStore } from '@cubeplex/core'
 import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { Sidebar } from '@/components/layout/Sidebar'
 
@@ -1112,7 +1112,7 @@ import { ThemeToggle } from '@/components/ui/theme-toggle'
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'
 import { ToolDetailPanel } from '@/components/panel/ToolDetailPanel'
 import { ArtifactPanel } from '@/components/panel/artifact/ArtifactPanel'
-import { usePanelStore } from '@cubebox/core'
+import { usePanelStore } from '@cubeplex/core'
 
 interface AppShellProps {
   children: ReactNode
@@ -1168,7 +1168,7 @@ Expected: no results. Fix any leftovers (they should be only in the deleted file
 - [ ] **Step 5: Smoke test (start dev server, verify all pages)**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web dev &
+cd frontend && pnpm --filter @cubeplex/web dev &
 sleep 5
 # Open in browser:
 #   http://localhost:3000/                  -- sidebar visible
@@ -1283,7 +1283,7 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
         <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center shrink-0">
           <Box className="size-3.5 text-white" strokeWidth={2.5} />
         </div>
-        <span className="text-sm font-semibold">cubebox</span>
+        <span className="text-sm font-semibold">cubeplex</span>
       </div>
       <Separator orientation="vertical" className="h-6" />
       <h1 className="text-sm font-medium">管理后台</h1>
@@ -1309,7 +1309,7 @@ export function AdminTopBar({ orgName }: AdminTopBarProps) {
 
 import { useRouter } from 'next/navigation'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { createApiClient, logoutUser, useAuthStore } from '@cubebox/core'
+import { createApiClient, logoutUser, useAuthStore } from '@cubeplex/core'
 
 export function AdminAvatarMenu() {
   const router = useRouter()
@@ -1626,7 +1626,7 @@ export default function SandboxPage() {
 - [ ] **Step 4: Smoke test**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web dev &
+cd frontend && pnpm --filter @cubeplex/web dev &
 sleep 5
 # In browser, log in as admin user, then:
 #   http://localhost:3000/admin           -- should redirect to /admin/models
@@ -1753,7 +1753,7 @@ NOTE: The `default-src` portion includes `'unsafe-inline' 'unsafe-eval'` because
 - [ ] **Step 3: Verify dev server starts without errors**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web dev &
+cd frontend && pnpm --filter @cubeplex/web dev &
 sleep 5
 curl -s -I http://localhost:3000/admin/models | grep -i content-security-policy
 kill %1
@@ -1798,7 +1798,7 @@ test.describe("admin console skeleton", () => {
     await adminPage.waitForLoadState();
 
     await expect(adminPage).toHaveURL(/\/admin(\/|$)/);
-    await expect(adminPage.getByText(/cubebox · 管理后台/)).toBeVisible();
+    await expect(adminPage.getByText(/cubeplex · 管理后台/)).toBeVisible();
     for (const tab of ["模型", "技能", "MCP", "成员", "审计"]) {
       await expect(adminPage.getByRole("link", { name: new RegExp(tab) })).toBeVisible();
     }
@@ -1832,7 +1832,7 @@ If `frontend/packages/web/e2e/helpers/auth.ts` does not already expose a dual-ro
 - [ ] **Step 3: Run**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web exec playwright test admin-console-skeleton.spec.ts
+cd frontend && pnpm --filter @cubeplex/web exec playwright test admin-console-skeleton.spec.ts
 ```
 
 Expected: 3 passed.
@@ -1861,8 +1861,8 @@ Expected: all PASS (including pre-existing test_rbac, auth tests).
 - [ ] **Step 2: Frontend type-check + build**
 
 ```bash
-cd frontend && pnpm --filter @cubebox/web exec tsc --noEmit
-cd frontend && pnpm --filter @cubebox/web build
+cd frontend && pnpm --filter @cubeplex/web exec tsc --noEmit
+cd frontend && pnpm --filter @cubeplex/web build
 ```
 Expected: no errors.
 
@@ -1878,7 +1878,7 @@ Start backend + frontend dev servers. Log in as an admin user. Walk through:
 | `/w/<wsId>/conversations/<id>` | Sidebar visible; AppShell renders main + (optional) artifact panel |
 | Click avatar in sidebar | Popover opens upward; "管理后台" item shown |
 | Click "管理后台" | Opens `/admin` in NEW TAB |
-| `/admin` (new tab) | Independent layout; top bar shows "cubebox · 管理后台 · <org name>"; left sub-nav with 5 native items + (no extensions in CE-only); content redirects to `/admin/models` |
+| `/admin` (new tab) | Independent layout; top bar shows "cubeplex · 管理后台 · <org name>"; left sub-nav with 5 native items + (no extensions in CE-only); content redirects to `/admin/models` |
 | `/admin/skills` | "技能管理 / Coming Soon" card |
 | Click "回应用" | New tab closes (because window.opener exists) |
 
@@ -1912,9 +1912,9 @@ git status
   - CSP frame-src self (D14) → Task 15
   - Back-to-app via window.close fallback (D16) → Task 12 AdminTopBar
 - ✅ Backend new endpoints (`/api/v1/admin/me`) + new dependency (`require_org_admin`) + new repo method (`user_has_role_in_org`) all explicit
-- ✅ Frontend file paths use existing `@/` alias and `@cubebox/core` package
+- ✅ Frontend file paths use existing `@/` alias and `@cubeplex/core` package
 - ✅ Existing AppTopBar / AvatarMenu / WorkspaceSwitcher explicitly deleted
 - ✅ AppShell refactor preserves resizable artifact-panel logic (only Sidebar removed since outer layout provides it)
-- ✅ Task 5 `last_activity_at` confirmed to use `Conversation.updated_at` (verified that `ConversationRepository.update_timestamp()` is called from messages endpoint at conversations.py:55 on every message round-trip); no Message table exists in cubebox
+- ✅ Task 5 `last_activity_at` confirmed to use `Conversation.updated_at` (verified that `ConversationRepository.update_timestamp()` is called from messages endpoint at conversations.py:55 on every message round-trip); no Message table exists in cubeplex
 - ⚠ Task 4 `_resolve_current_org_id` v1 picks user's first workspace's org. Multi-org users see only one org's admin until OrgSwitcher lands (Path A in spec §8). Acceptable per D9.
 - ⚠ Task 10 deletes WorkspaceSwitcher; before merging, grep for any non-(app)/layout reference (deep-linked imports). The plan's grep step covers this.

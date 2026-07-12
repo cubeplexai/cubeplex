@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from cubebox.services.conversation_search.embedding import EmbeddingProvider
+from cubeplex.services.conversation_search.embedding import EmbeddingProvider
 
 
 @pytest.mark.asyncio

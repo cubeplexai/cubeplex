@@ -1,4 +1,4 @@
-# cubebox - Agent System Backend
+# cubeplex - Agent System Backend
 
 AI Agent System Backend built on cubepi, a Python-native agent runtime.
 
@@ -6,7 +6,7 @@ AI Agent System Backend built on cubepi, a Python-native agent runtime.
 
 ```
 backend/
-├── cubebox/                      # Main source package
+├── cubeplex/                      # Main source package
 │   ├── agents/                   # Agent graph factory, schemas, message conversion
 │   ├── api/                      # FastAPI app, routes, exceptions
 │   ├── llm/                      # LLM factory, config, OpenAI-compatible client
@@ -74,20 +74,20 @@ Configuration is managed using dynaconf with YAML files:
 - `config.yaml` - Base configuration
 - `config.development.yaml` - Development overrides
 - `config.production.yaml` - Production overrides
-- Environment variables with `CUBEBOX_` prefix
+- Environment variables with `CUBEPLEX_` prefix
 
 Example:
 
 ```bash
-export CUBEBOX_DEBUG=true
-export CUBEBOX_LLM__PROVIDER=anthropic
+export CUBEPLEX_DEBUG=true
+export CUBEPLEX_LLM__PROVIDER=anthropic
 ```
 
 ## Architecture Overview
 
 ### Core Components
 
-1. **Agent Graph Factory** - `create_cubebox_agent()` wires the cubepi Provider, tools, and
+1. **Agent Graph Factory** - `create_cubeplex_agent()` wires the cubepi Provider, tools, and
    middleware stack into a `cubepi.Agent`
 2. **Middleware Stack** - SandboxMiddleware, SubAgentMiddleware, SkillsMiddleware
 3. **LLM Integration** - Multi-provider LLM support (OpenAI, OpenAI-compatible)
@@ -112,7 +112,7 @@ export CUBEBOX_LLM__PROVIDER=anthropic
 ```bash
 make format        # ruff format + import sort
 make lint          # ruff check
-make type-check    # mypy cubebox/
+make type-check    # mypy cubeplex/
 make test          # pytest -s -v
 make check         # format + lint + type-check + test
 ```

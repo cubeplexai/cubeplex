@@ -22,11 +22,11 @@
 
 ## File structure
 
-- Create `backend/cubebox/services/conversation_search/history.py`: pure history parsing, tool-call summarization, and estimated-token truncation.
-- Create `backend/cubebox/agents/actions/capabilities/conversation_history.py`: input models and three read-only history operations.
-- Create `backend/cubebox/agents/actions/capabilities/artifacts.py`: scoped artifact listing.
-- Modify `backend/cubebox/agents/actions/registry.py`: history runtime deps and group registration.
-- Modify `backend/cubebox/streams/run_manager.py`: pass embedding provider and lexical backend to history actions.
+- Create `backend/cubeplex/services/conversation_search/history.py`: pure history parsing, tool-call summarization, and estimated-token truncation.
+- Create `backend/cubeplex/agents/actions/capabilities/conversation_history.py`: input models and three read-only history operations.
+- Create `backend/cubeplex/agents/actions/capabilities/artifacts.py`: scoped artifact listing.
+- Modify `backend/cubeplex/agents/actions/registry.py`: history runtime deps and group registration.
+- Modify `backend/cubeplex/streams/run_manager.py`: pass embedding provider and lexical backend to history actions.
 - Create `backend/tests/unit/services/conversation_search/test_history.py`: formatter contract.
 - Create `backend/tests/e2e/test_agent_history_artifacts_actions.py`: DB-backed scope and handler contracts.
 - Modify `docs/site/docs/guides/conversations/basics.md`: user-visible behavior.
@@ -34,7 +34,7 @@
 ## Task 1: Build the history formatter
 
 **Files:**
-- Create: `backend/cubebox/services/conversation_search/history.py`
+- Create: `backend/cubeplex/services/conversation_search/history.py`
 - Test: `backend/tests/unit/services/conversation_search/test_history.py`
 
 **Interfaces:**
@@ -94,17 +94,17 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/services/conversation_search/history.py backend/tests/unit/services/conversation_search/test_history.py
+git add backend/cubeplex/services/conversation_search/history.py backend/tests/unit/services/conversation_search/test_history.py
 git commit -m "feat: format historical agent turns"
 ```
 
 ## Task 2: Add read-only capability handlers
 
 **Files:**
-- Create: `backend/cubebox/agents/actions/capabilities/conversation_history.py`
-- Create: `backend/cubebox/agents/actions/capabilities/artifacts.py`
-- Modify: `backend/cubebox/agents/actions/registry.py`
-- Modify: `backend/cubebox/streams/run_manager.py`
+- Create: `backend/cubeplex/agents/actions/capabilities/conversation_history.py`
+- Create: `backend/cubeplex/agents/actions/capabilities/artifacts.py`
+- Modify: `backend/cubeplex/agents/actions/registry.py`
+- Modify: `backend/cubeplex/streams/run_manager.py`
 - Test: `backend/tests/e2e/test_agent_history_artifacts_actions.py`
 
 **Interfaces:**
@@ -185,7 +185,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities backend/cubebox/agents/actions/registry.py backend/cubebox/streams/run_manager.py backend/tests/e2e/test_agent_history_artifacts_actions.py
+git add backend/cubeplex/agents/actions/capabilities backend/cubeplex/agents/actions/registry.py backend/cubeplex/streams/run_manager.py backend/tests/e2e/test_agent_history_artifacts_actions.py
 git commit -m "feat: expose history and artifacts to agents"
 ```
 
@@ -211,7 +211,7 @@ Expected: PASS.
 
 - [ ] **Step 3: Run static checks**
 
-Run: `cd backend && uv run ruff check cubebox/agents/actions && uv run ruff format --check cubebox/agents/actions && uv run mypy cubebox/agents/actions 2>&1 | tee tmp/history-artifacts-static.log | tail -5`
+Run: `cd backend && uv run ruff check cubeplex/agents/actions && uv run ruff format --check cubeplex/agents/actions && uv run mypy cubeplex/agents/actions 2>&1 | tee tmp/history-artifacts-static.log | tail -5`
 
 Expected: all commands exit 0.
 

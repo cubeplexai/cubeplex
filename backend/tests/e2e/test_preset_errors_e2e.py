@@ -26,14 +26,14 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-import cubebox.db as _cubebox_db
-from cubebox.api.app import create_app
-from cubebox.db.engine import _build_database_url, engine
-from cubebox.db.session import get_session
-from cubebox.models.conversation import Conversation
-from cubebox.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
-from cubebox.models.provider import Model as DBModel
-from cubebox.models.provider import Provider as DBProvider
+import cubeplex.db as _cubeplex_db
+from cubeplex.api.app import create_app
+from cubeplex.db.engine import _build_database_url, engine
+from cubeplex.db.session import get_session
+from cubeplex.models.conversation import Conversation
+from cubeplex.models.org_settings import MODEL_PRESETS_KEY, OrgSettings
+from cubeplex.models.provider import Model as DBModel
+from cubeplex.models.provider import Provider as DBProvider
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
     DEFAULT_TEST_EMAIL,
@@ -68,7 +68,7 @@ def _make_test_app() -> Any:
     test_session_maker = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
     )
-    _cubebox_db.async_session_maker = test_session_maker
+    _cubeplex_db.async_session_maker = test_session_maker
 
     async def override_get_session() -> AsyncIterator[AsyncSession]:
         async with test_session_maker() as session:

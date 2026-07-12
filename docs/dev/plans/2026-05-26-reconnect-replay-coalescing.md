@@ -14,11 +14,11 @@
 
 ## File Structure
 
-- **Create** `backend/cubebox/streams/replay_coalescer.py` — the pure, stateful `ReplayCoalescer` (no IO). One responsibility: fold a stream of `RunEvent` into a compact, order-preserving equivalent.
+- **Create** `backend/cubeplex/streams/replay_coalescer.py` — the pure, stateful `ReplayCoalescer` (no IO). One responsibility: fold a stream of `RunEvent` into a compact, order-preserving equivalent.
 - **Create** `backend/tests/unit/test_replay_coalescer.py` — unit tests for the coalescer.
-- **Modify** `backend/cubebox/streams/run_events.py` — add `iter_run_events_chunked` (cursor-paginated batch reader). Leave `iter_run_events` and its callers untouched.
+- **Modify** `backend/cubeplex/streams/run_events.py` — add `iter_run_events_chunked` (cursor-paginated batch reader). Leave `iter_run_events` and its callers untouched.
 - **Create** `backend/tests/unit/test_iter_run_events_chunked.py` — test for the chunked reader. Uses an inline `fakeredis` fixture with `decode_responses=True` (matches production `app.py:141` and the convention in `tests/unit/test_run_control_pubsub.py`).
-- **Modify** `backend/cubebox/api/routes/v1/conversations.py` — replay segment of `event_generator` uses the chunked reader + coalescer.
+- **Modify** `backend/cubeplex/api/routes/v1/conversations.py` — replay segment of `event_generator` uses the chunked reader + coalescer.
 - **Modify** `frontend/packages/core/src/stores/messageStore.ts` — periodic yield in both consume loops (`consumeRunStream`, `send`).
 - **Create** `frontend/packages/web/__tests__/stores/messageStore.yield.test.ts` — asserts the yield fires for large event counts.
 
@@ -27,7 +27,7 @@
 ## Task 1: ReplayCoalescer (pure, streaming)
 
 **Files:**
-- Create: `backend/cubebox/streams/replay_coalescer.py`
+- Create: `backend/cubeplex/streams/replay_coalescer.py`
 - Test: `backend/tests/unit/test_replay_coalescer.py`
 
 The coalescer holds **at most one** pending mergeable run at a time. When an event arrives whose key differs from the pending run's key (or is non-mergeable), the pending run is flushed first — this is what preserves SSE order and event-id dedup monotonicity on the frontend.
@@ -44,8 +44,8 @@ Every other event type is non-mergeable (pass-through). A coalesced event keeps 
 Create `backend/tests/unit/test_replay_coalescer.py`:
 
 ```python
-from cubebox.streams.replay_coalescer import ReplayCoalescer
-from cubebox.streams.run_events import RunEvent
+from cubeplex.streams.replay_coalescer import ReplayCoalescer
+from cubeplex.streams.run_events import RunEvent
 
 
 def _ev(event_id: str, etype: str, *, data=None, agent_id=None) -> RunEvent:
@@ -183,11 +183,11 @@ def test_size_cap_splits_huge_run_into_bounded_events():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/unit/test_replay_coalescer.py -v`
-Expected: FAIL with `ModuleNotFoundError: No module named 'cubebox.streams.replay_coalescer'`
+Expected: FAIL with `ModuleNotFoundError: No module named 'cubeplex.streams.replay_coalescer'`
 
 - [ ] **Step 3: Implement the coalescer**
 
-Create `backend/cubebox/streams/replay_coalescer.py`:
+Create `backend/cubeplex/streams/replay_coalescer.py`:
 
 ```python
 """Fold a run's replayed event backlog into a compact, order-preserving set.
@@ -219,7 +219,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
-from cubebox.streams.run_events import RunEvent
+from cubeplex.streams.run_events import RunEvent
 
 # Max accumulated characters in one coalesced delta before it is flushed and a
 # fresh same-key run continues. ~64 KiB: large enough that normal messages
@@ -340,7 +340,7 @@ Expected: PASS (all 10 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/replay_coalescer.py backend/tests/unit/test_replay_coalescer.py
+git add backend/cubeplex/streams/replay_coalescer.py backend/tests/unit/test_replay_coalescer.py
 git commit -m "feat(streams): add ReplayCoalescer for reconnect replay folding"
 ```
 
@@ -349,7 +349,7 @@ git commit -m "feat(streams): add ReplayCoalescer for reconnect replay folding"
 ## Task 2: Chunked run-event reader
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_events.py` (add `iter_run_events_chunked`; leave `iter_run_events` untouched)
+- Modify: `backend/cubeplex/streams/run_events.py` (add `iter_run_events_chunked`; leave `iter_run_events` untouched)
 - Test: `backend/tests/unit/test_iter_run_events_chunked.py`
 
 Reads `[start, stop]` in batches of ~`count` using a `(<id>` exclusive cursor for pagination, so each `await xrange` returns control to the event loop and memory stays bounded to one batch. `start` may be `None` (read from the beginning), a bare id, or an exclusive `(<id>` form (as the route passes when a `Last-Event-ID` header is present).
@@ -368,7 +368,7 @@ import json
 import fakeredis.aioredis
 import pytest
 
-from cubebox.streams.run_events import (
+from cubeplex.streams.run_events import (
     _run_events_key,
     iter_run_events_chunked,
 )
@@ -443,7 +443,7 @@ Expected: FAIL with `ImportError: cannot import name 'iter_run_events_chunked'`
 
 - [ ] **Step 3: Implement the chunked reader**
 
-In `backend/cubebox/streams/run_events.py`, add the import at the top of the file (with the other typing imports) if not present:
+In `backend/cubeplex/streams/run_events.py`, add the import at the top of the file (with the other typing imports) if not present:
 
 ```python
 from collections.abc import AsyncIterator
@@ -489,7 +489,7 @@ Expected: PASS (3 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_events.py backend/tests/unit/test_iter_run_events_chunked.py
+git add backend/cubeplex/streams/run_events.py backend/tests/unit/test_iter_run_events_chunked.py
 git commit -m "feat(streams): add chunked run-event reader for bounded replay"
 ```
 
@@ -498,21 +498,21 @@ git commit -m "feat(streams): add chunked run-event reader for bounded replay"
 ## Task 3: Wire coalescer + chunked reader into the stream route
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/conversations.py` (replay segment of `event_generator`, around lines 321-340)
+- Modify: `backend/cubeplex/api/routes/v1/conversations.py` (replay segment of `event_generator`, around lines 321-340)
 
 The replay segment is replaced so it reads in chunks, folds each batch through the coalescer, and advances the live-tail cursor by the **original** last id of each batch (not the synthetic coalesced id). The live tail segment (the `while True` loop) and the `done`/`error` early-return are unchanged.
 
 - [ ] **Step 1: Read the current replay segment**
 
-Run: `cd backend && sed -n '305,345p' cubebox/api/routes/v1/conversations.py`
+Run: `cd backend && sed -n '305,345p' cubeplex/api/routes/v1/conversations.py`
 Expected: see `target_event_id = await get_latest_event_id(...)`, `replay_start = ...`, the `iter_run_events(...)` call, and the replay `for` loop.
 
 - [ ] **Step 2: Add imports + chunk-size constant**
 
-Near the existing imports from `cubebox.streams.run_events` in `conversations.py`, add `iter_run_events_chunked` to that import list, and import the coalescer:
+Near the existing imports from `cubeplex.streams.run_events` in `conversations.py`, add `iter_run_events_chunked` to that import list, and import the coalescer:
 
 ```python
-from cubebox.streams.replay_coalescer import ReplayCoalescer
+from cubeplex.streams.replay_coalescer import ReplayCoalescer
 ```
 
 Add a module-level constant near the top of the file (after imports):
@@ -574,11 +574,11 @@ with:
         live_cursor = replay_cursor or target_event_id or "$"
 ```
 
-> If `iter_run_events` is now unused in `conversations.py`, remove it from the import to keep the linter happy. Grep first: `grep -n iter_run_events cubebox/api/routes/v1/conversations.py`.
+> If `iter_run_events` is now unused in `conversations.py`, remove it from the import to keep the linter happy. Grep first: `grep -n iter_run_events cubeplex/api/routes/v1/conversations.py`.
 
 - [ ] **Step 4: Verify type-check and lint pass**
 
-Run: `cd backend && uv run mypy cubebox/api/routes/v1/conversations.py && uv run ruff check cubebox/api/routes/v1/conversations.py`
+Run: `cd backend && uv run mypy cubeplex/api/routes/v1/conversations.py && uv run ruff check cubeplex/api/routes/v1/conversations.py`
 Expected: no errors.
 
 - [ ] **Step 5: Run the existing conversations route tests**
@@ -589,7 +589,7 @@ Expected: PASS (no regressions in existing stream/replay tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/conversations.py
+git add backend/cubeplex/api/routes/v1/conversations.py
 git commit -m "feat(stream): coalesce + chunk replay on reconnect"
 ```
 
@@ -609,7 +609,7 @@ Create `frontend/packages/web/__tests__/stores/messageStore.yield.test.ts`:
 
 ```typescript
 import { act } from '@testing-library/react'
-import { useMessageStore } from '@cubebox/core'
+import { useMessageStore } from '@cubeplex/core'
 
 const CONV_ID = 'conv-yield'
 
@@ -671,7 +671,7 @@ it('yields to the event loop when processing many events', async () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd frontend && pnpm --filter @cubebox/web test -- messageStore.yield`
+Run: `cd frontend && pnpm --filter @cubeplex/web test -- messageStore.yield`
 Expected: FAIL — `setTimeoutSpy` not called (no yield exists yet).
 
 - [ ] **Step 3: Add the yield helper + constant**
@@ -720,12 +720,12 @@ In `send`, the inner `for await (const event of streamSource)` loop ends with th
 
 - [ ] **Step 6: Build core and run the test**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web test -- messageStore.yield`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web test -- messageStore.yield`
 Expected: PASS.
 
 - [ ] **Step 7: Run the existing messageStore tests for regressions**
 
-Run: `cd frontend && pnpm --filter @cubebox/web test -- useMessages`
+Run: `cd frontend && pnpm --filter @cubeplex/web test -- useMessages`
 Expected: PASS (no regressions).
 
 - [ ] **Step 8: Commit**
@@ -746,7 +746,7 @@ Expected: all PASS.
 
 - [ ] **Frontend type-check + lint**
 
-Run: `cd frontend && pnpm --filter @cubebox/core build && pnpm --filter @cubebox/web lint`
+Run: `cd frontend && pnpm --filter @cubeplex/core build && pnpm --filter @cubeplex/web lint`
 Expected: clean.
 
 - [ ] **Manual self-test (user)**

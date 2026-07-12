@@ -37,7 +37,7 @@ Steps (all verified in the PoC at `tmp/neko-poc/combined.Dockerfile`):
    (`/ms-playwright/.../chrome-linux64/chrome`) headful on `DISPLAY=:99.0` with
    `--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1
    --remote-allow-origins=* --disable-dev-shm-usage
-   --user-data-dir=/workspace/.cubebox-browser-profile`. The
+   --user-data-dir=/workspace/.cubeplex-browser-profile`. The
    `--user-data-dir` **must** point at the persistent sandbox volume
    (`/workspace` is the PVC mount) so the profile — and thus all auth state —
    survives, satisfying the Phase 3 continuity requirement. The agent's
@@ -63,11 +63,11 @@ in-container Playwright `connectOverCDP().newPage()` drives the streamed Chromiu
 ## Phase 2 — Backend: expose the Neko endpoint (workspace-scoped)
 
 Files:
-- `backend/cubebox/sandbox/base.py` — add abstract `get_browser_endpoint()`.
-- `backend/cubebox/sandbox/opensandbox.py` — implement via
+- `backend/cubeplex/sandbox/base.py` — add abstract `get_browser_endpoint()`.
+- `backend/cubeplex/sandbox/opensandbox.py` — implement via
   `self._sandbox.get_signed_endpoint(8080, expires)`.
-- `backend/cubebox/sandbox/local.py` — return a localhost URL for dev.
-- `backend/cubebox/api/routes/v1/ws_browser.py` (new) — `GET
+- `backend/cubeplex/sandbox/local.py` — return a localhost URL for dev.
+- `backend/cubeplex/api/routes/v1/ws_browser.py` (new) — `GET
   /api/v1/ws/{workspace_id}/browser/live-view` → resolves the caller's active
   sandbox (SandboxManager), **ensures the Neko stack is running** (idempotent
   `start-browser.sh` via `sandbox.execute`, per Phase 1 step 8), then returns the
@@ -93,7 +93,7 @@ upgrade). Real-sandbox E2E if the cluster sandbox is reachable.
 
 ## Phase 3 — Takeover / privacy signaling
 
-Files: agent middleware / event types (`cubebox/agents/`, `core/src/types/events.ts`).
+Files: agent middleware / event types (`cubeplex/agents/`, `core/src/types/events.ts`).
 - Emit a "browser needs human" event when the agent decides it is blocked
   (initial trigger: explicit agent tool/marker; heuristics later).
 - Control toggle: an event/flag for "human in control" ↔ "agent in control".

@@ -20,7 +20,7 @@ import {
   validateSsoConnection,
   type SsoConnectionResponse,
   type SsoValidateCheck,
-} from '@cubebox/core'
+} from '@cubeplex/core'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

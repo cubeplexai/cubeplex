@@ -4,11 +4,11 @@
 
 **Goal:** Make the `scheduled_tasks` agent capability hard to misuse on the first call, by encoding conditional schedule requirements in the pydantic schema, aligning `UpdateInput` with the `CreateInput` `target` sentinel, and rewriting per-operation descriptions to include canonical example payloads.
 
-**Architecture:** All changes live in `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py` and the new unit-test module beside it. The capability builder (`backend/cubebox/agents/actions/builder.py`), the route layer (`backend/cubebox/api/routes/v1/ws_scheduled_tasks.py`), the API-facing schemas (`ScheduledTaskCreate / ScheduledTaskUpdate`), the service (`backend/cubebox/services/scheduled_task.py`) and the DB model (`backend/cubebox/models/scheduled_task.py`) are unchanged — the agent-tool layer just flattens its nested union into the same `dict[str, Any]` shape the service already accepts.
+**Architecture:** All changes live in `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py` and the new unit-test module beside it. The capability builder (`backend/cubeplex/agents/actions/builder.py`), the route layer (`backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py`), the API-facing schemas (`ScheduledTaskCreate / ScheduledTaskUpdate`), the service (`backend/cubeplex/services/scheduled_task.py`) and the DB model (`backend/cubeplex/models/scheduled_task.py`) are unchanged — the agent-tool layer just flattens its nested union into the same `dict[str, Any]` shape the service already accepts.
 
 **Tech Stack:** Python 3.12 / pydantic v2 / pytest / uv / pre-commit (mypy strict, ruff, line length 100).
 
-**Worktree:** `/home/chris/cubebox/.worktrees/feat/sched-tasks-tool-ergo` on branch `feat/sched-tasks-tool-ergo` (slot 2: backend port 8002, DB `cubebox_feat_sched_tasks_tool_ergo`). Run all commands from this worktree root. Source the worktree env if you need ports: `cat .worktree.env`.
+**Worktree:** `/home/chris/cubeplex/.worktrees/feat/sched-tasks-tool-ergo` on branch `feat/sched-tasks-tool-ergo` (slot 2: backend port 8002, DB `cubeplex_feat_sched_tasks_tool_ergo`). Run all commands from this worktree root. Source the worktree env if you need ports: `cat .worktree.env`.
 
 **Spec:** `docs/dev/specs/2026-06-03-scheduled-tasks-tool-ergonomics-design.md`
 
@@ -18,7 +18,7 @@
 
 | File | Action | Purpose |
 |---|---|---|
-| `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py` | Modify | Replace flat `CreateInput` / `UpdateInput` schedule fields with a nested `Schedule = Cron \| Interval \| Once` discriminated union. Replace `UpdateInput.target_mode` + `target_conversation_id` with a sentinel `target` mirroring `CreateInput`. Update `_handle_create` and `_handle_update` to flatten the nested union back into the service `dict`. Rewrite every `AgentOperation.description` with a one-line minimal example payload, and rewrite the capability description to point at them. |
+| `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py` | Modify | Replace flat `CreateInput` / `UpdateInput` schedule fields with a nested `Schedule = Cron \| Interval \| Once` discriminated union. Replace `UpdateInput.target_mode` + `target_conversation_id` with a sentinel `target` mirroring `CreateInput`. Update `_handle_create` and `_handle_update` to flatten the nested union back into the service `dict`. Rewrite every `AgentOperation.description` with a one-line minimal example payload, and rewrite the capability description to point at them. |
 | `backend/tests/unit/test_scheduled_tasks_capability.py` | Create | Direct unit tests for the agent-tool input models and handler translations: schedule union happy paths and rejection cases, `target` sentinel translation in create and update, description content sanity check. |
 | `backend/tests/unit/test_scheduled_task_service.py` | Unchanged | Service-layer tests stay green because the handler still emits the same flat `dict` shape. |
 | `backend/tests/e2e/test_scheduled_tasks_api.py` | Unchanged | API routes are unchanged. |
@@ -31,8 +31,8 @@
 
 **Files:**
 - Create: `backend/tests/unit/test_scheduled_tasks_capability.py`
-- Modify: `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py:61-86` (replace `CreateInput`)
-- Modify: `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py:145-171` (rewrite `_handle_create`)
+- Modify: `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py:61-86` (replace `CreateInput`)
+- Modify: `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py:145-171` (rewrite `_handle_create`)
 
 - [ ] **Step 1.1: Write the failing tests**
 
@@ -49,15 +49,15 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
-from cubebox.agents.actions.capabilities.scheduled_tasks import (
+from cubeplex.agents.actions.capabilities.scheduled_tasks import (
     SCHEDULED_TASKS_CAPABILITY,
     CreateInput,
     UpdateInput,
     _handle_create,
     _handle_update,
 )
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionInvalidInput
 
 
 def _ctx(conversation_id: str | None = "conv-test") -> ScopeContext:
@@ -168,7 +168,7 @@ async def test_handle_create_cron_flattens_to_service_dict() -> None:
         task.last_fired_at = None
         return task
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     cap._svc.create = fake_create  # type: ignore[method-assign]
 
@@ -208,7 +208,7 @@ async def test_handle_create_target_current_conversation_uses_ctx_id() -> None:
         task.last_fired_at = None
         return task
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     cap._svc.create = fake_create  # type: ignore[method-assign]
 
@@ -247,7 +247,7 @@ Expected: ALL fail — `CreateInput` doesn't accept `schedule={...}` yet, and `_
 
 - [ ] **Step 1.3: Refactor `CreateInput` to use nested `Schedule`**
 
-Edit `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py`:
+Edit `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py`:
 
 Replace the entire `CreateInput` block (lines 61-86 in the current file) and the imports section (line 6) so the module top looks like:
 
@@ -262,10 +262,10 @@ from typing import Annotated, Any, Literal, Union
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput, AgentCapability, AgentOperation
-from cubebox.services.scheduled_task import ScheduledTaskService
-from cubebox.utils.time import utc_isoformat
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionInvalidInput, AgentCapability, AgentOperation
+from cubeplex.services.scheduled_task import ScheduledTaskService
+from cubeplex.utils.time import utc_isoformat
 ```
 
 Then, replace `class CreateInput` (lines 61-86 in the original) with:
@@ -388,7 +388,7 @@ Expected: all green (we didn't touch the service).
 - [ ] **Step 1.7: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/scheduled_tasks.py \
+git add backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py \
         backend/tests/unit/test_scheduled_tasks_capability.py
 git commit -m "feat(scheduled-tasks): nest schedule into discriminated union on CreateInput"
 ```
@@ -398,8 +398,8 @@ git commit -m "feat(scheduled-tasks): nest schedule into discriminated union on 
 ## Task 2: Same nested `Schedule` on `UpdateInput`
 
 **Files:**
-- Modify: `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py:88-99` (rewrite `UpdateInput`)
-- Modify: `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py:174-184` (rewrite `_handle_update`)
+- Modify: `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py:88-99` (rewrite `UpdateInput`)
+- Modify: `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py:174-184` (rewrite `_handle_update`)
 - Modify: `backend/tests/unit/test_scheduled_tasks_capability.py` (extend with UpdateInput tests)
 
 - [ ] **Step 2.1: Add failing tests for `UpdateInput`**
@@ -454,7 +454,7 @@ async def test_handle_update_flattens_schedule() -> None:
         task.last_fired_at = None
         return task
 
-    from cubebox.agents.actions.capabilities import scheduled_tasks as cap
+    from cubeplex.agents.actions.capabilities import scheduled_tasks as cap
 
     cap._svc.update = fake_update  # type: ignore[method-assign]
 
@@ -580,7 +580,7 @@ Expected: all green. The E2E hits the HTTP layer (`ScheduledTaskCreate / Update`
 - [ ] **Step 2.7: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/scheduled_tasks.py \
+git add backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py \
         backend/tests/unit/test_scheduled_tasks_capability.py
 git commit -m "feat(scheduled-tasks): mirror nested schedule + target sentinel on UpdateInput"
 ```
@@ -590,7 +590,7 @@ git commit -m "feat(scheduled-tasks): mirror nested schedule + target sentinel o
 ## Task 3: Rewrite per-operation descriptions with canonical examples
 
 **Files:**
-- Modify: `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py:206-283` (rewrite `SCHEDULED_TASKS_CAPABILITY`)
+- Modify: `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py:206-283` (rewrite `SCHEDULED_TASKS_CAPABILITY`)
 - Modify: `backend/tests/unit/test_scheduled_tasks_capability.py` (add description-content sanity tests)
 
 - [ ] **Step 3.1: Write the failing description tests**
@@ -805,7 +805,7 @@ Expected: every test in this file passes.
 - [ ] **Step 3.6: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/scheduled_tasks.py \
+git add backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py \
         backend/tests/unit/test_scheduled_tasks_capability.py
 git commit -m "feat(scheduled-tasks): rewrite operation descriptions with copyable example payloads"
 ```
@@ -838,7 +838,7 @@ Expected: all green. The handler still emits the flat-dict shape the service / r
 
 ```bash
 pre-commit run --files \
-  backend/cubebox/agents/actions/capabilities/scheduled_tasks.py \
+  backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py \
   backend/tests/unit/test_scheduled_tasks_capability.py
 ```
 
@@ -857,8 +857,8 @@ git add -u && git commit -m "style: pre-commit fixups"
 ```bash
 cd backend
 uv run python -c "
-from cubebox.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY
-from cubebox.agents.actions.builder import build_capability_tool
+from cubeplex.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY
+from cubeplex.agents.actions.builder import build_capability_tool
 
 class _FakeCtx:
     async def __aenter__(self): return (None, None)
@@ -936,7 +936,7 @@ cd backend && uv run python main.py
 cd frontend && pnpm dev
 ```
 
-- **Cubepi-side ValidationError translation.** Separate PR in `/home/chris/cubepi`: edit `cubepi/agent/tools.py:114-117` to format pydantic errors (field paths, discriminator + allowed values) before returning them to the LLM. Bump the cubepi pin in cubebox after merge. Tracked in the spec under "Out of scope".
+- **Cubepi-side ValidationError translation.** Separate PR in `/home/chris/cubepi`: edit `cubepi/agent/tools.py:114-117` to format pydantic errors (field paths, discriminator + allowed values) before returning them to the LLM. Bump the cubepi pin in cubeplex after merge. Tracked in the spec under "Out of scope".
 
 - **Progressive schema disclosure for capability tools.** Designed alongside MCP, separate spec.
 

@@ -16,20 +16,20 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Create | `backend/cubebox/agents/actions/__init__.py` | Package init |
-| Create | `backend/cubebox/agents/actions/context.py` | `ScopeContext` dataclass + builders |
-| Create | `backend/cubebox/agents/actions/types.py` | `AgentOperation`, `AgentCapability`, domain exceptions |
-| Create | `backend/cubebox/agents/actions/builder.py` | `build_capability_tool()` — generic factory |
-| Create | `backend/cubebox/agents/actions/registry.py` | `AGENT_CAPABILITIES` list + `tools_for_run()` |
-| Create | `backend/cubebox/agents/actions/capabilities/__init__.py` | Package init |
-| Create | `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py` | Declares the `scheduled_tasks` capability |
-| Create | `backend/cubebox/services/scheduled_task.py` | `ScheduledTaskService` — source of truth |
-| Modify | `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py` | Refactor to thin adapter over service |
-| Modify | `backend/cubebox/streams/run_manager.py:30` | Add `trigger` field to `RunContext` |
-| Modify | `backend/cubebox/streams/run_manager.py:540` | Thread `trigger` through `start_run` |
-| Modify | `backend/cubebox/streams/run_manager.py:1860` | Thread `trigger` through `_execute_run` |
-| Modify | `backend/cubebox/streams/run_manager.py:969` | Thread `trigger` through `_run_cubepi_path`, wire `tools_for_run` |
-| Modify | `backend/cubebox/schedules/dispatch.py:91-102` | Pass `trigger="automated"` to `RunContext` |
+| Create | `backend/cubeplex/agents/actions/__init__.py` | Package init |
+| Create | `backend/cubeplex/agents/actions/context.py` | `ScopeContext` dataclass + builders |
+| Create | `backend/cubeplex/agents/actions/types.py` | `AgentOperation`, `AgentCapability`, domain exceptions |
+| Create | `backend/cubeplex/agents/actions/builder.py` | `build_capability_tool()` — generic factory |
+| Create | `backend/cubeplex/agents/actions/registry.py` | `AGENT_CAPABILITIES` list + `tools_for_run()` |
+| Create | `backend/cubeplex/agents/actions/capabilities/__init__.py` | Package init |
+| Create | `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py` | Declares the `scheduled_tasks` capability |
+| Create | `backend/cubeplex/services/scheduled_task.py` | `ScheduledTaskService` — source of truth |
+| Modify | `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py` | Refactor to thin adapter over service |
+| Modify | `backend/cubeplex/streams/run_manager.py:30` | Add `trigger` field to `RunContext` |
+| Modify | `backend/cubeplex/streams/run_manager.py:540` | Thread `trigger` through `start_run` |
+| Modify | `backend/cubeplex/streams/run_manager.py:1860` | Thread `trigger` through `_execute_run` |
+| Modify | `backend/cubeplex/streams/run_manager.py:969` | Thread `trigger` through `_run_cubepi_path`, wire `tools_for_run` |
+| Modify | `backend/cubeplex/schedules/dispatch.py:91-102` | Pass `trigger="automated"` to `RunContext` |
 | Create | `backend/tests/unit/test_scheduled_task_service.py` | Service unit tests |
 | Create | `backend/tests/unit/test_agent_action_builder.py` | Builder + mutation gate tests |
 | Modify | `backend/tests/e2e/test_scheduled_tasks_api.py` | Existing route tests stay green (guard) |
@@ -39,32 +39,32 @@
 ### Task 1: Domain Exceptions + ScopeContext + AgentOperation/AgentCapability types
 
 **Files:**
-- Create: `backend/cubebox/agents/actions/__init__.py`
-- Create: `backend/cubebox/agents/actions/context.py`
-- Create: `backend/cubebox/agents/actions/types.py`
-- Create: `backend/cubebox/agents/actions/capabilities/__init__.py`
+- Create: `backend/cubeplex/agents/actions/__init__.py`
+- Create: `backend/cubeplex/agents/actions/context.py`
+- Create: `backend/cubeplex/agents/actions/types.py`
+- Create: `backend/cubeplex/agents/actions/capabilities/__init__.py`
 
 These are pure data types with no dependencies on DB or services — they can be built and tested in isolation.
 
 - [ ] **Step 1: Create the package and `context.py`**
 
 ```python
-# backend/cubebox/agents/actions/__init__.py
+# backend/cubeplex/agents/actions/__init__.py
 """Agent platform actions — unified mechanism for agent-operable capabilities."""
 
-# backend/cubebox/agents/actions/capabilities/__init__.py
+# backend/cubeplex/agents/actions/capabilities/__init__.py
 """Capability declarations for agent platform actions."""
 ```
 
 ```python
-# backend/cubebox/agents/actions/context.py
+# backend/cubeplex/agents/actions/context.py
 """Scoped context for agent platform actions."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from cubebox.models.membership import Role
+from cubeplex.models.membership import Role
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,7 @@ class ScopeContext:
 - [ ] **Step 2: Create `types.py` — domain exceptions + operation/capability dataclasses**
 
 ```python
-# backend/cubebox/agents/actions/types.py
+# backend/cubeplex/agents/actions/types.py
 """Core types for the agent platform actions mechanism."""
 
 from __future__ import annotations
@@ -92,7 +92,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from cubebox.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.context import ScopeContext
 
 
 # --- Domain exceptions (raised by services, mapped by front doors) ---
@@ -133,18 +133,18 @@ class AgentCapability:
 
 - [ ] **Step 3: Verify types are importable**
 
-Run: `cd backend && uv run python -c "from cubebox.agents.actions.types import AgentCapability, AgentOperation, ActionNotFound; print('OK')"`
+Run: `cd backend && uv run python -c "from cubeplex.agents.actions.types import AgentCapability, AgentOperation, ActionNotFound; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 4: Run mypy on the new files**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/`
 Expected: `Success: no issues found`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/
+git add backend/cubeplex/agents/actions/
 git commit -m "feat(actions): add ScopeContext, domain exceptions, AgentOperation/AgentCapability types"
 ```
 
@@ -153,7 +153,7 @@ git commit -m "feat(actions): add ScopeContext, domain exceptions, AgentOperatio
 ### Task 2: Generic capability tool builder
 
 **Files:**
-- Create: `backend/cubebox/agents/actions/builder.py`
+- Create: `backend/cubeplex/agents/actions/builder.py`
 - Create: `backend/tests/unit/test_agent_action_builder.py`
 
 The builder takes an `AgentCapability` + a context factory and produces one cubepi `AgentTool` with a Pydantic discriminated-union input model. It also implements the mutation gate: when `allow_mutations=False`, mutating operations are excluded.
@@ -175,16 +175,16 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
-from cubebox.agents.actions.builder import build_capability_tool
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import (
+from cubeplex.agents.actions.builder import build_capability_tool
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import (
     ActionInvalidInput,
     ActionNotFound,
     ActionPermissionDenied,
     AgentCapability,
     AgentOperation,
 )
-from cubebox.models.membership import Role
+from cubeplex.models.membership import Role
 
 
 class EchoInput(BaseModel):
@@ -309,12 +309,12 @@ class TestErrorMapping:
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/unit/test_agent_action_builder.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.agents.actions.builder'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.agents.actions.builder'`
 
 - [ ] **Step 3: Implement `builder.py`**
 
 ```python
-# backend/cubebox/agents/actions/builder.py
+# backend/cubeplex/agents/actions/builder.py
 """Generic factory: AgentCapability → one cubepi AgentTool.
 
 Builds a Pydantic discriminated-union input model from the capability's
@@ -333,8 +333,8 @@ from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import TextContent
 from pydantic import BaseModel, Field
 
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import (
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import (
     ActionInvalidInput,
     ActionNotFound,
     ActionPermissionDenied,
@@ -457,13 +457,13 @@ Expected: all pass
 
 - [ ] **Step 5: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/builder.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/builder.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/builder.py backend/tests/unit/test_agent_action_builder.py
+git add backend/cubeplex/agents/actions/builder.py backend/tests/unit/test_agent_action_builder.py
 git commit -m "feat(actions): generic capability tool builder with mutation gate"
 ```
 
@@ -472,7 +472,7 @@ git commit -m "feat(actions): generic capability tool builder with mutation gate
 ### Task 3: ScheduledTaskService — extract business logic from routes
 
 **Files:**
-- Create: `backend/cubebox/services/scheduled_task.py`
+- Create: `backend/cubeplex/services/scheduled_task.py`
 - Create: `backend/tests/unit/test_scheduled_task_service.py`
 
 This is the largest task. The service absorbs all logic from `ws_scheduled_tasks.py`: validation, `next_fire_at` computation, timezone normalization, owner-or-admin authorization, and the resume missed-run policy. The service owns the transaction (single commit per mutating call).
@@ -490,11 +490,11 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput, ActionNotFound, ActionPermissionDenied
-from cubebox.models.membership import Role
-from cubebox.models.scheduled_task import ScheduledTask
-from cubebox.services.scheduled_task import ScheduledTaskService
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionInvalidInput, ActionNotFound, ActionPermissionDenied
+from cubeplex.models.membership import Role
+from cubeplex.models.scheduled_task import ScheduledTask
+from cubeplex.services.scheduled_task import ScheduledTaskService
 
 pytestmark = pytest.mark.e2e  # needs real DB
 
@@ -649,7 +649,7 @@ class TestUpdate:
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/unit/test_scheduled_task_service.py -v --no-header 2>&1 | head -20`
-Expected: FAIL — `ModuleNotFoundError: No module named 'cubebox.services.scheduled_task'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'cubeplex.services.scheduled_task'`
 
 - [ ] **Step 3: Implement `ScheduledTaskService`**
 
@@ -658,10 +658,10 @@ This service extracts all logic from `ws_scheduled_tasks.py`. The key rules:
 - Does NOT use `ScopedRepository.add()` or `.delete()` (they auto-commit). Instead uses `session.add()` + explicit `session.commit()`.
 - Uses `begin_nested()` for the race-safe history insert in `resume` (mirrors `_resume_next_fire`).
 - Authorization: checks `task.owner_user_id == ctx.user_id or ctx.role == Role.ADMIN` before mutations.
-- Validation: reuses `_validate_timezone`, `_validate_cron` from `cubebox.api.schemas.ws_scheduled_tasks`.
+- Validation: reuses `_validate_timezone`, `_validate_cron` from `cubeplex.api.schemas.ws_scheduled_tasks`.
 
 ```python
-# backend/cubebox/services/scheduled_task.py
+# backend/cubeplex/services/scheduled_task.py
 """ScheduledTaskService — source of truth for scheduled-task operations.
 
 Both the REST route (thin adapter) and the agent tool (via the action
@@ -681,12 +681,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput, ActionNotFound, ActionPermissionDenied
-from cubebox.api.schemas.ws_scheduled_tasks import _validate_cron, _validate_timezone
-from cubebox.models.membership import Role
-from cubebox.models.scheduled_task import ScheduledTask, ScheduledTaskRun
-from cubebox.schedules.compute import as_utc, latest_due_before, next_fire_after
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionInvalidInput, ActionNotFound, ActionPermissionDenied
+from cubeplex.api.schemas.ws_scheduled_tasks import _validate_cron, _validate_timezone
+from cubeplex.models.membership import Role
+from cubeplex.models.scheduled_task import ScheduledTask, ScheduledTaskRun
+from cubeplex.schedules.compute import as_utc, latest_due_before, next_fire_after
 
 
 _SCHEDULE_FIELDS: frozenset[str] = frozenset(
@@ -1002,7 +1002,7 @@ class ScheduledTaskService:
         ctx: ScopeContext,
         conversation_id: str,
     ) -> None:
-        from cubebox.repositories.conversation import ConversationRepository
+        from cubeplex.repositories.conversation import ConversationRepository
 
         conv_repo = ConversationRepository(
             session,
@@ -1079,7 +1079,7 @@ class ScheduledTaskService:
 
 The functions are module-level in `ws_scheduled_tasks.py` (schemas). They are already importable — confirm by checking:
 
-Run: `cd backend && uv run python -c "from cubebox.api.schemas.ws_scheduled_tasks import _validate_cron, _validate_timezone; print('OK')"`
+Run: `cd backend && uv run python -c "from cubeplex.api.schemas.ws_scheduled_tasks import _validate_cron, _validate_timezone; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 5: Run the service tests**
@@ -1089,13 +1089,13 @@ Expected: all pass
 
 - [ ] **Step 6: Run mypy on the service**
 
-Run: `cd backend && uv run mypy cubebox/services/scheduled_task.py`
+Run: `cd backend && uv run mypy cubeplex/services/scheduled_task.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/services/scheduled_task.py backend/tests/unit/test_scheduled_task_service.py
+git add backend/cubeplex/services/scheduled_task.py backend/tests/unit/test_scheduled_task_service.py
 git commit -m "feat(services): extract ScheduledTaskService from route handlers"
 ```
 
@@ -1104,7 +1104,7 @@ git commit -m "feat(services): extract ScheduledTaskService from route handlers"
 ### Task 4: Refactor routes to thin adapters
 
 **Files:**
-- Modify: `backend/cubebox/api/routes/v1/ws_scheduled_tasks.py`
+- Modify: `backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py`
 
 Replace all inline business logic with calls to `ScheduledTaskService`. The route keeps `_to_out` serialization and the `_iso` helper (these are route-layer concerns — translating domain objects into HTTP response shapes). All existing E2E tests must stay green.
 
@@ -1128,9 +1128,9 @@ Each handler becomes:
 
 ```python
 # Pattern for all handlers:
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import ActionInvalidInput, ActionNotFound, ActionPermissionDenied
-from cubebox.services.scheduled_task import ScheduledTaskService
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import ActionInvalidInput, ActionNotFound, ActionPermissionDenied
+from cubeplex.services.scheduled_task import ScheduledTaskService
 
 _svc = ScheduledTaskService()
 
@@ -1184,13 +1184,13 @@ Expected: all pass (behavior-preserving refactor)
 
 - [ ] **Step 5: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/api/routes/v1/ws_scheduled_tasks.py`
+Run: `cd backend && uv run mypy cubeplex/api/routes/v1/ws_scheduled_tasks.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/cubebox/api/routes/v1/ws_scheduled_tasks.py
+git add backend/cubeplex/api/routes/v1/ws_scheduled_tasks.py
 git commit -m "refactor(routes): scheduled-tasks routes → thin adapters over ScheduledTaskService"
 ```
 
@@ -1199,14 +1199,14 @@ git commit -m "refactor(routes): scheduled-tasks routes → thin adapters over S
 ### Task 5: Scheduled-tasks capability declaration
 
 **Files:**
-- Create: `backend/cubebox/agents/actions/capabilities/scheduled_tasks.py`
+- Create: `backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py`
 
 Declares the 8 operations pointing at `ScheduledTaskService` methods, with LLM-facing descriptions.
 
 - [ ] **Step 1: Create the capability declaration**
 
 ```python
-# backend/cubebox/agents/actions/capabilities/scheduled_tasks.py
+# backend/cubeplex/agents/actions/capabilities/scheduled_tasks.py
 """scheduled_tasks capability — declares operations for the agent tool."""
 
 from __future__ import annotations
@@ -1216,10 +1216,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from cubebox.agents.actions.context import ScopeContext
-from cubebox.agents.actions.types import AgentCapability, AgentOperation
-from cubebox.services.scheduled_task import ScheduledTaskService
-from cubebox.utils.time import utc_isoformat
+from cubeplex.agents.actions.context import ScopeContext
+from cubeplex.agents.actions.types import AgentCapability, AgentOperation
+from cubeplex.services.scheduled_task import ScheduledTaskService
+from cubeplex.utils.time import utc_isoformat
 
 _svc = ScheduledTaskService()
 
@@ -1364,7 +1364,7 @@ async def _handle_create(ctx: ScopeContext, session: Any, inp: CreateInput) -> A
     }
     if inp.target == "current_conversation":
         if ctx.conversation_id is None:
-            from cubebox.agents.actions.types import ActionInvalidInput
+            from cubeplex.agents.actions.types import ActionInvalidInput
 
             raise ActionInvalidInput("Cannot pin to current conversation: no conversation context")
         data["target_mode"] = "fixed"
@@ -1474,18 +1474,18 @@ SCHEDULED_TASKS_CAPABILITY = AgentCapability(
 
 - [ ] **Step 2: Verify the capability is importable**
 
-Run: `cd backend && uv run python -c "from cubebox.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY; print(len(SCHEDULED_TASKS_CAPABILITY.operations), 'operations')"`
+Run: `cd backend && uv run python -c "from cubeplex.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY; print(len(SCHEDULED_TASKS_CAPABILITY.operations), 'operations')"`
 Expected: `8 operations`
 
 - [ ] **Step 3: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/capabilities/scheduled_tasks.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/capabilities/scheduled_tasks.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/capabilities/
+git add backend/cubeplex/agents/actions/capabilities/
 git commit -m "feat(actions): declare scheduled_tasks capability with 8 operations"
 ```
 
@@ -1494,14 +1494,14 @@ git commit -m "feat(actions): declare scheduled_tasks capability with 8 operatio
 ### Task 6: Registry + `tools_for_run`
 
 **Files:**
-- Create: `backend/cubebox/agents/actions/registry.py`
+- Create: `backend/cubeplex/agents/actions/registry.py`
 
 Simple module: lists all capabilities, exposes `tools_for_run()` that the run manager calls.
 
 - [ ] **Step 1: Create the registry**
 
 ```python
-# backend/cubebox/agents/actions/registry.py
+# backend/cubeplex/agents/actions/registry.py
 """Agent capability registry — the single entry point for run_manager."""
 
 from __future__ import annotations
@@ -1510,9 +1510,9 @@ from typing import Any
 
 from cubepi.agent.types import AgentTool
 
-from cubebox.agents.actions.builder import ContextFactory, build_capability_tool
-from cubebox.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY
-from cubebox.agents.actions.types import AgentCapability
+from cubeplex.agents.actions.builder import ContextFactory, build_capability_tool
+from cubeplex.agents.actions.capabilities.scheduled_tasks import SCHEDULED_TASKS_CAPABILITY
+from cubeplex.agents.actions.types import AgentCapability
 
 AGENT_CAPABILITIES: list[AgentCapability] = [
     SCHEDULED_TASKS_CAPABILITY,
@@ -1539,18 +1539,18 @@ def tools_for_run(
 
 - [ ] **Step 2: Verify importable**
 
-Run: `cd backend && uv run python -c "from cubebox.agents.actions.registry import tools_for_run; print('OK')"`
+Run: `cd backend && uv run python -c "from cubeplex.agents.actions.registry import tools_for_run; print('OK')"`
 Expected: `OK`
 
 - [ ] **Step 3: Run mypy**
 
-Run: `cd backend && uv run mypy cubebox/agents/actions/registry.py`
+Run: `cd backend && uv run mypy cubeplex/agents/actions/registry.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/cubebox/agents/actions/registry.py
+git add backend/cubeplex/agents/actions/registry.py
 git commit -m "feat(actions): capability registry with tools_for_run entry point"
 ```
 
@@ -1559,10 +1559,10 @@ git commit -m "feat(actions): capability registry with tools_for_run entry point
 ### Task 7: Thread trigger signal + wire `tools_for_run` into run_manager
 
 **Files:**
-- Modify: `backend/cubebox/streams/run_manager.py:30` — add `trigger` to `RunContext`
-- Modify: `backend/cubebox/streams/run_manager.py:540` — thread `trigger` through `start_run` → `_execute_run` → `_run_cubepi_path`
-- Modify: `backend/cubebox/streams/run_manager.py:969` — accept `trigger`, wire `tools_for_run`
-- Modify: `backend/cubebox/schedules/dispatch.py:91` — pass `trigger="automated"` in `RunContext`
+- Modify: `backend/cubeplex/streams/run_manager.py:30` — add `trigger` to `RunContext`
+- Modify: `backend/cubeplex/streams/run_manager.py:540` — thread `trigger` through `start_run` → `_execute_run` → `_run_cubepi_path`
+- Modify: `backend/cubeplex/streams/run_manager.py:969` — accept `trigger`, wire `tools_for_run`
+- Modify: `backend/cubeplex/schedules/dispatch.py:91` — pass `trigger="automated"` in `RunContext`
 
 This task threads the interactivity signal and wires the action registry's tools into the agent.
 
@@ -1603,7 +1603,7 @@ After the existing `show_widget` tool block (after ~line 1220), add:
         # Platform action tools (scheduled_tasks, etc.) — via the capability
         # registry. Automated runs get read-only tools (mutation gate).
         try:
-            from cubebox.agents.actions.registry import tools_for_run as _action_tools_for_run
+            from cubeplex.agents.actions.registry import tools_for_run as _action_tools_for_run
 
             async with async_session_maker() as _action_session:
                 _role = await MembershipRepository(_action_session).get_role(
@@ -1614,7 +1614,7 @@ After the existing `show_widget` tool block (after ~line 1220), add:
                 from collections.abc import AsyncIterator as _ActionsAsyncIterator
                 from contextlib import asynccontextmanager as _actions_acm
 
-                from cubebox.agents.actions.context import ScopeContext as _ScopeContext
+                from cubeplex.agents.actions.context import ScopeContext as _ScopeContext
 
                 @_actions_acm
                 async def _action_context_factory() -> _ActionsAsyncIterator[tuple[_ScopeContext, Any]]:
@@ -1655,7 +1655,7 @@ In `dispatch.py` (~line 91), change:
 
 - [ ] **Step 5: Run mypy on changed files**
 
-Run: `cd backend && uv run mypy cubebox/streams/run_manager.py cubebox/schedules/dispatch.py`
+Run: `cd backend && uv run mypy cubeplex/streams/run_manager.py cubeplex/schedules/dispatch.py`
 Expected: `Success: no issues found`
 
 - [ ] **Step 6: Run the existing scheduled-task E2E tests (regression check)**
@@ -1666,7 +1666,7 @@ Expected: all pass
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/cubebox/streams/run_manager.py backend/cubebox/schedules/dispatch.py
+git add backend/cubeplex/streams/run_manager.py backend/cubeplex/schedules/dispatch.py
 git commit -m "feat(actions): thread trigger signal + wire tools_for_run into run_manager"
 ```
 
@@ -1678,7 +1678,7 @@ git commit -m "feat(actions): thread trigger signal + wire tools_for_run into ru
 
 - [ ] **Step 1: Run full mypy**
 
-Run: `cd backend && uv run mypy cubebox/`
+Run: `cd backend && uv run mypy cubeplex/`
 Expected: `Success: no issues found`
 
 - [ ] **Step 2: Run all existing scheduled-task tests**

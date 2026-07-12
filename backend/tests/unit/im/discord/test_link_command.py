@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from cubebox.im.discord.commands import _initiate_link
+from cubeplex.im.discord.commands import _initiate_link
 
 
 @pytest.mark.anyio
@@ -18,13 +18,13 @@ async def test_link_generates_token_and_replies_ephemeral() -> None:
     interaction.followup.send = AsyncMock()
 
     bot = MagicMock()
-    bot._cubebox_account_id = "imca_abc"
-    bot._cubebox_workspace_id = "ws_xyz"
+    bot._cubeplex_account_id = "imca_abc"
+    bot._cubeplex_workspace_id = "ws_xyz"
 
     with (
-        patch("cubebox.im.link.get_jwt_secret", return_value="test-secret"),
+        patch("cubeplex.im.link.get_jwt_secret", return_value="test-secret"),
         patch(
-            "cubebox.im.link.get_frontend_base_url",
+            "cubeplex.im.link.get_frontend_base_url",
             return_value="http://localhost:3000",
         ),
     ):
@@ -45,8 +45,8 @@ async def test_link_missing_account_id_replies_error() -> None:
     interaction.followup.send = AsyncMock()
 
     bot = MagicMock()
-    bot._cubebox_account_id = None
-    bot._cubebox_workspace_id = None
+    bot._cubeplex_account_id = None
+    bot._cubeplex_workspace_id = None
 
     await _initiate_link(interaction, bot, email="a@b.com")
 

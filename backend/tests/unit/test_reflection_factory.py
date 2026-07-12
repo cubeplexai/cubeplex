@@ -13,8 +13,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from cubebox.prompts.reflection_system import REFLECTION_SYSTEM_PROMPT
-from cubebox.services.reflection_runner import ReflectionInput, ReflectionTurn
+from cubeplex.prompts.reflection_system import REFLECTION_SYSTEM_PROMPT
+from cubeplex.services.reflection_runner import ReflectionInput, ReflectionTurn
 
 
 def _mk_input() -> ReflectionInput:
@@ -59,7 +59,7 @@ def test_make_reflection_agent_uses_reflection_system_prompt(
     def _make_reflection_agent(inp: ReflectionInput) -> MagicMock:
         from cubepi import Model
 
-        from cubebox.tools.builtin.memory import create_memory_tools
+        from cubeplex.tools.builtin.memory import create_memory_tools
 
         _mem_tools = create_memory_tools(
             service_factory=fake_memory_service,  # type: ignore[arg-type]
@@ -88,7 +88,7 @@ def test_make_reflection_agent_binds_memory_tools(
     fake_memory_service: object,
 ) -> None:
     """The factory closure should give the agent memory_save / memory_search / memory_update tools."""
-    from cubebox.tools.builtin.memory import create_memory_tools
+    from cubeplex.tools.builtin.memory import create_memory_tools
 
     inp = _mk_input()
     tools = create_memory_tools(

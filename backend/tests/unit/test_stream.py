@@ -1,4 +1,4 @@
-"""stream tests — cubepi StreamEvent → cubebox SSE (M1.3)."""
+"""stream tests — cubepi StreamEvent → cubeplex SSE (M1.3)."""
 
 import json
 
@@ -19,7 +19,7 @@ from cubepi.providers.base import (
     UserMessage,
 )
 
-from cubebox.agents.stream import convert_agent_event_to_sse, convert_event_to_sse
+from cubeplex.agents.stream import convert_agent_event_to_sse, convert_event_to_sse
 
 
 def _mk_assistant(text: str = "", tool_calls: list[ToolCall] | None = None) -> AssistantMessage:
@@ -89,8 +89,8 @@ def test_live_chain_toolcall_delta_reaches_frontend_shape() -> None:
     toolcall_end instead of streaming."""
     from cubepi.agent.types import MessageUpdateEvent
 
-    from cubebox.agents.schemas import ToolCallDeltaEvent
-    from cubebox.streams.run_manager import cubepi_dict_to_agent_event
+    from cubeplex.agents.schemas import ToolCallDeltaEvent
+    from cubeplex.streams.run_manager import cubepi_dict_to_agent_event
 
     partial = _mk_assistant(tool_calls=[ToolCall(id="tc1", name="file_write", arguments={})])
     stream_evt = StreamEvent(
@@ -131,7 +131,7 @@ def test_error_with_missing_message_has_fallback() -> None:
 
 
 def test_silent_events_are_dropped() -> None:
-    """Events with no cubebox SSE equivalent return empty list."""
+    """Events with no cubeplex SSE equivalent return empty list."""
     for t in [
         "text_start",
         "text_end",

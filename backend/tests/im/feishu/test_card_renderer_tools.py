@@ -1,6 +1,6 @@
 """Tests for per-tool icon and one-liner args summarization."""
 
-from cubebox.im.feishu.card_renderer import (
+from cubeplex.im.feishu.card_renderer import (
     TOOL_DISPLAY,
     default_display,
     summarize_args,

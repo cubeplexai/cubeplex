@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import inspect
 
-from cubebox.streams.run_manager import RunManager
+from cubeplex.streams.run_manager import RunManager
 
 
 def test_run_cubepi_respond_path_signature():

@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubebox.services.memory_screen import MemoryScreenError, screen_shared_content
+from cubeplex.services.memory_screen import MemoryScreenError, screen_shared_content
 
 
 @pytest.mark.parametrize(

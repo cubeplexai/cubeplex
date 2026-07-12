@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from cubebox.services import mcp_discovery
+from cubeplex.services import mcp_discovery
 
 
 @pytest.mark.asyncio

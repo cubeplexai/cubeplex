@@ -9,7 +9,7 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
-import { bareToolName } from '@cubebox/core'
+import { bareToolName } from '@cubeplex/core'
 
 const iconMap: Record<string, LucideIcon> = {
   execute: Terminal,

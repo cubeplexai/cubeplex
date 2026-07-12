@@ -34,14 +34,14 @@ Optimize the registration flow with three changes:
 
 ## Current state (what exists today)
 
-- **Register** (`backend/cubebox/api/routes/v1/auth.py:46`): custom
+- **Register** (`backend/cubeplex/api/routes/v1/auth.py:46`): custom
   `POST /api/v1/auth/register`. Creates user via fastapi-users
   `UserManager.create`. Does **not** set an auth cookie; the frontend
   auto-calls `/login` after. Returns `{id, email, default_workspace_id}`.
 - **Login** (`auth.py:75`): custom `POST /api/v1/auth/login`,
   `OAuth2PasswordRequestForm`. Checks `is_active`. SSO enforcement returns
-  403 `sso_required`. Sets `cubebox_auth` cookie.
-- **Bootstrap** (`backend/cubebox/auth/users.py:86`, `on_after_register`):
+  403 `sso_required`. Sets `cubeplex_auth` cookie.
+- **Bootstrap** (`backend/cubeplex/auth/users.py:86`, `on_after_register`):
   - `multi_tenant` (`_on_register_multi_tenant`, lines 136-183): silently
     creates org `"{local}'s Org"`, slug, `OrganizationMembership(OWNER)`,
     "Personal" workspace, `Membership(ADMIN)`, `AgentConfig`, MCP enrollment,
@@ -57,7 +57,7 @@ Optimize the registration flow with three changes:
   enforced** — unverified users log in freely. `VerificationBanner` nags
   in-app.
 - **Password validation**: effectively none. fastapi-users'
-  `BaseUserManager.validate_password` is a no-op and cubebox does not override
+  `BaseUserManager.validate_password` is a no-op and cubeplex does not override
   it. Only `ChangePasswordRequest.new_password: str = Field(min_length=8)`
   (`auth.py:277`) enforces anything, and only on change-password.
 - **Config**: dynaconf. `config.yaml` has `auth:` block (lines 278-288) and
@@ -103,7 +103,7 @@ proceeds straight to onboarding — no OTP step.
 
 ### §2. Password policy
 
-New pure-function module `backend/cubebox/auth/password_policy.py`:
+New pure-function module `backend/cubeplex/auth/password_policy.py`:
 
 ```python
 class PasswordPolicy(StrEnum):
@@ -134,7 +134,7 @@ Integration points (single source of truth = the pure function):
 3. **Reset password** (fastapi-users reset router): routes through
    `validate_password` automatically once overridden — no extra change.
 
-A TypeScript mirror lives in `@cubebox/core` (`validatePassword(policy)`)
+A TypeScript mirror lives in `@cubeplex/core` (`validatePassword(policy)`)
 for frontend pre-submit UX. The backend remains the authority.
 
 ### §3. OTP verification (replaces magic-link)
@@ -151,7 +151,7 @@ for frontend pre-submit UX. The backend remains the authority.
 - Per-email send rate limit: counter key `email_otp_rl:{email}` (TTL 3600s);
   exceeding `rate_limit_per_hour` rejects the send.
 
-**New module** `backend/cubebox/auth/email_otp.py` (service layer, no HTTP):
+**New module** `backend/cubeplex/auth/email_otp.py` (service layer, no HTTP):
 - `issue_otp(email) -> code`: generate, write Redis, send via
   `get_email_service()`. New template `email_otp_verification.{html,txt}`
   replaces `email_verification.*`.

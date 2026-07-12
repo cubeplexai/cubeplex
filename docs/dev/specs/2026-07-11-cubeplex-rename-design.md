@@ -2,14 +2,14 @@
 
 **Status:** Approved for planning
 **Date:** 2026-07-11
-**Scope:** Rename the project from `cubebox` to `cubeplex` everywhere the
+**Scope:** Rename the project from `cubeplex` to `cubeplex` everywhere the
 repository owns the name. The rename covers all case variants, paths,
 identifiers, packages, deployment resources, documentation, and generated
 repository metadata.
 
 ## Decision
 
-Perform a full, single-cutover rename. `cubebox`, `CubeBox`, and `CUBEBOX`
+Perform a full, single-cutover rename. `cubeplex`, `CubePlex`, and `CUBEPLEX`
 must no longer appear in active first-party repository content. The new name
 uses matching case conventions: `cubeplex`, `CubePlex`, and `CUBEPLEX`.
 
@@ -22,8 +22,8 @@ must be explicitly documented in the implementation results.
 ## Rename Surfaces
 
 1. **Repository paths and source namespaces.** Rename the top-level checkout
-   directory where feasible, `backend/cubebox/`, Python imports and entry
-   points, frontend workspace package names such as `@cubebox/core`, package
+   directory where feasible, `backend/cubeplex/`, Python imports and entry
+   points, frontend workspace package names such as `@cubeplex/core`, package
    lockfiles, scripts, and tests.
 2. **Runtime configuration.** Rename application/module references,
    environment-variable prefixes, config keys, logging names, filesystem
@@ -42,8 +42,8 @@ must be explicitly documented in the implementation results.
 ## Case-Sensitive Audit Rules
 
 - The implementation maintains a replacement table for exact case forms:
-  `cubebox` → `cubeplex`, `Cubebox` → `Cubeplex`, `CubeBox` → `CubePlex`, and
-  `CUBEBOX` → `CUBEPLEX`.
+  `cubeplex` → `cubeplex`, `Cubeplex` → `Cubeplex`, `CubePlex` → `CubePlex`, and
+  `CUBEPLEX` → `CUBEPLEX`.
 - Before and after modifications, run both case-sensitive and
   case-insensitive repository searches, excluding dependency directories and
   `.git`.
@@ -73,7 +73,7 @@ must be explicitly documented in the implementation results.
 - Python imports, frontend workspace references, Helm templates, Docker
   configuration, and documentation builds are validated after their respective
   changes.
-- The final audit fails the rename if active first-party `cubebox` text or
+- The final audit fails the rename if active first-party `cubeplex` text or
   paths remain, regardless of case.
 
 ## Non-Goals

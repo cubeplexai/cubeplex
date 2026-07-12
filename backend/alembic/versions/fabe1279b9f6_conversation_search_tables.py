@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 from pgvector.sqlalchemy import Vector
 
-from cubebox.config import config
+from cubeplex.config import config
 
 revision: str = "fabe1279b9f6"
 down_revision: str | None = "c8bbfbf153b6"
@@ -24,7 +24,7 @@ LEXICAL_BACKEND = "pgroonga"
 # Vector dim is config-driven so operators can plug in any OpenAI-protocol
 # embedding model without editing this file. Trade-off: the same revision id
 # now emits different DDL across deployments depending on each operator's
-# config. The runtime three-way check in cubebox.services.conversation_search.
+# config. The runtime three-way check in cubeplex.services.conversation_search.
 # startup catches drift between schema, config, and provider.
 VECTOR_DIM = int(config.get("search.embedding.vector_dim", 1024))
 

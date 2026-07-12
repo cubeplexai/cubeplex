@@ -14,10 +14,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from cubebox.db.engine import _build_database_url
-from cubebox.models import User
-from cubebox.models.topic import Topic, TopicParticipant
-from cubebox.repositories import ConversationRepository
+from cubeplex.db.engine import _build_database_url
+from cubeplex.models import User
+from cubeplex.models.topic import Topic, TopicParticipant
+from cubeplex.repositories import ConversationRepository
 from tests.e2e.conftest import (
     DEFAULT_ORG_ID,
     DEFAULT_TEST_EMAIL,

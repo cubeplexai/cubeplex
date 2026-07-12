@@ -1,4 +1,4 @@
-import { CSRF_COOKIE_NAME } from '@cubebox/core'
+import { CSRF_COOKIE_NAME } from '@cubeplex/core'
 
 /** Read the CSRF token cookie set by the backend on login. */
 export function readCsrfToken(): string {
