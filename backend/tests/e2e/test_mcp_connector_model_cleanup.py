@@ -12,6 +12,7 @@ from cubebox.mcp.effective import MCPEffectiveConnectorService
 from cubebox.models import (
     Credential,
     MCPConnector,
+    MCPConnectorTemplate,
     MCPCredentialGrant,
     Organization,
     User,
@@ -21,6 +22,7 @@ from cubebox.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
+    MCPTemplateSettingsRepository,
     MCPWorkspaceConnectorStateRepository,
 )
 
@@ -49,17 +51,30 @@ async def _create_connector_fixture(
     db_session.add(user)
     await db_session.flush()
 
+    # Template required (template_id FK is NOT NULL).
+    template = MCPConnectorTemplate(
+        slug=f"cleanup-{suffix}",
+        name=f"Cleanup Template {suffix}",
+        description="test",
+        provider="test",
+        server_url=f"https://cleanup-{suffix}.example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["static"],
+        default_credential_policy="workspace",
+        scope="global",
+    )
+    db_session.add(template)
+    await db_session.flush()
+
     connector = await MCPConnectorRepository(db_session, org_id=org.id).add(
         MCPConnector(
             org_id=org.id,
-            template_id=None,
+            template_id=template.id,
             name=f"Cleanup Connector {suffix}",
             server_url=f"https://cleanup-{suffix}.example.com/mcp",
             server_url_hash=server_url_hash(f"https://cleanup-{suffix}.example.com/mcp"),
             transport="streamable_http",
-            auth_method="static",
             default_credential_policy="workspace",
-            auth_status="connected",
             status="active",
             created_by_user_id=user.id,
         )
@@ -129,6 +144,7 @@ async def test_credential_grants_are_keyed_by_connector_id(
             org_id=org_id,
             connector_id=connector_id,
             grant_scope="org",
+            auth_method="static",
             credential_id=credentials[0].id,
             created_by_user_id=user_id,
         )
@@ -138,6 +154,7 @@ async def test_credential_grants_are_keyed_by_connector_id(
             org_id=org_id,
             connector_id=connector_id,
             grant_scope="workspace",
+            auth_method="static",
             workspace_id=workspace_id,
             credential_id=credentials[1].id,
             created_by_user_id=user_id,
@@ -148,6 +165,7 @@ async def test_credential_grants_are_keyed_by_connector_id(
             org_id=org_id,
             connector_id=connector_id,
             grant_scope="user",
+            auth_method="static",
             workspace_id=workspace_id,
             user_id=user_id,
             credential_id=credentials[2].id,
@@ -202,6 +220,7 @@ async def test_effective_runtime_resolves_workspace_grant_by_connector_id(
             org_id=org_id,
             connector_id=connector_id,
             grant_scope="workspace",
+            auth_method="static",
             workspace_id=workspace_id,
             credential_id=credential.id,
             created_by_user_id=user_id,
@@ -210,6 +229,7 @@ async def test_effective_runtime_resolves_workspace_grant_by_connector_id(
 
     service = MCPEffectiveConnectorService(
         template_repo=MCPConnectorTemplateRepository(db_session),
+        settings_repo=MCPTemplateSettingsRepository(db_session, org_id=org_id),
         connector_repo=MCPConnectorRepository(db_session, org_id=org_id),
         state_repo=MCPWorkspaceConnectorStateRepository(db_session, org_id=org_id),
         grant_repo=MCPCredentialGrantRepository(db_session, org_id=org_id),

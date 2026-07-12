@@ -52,7 +52,7 @@ const sidebars: SidebarsConfig = {
           label: 'MCP Tools',
           items: [
             'guides/mcp/overview',
-            'guides/mcp/installing-connectors',
+            'guides/mcp/enabling-connectors',
             'guides/mcp/using-tools',
           ],
         },

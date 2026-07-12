@@ -16,15 +16,20 @@ def _route_pairs(app: object) -> set[tuple[str, str]]:
 
 
 def test_workspace_mcp_four_layer_routes_are_registered() -> None:
+    """Verify the workspace MCP template-centric API surface is fully registered."""
     app = create_app()
     pairs = _route_pairs(app)
 
     expected: list[tuple[str, str]] = [
-        ("GET", "/api/v1/ws/{workspace_id}/mcp/templates"),
+        # Template catalog / management
+        ("GET", "/api/v1/ws/{workspace_id}/mcp/catalog"),
+        ("POST", "/api/v1/ws/{workspace_id}/mcp/templates"),
+        ("PUT", "/api/v1/ws/{workspace_id}/mcp/templates/{template_id}/state"),
+        ("POST", "/api/v1/ws/{workspace_id}/mcp/templates/{template_id}/promote"),
+        # Connector / active-tools
         ("GET", "/api/v1/ws/{workspace_id}/mcp/connectors"),
-        ("POST", "/api/v1/ws/{workspace_id}/mcp/installs"),
-        ("DELETE", "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}"),
-        ("PATCH", "/api/v1/ws/{workspace_id}/mcp/connectors/{connector_id}/state"),
+        ("GET", "/api/v1/ws/{workspace_id}/mcp/active-tools"),
+        # Grant endpoints (connector-keyed)
         ("POST", "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/me"),
         ("DELETE", "/api/v1/ws/{workspace_id}/mcp/installs/{connector_id}/grants/me"),
         (

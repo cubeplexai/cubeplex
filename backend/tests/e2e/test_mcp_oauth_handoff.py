@@ -1,7 +1,21 @@
-"""E2E for MCP install → authentication handoff."""
+"""E2E for MCP install → authentication handoff.
+
+Removed in Task 9 template-centric cutover:
+- seeded_static_org_install fixture: used POST /admin/mcp/installs (removed)
+- seeded_oauth_org_install_no_grant fixture: same
+- test_admin_install_effective_static_org_pending: used GET /installs/{id}/effective (removed)
+- test_admin_install_effective_oauth_org_pending_returns_pending_oauth: same
+
+auth_status was removed from MCPConnector in the template-centric model (status
+is now on MCPCredentialGrant). Callback tests no longer assert install.auth_status.
+
+_seed_oauth_install now creates a real MCPConnectorTemplate first so the
+template_id FK constraint is satisfied.
+"""
 
 from __future__ import annotations
 
+import secrets
 from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -114,13 +128,32 @@ async def _seed_oauth_install(
     default_credential_policy: str = "user",
     created_by_user_id: str | None = None,
 ) -> MCPConnector:
-    """Insert a directly-installed (template_id=NULL) OAuth connector row.
+    """Insert an OAuth connector row backed by a real template.
 
-    Pre-populates ``oauth_client_config.client_id`` so the start service
-    short-circuits DCR.
+    Creates an org-custom OAuth template (or reuses one if template_id is
+    passed) so the ``template_id`` FK constraint is satisfied. Pre-populates
+    ``oauth_client_config.client_id`` so the start service short-circuits DCR.
+
+    ``workspace_id`` and ``install_scope`` are accepted but ignored — connectors
+    are always org-scope in the template-centric model.
     """
-
     del workspace_id, install_scope
+
+    if template_id is None:
+        slug = f"oauth-e2e-{secrets.token_hex(6)}"
+        template = await MCPConnectorTemplateRepository(session).upsert_by_slug(
+            slug=slug,
+            name="OAuth E2E Handoff",
+            description="Auto-seeded OAuth template for handoff tests",
+            provider="E2E",
+            server_url="https://oauth-e2e.example.com/mcp",
+            transport="streamable_http",
+            supported_auth_methods=["oauth"],
+            default_credential_policy=default_credential_policy,
+            oauth_dcr_supported=False,
+        )
+        await session.commit()
+        template_id = template.id
 
     connector = await MCPConnectorRepository(session, org_id=org_id).add(
         MCPConnector(
@@ -130,9 +163,7 @@ async def _seed_oauth_install(
             server_url="https://oauth-e2e.example.com/mcp",
             server_url_hash=server_url_hash("https://oauth-e2e.example.com/mcp"),
             transport="streamable_http",
-            auth_method="oauth",
             default_credential_policy=default_credential_policy,
-            auth_status="pending",
             status="active",
             oauth_client_config={"client_id": "test-client-id"},
             created_by_user_id=created_by_user_id,
@@ -181,7 +212,6 @@ async def seeded_oauth_install(
             session,
             org_id=org_id,
             workspace_id=ws_id,
-            install_scope="workspace",
             default_credential_policy="user",
             created_by_user_id=user_id,
         )
@@ -600,7 +630,6 @@ async def seeded_oauth_org_install(
             session,
             org_id=org_id,
             workspace_id=None,
-            install_scope="org",
             default_credential_policy="org",
             created_by_user_id=user_id,
         )
@@ -725,10 +754,11 @@ async def test_callback_writes_user_grant_and_keeps_install_pending(
     assert grant is not None
     assert grant.connector_id == connector_id
     assert grant.grant_status == "valid"
-
+    # User-policy: the connector row is not flipped to "authorized" because
+    # auth_status was removed from MCPConnector in the template-centric model.
+    # Verify the connector itself is still findable and intact.
     install = await install_repo.get(install_id)
     assert install is not None
-    assert install.auth_status == "pending"  # user-policy: never flips
 
 
 async def test_callback_writes_org_grant_and_authorizes_install(
@@ -776,84 +806,13 @@ async def test_callback_writes_org_grant_and_authorizes_install(
     assert grant is not None
     assert grant.connector_id == connector_id
     assert grant.grant_status == "valid"
-
+    # auth_status was removed from MCPConnector in the template-centric model.
+    # The grant's grant_status == "valid" is the canonical "authorized" signal now.
     install = await install_repo.get(install_id)
     assert install is not None
-    assert install.auth_status == "authorized"
 
 
-# ---------------------------------------------------------------------------
-# Task 4: admin org-row effective endpoint.
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def seeded_static_org_install(
-    admin_client: tuple[httpx.AsyncClient, str],
-    static_template_id: str,
-) -> str:
-    """Install a static-auth org-scope row WITHOUT writing an org grant.
-
-    ``default_credential_policy='org'`` and ``auth_status='pending'`` so the
-    admin-row derivation must yield ``missing_org_grant``.
-    """
-    client, _workspace_id = admin_client
-    resp = await client.post(
-        "/api/v1/admin/mcp/installs",
-        json={
-            "template_id": static_template_id,
-            "install_scope": "org",
-            "auth_method": "static",
-            "default_credential_policy": "org",
-            "auto_enable": {"mode": "none"},
-        },
-    )
-    assert resp.status_code == 201, resp.text
-    return str(resp.json()["connector_id"])
-
-
-@pytest_asyncio.fixture
-async def seeded_oauth_org_install_no_grant(
-    admin_client: tuple[httpx.AsyncClient, str],
-    oauth_template_id: str,
-) -> str:
-    """Install an OAuth org-scope row with no grant yet — admin row → pending_oauth."""
-    client, _workspace_id = admin_client
-    resp = await client.post(
-        "/api/v1/admin/mcp/installs",
-        json={
-            "template_id": oauth_template_id,
-            "install_scope": "org",
-            "auth_method": "oauth",
-            "default_credential_policy": "org",
-            "auto_enable": {"mode": "none"},
-        },
-    )
-    assert resp.status_code == 201, resp.text
-    return str(resp.json()["connector_id"])
-
-
-async def test_admin_install_effective_static_org_pending(
-    admin_client: tuple[httpx.AsyncClient, str],
-    seeded_static_org_install: str,
-) -> None:
-    client, _workspace_id = admin_client
-    install_id = seeded_static_org_install
-    res = await client.get(f"/api/v1/admin/mcp/installs/{install_id}/effective")
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["usable"] is False
-    assert body["reason"] == "missing_org_grant"
-
-
-async def test_admin_install_effective_oauth_org_pending_returns_pending_oauth(
-    admin_client: tuple[httpx.AsyncClient, str],
-    seeded_oauth_org_install_no_grant: str,
-) -> None:
-    client, _workspace_id = admin_client
-    install_id = seeded_oauth_org_install_no_grant
-    res = await client.get(f"/api/v1/admin/mcp/installs/{install_id}/effective")
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["usable"] is False
-    assert body["reason"] == "pending_oauth"
+# Task 4 (GET /installs/{id}/effective) was removed in Task 9 template-centric
+# cutover. The "effective" endpoint no longer exists. The equivalent check is
+# now done via GET /admin/mcp/catalog which returns per-template catalog rows
+# including org_grant_status and needs_attention fields.

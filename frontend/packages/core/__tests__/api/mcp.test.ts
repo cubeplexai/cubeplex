@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createApiClient } from '../../src/api/client'
 import {
-  adminCreateInstall,
-  adminListTemplates,
-  wsCreateInstall,
+  adminCreateTemplate,
+  adminDistribute,
+  adminListCatalog,
   wsCreateMyGrant,
+  wsListCatalog,
   wsListEffectiveConnectors,
-  wsListTemplates,
-  wsPatchConnectorState,
+  wsSetTemplateState,
 } from '../../src/api/mcp'
 
-describe('MCP four-layer API', () => {
+describe('MCP catalog API', () => {
   let fetchMock: ReturnType<typeof vi.fn>
   beforeEach(() => {
     fetchMock = vi.fn()
@@ -19,43 +19,55 @@ describe('MCP four-layer API', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('uses template and install paths for workspace MCP', async () => {
+  it('adminListCatalog GETs the admin catalog endpoint', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
     const client = createApiClient('')
-    await wsListTemplates(client, 'ws-x')
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/templates')
+    await adminListCatalog(client)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/catalog')
   })
 
-  it('adminListTemplates hits the admin scope', async () => {
+  it('wsListCatalog GETs the workspace catalog endpoint', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
     const client = createApiClient('')
-    await adminListTemplates(client)
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/templates')
+    await wsListCatalog(client, 'ws-x')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/catalog')
   })
 
-  it('wsCreateInstall POSTs to workspace install endpoint', async () => {
+  it('adminCreateTemplate POSTs to admin templates endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ connector_id: 'mcpco-1' }), {
-        status: 201,
-      }),
+      new Response(JSON.stringify({ template_id: 'mcptpl-1' }), { status: 201 }),
     )
     const client = createApiClient('')
-    await wsCreateInstall(client, 'ws-x', { template_id: 'mctpl-1' })
+    const body = {
+      name: 'My Server',
+      server_url: 'https://example.com/mcp',
+      transport: 'streamable_http' as const,
+      auth_method: 'static' as const,
+    }
+    await adminCreateTemplate(client, body)
     const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/v1/ws/ws-x/mcp/installs')
+    expect(url).toBe('/api/v1/admin/mcp/templates')
     expect((init as RequestInit).method).toBe('POST')
   })
 
-  it('adminCreateInstall POSTs to admin install endpoint', async () => {
+  it('adminDistribute POSTs to the distribute endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ connector_id: 'mcpco-1' }), {
-        status: 201,
-      }),
+      new Response(JSON.stringify({ template: { template_id: 'mcptpl-1' } }), { status: 200 }),
     )
     const client = createApiClient('')
-    const install = await adminCreateInstall(client, { template_id: 'mctpl-1' })
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/installs')
-    expect(install.connector_id).toBe('mcpco-1')
+    await adminDistribute(client, 'mcptpl-1', { enable_existing: true, auto_enroll: false })
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/admin/mcp/templates/mcptpl-1/distribute')
+  })
+
+  it('wsSetTemplateState PUTs to the ws state endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ template: {}, enabled: true }), { status: 200 }),
+    )
+    const client = createApiClient('')
+    await wsSetTemplateState(client, 'ws-x', 'mcptpl-1', { enabled: true })
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/v1/ws/ws-x/mcp/templates/mcptpl-1/state')
+    expect((init as RequestInit).method).toBe('PUT')
   })
 
   it('wsListEffectiveConnectors GETs the workspace connectors endpoint', async () => {
@@ -65,20 +77,9 @@ describe('MCP four-layer API', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/ws/ws-x/mcp/connectors')
   })
 
-  it('wsPatchConnectorState PATCHes the connector state', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({}), { status: 200 }))
-    const client = createApiClient('')
-    await wsPatchConnectorState(client, 'ws-x', 'mcins-1', { enabled: false })
-    const [url, init] = fetchMock.mock.calls[0]
-    expect(url).toBe('/api/v1/ws/ws-x/mcp/connectors/mcins-1/state')
-    expect((init as RequestInit).method).toBe('PATCH')
-  })
-
   it('wsCreateMyGrant posts to the per-user grant endpoint', async () => {
     fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ connector_id: 'mcpco-1' }), {
-        status: 201,
-      }),
+      new Response(JSON.stringify({ connector_id: 'mcpco-1' }), { status: 201 }),
     )
     const client = createApiClient('')
     await wsCreateMyGrant(client, 'ws-x', 'mcins-1', { credential_plaintext: 'tok' })

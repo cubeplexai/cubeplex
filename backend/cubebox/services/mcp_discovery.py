@@ -44,6 +44,7 @@ from cubebox.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
+    MCPTemplateSettingsRepository,
     MCPWorkspaceConnectorStateRepository,
 )
 from cubebox.services.credential import CredentialService
@@ -208,10 +209,14 @@ async def _build_discovery_metadata(discovered: _DiscoveredRaw) -> dict[str, Any
     return {"server": server_dict, "tool_icons": tool_icons}
 
 
-def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
+def _build_runtime_spec_for_discovery(install: Any, grant: Any, *, workspace_id: str = "") -> Any:
     """Build the ``MCPRuntimeConnectorSpec`` shape that
     ``_resolve_auth_from_spec`` expects without going through the
-    full effective-state list (which the caller already computed)."""
+    full effective-state list (which the caller already computed).
+
+    ``workspace_id`` is the request context value (not the old install-level
+    field, which was removed in the template-centric model).
+    """
     from cubebox.mcp.effective import MCPRuntimeConnectorSpec
 
     return MCPRuntimeConnectorSpec(
@@ -219,7 +224,7 @@ def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
         name=install.name,
         server_url=install.server_url,
         transport=install.transport,
-        auth_method=install.auth_method,
+        auth_method=grant.auth_method if grant is not None else "none",
         grant_scope=grant.grant_scope if grant is not None else None,
         credential_id=grant.credential_id if grant is not None else None,
         refresh_credential_id=(grant.refresh_credential_id if grant is not None else None),
@@ -230,7 +235,7 @@ def _build_runtime_spec_for_discovery(install: Any, grant: Any) -> Any:
         sse_read_timeout=install.sse_read_timeout,
         template_id=install.template_id,
         org_id=install.org_id,
-        workspace_id=install.workspace_id or "",
+        workspace_id=workspace_id,
         grant=grant,
         oauth_client_config=dict(install.oauth_client_config or {}),
         static_auth_style=getattr(install, "static_auth_style", None) or "bearer",
@@ -296,8 +301,8 @@ async def discover_tools_for_install(
 
     Routes inject ``signer`` and ``token_mgr`` via the existing DI
     factories. Both are needed because ``_resolve_auth_from_spec``
-    mints an identity token for ``auth_method='none'`` installs and
-    refreshes OAuth grants on call for ``auth_method='oauth'`` installs.
+    mints an identity token for no-auth templates and refreshes OAuth
+    grants on call for OAuth-auth templates.
     """
     cred_org_id = cred_service._org_id
     assert cred_org_id is not None, "discover_tools_for_install requires org-scoped cred_service"
@@ -305,7 +310,7 @@ async def discover_tools_for_install(
     install = await install_repo.get(connector_id)
     if install is None:
         raise ValueError("connector_install_not_found")
-    if install.install_state != "active":
+    if install.status != "active":
         raise ValueError("connector_install_not_active")
     connector_repo = MCPConnectorRepository(session, org_id=install.org_id)
     connector = await connector_repo.get_active_by_identity(
@@ -319,6 +324,7 @@ async def discover_tools_for_install(
     template_repo = MCPConnectorTemplateRepository(session)
     effective_svc = MCPEffectiveConnectorService(
         template_repo=template_repo,
+        settings_repo=MCPTemplateSettingsRepository(session, org_id=install.org_id),
         install_repo=install_repo,
         state_repo=state_repo,
         grant_repo=grant_repo,
@@ -332,8 +338,6 @@ async def discover_tools_for_install(
         token_manager=token_mgr,
     )
 
-    if workspace_id is None and install.install_scope == "workspace":
-        workspace_id = install.workspace_id
     if workspace_id is None and install.default_credential_policy in {"workspace", "user"}:
         raise ValueError("workspace_id_required_for_scoped_policy")
 
@@ -359,13 +363,17 @@ async def discover_tools_for_install(
             usable = True
     else:
         grant = await grant_repo.get_org_grant(connector_id)
+        # Derive auth_required from the template (no longer from the install row).
+        _template = await template_repo.get(install.template_id)
+        _methods = set(_template.supported_auth_methods or []) if _template is not None else set()
+        _auth_required = bool(_methods - {"none"})
         # Match the workspace-side effective rule (compute_effective_state
         # rule 8): an org OAuth grant whose status is 'expired' but still
         # has a refresh_credential_id is usable — the token manager rotates
         # the access token on call. Rejecting it here would block Refresh
         # tools for any org OAuth install that ever had a transient
         # refresh failure mark the grant expired.
-        usable = install.auth_method == "none" or (
+        usable = not _auth_required or (
             grant is not None
             and (
                 grant.grant_status == "valid"
@@ -379,7 +387,9 @@ async def discover_tools_for_install(
 
     from cubebox.mcp.cubepi_runtime import _resolve_auth_from_spec
 
-    spec = _build_runtime_spec_for_discovery(install=install, grant=grant)
+    spec = _build_runtime_spec_for_discovery(
+        install=install, grant=grant, workspace_id=workspace_id or ""
+    )
     # Wrap header resolution: vault read failures (deleted credential,
     # wrong kind, OAuth refresh failure) raise from
     # ``_resolve_auth_from_spec``. Persist them as
@@ -388,7 +398,7 @@ async def discover_tools_for_install(
     try:
         resolved = await _resolve_auth_from_spec(
             spec=spec,
-            workspace_id=workspace_id or install.workspace_id or "",
+            workspace_id=workspace_id or "",
             org_id=install.org_id,
             user_id=actor_user_id,
             cred_service=cred_service,

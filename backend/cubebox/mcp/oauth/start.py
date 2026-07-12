@@ -6,7 +6,8 @@ The per-scope start route handlers in admin_mcp.py / ws_mcp.py call
 ``OAuthStartResult`` into ``MCPOAuthStartOut``.
 
 The service:
-1. Looks up the install row (must exist, be active, and use auth_method='oauth').
+1. Looks up the install row (must exist, be active) and verifies its template
+   supports OAuth.
 2. Discovers / refreshes AS metadata via OAuthMetadataDiscovery.
 3. Performs DCR if the AS supports it and the install has no client_id yet
    (snapshots client_id / client_secret onto the install row); otherwise reuses
@@ -138,10 +139,14 @@ class OAuthStartService:
         # clause above, this guard keeps the boundary.
         if install.org_id != actor_org_id:
             raise OAuthStartError("connector_install_not_found")
-        if install.install_state != "active":
+        if install.status != "active":
             raise OAuthStartError("connector_install_not_active")
-        if install.auth_method != "oauth":
-            raise OAuthStartError("oauth_start_only_valid_for_oauth_auth")
+        # Validate that the template supports OAuth (replaces the old connector-level
+        # auth_method field which no longer exists on MCPConnector).
+        _tpl_repo = MCPConnectorTemplateRepository(self._session)
+        _tpl = await _tpl_repo.get(install.template_id)
+        if _tpl is None or "oauth" not in (_tpl.supported_auth_methods or []):
+            raise OAuthStartError("auth_method_not_supported_by_template")
         connector_id = install.id
 
         # Build org-scoped service surface AFTER install reveals org_id.

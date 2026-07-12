@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any
 
 from loguru import logger
+from sqlalchemy import select
 
-from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, server_url_hash, slugify_for_namespace
+from cubebox.mcp._constants import CREDENTIAL_KIND_MCP, slugify_for_namespace
 from cubebox.models import MCPConnector, MCPConnectorTemplate, MCPCredentialGrant
+from cubebox.models.mcp import MCPWorkspaceConnectorState
 from cubebox.repositories.mcp import (
     MCPConnectorRepository,
+    MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
     MCPWorkspaceConnectorStateRepository,
 )
@@ -20,19 +21,11 @@ from cubebox.services.credential import CredentialService
 
 
 @dataclass(frozen=True)
-class MCPConnectorDefaults:
-    """Derived defaults applied to a connector row."""
-
-    auth_status: str
-    credential_policy: str
-
-
-@dataclass(frozen=True)
 class ConnectorWithIdentity:
     """A connector plus its primary identity.
 
     ``install`` is kept as a temporary alias while route/schema call sites are
-    migrated in this task.
+    migrated in Tasks 9-10.
     """
 
     connector: MCPConnector
@@ -41,15 +34,6 @@ class ConnectorWithIdentity:
     @property
     def install(self) -> MCPConnector:
         return self.connector
-
-
-def install_defaults_for_auth_method(
-    auth_method: str,
-    requested_policy: str,
-) -> MCPConnectorDefaults:
-    if auth_method == "none":
-        return MCPConnectorDefaults(auth_status="not_required", credential_policy="none")
-    return MCPConnectorDefaults(auth_status="pending", credential_policy=requested_policy)
 
 
 class MCPConnectorService:
@@ -75,218 +59,150 @@ class MCPConnectorService:
         self._connector_repo = connector_repo
         self._install_repo = connector_repo
 
-    async def create_from_template_for_workspace(
-        self,
-        *,
-        template: MCPConnectorTemplate,
-        workspace_id: str,
-        auth_method: str,
-        credential_policy: str,
-    ) -> ConnectorWithIdentity:
-        if auth_method not in template.supported_auth_methods:
-            raise ValueError("auth_method_not_supported_by_template")
-        connector = await self._ensure_connector_from_template(
-            template,
-            auth_method=auth_method,
-            credential_policy=credential_policy,
-            auto_enroll_new_workspaces=False,
+    async def ensure_connector(self, template: MCPConnectorTemplate) -> MCPConnector:
+        """Lazily materialise the org's connector for ``template``.
+
+        Delegates to ``get_or_create_for_template`` — idempotent and race-safe.
+        """
+        return await self._connector_repo.get_or_create_for_template(
+            template, created_by_user_id=self._actor_user_id
         )
-        defaults = install_defaults_for_auth_method(auth_method, credential_policy)
-        await self._state_repo.upsert_for_connector(
+
+    async def distribute(
+        self,
+        template: MCPConnectorTemplate,
+        *,
+        enable_existing: bool,
+        auto_enroll: bool,
+    ) -> MCPConnector:
+        """Ensure a connector exists and fan out state rows to workspaces.
+
+        When ``enable_existing`` is True, insert an ``enabled=True`` state row
+        with ``enablement_source='admin_auto'`` for every workspace that has no
+        existing row.  Workspaces that already have a state row — including those
+        with an explicit ``enabled=False`` — are never touched (spec §5).
+
+        Sets ``auto_enroll_new_workspaces = auto_enroll`` on the connector.
+
+        Raises ``RuntimeError`` if ``workspace_repo`` was not provided at
+        construction time.
+        """
+        if self._workspace_repo is None:
+            raise RuntimeError("distribute requires workspace_repo")
+        connector = await self._connector_repo.get_or_create_for_template(
+            template, created_by_user_id=self._actor_user_id
+        )
+        if enable_existing:
+            existing_rows = await self._state_repo.list_for_install(connector.id)
+            already = {row.workspace_id for row in existing_rows}
+            for ws in await self._workspace_repo.list_for_org(self._org_id):
+                if ws.id in already:
+                    continue
+                await self._state_repo.upsert_for_connector(
+                    workspace_id=ws.id,
+                    connector_id=connector.id,
+                    enabled=True,
+                    credential_policy=connector.default_credential_policy,
+                    enablement_source="admin_auto",
+                    updated_by_user_id=self._actor_user_id,
+                )
+        connector.auto_enroll_new_workspaces = auto_enroll
+        return await self._connector_repo.update(connector)
+
+    async def purge(self, template_id: str) -> None:
+        """Hard-delete the connector for ``template_id`` plus all its state rows and grants.
+
+        Credential vault rows referenced by grants are also deleted (mirrors
+        ``disconnect_grant`` cleanup).  The template row is left intact.
+
+        Vault deletion happens AFTER the DB commit so that CredentialRepository.delete's
+        internal commit cannot split the DB transaction.  Vault cleanup is best-effort:
+        failures leave orphaned encrypted rows but never leave the DB in a broken state.
+
+        Raises ``ValueError("mcp_install_not_found")`` if no active connector
+        exists for this template in the current org.
+        """
+        connector = await self._connector_repo.get_by_template_id(template_id)
+        if connector is None:
+            raise ValueError("mcp_install_not_found")
+
+        # Collect credential ids from grants BEFORE the DB delete pass (grants will be
+        # gone after, so we can't read them from the committed state).
+        session = self._connector_repo.session
+        grant_rows = list(
+            (
+                await session.execute(
+                    select(MCPCredentialGrant).where(
+                        MCPCredentialGrant.org_id == self._org_id,  # type: ignore[arg-type]
+                        MCPCredentialGrant.connector_id == connector.id,  # type: ignore[arg-type]
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        credential_ids: set[str] = set()
+        for grant in grant_rows:
+            for cred_id in (grant.credential_id, grant.refresh_credential_id):
+                if cred_id:
+                    credential_ids.add(cred_id)
+
+        # DB deletes in one atomic transaction.  If ANY step fails, rollback restores
+        # everything — no mid-transaction commit can corrupt the DB state.
+        try:
+            await self._state_repo.delete_for_connector(connector.id, flush_only=True)
+            await self._grant_repo.delete_for_connector(connector.id, flush_only=True)
+            await session.delete(connector)
+            await session.flush()
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+        # AFTER the DB commit: grants are now truly gone, so _guard_references will
+        # see no live references.  Vault cleanup is best-effort — a failure here only
+        # leaves orphaned encrypted rows; the DB state is already clean.
+        for cred_id in credential_ids:
+            try:
+                await self._cred_service.delete(credential_id=cred_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("MCP purge: skipping vault delete for {}: {}", cred_id, exc)
+
+    async def set_workspace_enabled(
+        self,
+        template: MCPConnectorTemplate,
+        *,
+        workspace_id: str,
+        enabled: bool,
+        credential_policy: str | None,
+    ) -> MCPWorkspaceConnectorState:
+        """Lazy-enable path used by the workspace route.
+
+        Ensures the connector exists (creating it if necessary), then upserts
+        the workspace's state row with ``enablement_source='workspace_manual'``.
+
+        When ``credential_policy`` is None the connector's
+        ``default_credential_policy`` is used.
+
+        This method intentionally does NOT check template visibility or the
+        org-disabled flag — those rejections belong to the route layer (Task 10).
+        """
+        connector = await self._connector_repo.get_or_create_for_template(
+            template, created_by_user_id=self._actor_user_id
+        )
+        policy = (
+            credential_policy
+            if credential_policy is not None
+            else connector.default_credential_policy
+        )
+        return await self._state_repo.upsert_for_connector(
             workspace_id=workspace_id,
             connector_id=connector.id,
-            enabled=True,
-            credential_policy=defaults.credential_policy,
+            enabled=enabled,
+            credential_policy=policy,
             enablement_source="workspace_manual",
             updated_by_user_id=self._actor_user_id,
         )
-        return ConnectorWithIdentity(connector=connector, connector_id=connector.id)
-
-    async def create_from_template_for_org(
-        self,
-        *,
-        template: MCPConnectorTemplate,
-        auth_method: str,
-        credential_policy: str,
-        distribution: dict[str, Any],
-    ) -> ConnectorWithIdentity:
-        if auth_method not in template.supported_auth_methods:
-            raise ValueError("auth_method_not_supported_by_template")
-        workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
-        connector = await self._ensure_connector_from_template(
-            template,
-            auth_method=auth_method,
-            credential_policy=credential_policy,
-            auto_enroll_new_workspaces=mode == "all",
-        )
-        defaults = install_defaults_for_auth_method(auth_method, credential_policy)
-        await self._fan_out_state_rows(
-            connector=connector,
-            workspace_ids=workspace_ids,
-            credential_policy=defaults.credential_policy,
-            enablement_source=enablement_source,
-        )
-        return ConnectorWithIdentity(connector=connector, connector_id=connector.id)
-
-    async def create_custom_install_for_org(
-        self,
-        *,
-        name: str,
-        server_url: str,
-        transport: str,
-        auth_method: str,
-        default_credential_policy: str,
-        headers: dict[str, str] | None,
-        distribution: dict[str, Any],
-    ) -> ConnectorWithIdentity:
-        workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
-        existing = await self._connector_repo.get_active_by_identity(
-            template_id=None,
-            server_url_hash=server_url_hash(server_url),
-            slug_name=slugify_for_namespace(name),
-        )
-        if existing is not None:
-            raise ValueError("install_already_exists")
-        defaults = install_defaults_for_auth_method(auth_method, default_credential_policy)
-        connector = await self._connector_repo.add(
-            MCPConnector(
-                org_id=self._org_id,
-                template_id=None,
-                name=name,
-                server_url=server_url,
-                server_url_hash=server_url_hash(server_url),
-                transport=transport,
-                auth_method=auth_method,
-                default_credential_policy=defaults.credential_policy,
-                auth_status=defaults.auth_status,
-                headers=dict(headers or {}),
-                auto_enroll_new_workspaces=mode == "all",
-                status="active",
-                created_by_user_id=self._actor_user_id,
-            )
-        )
-        await self._fan_out_state_rows(
-            connector=connector,
-            workspace_ids=workspace_ids,
-            credential_policy=defaults.credential_policy,
-            enablement_source=enablement_source,
-        )
-        return ConnectorWithIdentity(connector=connector, connector_id=connector.id)
-
-    async def _ensure_connector_from_template(
-        self,
-        template: MCPConnectorTemplate,
-        *,
-        auth_method: str,
-        credential_policy: str,
-        auto_enroll_new_workspaces: bool,
-    ) -> MCPConnector:
-        defaults = install_defaults_for_auth_method(auth_method, credential_policy)
-        existing = await self._connector_repo.get_active_by_identity(
-            template_id=template.id,
-            server_url_hash=server_url_hash(template.server_url),
-            slug_name=slugify_for_namespace(template.name),
-        )
-        if existing is not None:
-            if not (
-                existing.template_id == template.id
-                and existing.server_url_hash == server_url_hash(template.server_url)
-                and existing.slug_name == slugify_for_namespace(template.name)
-            ):
-                raise ValueError("install_already_exists")
-            existing.auth_method = auth_method
-            existing.default_credential_policy = defaults.credential_policy
-            existing.auth_status = defaults.auth_status
-            existing.tool_citations = dict(template.tool_citation_defaults)
-            existing.static_auth_style = template.static_auth_style
-            existing.static_auth_header_name = template.static_auth_header_name
-            existing.static_auth_query_param = template.static_auth_query_param
-            existing.auto_enroll_new_workspaces = auto_enroll_new_workspaces
-            return await self._connector_repo.update(existing)
-        return await self._connector_repo.add(
-            MCPConnector(
-                org_id=self._org_id,
-                template_id=template.id,
-                name=template.name,
-                server_url=template.server_url,
-                server_url_hash=server_url_hash(template.server_url),
-                transport=template.transport,
-                auth_method=auth_method,
-                default_credential_policy=defaults.credential_policy,
-                auth_status=defaults.auth_status,
-                oauth_client_config={},
-                static_auth_style=template.static_auth_style,
-                static_auth_header_name=template.static_auth_header_name,
-                static_auth_query_param=template.static_auth_query_param,
-                tool_citations=dict(template.tool_citation_defaults),
-                auto_enroll_new_workspaces=auto_enroll_new_workspaces,
-                created_by_user_id=self._actor_user_id,
-            )
-        )
-
-    async def _resolve_distribution(
-        self,
-        distribution: dict[str, Any],
-    ) -> tuple[list[str], str, str]:
-        mode = distribution.get("mode")
-        if mode not in {"all", "selected", "none"}:
-            raise ValueError(f"unknown distribution mode: {mode!r}")
-
-        if mode == "all":
-            if self._workspace_repo is None:
-                raise RuntimeError("distribution mode='all' requires workspace_repo")
-            workspaces = await self._workspace_repo.list_for_org(self._org_id)
-            return [ws.id for ws in workspaces], "admin_auto", "all"
-        if mode == "selected":
-            raw_ids = distribution.get("workspace_ids") or []
-            if not isinstance(raw_ids, list):
-                raise ValueError("distribution.workspace_ids must be a list")
-            requested = [str(wid) for wid in raw_ids]
-            if requested:
-                if self._workspace_repo is None:
-                    raise RuntimeError("distribution mode='selected' requires workspace_repo")
-                valid_ws = await self._workspace_repo.list_for_org(self._org_id)
-                valid_ids = {ws.id for ws in valid_ws}
-                if any(wid not in valid_ids for wid in requested):
-                    raise ValueError("workspace_not_in_org")
-            return requested, "admin_manual", "selected"
-        return [], "", "none"
-
-    async def _fan_out_state_rows(
-        self,
-        *,
-        connector: MCPConnector,
-        workspace_ids: list[str],
-        credential_policy: str,
-        enablement_source: str,
-    ) -> None:
-        for ws_id in workspace_ids:
-            await self._state_repo.upsert_for_connector(
-                workspace_id=ws_id,
-                connector_id=connector.id,
-                enabled=True,
-                credential_policy=credential_policy,
-                enablement_source=enablement_source,
-                updated_by_user_id=self._actor_user_id,
-            )
-
-    async def promote_workspace_install_to_org(
-        self,
-        *,
-        connector_id: str,
-        distribution: dict[str, Any],
-    ) -> MCPConnector:
-        connector = await self._require_active_connector(connector_id)
-        workspace_ids, enablement_source, mode = await self._resolve_distribution(distribution)
-        connector.auto_enroll_new_workspaces = mode == "all"
-        saved = await self._connector_repo.update(connector)
-        await self._fan_out_state_rows(
-            connector=saved,
-            workspace_ids=workspace_ids,
-            credential_policy=saved.default_credential_policy,
-            enablement_source=enablement_source,
-        )
-        return saved
 
     async def _connector_id_for_install(self, connector: MCPConnector) -> str | None:
         return connector.id
@@ -362,8 +278,13 @@ class MCPConnectorService:
     ) -> MCPCredentialGrant:
         self._validate_grant_scope_shape(grant_scope, workspace_id, user_id)
         connector = await self._require_active_connector(connector_id)
-        if connector.auth_method != "static":
-            raise ValueError("static_grant_only_valid_for_static_auth")
+        # Validate the template supports static auth before creating the grant.
+        if connector.template_id is not None:
+            template = await MCPConnectorTemplateRepository(self._connector_repo.session).get(
+                connector.template_id
+            )
+            if template is not None and "static" not in (template.supported_auth_methods or []):
+                raise ValueError("auth_method_not_supported_by_template")
 
         credential_name = name or self._static_credential_name(
             connector_id=connector_id,
@@ -388,6 +309,7 @@ class MCPConnectorService:
                     org_id=self._org_id,
                     connector_id=connector_id,
                     grant_scope=grant_scope,
+                    auth_method="static",
                     workspace_id=workspace_id,
                     user_id=user_id,
                     credential_id=credential_id,
@@ -431,14 +353,3 @@ class MCPConnectorService:
                 connector.discovery_status = "not_run"
                 connector.last_error = None
                 await self._connector_repo.update(connector)
-
-    async def uninstall(self, connector_id: str) -> MCPConnector:
-        connector = await self._connector_repo.get(connector_id)
-        if connector is None:
-            raise ValueError(f"connector not found: {connector_id}")
-        await self._state_repo.delete_for_connector(connector_id)
-        await self._grant_repo.delete_for_connector(connector_id)
-        connector.status = "uninstalled"
-        connector.auth_status = "disconnected"
-        connector.updated_at = datetime.now(UTC)
-        return await self._connector_repo.update(connector)

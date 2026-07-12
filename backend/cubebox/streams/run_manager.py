@@ -2561,6 +2561,7 @@ class RunManager:
                 MCPConnectorRepository,
                 MCPConnectorTemplateRepository,
                 MCPCredentialGrantRepository,
+                MCPTemplateSettingsRepository,
                 MCPWorkspaceConnectorStateRepository,
             )
 
@@ -2592,6 +2593,9 @@ class RunManager:
                 _grant_repo = MCPCredentialGrantRepository(effective_session, org_id=ctx.org_id)
                 _effective_service = MCPEffectiveConnectorService(
                     template_repo=MCPConnectorTemplateRepository(effective_session),
+                    settings_repo=MCPTemplateSettingsRepository(
+                        effective_session, org_id=ctx.org_id
+                    ),
                     install_repo=MCPConnectorRepository(effective_session, org_id=ctx.org_id),
                     state_repo=MCPWorkspaceConnectorStateRepository(
                         effective_session, org_id=ctx.org_id

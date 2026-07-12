@@ -44,14 +44,14 @@ async def _noop_execute(
 def _make_spec(
     name: str,
     *,
-    install_id: str = "",
+    connector_id: str = "",
     tools_cache: list[dict[str, Any]] | None = None,
     auth_method: str = "none",
     server_url: str = "",
     discovery_metadata: dict[str, Any] | None = None,
 ) -> MCPRuntimeConnectorSpec:
     return MCPRuntimeConnectorSpec(
-        install_id=install_id or f"inst-{name.lower()}",
+        connector_id=connector_id or f"inst-{name.lower()}",
         name=name,
         server_url=server_url or f"https://{name.lower()}.example.com/mcp",
         transport="streamable_http",

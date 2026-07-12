@@ -258,7 +258,6 @@ async def delete_workspace(
         ArtifactVersion,
         Attachment,
         Conversation,
-        MCPConnector,
         MCPCredentialGrant,
         MCPWorkspaceConnectorState,
         Membership,
@@ -366,6 +365,63 @@ async def delete_workspace(
         {"wsid": workspace_id},
     )
 
+    # Purge unpromoted workspace-scoped MCP connector templates (spec §10).
+    # MCPConnector is org-scoped (no workspace_id), so it is NOT caught by the
+    # bulk workspace cascade below. We find all templates owned by this workspace
+    # (any status), hard-delete their active connectors (+ state rows + grants)
+    # inline, then bulk-UPDATE the template rows to clear workspace_id and promote
+    # scope to 'org'. The bulk UPDATE must set status/workspace_id/scope in one
+    # statement to avoid triggering the check constraint
+    # (scope='workspace' AND workspace_id IS NOT NULL) mid-transaction.
+    from cubebox.models import MCPConnector as _MCPConnector
+    from cubebox.models import MCPConnectorTemplate
+    from cubebox.models import MCPCredentialGrant as _MCPGrant
+    from cubebox.models import MCPWorkspaceConnectorState as _MCPState
+
+    # Collect all workspace-owned templates (any status) so we can clear their
+    # FK before deleting the workspace row.
+    ws_tpl_stmt = sa_select(MCPConnectorTemplate).where(
+        MCPConnectorTemplate.scope == "workspace",  # type: ignore[arg-type]
+        MCPConnectorTemplate.workspace_id == workspace_id,  # type: ignore[arg-type]
+    )
+    ws_templates = list((await session.execute(ws_tpl_stmt)).scalars().all())
+    for ws_tpl in ws_templates:
+        # Hard-delete the active connector (if any) for each template.
+        connector_stmt = sa_select(_MCPConnector).where(
+            _MCPConnector.template_id == ws_tpl.id,  # type: ignore[arg-type]
+            _MCPConnector.status == "active",  # type: ignore[arg-type]
+        )
+        connector_row = (await session.execute(connector_stmt)).scalar_one_or_none()
+        if connector_row is not None:
+            await session.execute(
+                sa_delete(_MCPState).where(
+                    _MCPState.connector_id == connector_row.id  # type: ignore[arg-type]
+                )
+            )
+            await session.execute(
+                sa_delete(_MCPGrant).where(
+                    _MCPGrant.connector_id == connector_row.id  # type: ignore[arg-type]
+                )
+            )
+            await session.delete(connector_row)
+    if ws_templates:
+        # Bulk-UPDATE all workspace-owned templates in one statement so that
+        # workspace_id and scope change atomically — the check constraint fires on
+        # the final row shape, which must satisfy scope='org' AND workspace_id IS
+        # NULL. Updating via ORM instance attributes causes SQLAlchemy to emit two
+        # separate UPDATEs (one per dirty field), which transiently violates the
+        # constraint. Using the core UPDATE avoids that.
+        ws_tpl_tbl = MCPConnectorTemplate.__table__  # type: ignore[attr-defined]
+        await session.execute(
+            ws_tpl_tbl.update()
+            .where(
+                ws_tpl_tbl.c.scope == "workspace",
+                ws_tpl_tbl.c.workspace_id == workspace_id,
+            )
+            .values(status="deleted", workspace_id=None, scope="org")
+        )
+        await session.flush()
+
     # Delete child rows deepest-first to avoid FK violations.
     # NOTE: UserSandbox rows are deleted without calling the sandbox manager's
     # kill path. Provider sandboxes are reaped by cleanup_expired. A public
@@ -381,7 +437,8 @@ async def delete_workspace(
         ScheduledTask,
         MCPCredentialGrant,
         MCPWorkspaceConnectorState,
-        MCPConnector,
+        # MCPConnector is org-scoped (no workspace_id); ws-owned connectors are
+        # purged above in the ws-template cascade. Shared org connectors survive.
         SandboxEnvVar,
         UserSandbox,
         ArtifactVersion,

@@ -26,21 +26,39 @@ function renderWithIntl(node: React.ReactNode): ReturnType<typeof render> {
   )
 }
 
-function adminConnector(connectorId: string, name: string) {
+function adminRow(connectorId: string, name: string, supportedAuthMethods: string[] = ['oauth']) {
   return {
-    template: { provider: name, name },
-    install: {
-      connector_id: connectorId,
+    template: {
+      template_id: 'mcptpl_' + connectorId,
+      slug: connectorId,
       name,
-      auth_method: 'oauth',
-      auth_status: 'pending',
+      provider: name,
+      description: '',
+      scope: 'global',
+      workspace_id: null,
+      server_url: 'https://example.com/mcp',
+      transport: 'streamable_http',
+      supported_auth_methods: supportedAuthMethods,
       default_credential_policy: 'org',
+      status: 'active',
     },
-    org_effective: {
-      usable: false,
-      reason: 'pending_oauth',
-      credential_availability: 'missing',
+    connector: {
+      connector_id: connectorId,
+      default_credential_policy: 'org',
+      discovery_status: 'pending',
+      tool_count: 0,
+      tools: [],
+      tool_citations: {},
+      last_error: null,
+      auto_enroll_new_workspaces: false,
+      org_grant_auth_method: null,
     },
+    disabled: false,
+    in_use: true,
+    needs_attention: true,
+    enabled_workspace_count: 0,
+    eligible_workspace_count: 1,
+    org_grant_status: null,
   } as any
 }
 
@@ -59,8 +77,30 @@ function workspaceConnector(connectorId: string, name: string) {
     required_grant_scope: 'workspace',
     credential_availability: 'missing',
     credential_source: null,
+    credential_availability_by_scope: { org: false, workspace: false, user: false },
     usable: false,
     reason: 'pending_oauth',
+  } as any
+}
+
+function wsMultiMethodConnector(connectorId: string, name: string) {
+  return {
+    template: { provider: name, name, supported_auth_methods: ['oauth', 'static'] },
+    install: {
+      connector_id: connectorId,
+      name,
+      auth_method: 'none',
+      auth_status: 'pending',
+      install_scope: 'workspace',
+    },
+    workspace_state: { enabled: true },
+    credential_policy: 'workspace',
+    required_grant_scope: 'workspace',
+    credential_availability: 'missing',
+    credential_source: null,
+    credential_availability_by_scope: { org: false, workspace: false, user: false },
+    usable: false,
+    reason: 'missing_workspace_grant',
   } as any
 }
 
@@ -76,7 +116,7 @@ describe('MCP auth band selection changes', () => {
     })
     const { rerender } = renderWithIntl(
       <AdminAuthBand
-        connector={adminConnector('mcp_a', 'GitHub')}
+        row={adminRow('mcp_a', 'GitHub')}
         client={{} as any}
         onChanged={async () => undefined}
       />,
@@ -89,7 +129,7 @@ describe('MCP auth band selection changes', () => {
     rerender(
       <NextIntlClientProvider locale="en" messages={en}>
         <AdminAuthBand
-          connector={adminConnector('mcp_b', 'Slack')}
+          row={adminRow('mcp_b', 'Slack')}
           client={{} as any}
           onChanged={async () => undefined}
         />
@@ -165,5 +205,119 @@ describe('MCP auth band selection changes', () => {
         'invalid_redirect_uri: Plaintext HTTP is allowed only for loopback addresses.',
       ),
     ).toBeInTheDocument()
+  })
+
+  it('shows one Connect button per method when no grant and template supports oauth + static', () => {
+    // Durable invariant: when supported=['oauth','static'] and no org grant exists,
+    // AdminAuthBand renders two connect actions (one per method) — no auth-method guessing.
+    renderWithIntl(
+      <AdminAuthBand
+        row={adminRow('mcp_multi', 'Acme', ['oauth', 'static'])}
+        client={{} as any}
+        onChanged={async () => undefined}
+      />,
+    )
+
+    // OAuth connect button is present (labelled by provider name)
+    expect(screen.getByRole('button', { name: 'Connect with Acme' })).toBeInTheDocument()
+    // Static connect button is present
+    expect(screen.getByTestId('connect-static')).toBeInTheDocument()
+  })
+
+  it('ws: shows one Connect button per method when no ws-scope grant and template supports oauth + static', async () => {
+    // Durable invariant: when supported=['oauth','static'] and no ws-scope grant exists,
+    // WsAuthBand renders WsNoGrantMultiMethod with two connect actions — mirrors the admin band.
+    const mockRunOAuthFlow = vi.fn().mockResolvedValue({ status: 'cancelled' })
+    coreMocks.runOAuthFlow.mockImplementation(mockRunOAuthFlow)
+
+    const onChanged = vi.fn().mockResolvedValue(undefined)
+    renderWithIntl(
+      <WsAuthBand
+        connector={wsMultiMethodConnector('mcp_ws_multi', 'Acme')}
+        client={{} as any}
+        wsId="ws_1"
+        callerRole="admin"
+        onChanged={onChanged}
+      />,
+    )
+
+    // OAuth connect button is present (labelled by provider name)
+    expect(screen.getByTestId('connect-oauth')).toBeInTheDocument()
+    // Static connect button is present
+    expect(screen.getByTestId('connect-static')).toBeInTheDocument()
+  })
+
+  it('ws: org policy + no org grant → does NOT render multi-method Connect buttons (awaiting org admin)', () => {
+    // When credential_policy='org' the band state is 'awaiting-others' (not 'needs-action'),
+    // so WsNoGrantMultiMethod must NOT render even if supported=['oauth','static'].
+    const orgPolicyConnector = {
+      template: { provider: 'Acme', name: 'Acme', supported_auth_methods: ['oauth', 'static'] },
+      install: {
+        connector_id: 'mcp_org_policy',
+        name: 'Acme',
+        auth_method: 'none',
+        auth_status: 'pending',
+        install_scope: 'workspace',
+      },
+      workspace_state: { enabled: true },
+      credential_policy: 'org',
+      required_grant_scope: 'org',
+      credential_availability: 'missing',
+      credential_source: null,
+      credential_availability_by_scope: { org: false, workspace: false, user: false },
+      usable: false,
+      reason: 'missing_org_grant',
+    } as any
+
+    renderWithIntl(
+      <WsAuthBand
+        connector={orgPolicyConnector}
+        client={{} as any}
+        wsId="ws_1"
+        callerRole="member"
+        onChanged={async () => undefined}
+      />,
+    )
+
+    // Must not render Connect buttons — caller cannot submit an org grant from the ws page.
+    expect(screen.queryByTestId('connect-oauth')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('connect-static')).not.toBeInTheDocument()
+  })
+
+  it('ws: workspace policy + member caller → does NOT render multi-method Connect buttons (awaiting ws admin)', () => {
+    // When credential_policy='workspace' and callerRole='member', the band state is
+    // 'awaiting-others' (workspace_admin), so WsNoGrantMultiMethod must NOT render.
+    const wsPolicyMemberConnector = {
+      template: { provider: 'Acme', name: 'Acme', supported_auth_methods: ['oauth', 'static'] },
+      install: {
+        connector_id: 'mcp_ws_member',
+        name: 'Acme',
+        auth_method: 'none',
+        auth_status: 'pending',
+        install_scope: 'workspace',
+      },
+      workspace_state: { enabled: true },
+      credential_policy: 'workspace',
+      required_grant_scope: 'workspace',
+      credential_availability: 'missing',
+      credential_source: null,
+      credential_availability_by_scope: { org: false, workspace: false, user: false },
+      usable: false,
+      reason: 'missing_workspace_grant',
+    } as any
+
+    renderWithIntl(
+      <WsAuthBand
+        connector={wsPolicyMemberConnector}
+        client={{} as any}
+        wsId="ws_1"
+        callerRole="member"
+        onChanged={async () => undefined}
+      />,
+    )
+
+    // Plain member cannot submit a workspace grant — must not see Connect buttons.
+    expect(screen.queryByTestId('connect-oauth')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('connect-static')).not.toBeInTheDocument()
   })
 })

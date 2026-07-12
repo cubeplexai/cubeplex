@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubebox.mcp._constants import server_url_hash, slugify_for_namespace
-from cubebox.models import MCPConnector, Organization
+from cubebox.models import MCPConnector, MCPConnectorTemplate, Organization
 from cubebox.repositories.mcp import MCPConnectorRepository
 
 pytestmark = pytest.mark.e2e
@@ -23,14 +23,29 @@ async def test_get_active_by_identity_matches_template_url_or_slug(
     await db_session.flush()
 
     url = "https://mcp.example.com"
+
+    # template_id is NOT NULL (FK); create a minimal template first.
+    template = MCPConnectorTemplate(
+        slug=f"repo-test-{suffix}",
+        name=f"Repo Test Template {suffix}",
+        description="test",
+        provider="test",
+        server_url=url,
+        transport="streamable_http",
+        supported_auth_methods=["oauth"],
+        default_credential_policy="org",
+        scope="global",
+    )
+    db_session.add(template)
+    await db_session.flush()
+
     connector = MCPConnector(
         org_id=org.id,
-        template_id=None,
+        template_id=template.id,
         name="Example MCP",
         server_url=url,
         server_url_hash=server_url_hash(url),
         transport="streamable_http",
-        auth_method="oauth",
         status="active",
     )
     db_session.add(connector)

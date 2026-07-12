@@ -37,6 +37,7 @@ from cubebox.repositories.mcp import (
     MCPConnectorRepository,
     MCPConnectorTemplateRepository,
     MCPCredentialGrantRepository,
+    MCPTemplateSettingsRepository,
     MCPWorkspaceConnectorStateRepository,
 )
 from cubebox.repositories.workspace import WorkspaceRepository
@@ -182,6 +183,7 @@ async def get_ws_effective_service(
     """
     return MCPEffectiveConnectorService(
         template_repo=MCPConnectorTemplateRepository(session),
+        settings_repo=MCPTemplateSettingsRepository(session, org_id=ctx.org_id),
         connector_repo=MCPConnectorRepository(session, org_id=ctx.org_id),
         state_repo=MCPWorkspaceConnectorStateRepository(session, org_id=ctx.org_id),
         grant_repo=MCPCredentialGrantRepository(session, org_id=ctx.org_id),
