@@ -277,6 +277,53 @@ async def test_ws_custom_template_invisible_to_sibling_workspace(
     assert sib_row is None, "ws-custom template must NOT be visible in sibling workspace"
 
 
+async def test_ws_create_template_static_with_workspace_policy(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Regression: workspace admin creating a static-auth custom template with
+    policy='workspace' must succeed. The MCPTemplateCreateForm (variant='workspace')
+    posts exactly this shape; the schema uses extra='forbid', so any drift in the
+    field set fails with 422."""
+    client, workspace_id = admin_client
+
+    resp = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/templates",
+        json={
+            "name": "WS Static Custom",
+            "server_url": "https://ws-static.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "static",
+            "default_credential_policy": "workspace",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    created = resp.json()
+    assert created["scope"] == "workspace"
+    assert created["workspace_id"] == workspace_id
+    assert created["supported_auth_methods"] == ["static"]
+    assert created["default_credential_policy"] == "workspace"
+
+
+async def test_ws_create_template_rejects_unknown_fields(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """The schema is extra='forbid'; sending legacy fields must 422 so the
+    frontend doesn't silently drift."""
+    client, workspace_id = admin_client
+    resp = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/templates",
+        json={
+            "name": "Legacy Field",
+            "server_url": "https://legacy.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "static",
+            "default_credential_policy": "workspace",
+            "supported_auth_methods": ["static"],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+
+
 # ---------------------------------------------------------------------------
 # Test 5: promote makes template enableable by sibling (spec test #6)
 # ---------------------------------------------------------------------------
@@ -661,3 +708,358 @@ async def test_ws_grant_blocked_when_template_disabled(
     )
     assert grant_resp.status_code == 409, grant_resp.text
     assert grant_resp.json()["detail"]["code"] == "template_disabled_in_org"
+
+
+# ---------------------------------------------------------------------------
+# PATCH + DELETE /ws/{ws}/mcp/templates/{id}  (workspace-scoped custom template CRUD)
+# ---------------------------------------------------------------------------
+
+
+async def _create_ws_template(
+    client: httpx.AsyncClient, workspace_id: str, *, name: str, server_url: str
+) -> str:
+    resp = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/templates",
+        json={
+            "name": name,
+            "server_url": server_url,
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["template_id"]
+
+
+async def test_ws_patch_template_updates_server_url(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """PATCH /ws/{ws}/mcp/templates/{id} updates server_url (the URL-typo fix case)."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_ws_template(
+        client,
+        workspace_id,
+        name=f"WS Custom {suffix}",
+        server_url=f"https://ws-typo-{suffix}.example.com",  # missing /mcp
+    )
+    resp = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/templates/{template_id}",
+        json={"server_url": f"https://ws-typo-{suffix}.example.com/mcp"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["server_url"] == f"https://ws-typo-{suffix}.example.com/mcp"
+
+
+async def test_ws_patch_template_rejects_sibling_workspace(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Sibling workspace cannot patch another workspace's custom template."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_ws_template(
+        client,
+        workspace_id,
+        name=f"Owned by A {suffix}",
+        server_url=f"https://owned-{suffix}.example.com/mcp",
+    )
+    # Create sibling workspace
+    org_id = await _get_org_id(client)
+    sib = await client.post(
+        "/api/v1/workspaces",
+        json={"name": f"sib-patch-{suffix}", "org_id": org_id},
+    )
+    assert sib.status_code == 201, sib.text
+    sibling_ws_id = sib.json()["id"]
+
+    resp = await client.patch(
+        f"/api/v1/ws/{sibling_ws_id}/mcp/templates/{template_id}",
+        json={"name": "hijacked"},
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "template_not_owned_by_workspace"
+
+
+async def test_ws_delete_template_happy_path(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """DELETE /ws/{ws}/mcp/templates/{id} soft-deletes workspace-owned template."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_ws_template(
+        client,
+        workspace_id,
+        name=f"WS Delete Me {suffix}",
+        server_url=f"https://ws-del-{suffix}.example.com/mcp",
+    )
+    resp = await client.delete(f"/api/v1/ws/{workspace_id}/mcp/templates/{template_id}")
+    assert resp.status_code == 204, resp.text
+    # Gone from own catalog
+    cat = await client.get(f"/api/v1/ws/{workspace_id}/mcp/catalog")
+    assert cat.status_code == 200, cat.text
+    items = cat.json()["items"]
+    assert not any(r["template"]["template_id"] == template_id for r in items)
+
+
+async def test_ws_delete_template_rejects_org_scope(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """DELETE via ws route rejects org-scoped templates (not owned by ws)."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    # Create as org-scoped via admin route
+    admin_resp = await client.post(
+        "/api/v1/admin/mcp/templates",
+        json={
+            "name": f"Org owned {suffix}",
+            "server_url": f"https://org-{suffix}.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert admin_resp.status_code == 201, admin_resp.text
+    template_id = admin_resp.json()["template_id"]
+
+    resp = await client.delete(f"/api/v1/ws/{workspace_id}/mcp/templates/{template_id}")
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "template_not_owned_by_workspace"
+
+
+async def test_ws_create_template_rejects_url_taken_by_active_template(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Creating a workspace template with a URL already used by another active
+    template in the same org returns 409 server_url_taken_in_org — the check
+    fires at create time (no need to wait until workspace enable)."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    shared_url = f"https://precheck-{suffix}.example.com/mcp"
+
+    # First template owns the URL.
+    a = await _create_ws_template(
+        client,
+        workspace_id,
+        name=f"Precheck A {suffix}",
+        server_url=shared_url,
+    )
+    assert a  # noqa: asserts fixture worked
+
+    # Second template with the same URL must be rejected at create time.
+    resp = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/templates",
+        json={
+            "name": f"Precheck B {suffix}",
+            "server_url": shared_url,
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "server_url_taken_in_org"
+    assert detail["colliding_template_name"] == f"Precheck A {suffix}"
+    assert detail["server_url"] == shared_url
+
+
+async def test_ws_patch_template_rejects_url_taken(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Editing a template to use another active template's URL is rejected."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    a_url = f"https://patch-a-{suffix}.example.com/mcp"
+    b_url = f"https://patch-b-{suffix}.example.com/mcp"
+
+    await _create_ws_template(client, workspace_id, name=f"Own URL {suffix}", server_url=a_url)
+    b_id = await _create_ws_template(
+        client, workspace_id, name=f"Editable {suffix}", server_url=b_url
+    )
+
+    resp = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/templates/{b_id}",
+        json={"server_url": a_url},
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "server_url_taken_in_org"
+
+
+async def test_ws_patch_template_allows_url_unchanged(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """PATCHing with the same server_url as the template already has must NOT
+    self-collide (exclude_template_id excludes the row from the check)."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    url = f"https://self-{suffix}.example.com/mcp"
+    tid = await _create_ws_template(client, workspace_id, name=f"Self {suffix}", server_url=url)
+    resp = await client.patch(
+        f"/api/v1/ws/{workspace_id}/mcp/templates/{tid}",
+        json={"server_url": url, "name": f"Self renamed {suffix}"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_ws_create_template_revives_soft_deleted_same_name(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Creating a workspace template with the same name as a soft-deleted one
+    revives the deleted row (status='active' + fields updated) instead of
+    returning 409 connector_name_conflict — otherwise the unique slug index
+    would trap the user forever after any delete."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    name = f"Revive Me {suffix}"
+
+    first = await _create_ws_template(
+        client,
+        workspace_id,
+        name=name,
+        server_url=f"https://revive-{suffix}.example.com/mcp",
+    )
+    # Delete it (soft delete → status='deleted').
+    del_resp = await client.delete(f"/api/v1/ws/{workspace_id}/mcp/templates/{first}")
+    assert del_resp.status_code == 204, del_resp.text
+
+    # Re-create with the SAME name but different URL.
+    new_url = f"https://revive-{suffix}-v2.example.com/mcp"
+    resp = await client.post(
+        f"/api/v1/ws/{workspace_id}/mcp/templates",
+        json={
+            "name": name,
+            "server_url": new_url,
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    revived = resp.json()
+    # Same template_id — the deleted row was revived, not a new row inserted.
+    assert revived["template_id"] == first
+    assert revived["server_url"] == new_url
+    assert revived["status"] == "active"
+
+
+async def test_ws_delete_template_in_use_returns_409(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """DELETE on a ws template with an active connector returns 409 template_in_use."""
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_ws_template(
+        client,
+        workspace_id,
+        name=f"WS In Use {suffix}",
+        server_url=f"https://ws-inuse-{suffix}.example.com/mcp",
+    )
+    # Enable in workspace so a connector row materializes
+    state_resp = await client.put(
+        f"/api/v1/ws/{workspace_id}/mcp/templates/{template_id}/state",
+        json={"enabled": True},
+    )
+    assert state_resp.status_code == 200, state_resp.text
+
+    resp = await client.delete(f"/api/v1/ws/{workspace_id}/mcp/templates/{template_id}")
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "template_in_use"
+
+
+# ---------------------------------------------------------------------------
+# server_url_taken_in_org: two templates pointing at the same URL collide
+# ---------------------------------------------------------------------------
+
+
+async def test_ws_enable_returns_409_when_url_taken_by_other_template(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Enabling a workspace template whose URL matches another template's
+    active connector returns 409 server_url_taken_in_org (not 500).
+
+    The two colliding templates are seeded directly at the DB level to bypass
+    the create-time URL guard — this exercises the connector-level defensive
+    check that survives if a template ever ends up sharing a URL (e.g. via a
+    race between two concurrent admin edits)."""
+    from tests.e2e.conftest import _seed_four_layer_template
+
+    client, workspace_id = admin_client
+    suffix = secrets.token_hex(4)
+    shared_url = f"https://collide-{suffix}.example.com/mcp"
+
+    # Template A + connector, seeded directly and distributed via API.
+    a_id = await _seed_four_layer_template(
+        slug=f"collide-a-{suffix}",
+        name=f"A-{suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+        server_url=shared_url,
+    )
+    dist = await client.post(
+        f"/api/v1/admin/mcp/templates/{a_id}/distribute",
+        json={"enable_existing": False, "auto_enroll": False},
+    )
+    assert dist.status_code == 200, dist.text
+
+    # Template B: same URL, seeded directly (bypasses API URL guard).
+    b_id = await _seed_four_layer_template(
+        slug=f"collide-b-{suffix}",
+        name=f"B-{suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+        server_url=shared_url,
+    )
+
+    # Enabling B in the workspace must 409, not 500.
+    state = await client.put(
+        f"/api/v1/ws/{workspace_id}/mcp/templates/{b_id}/state",
+        json={"enabled": True},
+    )
+    assert state.status_code == 409, state.text
+    detail = state.json()["detail"]
+    assert detail["code"] == "server_url_taken_in_org"
+    assert detail["colliding_template_name"] == f"A-{suffix}"
+    assert detail["server_url"] == shared_url
+
+
+async def test_admin_distribute_returns_409_when_url_taken_by_other_template(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Distributing a second template with the same URL as an existing connector
+    returns 409 server_url_taken_in_org (not 500). Templates are seeded at the
+    DB level to bypass the create-time URL guard — see the state-route test."""
+    from tests.e2e.conftest import _seed_four_layer_template
+
+    client, _ = admin_client
+    suffix = secrets.token_hex(4)
+    shared_url = f"https://collide-admin-{suffix}.example.com/mcp"
+
+    a_id = await _seed_four_layer_template(
+        slug=f"collide-adm-a-{suffix}",
+        name=f"A-adm-{suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+        server_url=shared_url,
+    )
+    dist_a = await client.post(
+        f"/api/v1/admin/mcp/templates/{a_id}/distribute",
+        json={"enable_existing": False, "auto_enroll": False},
+    )
+    assert dist_a.status_code == 200, dist_a.text
+
+    b_id = await _seed_four_layer_template(
+        slug=f"collide-adm-b-{suffix}",
+        name=f"B-adm-{suffix}",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+        server_url=shared_url,
+    )
+    dist_b = await client.post(
+        f"/api/v1/admin/mcp/templates/{b_id}/distribute",
+        json={"enable_existing": False, "auto_enroll": False},
+    )
+    assert dist_b.status_code == 409, dist_b.text
+    detail = dist_b.json()["detail"]
+    assert detail["code"] == "server_url_taken_in_org"
+    assert detail["colliding_template_name"] == f"A-adm-{suffix}"

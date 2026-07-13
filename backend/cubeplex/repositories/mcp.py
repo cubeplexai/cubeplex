@@ -158,13 +158,17 @@ class MCPConnectorTemplateRepository:
     async def mark_deprecated_for_missing_slugs(
         self, *, kept_slugs: list[str]
     ) -> list[MCPConnectorTemplate]:
-        """Mark any active row whose slug isn't in ``kept_slugs`` as deprecated.
+        """Mark any active **global** row whose slug isn't in ``kept_slugs`` as
+        deprecated.
 
-        Returns the rows that were transitioned. Idempotent: rows already
-        in a non-active state are left untouched.
+        Only ``scope='global'`` rows are eligible — custom org/workspace-owned
+        templates are outside the seed list's authority and MUST be preserved
+        across restarts. Returns the rows that were transitioned. Idempotent:
+        rows already in a non-active state are left untouched.
         """
         stmt = select(MCPConnectorTemplate).where(
             MCPConnectorTemplate.status == "active",  # type: ignore[arg-type]
+            MCPConnectorTemplate.scope == "global",  # type: ignore[arg-type]
         )
         rows = list((await self.session.execute(stmt)).scalars().all())
         kept = set(kept_slugs)
@@ -181,6 +185,39 @@ class MCPConnectorTemplateRepository:
             for row in changed:
                 await self.session.refresh(row)
         return changed
+
+    async def find_active_template_by_url(
+        self,
+        *,
+        org_id: str,
+        server_url: str,
+        exclude_template_id: str | None = None,
+    ) -> MCPConnectorTemplate | None:
+        """Return an active template visible to ``org_id`` (global or same-org)
+        that already uses ``server_url`` — used to reject template create/edit
+        that would collide downstream with ``uq_mcp_connector_url_per_org``.
+
+        Excludes ``exclude_template_id`` so PATCH-on-self doesn't self-collide.
+        Deleted rows are ignored (they don't produce connectors).
+        """
+        target_hash = server_url_hash(server_url)
+        conditions: list[ColumnElement[bool]] = [
+            cast("ColumnElement[bool]", MCPConnectorTemplate.status == "active"),
+            or_(
+                cast("ColumnElement[bool]", MCPConnectorTemplate.scope == "global"),
+                cast("ColumnElement[bool]", MCPConnectorTemplate.org_id == org_id),
+            ),
+        ]
+        if exclude_template_id is not None:
+            conditions.append(
+                cast("ColumnElement[bool]", MCPConnectorTemplate.id != exclude_template_id)
+            )
+        stmt = select(MCPConnectorTemplate).where(*conditions)
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        for row in rows:
+            if server_url_hash(row.server_url) == target_hash:
+                return row
+        return None
 
     async def list_visible_for_org(self, org_id: str) -> list[MCPConnectorTemplate]:
         """All active templates visible to an org: global + any owned by the org
@@ -236,12 +273,42 @@ class MCPConnectorTemplateRepository:
         """Create a custom org- or workspace-scoped connector template.
 
         Slug is generated as ``custom-<slugified-name>-<last-6-of-org_id>``.
-        Raises ``ValueError("connector_name_conflict")`` if the slug already exists.
+        Raises ``ValueError("connector_name_conflict")`` if the slug already
+        exists and is still ``status='active'``.
+
+        Revive behaviour: if the slug collision is with a soft-deleted row in
+        the SAME (org_id, scope, workspace_id), the deleted row is revived —
+        every field re-set to the caller's values and ``status='active'``.
+        This lets users delete a template and immediately recreate one with
+        the same name, which was previously blocked by the unique slug index.
         """
         name_slug = slugify_for_namespace(name)
         slug = f"custom-{name_slug}-{org_id[-6:]}"
         existing = await self.get_by_slug(slug)
         if existing is not None:
+            if (
+                existing.status == "deleted"
+                and existing.org_id == org_id
+                and existing.scope == scope
+                and existing.workspace_id == workspace_id
+            ):
+                existing.name = name
+                existing.server_url = server_url
+                existing.transport = transport
+                existing.supported_auth_methods = supported_auth_methods
+                existing.default_credential_policy = default_credential_policy
+                existing.status = "active"
+                existing.created_by_user_id = created_by_user_id
+                existing.updated_at = datetime.now(UTC)
+                self.session.add(existing)
+                try:
+                    await self.session.flush()
+                except IntegrityError:
+                    await self.session.rollback()
+                    raise ValueError("connector_name_conflict") from None
+                await self.session.commit()
+                await self.session.refresh(existing)
+                return existing
             raise ValueError("connector_name_conflict")
         row = MCPConnectorTemplate(
             slug=slug,
@@ -267,6 +334,48 @@ class MCPConnectorTemplateRepository:
         await self.session.commit()
         await self.session.refresh(row)
         return row
+
+    async def update_custom_fields(
+        self,
+        template: MCPConnectorTemplate,
+        *,
+        name: str | None = None,
+        server_url: str | None = None,
+        transport: str | None = None,
+        supported_auth_methods: list[str] | None = None,
+    ) -> MCPConnectorTemplate:
+        """Update editable fields on an already-loaded custom template row.
+
+        Fields set to ``None`` are left untouched. Renames re-derive the
+        slug the same way :meth:`create_scoped` does — slug uniqueness is
+        enforced structurally by the DB unique index; conflicts surface as
+        ``ValueError("connector_name_conflict")``.
+        """
+        assert template.org_id is not None  # invariant: custom templates always have org_id
+        if name is not None and name != template.name:
+            template.name = name
+            new_slug = f"custom-{slugify_for_namespace(name)}-{template.org_id[-6:]}"
+            if new_slug != template.slug:
+                existing = await self.get_by_slug(new_slug)
+                if existing is not None and existing.id != template.id:
+                    raise ValueError("connector_name_conflict")
+                template.slug = new_slug
+        if server_url is not None:
+            template.server_url = server_url
+        if transport is not None:
+            template.transport = transport
+        if supported_auth_methods is not None:
+            template.supported_auth_methods = supported_auth_methods
+        template.updated_at = datetime.now(UTC)
+        self.session.add(template)
+        try:
+            await self.session.flush()
+        except IntegrityError:
+            await self.session.rollback()
+            raise ValueError("connector_name_conflict") from None
+        await self.session.commit()
+        await self.session.refresh(template)
+        return template
 
     async def promote_to_org(self, template_id: str) -> MCPConnectorTemplate:
         """Promote a workspace-scoped template to org scope.
@@ -378,19 +487,36 @@ class MCPConnectorRepository:
     ) -> MCPConnector:
         """Lazily create an org connector from a template snapshot.
 
-        Race-safe: on ``IntegrityError`` (concurrent create won the race),
-        roll back and re-fetch the row that the winner inserted.
+        Pre-checks the ``uq_mcp_connector_url_per_org`` uniqueness constraint
+        (org_id + server_url_hash) before inserting: if a *different* template
+        in this org already owns the same URL, raise
+        ``ValueError("server_url_taken_in_org")`` so callers can surface a
+        friendly 409. The pre-check pattern avoids the psycopg async-rollback
+        pitfall triggered when we catch ``IntegrityError`` from ``commit()``
+        (SQLAlchemy 2.x + async psycopg + NullPool loses the greenlet context
+        during error handling).
+
+        Race-safe: on ``IntegrityError`` (a concurrent request won the race
+        after our pre-check), roll back and re-fetch — this only fires for
+        the same-template-id race, which is the fast path the caller wants.
         """
+        target_url_hash = server_url_hash(template.server_url)
         existing = await self.get_by_template_id(template.id)
         if existing is not None:
             return existing
+        # Pre-check the URL uniqueness constraint. If a different template in
+        # this org already owns the URL, don't attempt the insert — surface a
+        # domain error so the route layer returns 409.
+        colliding = await self._find_by_url_hash(target_url_hash)
+        if colliding is not None and colliding.template_id != template.id:
+            raise ValueError("server_url_taken_in_org")
         row = MCPConnector(
             org_id=self.org_id,
             template_id=template.id,
             name=template.name,
             slug_name=slugify_for_namespace(template.name),
             server_url=template.server_url,
-            server_url_hash=server_url_hash(template.server_url),
+            server_url_hash=target_url_hash,
             transport=template.transport,
             default_credential_policy=template.default_credential_policy,
             static_auth_style=template.static_auth_style,
@@ -407,6 +533,28 @@ class MCPConnectorRepository:
             if raced is None:
                 raise
             return raced
+
+    async def _find_by_url_hash(self, url_hash: str) -> MCPConnector | None:
+        stmt = select(MCPConnector).where(
+            cast("ColumnElement[bool]", MCPConnector.org_id == self.org_id),
+            cast("ColumnElement[bool]", MCPConnector.server_url_hash == url_hash),
+        )
+        return (await self.session.execute(stmt)).scalars().first()
+
+    async def find_colliding_template_name(
+        self, *, url: str, exclude_template_id: str
+    ) -> str | None:
+        """Name of the template whose connector already owns ``url`` for this
+        org — used to enrich the ``server_url_taken_in_org`` 409 detail."""
+        url_hash = server_url_hash(url)
+        colliding = await self._find_by_url_hash(url_hash)
+        if colliding is None or colliding.template_id == exclude_template_id:
+            return None
+        tpl_stmt = select(MCPConnectorTemplate).where(
+            cast("ColumnElement[bool]", MCPConnectorTemplate.id == colliding.template_id),
+        )
+        template = (await self.session.execute(tpl_stmt)).scalar_one_or_none()
+        return template.name if template is not None else None
 
     async def get_active_by_identity(
         self,

@@ -612,3 +612,164 @@ async def test_invoke_tool_vetoed_when_template_disabled(
     )
     assert invoke_resp.status_code == 409, invoke_resp.text
     assert invoke_resp.json()["detail"]["code"] == "template_disabled_in_org"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /admin/mcp/templates/{id}
+# ---------------------------------------------------------------------------
+
+
+async def _create_org_template(
+    client: httpx.AsyncClient, *, name: str, server_url: str, auth_method: str = "none"
+) -> str:
+    policy = "none" if auth_method == "none" else "org"
+    resp = await client.post(
+        "/api/v1/admin/mcp/templates",
+        json={
+            "name": name,
+            "server_url": server_url,
+            "transport": "streamable_http",
+            "auth_method": auth_method,
+            "default_credential_policy": policy,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["template_id"]
+
+
+async def test_patch_org_template_updates_name_and_server_url(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """PATCH /admin/mcp/templates/{id} updates name+server_url and re-derives slug."""
+    client, _ = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_org_template(
+        client,
+        name=f"Original {suffix}",
+        server_url=f"https://original-{suffix}.example.com",  # bad URL: no /mcp
+    )
+
+    patch_resp = await client.patch(
+        f"/api/v1/admin/mcp/templates/{template_id}",
+        json={
+            "name": f"Renamed {suffix}",
+            "server_url": f"https://original-{suffix}.example.com/mcp",
+        },
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+    body = patch_resp.json()
+    assert body["name"] == f"Renamed {suffix}"
+    assert body["server_url"] == f"https://original-{suffix}.example.com/mcp"
+    # Slug re-derived from new name (slugify uses underscore + preserves case)
+    assert body["slug"].startswith("custom-Renamed_")
+
+
+async def test_patch_org_template_name_only_allowed_with_active_connector(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Renaming a template is allowed even when a connector already exists."""
+    client, _ = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_org_template(
+        client,
+        name=f"Rename Me {suffix}",
+        server_url=f"https://rename-{suffix}.example.com/mcp",
+    )
+    dist_resp = await client.post(
+        f"/api/v1/admin/mcp/templates/{template_id}/distribute",
+        json={"enable_existing": False, "auto_enroll": False},
+    )
+    assert dist_resp.status_code == 200, dist_resp.text
+
+    patch_resp = await client.patch(
+        f"/api/v1/admin/mcp/templates/{template_id}",
+        json={"name": f"Renamed {suffix}"},
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+    assert patch_resp.json()["name"] == f"Renamed {suffix}"
+
+
+async def test_patch_org_template_server_url_blocked_by_active_connector(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """PATCH that changes server_url returns 409 template_in_use when a connector exists."""
+    client, _ = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_org_template(
+        client,
+        name=f"Locked {suffix}",
+        server_url=f"https://locked-{suffix}.example.com/mcp",
+    )
+    dist_resp = await client.post(
+        f"/api/v1/admin/mcp/templates/{template_id}/distribute",
+        json={"enable_existing": False, "auto_enroll": False},
+    )
+    assert dist_resp.status_code == 200, dist_resp.text
+
+    patch_resp = await client.patch(
+        f"/api/v1/admin/mcp/templates/{template_id}",
+        json={"server_url": f"https://locked-{suffix}.example.com/other"},
+    )
+    assert patch_resp.status_code == 409, patch_resp.text
+    assert patch_resp.json()["detail"]["code"] == "template_in_use"
+
+
+async def test_patch_global_template_returns_404(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """PATCH on a global-scope template returns 404 with template_not_owned_by_org."""
+    client, _ = admin_client
+    suffix = secrets.token_hex(4)
+    global_tpl_id = await _seed_global_template(
+        slug=f"global-patch-{suffix}",
+        name=f"Global Patch {suffix}",
+    )
+    resp = await client.patch(
+        f"/api/v1/admin/mcp/templates/{global_tpl_id}",
+        json={"name": "attempted rename"},
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"]["code"] == "template_not_owned_by_org"
+
+
+async def test_admin_create_template_rejects_url_taken_by_global(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """Admin create rejects a URL that a *global* seed template already owns —
+    guard runs against global + same-org templates alike."""
+    client, _ = admin_client
+    suffix = secrets.token_hex(4)
+    slug = f"global-url-{suffix}"
+    # _seed_global_template uses the slug-derived URL: https://<slug>.example.com/mcp
+    shared_url = f"https://{slug}.example.com/mcp"
+    await _seed_global_template(slug=slug, name=f"Global URL {suffix}")
+
+    resp = await client.post(
+        "/api/v1/admin/mcp/templates",
+        json={
+            "name": f"Duplicate of Global {suffix}",
+            "server_url": shared_url,
+            "transport": "streamable_http",
+            "auth_method": "none",
+            "default_credential_policy": "none",
+        },
+    )
+    assert resp.status_code == 409, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "server_url_taken_in_org"
+    assert detail["colliding_template_name"] == f"Global URL {suffix}"
+
+
+async def test_patch_org_template_empty_body_rejected(
+    admin_client: tuple[httpx.AsyncClient, str],
+) -> None:
+    """PATCH with no editable fields returns 422 (schema validator)."""
+    client, _ = admin_client
+    suffix = secrets.token_hex(4)
+    template_id = await _create_org_template(
+        client,
+        name=f"Empty {suffix}",
+        server_url=f"https://empty-{suffix}.example.com/mcp",
+    )
+    resp = await client.patch(f"/api/v1/admin/mcp/templates/{template_id}", json={})
+    assert resp.status_code == 422, resp.text

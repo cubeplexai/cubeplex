@@ -41,6 +41,7 @@ class _Grant:
 class _State:
     connector_id: str
     enabled: bool
+    credential_policy: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl'
 import type { AdminCatalogRow } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { ConnectorLogo } from './ConnectorLogo'
 import { MCPScopeBadge } from './MCPScopeBadge'
 
 interface MCPCatalogListProps {
@@ -63,6 +64,12 @@ function CatalogRow({
       )}
     >
       <div className="flex min-w-0 items-center gap-2">
+        <ConnectorLogo
+          name={template.name}
+          icon={template.icon ?? null}
+          serverIcons={connector?.server_icons ?? null}
+          size="sm"
+        />
         <span className="truncate text-sm font-semibold">{template.name}</span>
         {template.provider && template.provider.toLowerCase() !== template.name.toLowerCase() ? (
           <Badge variant="outline" className="shrink-0 text-[10px]">

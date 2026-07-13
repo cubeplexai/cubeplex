@@ -30,6 +30,9 @@ class WorkspaceCatalogRow:
     template: Any
     connector: Any | None
     enabled: bool  # this workspace's state row says enabled
+    # Workspace-level credential policy override; None when no state row exists
+    # yet (workspace has never enabled this template).
+    credential_policy: str | None
 
 
 def _derive_org_grant_status(grant: Any | None) -> str | None:
@@ -118,12 +121,14 @@ def build_workspace_catalog_rows(
         connector = connectors_by_template_id.get(template.id)
         state = states_by_connector_id.get(connector.id) if connector is not None else None
         enabled = state.enabled if state is not None else False
+        credential_policy = state.credential_policy if state is not None else None
 
         rows.append(
             WorkspaceCatalogRow(
                 template=template,
                 connector=connector,
                 enabled=enabled,
+                credential_policy=credential_policy,
             )
         )
 

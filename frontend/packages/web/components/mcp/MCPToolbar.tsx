@@ -1,8 +1,9 @@
 'use client'
 
-import { Search } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import type { AdminCatalogFilter, MCPTemplateScope } from '@cubeplex/core'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
@@ -13,6 +14,8 @@ interface MCPToolbarProps {
   onFilterChange: (value: AdminCatalogFilter) => void
   source: MCPTemplateScope | 'all'
   onSourceChange: (value: MCPTemplateScope | 'all') => void
+  onAddCustom?: () => void
+  addCustomActive?: boolean
 }
 
 function PillGroup<T extends string>({
@@ -61,6 +64,8 @@ export function MCPToolbar({
   onFilterChange,
   source,
   onSourceChange,
+  onAddCustom,
+  addCustomActive,
 }: MCPToolbarProps) {
   const t = useTranslations('mcpAdmin')
 
@@ -111,6 +116,19 @@ export function MCPToolbar({
         value={source}
         onChange={onSourceChange}
       />
+
+      {onAddCustom ? (
+        <Button
+          size="sm"
+          variant={addCustomActive ? 'default' : 'outline'}
+          onClick={onAddCustom}
+          className="ml-auto"
+          data-testid="mcp-add-custom-connector"
+        >
+          <Plus className="size-3.5" />
+          {t('addCustomConnector')}
+        </Button>
+      ) : null}
     </div>
   )
 }
