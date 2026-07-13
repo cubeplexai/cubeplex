@@ -1,4 +1,4 @@
-# cubeplex - Agent System Backend
+# CubePlex - Agent System Backend
 
 AI Agent System Backend built on cubepi, a Python-native agent runtime.
 
@@ -128,7 +128,3 @@ Key dependencies:
 - **Loguru** - Logging
 
 See `pyproject.toml` for complete dependency list.
-
-## License
-
-MIT

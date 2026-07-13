@@ -231,10 +231,10 @@ default:
 
   # Object Storage Configuration (S3-compatible)
   objectstore:
-    provider: "oss" # "oss" or "s3"
-    endpoint: "https://oss-cn-zhangjiakou.aliyuncs.com"
-    bucket: "cubeplex-dev"
-    region: "cn-zhangjiakou"
+    provider: "s3" # "oss" or "s3"
+    endpoint: "s3.us-east-2.amazonaws.com"
+    bucket: "cubeplex"
+    region: "us-east-2"
     access_key: ""
     access_secret: ""
 
