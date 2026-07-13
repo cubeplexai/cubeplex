@@ -8,6 +8,7 @@ import {
   FileText,
   Loader2,
   Network,
+  Pencil,
   Trash2,
   Wrench,
   X,
@@ -21,13 +22,17 @@ import {
   adminPurgeTemplate,
   adminRefreshDiscovery,
   adminSetTemplateDisabled,
+  adminUpdateTemplate,
   useOrgAdminFlag,
   useWorkspaceStore,
+  wsDeleteTemplate,
+  wsUpdateTemplate,
   type AdminCatalogRow,
   type ApiClient,
   type MCPAuthMethod,
   type MCPConnector,
   type MCPTemplateScope,
+  type UpdateTemplateBody,
 } from '@cubeplex/core'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -35,9 +40,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
 import { AdminAuthBand } from './AdminAuthBand'
+import { ConnectorLogo } from './ConnectorLogo'
 import { MCPCitationsTab } from './MCPCitationsTab'
 import { MCPDistributeDialog } from './MCPDistributeDialog'
 import { MCPScopeBadge } from './MCPScopeBadge'
+import { MCPTemplateCreateForm, type CreateTemplateBody } from './MCPTemplateCreateForm'
 import { MCPWorkspacesTab } from './MCPWorkspacesTab'
 import { ServerErrorBanner } from './detail/ServerErrorBanner'
 import { AdminToolsPanel } from './detail/tools/AdminToolsPanel'
@@ -98,6 +105,8 @@ export function MCPAdminDetailPanel({
   const [purging, setPurging] = useState(false)
   const [toggling, setToggling] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [distributeOpen, setDistributeOpen] = useState(false)
 
@@ -119,6 +128,9 @@ export function MCPAdminDetailPanel({
   const { template, connector, disabled } = row
   const templateId = template.template_id
   const isOrgOwned = template.scope === 'org'
+  const isWorkspaceOwned = template.scope === 'workspace' && template.workspace_id !== null
+  // Editable/deletable when the current org owns the template (org- or workspace-scoped).
+  const isCustomOwned = isOrgOwned || isWorkspaceOwned
   const hasConnector = connector !== null
   const connectorId = connector?.connector_id ?? null
   const discoveryError = connector?.discovery_status === 'error'
@@ -158,13 +170,36 @@ export function MCPAdminDetailPanel({
     setDeleting(true)
     setActionError(null)
     try {
-      await adminDeleteTemplate(client, templateId)
+      if (isWorkspaceOwned && template.workspace_id) {
+        await wsDeleteTemplate(client, template.workspace_id, templateId)
+      } else {
+        await adminDeleteTemplate(client, templateId)
+      }
       onDeleted()
     } catch (err) {
       setActionError((err as Error).message)
     } finally {
       setDeleting(false)
       setConfirmDelete(false)
+    }
+  }
+
+  async function handleEditSubmit(body: UpdateTemplateBody): Promise<void> {
+    setSavingEdit(true)
+    setActionError(null)
+    try {
+      if (isWorkspaceOwned && template.workspace_id) {
+        await wsUpdateTemplate(client, template.workspace_id, templateId, body)
+      } else {
+        await adminUpdateTemplate(client, templateId, body)
+      }
+      await onRefresh()
+      setEditing(false)
+    } catch (err) {
+      setActionError((err as Error).message)
+      throw err
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -190,9 +225,40 @@ export function MCPAdminDetailPanel({
     await onRefresh()
   }
 
-  const busy = refreshing || deleting || purging || toggling
+  const busy = refreshing || deleting || purging || toggling || savingEdit
 
   const syntheticInstall: MCPConnector | null = hasConnector ? toMCPConnector(row) : null
+
+  if (editing) {
+    const initialAuth = (syntheticInstall?.auth_method ??
+      (template.supported_auth_methods?.[0] as MCPAuthMethod | undefined) ??
+      'none') as MCPAuthMethod
+    return (
+      <MCPTemplateCreateForm
+        client={client}
+        variant={isWorkspaceOwned ? 'workspace' : 'admin'}
+        initial={{
+          name: template.name,
+          server_url: template.server_url,
+          transport: template.transport as CreateTemplateBody['transport'],
+          auth_method: initialAuth,
+          lockConnectivity: hasConnector,
+        }}
+        onSubmit={async (body) => {
+          const diff: UpdateTemplateBody = {}
+          if (body.name !== template.name) diff.name = body.name
+          if (body.server_url !== template.server_url) diff.server_url = body.server_url
+          if (body.transport !== template.transport) diff.transport = body.transport
+          if (Object.keys(diff).length === 0) {
+            setEditing(false)
+            return
+          }
+          await handleEditSubmit(diff)
+        }}
+        onCancel={() => setEditing(false)}
+      />
+    )
+  }
 
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-detail-panel">
@@ -207,6 +273,12 @@ export function MCPAdminDetailPanel({
       <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
+            <ConnectorLogo
+              name={template.name}
+              icon={template.icon ?? null}
+              serverIcons={connector?.server_icons ?? null}
+              size="lg"
+            />
             {disabled ? (
               <Badge variant="destructive" className="text-[11px]">
                 {t('disabledBadge')}
@@ -319,7 +391,20 @@ export function MCPAdminDetailPanel({
             )
           ) : null}
 
-          {isOrgAdmin && isOrgOwned ? (
+          {isOrgAdmin && isCustomOwned ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setEditing(true)}
+            >
+              <Pencil data-icon="inline-start" />
+              {t('editTemplateAction')}
+            </Button>
+          ) : null}
+
+          {isOrgAdmin && isCustomOwned ? (
             !confirmDelete ? (
               <Button
                 type="button"

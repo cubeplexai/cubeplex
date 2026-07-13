@@ -49,6 +49,8 @@ export interface MCPTemplate {
   supported_auth_methods: string[]
   default_credential_policy: string
   status: string
+  /** Catalog brand key → frontend `/mcp-icons/{icon}.svg`. */
+  icon?: string | null
 }
 
 // ---------------- Connector facts (install-level, child of catalog row) ---------------- //
@@ -64,6 +66,8 @@ export interface MCPConnectorFacts {
   auto_enroll_new_workspaces: boolean
   /** Auth method used when the org grant was minted; null when no org grant exists. Admin-only. */
   org_grant_auth_method: 'oauth' | 'static' | null
+  /** Server icons from discovery_metadata (may include cached_src). */
+  server_icons?: MCPIcon[]
 }
 
 // ---------------- Catalog rows ---------------- //
@@ -86,6 +90,10 @@ export interface WorkspaceCatalogRow {
   usable: boolean | null
   reason: string | null
   credential_availability_by_scope: Record<'org' | 'workspace' | 'user', boolean>
+  /** Workspace-level credential policy override. Null when the workspace has
+   * never enabled this template; consumers should fall back to
+   * `connector.default_credential_policy` in that case. */
+  credential_policy: MCPCredentialScope | null
 }
 
 // ---------------- Legacy four-layer connector model (kept for WsAuthBand / effectiveAuthState) ---------------- //

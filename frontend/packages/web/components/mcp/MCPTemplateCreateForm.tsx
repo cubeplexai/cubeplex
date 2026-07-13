@@ -6,6 +6,7 @@ import { CheckCircle2, Eye, EyeOff, Loader2, XCircle } from 'lucide-react'
 import {
   adminCreateTemplate,
   adminTestConnection,
+  ApiError,
   type ApiClient,
   type MCPAuthMethod,
   type MCPCredentialScope,
@@ -25,22 +26,60 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
+/** Translate a submit-time error into human copy. Backend returns
+ *  `{"detail":{"code":"..."}}` for domain errors; `ApiError.message` is only
+ *  meaningful when the backend sends a `message` field (most 409/422 don't).
+ *  Fall back to a per-code i18n string, then to the code itself, then to
+ *  the raw error message. Never leave the user staring at bare "HTTP 409". */
+type FormT = ReturnType<typeof useTranslations<'mcpAdmin'>>
+function errorMessage(err: unknown, t: FormT): string {
+  if (err instanceof ApiError && err.code) {
+    // Known codes we translate; unknown codes render as `code (HTTP N)`.
+    switch (err.code) {
+      case 'connector_name_conflict':
+        return t('errorNameConflict')
+      case 'server_url_taken_in_org': {
+        const detail = (err.detail ?? {}) as { colliding_template_name?: string | null }
+        return t('errorUrlTaken', {
+          other: detail.colliding_template_name ?? t('errorUrlTakenFallbackName'),
+        })
+      }
+      default:
+        return `${err.code} (HTTP ${err.status})`
+    }
+  }
+  return (err as Error).message || 'Unknown error'
+}
+
 export interface CreateTemplateBody {
   name: string
   server_url: string
   transport: MCPTransport
   auth_method: MCPAuthMethod
-  supported_auth_methods: MCPAuthMethod[]
   default_credential_policy: MCPCredentialScope
+}
+
+export interface EditTemplateInitial {
+  name: string
+  server_url: string
+  transport: MCPTransport
+  auth_method: MCPAuthMethod
+  /** When true, disable server_url/transport inputs (connector already exists). */
+  lockConnectivity: boolean
 }
 
 interface MCPTemplateCreateFormProps {
   client: ApiClient
-  onCreated: (template: MCPTemplate) => void
+  onCreated?: (template: MCPTemplate) => void
   /** 'admin' (default) shows the org-level create title; 'workspace' shows the ws-level title. */
   variant?: 'admin' | 'workspace'
-  /** Custom submit handler; if provided, replaces adminCreateTemplate call. */
-  onSubmit?: (body: CreateTemplateBody) => Promise<MCPTemplate>
+  /** Custom submit handler; if provided, replaces adminCreateTemplate call.
+   *  Return void when the parent owns post-submit lifecycle (edit mode). */
+  onSubmit?: (body: CreateTemplateBody) => Promise<MCPTemplate | void>
+  /** When set, form runs in edit mode: prefilled values, no auth_method / credential
+   *  inputs, and server_url/transport disabled when initial.lockConnectivity=true. */
+  initial?: EditTemplateInitial
+  onCancel?: () => void
 }
 
 export function MCPTemplateCreateForm({
@@ -48,12 +87,15 @@ export function MCPTemplateCreateForm({
   onCreated,
   variant = 'admin',
   onSubmit,
+  initial,
+  onCancel,
 }: MCPTemplateCreateFormProps) {
   const t = useTranslations('mcpAdmin')
-  const [name, setName] = useState('')
-  const [serverUrl, setServerUrl] = useState('')
-  const [transport, setTransport] = useState<MCPTransport>('streamable_http')
-  const [authMethod, setAuthMethod] = useState<MCPAuthMethod>('static')
+  const isEdit = initial !== undefined
+  const [name, setName] = useState(initial?.name ?? '')
+  const [serverUrl, setServerUrl] = useState(initial?.server_url ?? '')
+  const [transport, setTransport] = useState<MCPTransport>(initial?.transport ?? 'streamable_http')
+  const [authMethod, setAuthMethod] = useState<MCPAuthMethod>(initial?.auth_method ?? 'static')
   const [credentialPlaintext, setCredentialPlaintext] = useState('')
   const [revealSecret, setRevealSecret] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -107,21 +149,33 @@ export function MCPTemplateCreateForm({
         server_url: serverUrl.trim(),
         transport,
         auth_method: authMethod,
-        supported_auth_methods: [authMethod] as MCPAuthMethod[],
-        default_credential_policy: (authMethod === 'none' ? 'none' : 'org') as MCPCredentialScope,
+        default_credential_policy: (authMethod === 'none'
+          ? 'none'
+          : variant === 'workspace'
+            ? 'workspace'
+            : 'org') as MCPCredentialScope,
       }
       const created = onSubmit ? await onSubmit(body) : await adminCreateTemplate(client, body)
-      onCreated(created)
+      if (created && onCreated) onCreated(created)
     } catch (err) {
-      setError((err as Error).message)
+      setError(errorMessage(err, t))
     } finally {
       setSubmitting(false)
     }
   }
 
-  const titleKey = variant === 'workspace' ? 'customCreateWorkspaceTitle' : 'customCreateTitle'
-  const subtitleKey =
-    variant === 'workspace' ? 'customCreateWorkspaceSubtitle' : 'customCreateSubtitle'
+  const titleKey = isEdit
+    ? 'customEditTitle'
+    : variant === 'workspace'
+      ? 'customCreateWorkspaceTitle'
+      : 'customCreateTitle'
+  const subtitleKey = isEdit
+    ? 'customEditSubtitle'
+    : variant === 'workspace'
+      ? 'customCreateWorkspaceSubtitle'
+      : 'customCreateSubtitle'
+  const submitKey = isEdit ? 'customEditSubmit' : 'customSubmit'
+  const connectivityLocked = isEdit && initial?.lockConnectivity === true
 
   return (
     <div className="flex w-full flex-col gap-4 p-6" data-testid="mcp-admin-custom-form">
@@ -170,7 +224,11 @@ export function MCPTemplateCreateForm({
                 autoCorrect="off"
                 spellCheck={false}
                 required
+                disabled={connectivityLocked}
               />
+              {connectivityLocked ? (
+                <p className="text-xs text-muted-foreground">{t('customEditLockedHint')}</p>
+              ) : null}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -181,6 +239,7 @@ export function MCPTemplateCreateForm({
                   onValueChange={(v) => {
                     if (v) setTransport(v as MCPTransport)
                   }}
+                  disabled={connectivityLocked}
                 >
                   <SelectTrigger id="custom-transport" className="w-full">
                     <SelectValue />
@@ -199,6 +258,7 @@ export function MCPTemplateCreateForm({
                   onValueChange={(v) => {
                     if (v) handleAuthMethodChange(v as MCPAuthMethod)
                   }}
+                  disabled={isEdit}
                 >
                   <SelectTrigger id="custom-auth-method" className="w-full">
                     <SelectValue />
@@ -214,7 +274,7 @@ export function MCPTemplateCreateForm({
           </CardContent>
         </Card>
 
-        {credentialFieldsNeeded ? (
+        {credentialFieldsNeeded && !isEdit ? (
           <Card>
             <CardHeader>
               <CardTitle>{t('customSectionCredential')}</CardTitle>
@@ -265,7 +325,9 @@ export function MCPTemplateCreateForm({
                 <XCircle className="size-3.5" />
               )}
               {testResult.ok
-                ? t('customTestOk', { count: testResult.tool_count })
+                ? authMethod === 'oauth'
+                  ? t('customTestOkOAuth')
+                  : t('customTestOk', { count: testResult.tool_count })
                 : (testResult.error_message ?? testResult.error_code ?? t('customTestFailed'))}
             </div>
           ) : null}
@@ -273,10 +335,15 @@ export function MCPTemplateCreateForm({
 
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {isEdit && onCancel ? (
+            <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
+              {t('customEditCancel')}
+            </Button>
+          ) : null}
           <Button type="submit" disabled={!canSubmit}>
             {submitting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
-            {t('customSubmit')}
+            {t(submitKey)}
           </Button>
         </div>
       </form>

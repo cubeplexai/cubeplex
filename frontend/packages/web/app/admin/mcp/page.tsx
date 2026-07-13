@@ -24,7 +24,7 @@ export default function AdminMcpPage() {
   const [loading, setLoading] = useState(true)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<AdminCatalogFilter>('in_use')
+  const [filter, setFilter] = useState<AdminCatalogFilter>('all')
   const [source, setSource] = useState<MCPTemplateScope | 'all'>('all')
   const [mode, setMode] = useState<'detail' | 'custom_create' | null>(null)
 
@@ -108,6 +108,11 @@ export default function AdminMcpPage() {
         onFilterChange={setFilter}
         source={source}
         onSourceChange={setSource}
+        onAddCustom={() => {
+          setSelectedTemplateId(null)
+          setMode('custom_create')
+        }}
+        addCustomActive={mode === 'custom_create'}
       />
 
       <ListDetailLayout
@@ -121,20 +126,6 @@ export default function AdminMcpPage() {
         railClassName="bg-card/20 px-0 py-0"
         list={
           <div aria-label="catalog-list">
-            <div className="border-b border-border/60 px-4 py-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedTemplateId(null)
-                  setMode('custom_create')
-                }}
-                data-testid="mcp-add-custom-connector"
-                className="flex w-full items-center gap-2 rounded-lg border border-dashed border-border/70 bg-card/40 p-2.5 text-left text-sm font-medium hover:border-border hover:bg-accent/40"
-              >
-                <span aria-hidden>+</span>
-                {t('addCustomConnector')}
-              </button>
-            </div>
             <MCPCatalogList
               rows={visible}
               loading={loading}

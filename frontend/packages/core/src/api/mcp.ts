@@ -54,6 +54,22 @@ export async function adminDeleteTemplate(client: ApiClient, templateId: string)
   if (!res.ok) throw await toApiError(res)
 }
 
+export interface UpdateTemplateBody {
+  name?: string
+  server_url?: string
+  transport?: MCPTransport
+}
+
+export async function adminUpdateTemplate(
+  client: ApiClient,
+  templateId: string,
+  body: UpdateTemplateBody,
+): Promise<MCPTemplate> {
+  const res = await client.patch(`/api/v1/admin/mcp/templates/${templateId}`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPTemplate
+}
+
 // PUT …/disable to disable; DELETE …/disable to re-enable.
 export async function adminSetTemplateDisabled(
   client: ApiClient,
@@ -111,6 +127,26 @@ export async function wsCreateTemplate(
   const res = await client.post(`/api/v1/ws/${wsId}/mcp/templates`, body)
   if (!res.ok) throw await toApiError(res)
   return (await res.json()) as MCPTemplate
+}
+
+export async function wsUpdateTemplate(
+  client: ApiClient,
+  wsId: string,
+  templateId: string,
+  body: UpdateTemplateBody,
+): Promise<MCPTemplate> {
+  const res = await client.patch(`/api/v1/ws/${wsId}/mcp/templates/${templateId}`, body)
+  if (!res.ok) throw await toApiError(res)
+  return (await res.json()) as MCPTemplate
+}
+
+export async function wsDeleteTemplate(
+  client: ApiClient,
+  wsId: string,
+  templateId: string,
+): Promise<void> {
+  const res = await client.del(`/api/v1/ws/${wsId}/mcp/templates/${templateId}`)
+  if (!res.ok) throw await toApiError(res)
 }
 
 export async function wsPromoteTemplate(

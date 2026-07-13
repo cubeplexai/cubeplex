@@ -322,7 +322,14 @@ function oauthStartFn(
 }
 
 function providerLabel(connector: MCPEffectiveConnector): string {
-  return connector.template?.provider || connector.template?.name || connector.install.name
+  // The seeder writes provider='custom' as a sentinel for user-created templates
+  // (see repositories/mcp.py::create_scoped); showing "Connect with custom" is
+  // useless, so fall through to the template's own name in that case.
+  const provider = connector.template?.provider
+  if (provider && provider.toLowerCase() !== 'custom') {
+    return provider
+  }
+  return connector.template?.name || connector.install.name
 }
 
 /**

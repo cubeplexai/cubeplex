@@ -500,6 +500,111 @@ async def test_admin_test_connection_rejects_static_plaintext_with_none_auth(
     assert res.status_code == 422, res.text
 
 
+async def test_admin_test_connection_oauth_probes_protected_resource(
+    admin_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OAuth servers reject anonymous MCP requests with 401. The probe must
+    instead succeed by fetching RFC 9728 protected-resource metadata."""
+    client, _ws = admin_client
+
+    calls: list[str] = []
+
+    async def fake_fetch_pr(self: object, base_url: str) -> object:
+        calls.append(base_url)
+        return SimpleNamespace(
+            resource=base_url,
+            authorization_servers=["https://issuer.example.com"],
+            scopes_supported=None,
+        )
+
+    async def fail_load(*args: object, **kwargs: object) -> object:
+        raise AssertionError("load_mcp_tools_http must not be called for OAuth probes")
+
+    monkeypatch.setattr(
+        "cubeplex.mcp.oauth.metadata.OAuthMetadataDiscovery.fetch_protected_resource",
+        fake_fetch_pr,
+    )
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.load_mcp_tools_http", fail_load)
+
+    res = await client.post(
+        "/api/v1/admin/mcp/test-connection",
+        json={
+            "server_url": "https://oauth.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "oauth",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["tool_count"] == 0
+    assert calls == ["https://oauth.example.com/mcp"]
+
+
+async def test_admin_test_connection_oauth_reports_metadata_failure(
+    admin_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When PR metadata is missing, surface a concrete error, not the raw 401."""
+    client, _ws = admin_client
+
+    async def fake_fetch_pr(self: object, base_url: str) -> object:
+        raise ConnectionError("well-known endpoint not reachable")
+
+    monkeypatch.setattr(
+        "cubeplex.mcp.oauth.metadata.OAuthMetadataDiscovery.fetch_protected_resource",
+        fake_fetch_pr,
+    )
+
+    res = await client.post(
+        "/api/v1/admin/mcp/test-connection",
+        json={
+            "server_url": "https://oauth-broken.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "oauth",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "ConnectionError"
+    assert "well-known" in body["error_message"]
+
+
+async def test_admin_test_connection_unwraps_exception_group(
+    admin_client: tuple[httpx.AsyncClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP client raises BaseExceptionGroup wrapping the real cause; the
+    endpoint must surface the underlying error, not 'unhandled errors in a
+    TaskGroup (1 sub-exception)'."""
+    client, _ws = admin_client
+
+    async def fake_load(*args: object, **kwargs: object) -> object:
+        raise ExceptionGroup(
+            "unhandled errors in a TaskGroup",
+            [ConnectionError("dns lookup failed for probe.example.com")],
+        )
+
+    monkeypatch.setattr("cubeplex.api.routes.v1.admin_mcp.load_mcp_tools_http", fake_load)
+
+    res = await client.post(
+        "/api/v1/admin/mcp/test-connection",
+        json={
+            "server_url": "https://probe.example.com/mcp",
+            "transport": "streamable_http",
+            "auth_method": "none",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is False
+    assert body["error_code"] == "ConnectionError"
+    assert "dns lookup failed" in body["error_message"]
+    assert "TaskGroup" not in body["error_message"]
+
+
 # ---------------------------------------------------------------------------
 # Task 7 — Tool-citation upsert.
 # ---------------------------------------------------------------------------

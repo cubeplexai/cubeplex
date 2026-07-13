@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from .mcp import MCPToolEntry
+from .mcp import McpIconOut, MCPToolEntry
 
 
 class MCPTemplateOut(BaseModel):
@@ -28,6 +28,7 @@ class MCPTemplateOut(BaseModel):
     supported_auth_methods: list[str]
     default_credential_policy: str
     status: str
+    icon: str | None = None
 
 
 class MCPConnectorFactsOut(BaseModel):
@@ -47,6 +48,7 @@ class MCPConnectorFactsOut(BaseModel):
     auto_enroll_new_workspaces: bool
     # Admin-only: auth method used when the org grant was minted; None when no org grant exists.
     org_grant_auth_method: Literal["oauth", "static"] | None = None
+    server_icons: list[McpIconOut] = []
 
 
 class AdminCatalogRowOut(BaseModel):
@@ -77,6 +79,11 @@ class WorkspaceCatalogRowOut(BaseModel):
     usable: bool | None  # None when no connector/state yet
     reason: str | None
     credential_availability_by_scope: dict[Literal["org", "workspace", "user"], bool]
+    # Workspace-level credential policy override; None when no state row exists
+    # yet (workspace has never enabled this template). Clients should use this
+    # as the source of truth for the "selected" policy in the workspace UI and
+    # fall back to connector.default_credential_policy only when null.
+    credential_policy: Literal["org", "workspace", "user", "none"] | None = None
 
 
 class WorkspaceCatalogListOut(BaseModel):
@@ -108,6 +115,32 @@ class CreateTemplateIn(BaseModel):
             )
         if self.auth_method == "none" and self.default_credential_policy != "none":
             raise ValueError("auth_method='none' requires default_credential_policy='none'")
+        return self
+
+
+class UpdateTemplateIn(BaseModel):
+    """Body for editing a custom MCP template (admin org-scoped, ws-scoped).
+
+    All fields optional; a field is treated as "unchanged" when omitted.
+    ``name`` is always editable. ``server_url`` / ``transport`` are
+    connectivity-affecting: the route rejects (409 ``template_in_use``) any
+    request that changes them while an active connector exists — mirroring the
+    delete pre-condition. Users must Purge first, then edit connectivity.
+
+    ``auth_method`` is intentionally not editable — switching credential
+    mechanisms is a full recreate flow (delete → new template).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    server_url: str | None = None
+    transport: Literal["streamable_http", "sse"] | None = None
+
+    @model_validator(mode="after")
+    def _validate_not_empty(self) -> "UpdateTemplateIn":
+        if all(v is None for v in (self.name, self.server_url, self.transport)):
+            raise ValueError("at least one field must be provided")
         return self
 
 

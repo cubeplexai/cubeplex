@@ -19,6 +19,7 @@ import time
 from contextvars import ContextVar
 from typing import Annotated, Any, cast
 
+import httpx
 from cubepi.mcp import load_mcp_tools_http
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +47,7 @@ from cubeplex.api.schemas.mcp_catalog import (
     DistributeIn,
     MCPConnectorFactsOut,
     MCPTemplateOut,
+    UpdateTemplateIn,
 )
 from cubeplex.audit.sink import AuditSink
 from cubeplex.auth.context import RequestContext
@@ -64,6 +66,7 @@ from cubeplex.mcp.dependencies import (
 )
 from cubeplex.mcp.exceptions import MCPDiscoveryFailed
 from cubeplex.mcp.oauth import OAuthStartError, OAuthStartService
+from cubeplex.mcp.oauth.metadata import OAuthMetadataDiscovery
 from cubeplex.mcp.oauth.token_manager import OAuthTokenManager
 from cubeplex.mcp.user_token import MCPUserTokenSigner
 from cubeplex.models import MCPConnector, User
@@ -91,6 +94,8 @@ router = APIRouter(prefix="/admin/mcp", tags=["admin-mcp"])
 
 
 def _template_to_out(template: Any) -> MCPTemplateOut:
+    from cubeplex.mcp.icons import template_icon_key
+
     return MCPTemplateOut(
         template_id=template.id,
         slug=template.slug,
@@ -104,7 +109,56 @@ def _template_to_out(template: Any) -> MCPTemplateOut:
         supported_auth_methods=list(template.supported_auth_methods or []),
         default_credential_policy=template.default_credential_policy,
         status=template.status,
+        icon=template_icon_key(getattr(template, "template_metadata", None)),
     )
+
+
+async def _guard_template_url_taken(
+    template_repo: MCPConnectorTemplateRepository,
+    *,
+    org_id: str,
+    server_url: str,
+    exclude_template_id: str | None,
+) -> None:
+    """Reject template create / edit when the URL is already used by another
+    active template in the same org (or a global one). Returns 409
+    ``server_url_taken_in_org`` — same shape the state/distribute routes emit,
+    so the frontend's error translator covers this too."""
+    colliding = await template_repo.find_active_template_by_url(
+        org_id=org_id,
+        server_url=server_url,
+        exclude_template_id=exclude_template_id,
+    )
+    if colliding is not None:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "server_url_taken_in_org",
+                "colliding_template_name": colliding.name,
+                "server_url": server_url,
+            },
+        )
+
+
+async def _guard_connectivity_edit(
+    session: AsyncSession,
+    org_id: str,
+    template_id: str,
+    body: UpdateTemplateIn,
+) -> None:
+    """Raise 409 ``template_in_use`` if the request changes connectivity-affecting
+    fields while an active connector exists for the template. Mirrors the
+    delete pre-condition — users must Purge first."""
+    if body.server_url is None and body.transport is None:
+        return
+    connector_repo = MCPConnectorRepository(session, org_id=org_id)
+    connector = await connector_repo.get_by_template_id(template_id)
+    if connector is not None:
+        raise HTTPException(409, detail={"code": "template_in_use"})
+
+
+def _updated_fields(body: UpdateTemplateIn) -> list[str]:
+    return [k for k in ("name", "server_url", "transport") if getattr(body, k) is not None]
 
 
 def _connector_to_facts(
@@ -112,6 +166,9 @@ def _connector_to_facts(
     *,
     org_grant_auth_method: str | None = None,
 ) -> MCPConnectorFactsOut:
+    from cubeplex.api.schemas.mcp import McpIconOut
+    from cubeplex.mcp.icons import server_icons_from_discovery
+
     tools_cache = connector.tools_cache or []
     tool_entries = [
         MCPToolEntry(
@@ -121,6 +178,10 @@ def _connector_to_facts(
         )
         for t in tools_cache
         if isinstance(t, dict) and t.get("name")
+    ]
+    server_icons = [
+        McpIconOut.model_validate(icon)
+        for icon in server_icons_from_discovery(getattr(connector, "discovery_metadata", None))
     ]
     return MCPConnectorFactsOut(
         connector_id=connector.id,
@@ -132,6 +193,7 @@ def _connector_to_facts(
         last_error=connector.last_error,
         auto_enroll_new_workspaces=connector.auto_enroll_new_workspaces,
         org_grant_auth_method=org_grant_auth_method,  # type: ignore[arg-type]
+        server_icons=server_icons,
     )
 
 
@@ -298,6 +360,12 @@ async def create_template(
 ) -> MCPTemplateOut:
     """Create an org-scoped custom MCP template."""
     template_repo = MCPConnectorTemplateRepository(session)
+    await _guard_template_url_taken(
+        template_repo,
+        org_id=ctx.org_id,
+        server_url=body.server_url,
+        exclude_template_id=None,
+    )
     try:
         template = await template_repo.create_scoped(
             scope="org",
@@ -321,6 +389,60 @@ async def create_template(
         details={"scope": "org", "name": body.name},
     )
     return _template_to_out(template)
+
+
+@router.patch(
+    "/templates/{template_id}",
+    response_model=MCPTemplateOut,
+)
+async def update_template(
+    template_id: str,
+    body: UpdateTemplateIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPTemplateOut:
+    """Edit an org-owned custom MCP template.
+
+    Only templates with ``scope='org'`` and ``org_id == ctx.org_id`` may be
+    edited. ``name`` is always editable; ``server_url`` / ``transport`` require
+    no active connector (409 ``template_in_use``) — user must Purge first.
+    """
+    template_repo = MCPConnectorTemplateRepository(session)
+    template = await template_repo.get(template_id)
+    if template is None or template.scope != "org" or template.org_id != ctx.org_id:
+        raise HTTPException(404, detail={"code": "template_not_owned_by_org"})
+
+    await _guard_connectivity_edit(session, ctx.org_id, template_id, body)
+    if body.server_url is not None and body.server_url != template.server_url:
+        await _guard_template_url_taken(
+            template_repo,
+            org_id=ctx.org_id,
+            server_url=body.server_url,
+            exclude_template_id=template_id,
+        )
+
+    try:
+        updated = await template_repo.update_custom_fields(
+            template,
+            name=body.name,
+            server_url=body.server_url,
+            transport=body.transport,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
+
+    await audit.record(
+        event="mcp.template.updated",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=template_id,
+        details={
+            "scope": "org",
+            "changed": _updated_fields(body),
+        },
+    )
+    return _template_to_out(updated)
 
 
 @router.delete(
@@ -436,11 +558,28 @@ async def distribute_template(
     if template is None:
         raise HTTPException(404, detail={"code": "template_not_found"})
 
-    await svc.distribute(
-        template,
-        enable_existing=body.enable_existing,
-        auto_enroll=body.auto_enroll,
-    )
+    try:
+        await svc.distribute(
+            template,
+            enable_existing=body.enable_existing,
+            auto_enroll=body.auto_enroll,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "server_url_taken_in_org":
+            collision_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+            colliding_name = await collision_repo.find_colliding_template_name(
+                url=template.server_url, exclude_template_id=template_id
+            )
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "server_url_taken_in_org",
+                    "colliding_template_name": colliding_name,
+                    "server_url": template.server_url,
+                },
+            ) from exc
+        raise
     await audit.record(
         event="mcp.template.distributed",
         actor_user_id=ctx.user.id,
@@ -1036,12 +1175,33 @@ async def admin_org_grant_oauth_start(
 _TEST_CONNECTION_TIMEOUT = 10.0
 
 
+def _unwrap_exception(exc: Exception) -> BaseException:
+    """Peel ExceptionGroup down to the first leaf so the error surfaced to the
+    client names the real cause (an httpx / MCP protocol error), not the outer
+    'unhandled errors in a TaskGroup (1 sub-exception)' wrapper the mcp client
+    raises when its internal TaskGroup fails."""
+    current: BaseException = exc
+    while isinstance(current, BaseExceptionGroup) and current.exceptions:
+        current = current.exceptions[0]
+    return current
+
+
 @router.post("/test-connection", response_model=TestConnectionOut)
 async def admin_test_connection(
     body: TestConnectionIn,
     _ctx: Annotated[RequestContext, Depends(get_admin_request_context)],
 ) -> TestConnectionOut:
-    """Probe an MCP server URL without persisting anything."""
+    """Probe an MCP server URL without persisting anything.
+
+    OAuth servers cannot be discovered anonymously — the MCP request is
+    correctly rejected with 401. Instead we verify RFC 9728
+    ``/.well-known/oauth-protected-resource`` is reachable and lists at least
+    one authorization server. That confirms the server is alive and OAuth-
+    capable; actual tool discovery has to wait until the OAuth flow completes.
+    """
+    if body.auth_method == "oauth":
+        return await _probe_oauth_metadata(body.server_url)
+
     headers = dict(body.headers or {})
     if body.auth_method == "static" and body.credential_plaintext:
         headers.setdefault("Authorization", f"Bearer {body.credential_plaintext}")
@@ -1056,10 +1216,35 @@ async def admin_test_connection(
             timeout=_TEST_CONNECTION_TIMEOUT,
         )
     except Exception as exc:  # noqa: BLE001
+        cause = _unwrap_exception(exc)
+        message = str(cause) or repr(cause)
         return TestConnectionOut(
             ok=False,
             tool_count=0,
-            error_code=type(exc).__name__,
-            error_message=str(exc)[:256],
+            error_code=type(cause).__name__,
+            error_message=message[:256],
         )
     return TestConnectionOut(ok=True, tool_count=len(discovery.tools))
+
+
+async def _probe_oauth_metadata(server_url: str) -> TestConnectionOut:
+    """Probe RFC 9728 protected-resource metadata for an OAuth MCP server."""
+    try:
+        async with httpx.AsyncClient(timeout=_TEST_CONNECTION_TIMEOUT) as http:
+            discovery = OAuthMetadataDiscovery(http)
+            await asyncio.wait_for(
+                discovery.fetch_protected_resource(server_url),
+                timeout=_TEST_CONNECTION_TIMEOUT,
+            )
+    except Exception as exc:  # noqa: BLE001
+        cause = _unwrap_exception(exc)
+        message = str(cause) or repr(cause)
+        return TestConnectionOut(
+            ok=False,
+            tool_count=0,
+            error_code=type(cause).__name__,
+            error_message=message[:256],
+        )
+    # Tool count is unknowable pre-authorization; report 0 and let the UI
+    # phrase the success message for OAuth flows.
+    return TestConnectionOut(ok=True, tool_count=0)

@@ -222,6 +222,44 @@ async def test_seed_marks_removed_slugs_as_deprecated(
     assert deprecated_row.status == "deprecated"
 
 
+async def test_seed_leaves_custom_scope_templates_alone(
+    session: AsyncSession, backend: FernetBackend
+) -> None:
+    """Regression: custom (org/workspace-scoped) templates must survive re-seed.
+
+    Prior to this guard, ``mark_deprecated_for_missing_slugs`` deprecated ANY
+    active row whose slug wasn't in the built-in seed list — including
+    user-created custom connectors — silently deleting them on every restart.
+    """
+    env = _full_env()
+    await seed_templates(session, backend, get_env=_make_get_env(env))
+
+    # Insert a custom org-scoped template directly (bypasses the seed path).
+    custom = MCPConnectorTemplate(
+        slug="custom-my-thing-abcdef",
+        name="my thing",
+        description="",
+        provider="custom",
+        server_url="https://example.com/mcp",
+        transport="streamable_http",
+        supported_auth_methods=["none"],
+        default_credential_policy="none",
+        scope="org",
+        org_id="org-abcdef",
+        status="active",
+    )
+    session.add(custom)
+    await session.flush()
+
+    # Re-run seed — the custom row must not be touched.
+    await seed_templates(session, backend, get_env=_make_get_env(env))
+
+    repo = MCPConnectorTemplateRepository(session)
+    row = await repo.get_by_slug("custom-my-thing-abcdef")
+    assert row is not None
+    assert row.status == "active", "custom template must survive re-seed"
+
+
 async def test_seed_is_idempotent(session: AsyncSession, backend: FernetBackend) -> None:
     env = _full_env()
     first = await seed_templates(session, backend, get_env=_make_get_env(env))

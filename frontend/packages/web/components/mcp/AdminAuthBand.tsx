@@ -61,7 +61,7 @@ export function AdminAuthBand(props: AdminAuthBandProps) {
         key={connectorId}
         connectorId={connectorId}
         supported={supported}
-        providerLabel={row.template.provider || row.template.name}
+        providerLabel={templateProviderLabel(row.template)}
         client={client}
         onChanged={onChanged}
       />
@@ -382,5 +382,18 @@ function AdminBandInner({
 }
 
 function providerLabel(connector: MCPEffectiveConnector): string {
-  return connector.template?.provider || connector.template?.name || connector.install.name
+  // See WsAuthBand.providerLabel — provider='custom' is a sentinel, fall through.
+  const provider = connector.template?.provider
+  if (provider && provider.toLowerCase() !== 'custom') {
+    return provider
+  }
+  return connector.template?.name || connector.install.name
+}
+
+function templateProviderLabel(template: { provider?: string; name: string }): string {
+  const provider = template.provider
+  if (provider && provider.toLowerCase() !== 'custom') {
+    return provider
+  }
+  return template.name
 }

@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from cubeplex.api.middleware.rate_limit import limiter
 from cubeplex.api.routes.v1.admin_mcp import (
     _connector_to_facts,
+    _guard_template_url_taken,
     _install_to_out,
     _template_to_out,
 )
@@ -56,6 +57,7 @@ from cubeplex.api.schemas.mcp_catalog import (
     CreateTemplateIn,
     MCPTemplateOut,
     TemplateStateIn,
+    UpdateTemplateIn,
     WorkspaceCatalogListOut,
     WorkspaceCatalogRowOut,
 )
@@ -190,6 +192,7 @@ def _row_to_catalog_out(
         usable=usable,
         reason=reason,
         credential_availability_by_scope=cred_avail,
+        credential_policy=row.credential_policy,  # type: ignore[arg-type]
     )
 
 
@@ -285,12 +288,29 @@ async def put_template_state(
         raise HTTPException(409, detail={"code": "template_disabled_in_org"})
 
     # Delegate to service (lazy-ensure connector + upsert state row)
-    await svc.set_workspace_enabled(
-        template,
-        workspace_id=workspace_id,
-        enabled=body.enabled,
-        credential_policy=body.credential_policy,
-    )
+    try:
+        await svc.set_workspace_enabled(
+            template,
+            workspace_id=workspace_id,
+            enabled=body.enabled,
+            credential_policy=body.credential_policy,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "server_url_taken_in_org":
+            collision_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+            colliding_name = await collision_repo.find_colliding_template_name(
+                url=template.server_url, exclude_template_id=template_id
+            )
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "server_url_taken_in_org",
+                    "colliding_template_name": colliding_name,
+                    "server_url": template.server_url,
+                },
+            ) from exc
+        raise
     await audit.record(
         event="mcp.workspace_template.state_changed",
         actor_user_id=ctx.user.id,
@@ -337,6 +357,7 @@ async def put_template_state(
         usable=None,
         reason=None,
         credential_availability_by_scope={"org": False, "workspace": False, "user": False},
+        credential_policy=None,
     )
 
 
@@ -359,6 +380,12 @@ async def create_workspace_template(
 ) -> MCPTemplateOut:
     """Create a workspace-scoped custom MCP template."""
     template_repo = MCPConnectorTemplateRepository(session)
+    await _guard_template_url_taken(
+        template_repo,
+        org_id=ctx.org_id,
+        server_url=body.server_url,
+        exclude_template_id=None,
+    )
     try:
         template = await template_repo.create_scoped(
             scope="workspace",
@@ -382,6 +409,101 @@ async def create_workspace_template(
         details={"scope": "workspace", "workspace_id": workspace_id, "name": body.name},
     )
     return _template_to_out(template)
+
+
+@router.patch(
+    "/templates/{template_id}",
+    response_model=MCPTemplateOut,
+)
+async def update_workspace_template(
+    workspace_id: str,
+    template_id: str,
+    body: UpdateTemplateIn,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> MCPTemplateOut:
+    """Edit a workspace-owned custom MCP template.
+
+    Only templates with ``scope='workspace'`` and ``workspace_id == path
+    workspace_id`` may be edited. ``name`` is always editable; ``server_url`` /
+    ``transport`` require no active connector (409 ``template_in_use``).
+    """
+    template_repo = MCPConnectorTemplateRepository(session)
+    template = await template_repo.get(template_id)
+    if template is None or template.scope != "workspace" or template.workspace_id != workspace_id:
+        raise HTTPException(404, detail={"code": "template_not_owned_by_workspace"})
+
+    if body.server_url is not None or body.transport is not None:
+        connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+        connector = await connector_repo.get_by_template_id(template_id)
+        if connector is not None:
+            raise HTTPException(409, detail={"code": "template_in_use"})
+    if body.server_url is not None and body.server_url != template.server_url:
+        await _guard_template_url_taken(
+            template_repo,
+            org_id=ctx.org_id,
+            server_url=body.server_url,
+            exclude_template_id=template_id,
+        )
+
+    try:
+        updated = await template_repo.update_custom_fields(
+            template,
+            name=body.name,
+            server_url=body.server_url,
+            transport=body.transport,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
+
+    changed = [k for k in ("name", "server_url", "transport") if getattr(body, k) is not None]
+    await audit.record(
+        event="mcp.template.updated",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=template_id,
+        details={"scope": "workspace", "workspace_id": workspace_id, "changed": changed},
+    )
+    return _template_to_out(updated)
+
+
+@router.delete(
+    "/templates/{template_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_workspace_template(
+    workspace_id: str,
+    template_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_admin)],
+    audit: Annotated[AuditSink, Depends(get_audit_sink)],
+) -> None:
+    """Delete a workspace-owned template.
+
+    Only templates with ``scope='workspace'`` and ``workspace_id == path
+    workspace_id`` may be deleted. 409 if an active connector exists.
+    """
+    template_repo = MCPConnectorTemplateRepository(session)
+    template = await template_repo.get(template_id)
+    if template is None or template.scope != "workspace" or template.workspace_id != workspace_id:
+        raise HTTPException(404, detail={"code": "template_not_owned_by_workspace"})
+
+    connector_repo = MCPConnectorRepository(session, org_id=ctx.org_id)
+    connector = await connector_repo.get_by_template_id(template_id)
+    if connector is not None:
+        raise HTTPException(409, detail={"code": "template_in_use"})
+
+    template.status = "deleted"
+    await session.commit()
+
+    await audit.record(
+        event="mcp.template.deleted",
+        actor_user_id=ctx.user.id,
+        org_id=ctx.org_id,
+        target_id=template_id,
+        details={"scope": "workspace", "workspace_id": workspace_id},
+    )
 
 
 @router.post(

@@ -181,8 +181,11 @@ class MCPConnectorService:
         Ensures the connector exists (creating it if necessary), then upserts
         the workspace's state row with ``enablement_source='workspace_manual'``.
 
-        When ``credential_policy`` is None the connector's
-        ``default_credential_policy`` is used.
+        Default policy when ``credential_policy`` is None: 'workspace', giving
+        the workspace admin autonomy over credentials. Exception: connectors
+        whose template requires no auth (default_credential_policy='none')
+        keep 'none' since there is no credential slot. Admin-driven distribution
+        continues to inherit connector.default_credential_policy (see distribute()).
 
         This method intentionally does NOT check template visibility or the
         org-disabled flag — those rejections belong to the route layer (Task 10).
@@ -190,11 +193,12 @@ class MCPConnectorService:
         connector = await self._connector_repo.get_or_create_for_template(
             template, created_by_user_id=self._actor_user_id
         )
-        policy = (
-            credential_policy
-            if credential_policy is not None
-            else connector.default_credential_policy
-        )
+        if credential_policy is not None:
+            policy = credential_policy
+        elif connector.default_credential_policy == "none":
+            policy = "none"
+        else:
+            policy = "workspace"
         return await self._state_repo.upsert_for_connector(
             workspace_id=workspace_id,
             connector_id=connector.id,
