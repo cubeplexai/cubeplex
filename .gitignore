@@ -21,11 +21,17 @@ logs
 node_modules/
 .next/
 
-# Claude Code
-# .agents/ is tracked — it holds installed skill content (managed by
-# `npx skills`); .claude/skills/<name> symlinks point into it. The
-# linguist-vendored marker in .gitattributes keeps it out of language
-# stats.
+# Claude Code / agent skills
+# .agents/skills/ holds skill content; .claude/skills/<name> symlinks point
+# into it. Hand-authored (native) skills ARE committed. Vendored skills are
+# tracked only via skills-lock.json — their content is restored with
+# `npx skills experimental_install`, so their dirs are ignored below (add one
+# line per vendored skill you install). .gitattributes marks .agents as
+# linguist-vendored to keep it out of language stats.
+.agents/skills/cubepi/
+.agents/skills/cubepi-trace/
+.agents/skills/playwright-cli/
+.agents/skills/web-design-guidelines/
 .superpowers/
 settings.local.json
 .claude/scheduled_tasks.lock

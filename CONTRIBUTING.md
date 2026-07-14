@@ -15,6 +15,9 @@ Thanks for your interest! This doc covers how to set up your local environment s
 git clone https://github.com/xfgong/cubeplex.git
 cd cubeplex
 
+# Agent skills — restore vendored skills from skills-lock.json into .agents/skills/
+npx skills experimental_install
+
 # Backend
 cd backend
 make dev-install
@@ -27,6 +30,31 @@ pnpm install
 npx playwright install   # only if you plan to run e2e locally
 cd ..
 ```
+
+## Agent skills
+
+Skills live in `.agents/skills/` and are symlinked into `.claude/skills/`
+(and other agent dirs). There are two kinds, tracked differently:
+
+- **Vendored skills** — installed from a GitHub source via `npx skills`. Only
+  their entry in `skills-lock.json` is committed; their *content* is
+  gitignored and restored with `npx skills experimental_install` (part of
+  first-time setup above). Add one to the repo with:
+
+  ```bash
+  npx skills add <owner/repo> -s <skill-name>   # updates skills-lock.json
+  ```
+
+  Then add its dir under `.agents/skills/` to `.gitignore` (one line, next to
+  the other vendored entries) so its content stays out of git.
+
+- **Native skills** — hand-authored, cubeplex-specific (e.g.
+  `feature-workflow`, `cubeplex-tdd`, `debug-cubeplex`, `pr-codex-review-loop`).
+  These are **committed** — their `.agents/skills/<name>/` content is the source
+  of truth. Create one with `npx skills init <name>` or by hand, and just commit
+  it (no `.gitignore` entry, not in `skills-lock.json`).
+
+Remove either kind with `npx skills remove <name>` (also updates the lock).
 
 ## Hook behavior
 
