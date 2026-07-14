@@ -63,6 +63,13 @@ cubeplex is a full-stack agent platform.
     [docs/dev/plans/2026-06-23-docs-overhaul.md](docs/dev/plans/2026-06-23-docs-overhaul.md).
 14. **PR titles: a brief description, nothing else.** Never use
     "Codex-generated", "[WIP]", or any other static prefixes.
+15. **Branch names follow repo history.** Prefer `feat/YYYY-MM-DD-<slug>` or
+    `fix/YYYY-MM-DD-<slug>` for new branches so names stay consistent with the
+    existing pattern. Do not introduce `bugfix/`, `codex/`, or other new
+    prefixes unless the user explicitly asks for them.
+16. **Commit messages use conventional commits.** Prefer
+    `type(scope): summary` for commit subjects, with a short imperative
+    summary and an optional scope.
 
 ---
 
@@ -102,12 +109,15 @@ cubeplex is a full-stack agent platform.
 Full discipline: **[docs/testing.md](docs/testing.md)**. TDD loop + when-to-TDD
 judgment: **`/cubeplex-tdd`**. What you can't get wrong:
 
-- A test protects a business invariant or contract; DOM-presence / element-count
-  tests get deleted on sight.
-- **If a test opens an `AsyncSession`, runs alembic, or hits the app, it's e2e
-  (`backend/tests/e2e/`), full stop** — misplacing it breaks `make check-ci`.
-- Real services at internal boundaries; mock only the outermost external.
-  Real-LLM tests are tagged `@pytest.mark.real_llm`.
+- A test must protect a business invariant or contract. DOM-presence /
+  element-count tests get deleted on sight.
+- Directory choice: `backend/tests/unit/` (pure, in-process),
+  `tests/integration/` (multi-module, no external systems), `tests/e2e/`
+  (touches Postgres / Redis / S3 / the FastAPI app). **If it opens an
+  `AsyncSession`, runs alembic, or hits the app, it's e2e, full stop** —
+  misplacing it breaks `make check-ci`.
+- Real services at internal boundaries; mock only the outermost external the
+  test isn't about. Real-LLM tests are tagged `@pytest.mark.real_llm`.
 
 ---
 
