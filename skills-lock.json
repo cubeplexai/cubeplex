@@ -1,26 +1,22 @@
 {
   "version": 1,
   "skills": {
-    "karpathy-guidelines": {
-      "source": "forrestchang/andrej-karpathy-skills",
+    "cubepi": {
+      "source": "cubeplexai/cubepi",
       "sourceType": "github",
-      "skillPath": "skills/karpathy-guidelines/SKILL.md",
-      "computedHash": "41e8ca055bbde13d240776a14a076a59614057200340c243130a76ba4e64cac8"
+      "skillPath": "skills/cubepi/SKILL.md",
+      "computedHash": "c995efb2aebd959260803cffa174de58a43b7bdc82d3be92a93a34d5491ad695"
+    },
+    "cubepi-trace": {
+      "source": "cubeplexai/cubepi",
+      "sourceType": "github",
+      "skillPath": "skills/cubepi-trace/SKILL.md",
+      "computedHash": "05eee5834c9c54e34998baa7edcea2ee3230e0a443d8831ebe0a1bc2c4fff27b"
     },
     "playwright-cli": {
       "source": "microsoft/playwright-cli",
       "sourceType": "github",
       "computedHash": "7075ab30f588019197a2f1518bb4c9d33d69d33352af079b5f9c60303ad3886e"
-    },
-    "shadcn": {
-      "source": "shadcn/ui",
-      "sourceType": "github",
-      "computedHash": "507f011a70e8b3ae242bdc0bb5b39fd91a1d4049a0f3c281991ccf84973d591c"
-    },
-    "sqlmodel-expert": {
-      "source": "bilalmk/todo_correct",
-      "sourceType": "github",
-      "computedHash": "1c1522cc9d347eb8dc6aeff240da1f2ba613f0a73e376c5a0922d770e5ce7ebf"
     },
     "web-design-guidelines": {
       "source": "vercel-labs/agent-skills",
