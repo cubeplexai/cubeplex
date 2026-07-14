@@ -36,8 +36,8 @@ cubeplex is a full-stack agent platform.
 3. **E2E priority over mocks/units.** "E2E" = a business-flow test that
    exercises a real user/system invariant, not a DOM snapshot. Full rules:
    [docs/testing.md](docs/testing.md).
-4. **Plan before code** for multi-step work. Use `/writing-plans` skill.
-5. **Brainstorm before designing** features. Use `/brainstorming` skill.
+4. **Plan before code** for multi-step work. Use `/feature-workflow` skill.
+5. **Brainstorm before designing** features. Use `/feature-workflow` skill.
 6. **One concern per PR.** Decide spec/plan/code split (1 PR vs N) **before**
    pushing, based on coupling and review cost.
 7. **PR codex review loop** — automated by the
@@ -47,20 +47,19 @@ cubeplex is a full-stack agent platform.
 8. **Branch discipline.** During multi-task execution, stay on the feature
    branch. Never auto-switch to main or initiate merges mid-execution.
 9. **Verify before claiming done.** Run the actual command, paste evidence.
-   `/verification-before-completion` skill enforces this.
+   No "should work now" without output. CI-equivalent `make check-ci` is gated
+   automatically by the pre-push hook — don't run it by hand first.
 10. **Act on review feedback directly** once you've confirmed it's valid —
     push the fix as a follow-up commit; don't ask permission first.
 11. **Incremental testing during dev**: run only changed-module tests per
     task; reserve the full suite for the pre-PR sweep.
 12. **Plain language in docs/specs.** Don't invent abstract jargon. Say what
     literally happens + why, in concrete words.
-13. **Docs ship with the code.** Any change to user-facing behavior — route,
-    header, enum/option, default limit, config key, UI flow, role, CLI/slash
-    command — MUST update the matching page under `docs/site/docs/` in the
-    **same PR**. New user-facing subsystems get a new doc page (the one
-    sanctioned exception to "don't create new docs"). Missing screenshot →
-    leave a placeholder block, never a silent gap. Placeholder format +
-    code-area→page mapping:
+13. **Docs ship with the code.** Any user-facing change (route, header, enum,
+    default, config key, UI flow, role, CLI/slash command) updates the matching
+    `docs/site/docs/` page in the **same PR**; new subsystems get a new page
+    (the one sanctioned new-doc exception). Missing screenshot → placeholder,
+    never a silent gap. Format + code-area→page mapping:
     [docs/dev/plans/2026-06-23-docs-overhaul.md](docs/dev/plans/2026-06-23-docs-overhaul.md).
 14. **PR titles: a brief description, nothing else.** Never use
     "Codex-generated", "[WIP]", or any other static prefixes.
@@ -98,36 +97,17 @@ cubeplex is a full-stack agent platform.
 
 ---
 
-## Testing — summary
+## Testing — the non-negotiables
 
-Full principles, frontend Playwright allowed/forbidden lists, backend e2e
-disciplines: **[docs/testing.md](docs/testing.md)**. The non-negotiables:
+Full discipline: **[docs/testing.md](docs/testing.md)**. TDD loop + when-to-TDD
+judgment: **`/cubeplex-tdd`**. What you can't get wrong:
 
-- A test must protect a business invariant or contract. DOM-presence /
-  element-count tests get deleted on sight.
-- Directory choice: `backend/tests/unit/` (pure, in-process),
-  `tests/integration/` (multi-module, no external systems), `tests/e2e/`
-  (touches Postgres / Redis / S3 / the FastAPI app). **If it opens an
-  `AsyncSession`, runs alembic, or hits the app, it's e2e, full stop** —
-  misplacing it breaks `make check-ci`.
-- Real services at internal boundaries; mock only the outermost external the
-  test isn't about. Real-LLM tests are tagged `@pytest.mark.real_llm`.
-
-### TDD judgment
-
-Use `/test-driven-development` as the default for feature work, business
-logic, reusable core behavior, and bug fixes where the behavior will keep
-evolving. The red → green loop is strongest when a test can express a stable
-contract that future changes must preserve.
-
-Do not force TDD where it produces brittle ceremony instead of useful signal:
-one-off Alembic migrations, generated migration files, config/doc edits,
-mechanical rewrites, and operational repair scripts may be validated with the
-smallest realistic reproduction instead. For migrations, prefer: identify the
-bad data shape, run the migration against a disposable database that contains
-that shape, verify the resulting schema/data, and add a focused regression
-test only when it protects a durable invariant. Verification before completion
-still applies every time.
+- A test protects a business invariant or contract; DOM-presence / element-count
+  tests get deleted on sight.
+- **If a test opens an `AsyncSession`, runs alembic, or hits the app, it's e2e
+  (`backend/tests/e2e/`), full stop** — misplacing it breaks `make check-ci`.
+- Real services at internal boundaries; mock only the outermost external.
+  Real-LLM tests are tagged `@pytest.mark.real_llm`.
 
 ---
 
@@ -161,27 +141,19 @@ Skills are loaded on demand; trigger them when the situation matches.
 
 | Skill | Trigger |
 |---|---|
-| `/brainstorming` | **Before** designing any feature or non-trivial change. |
-| `/writing-plans` | Multi-step work that needs a written plan before code. |
-| `/executing-plans` | Executing a written plan with checkpoints. |
-| `/systematic-debugging` | Any bug or test failure — **before** proposing fixes. |
-| `/test-driven-development` | Feature work, business logic, reusable core behavior, and durable bug-fix contracts. Use judgment for one-off migrations/config/docs; always verify. |
-| `/verification-before-completion` | Before claiming "done" / committing / opening a PR. |
-| `/receiving-code-review` | Responding to codex / human review comments. |
-| `/pr-codex-review-loop` | After pushing a PR — the full review loop. |
-| `/finishing-a-development-branch` | Implementation done; choosing merge / PR / cleanup. |
-| `/using-git-worktrees` | Before feature work that needs isolation. |
+| `/feature-workflow` | **Start** of any feature or non-trivial change — worktree, clarify intent, spec/plan under `docs/dev`, execute with checkpoints. |
+| `/cubeplex-tdd` | Feature work, business logic, reusable core behavior, and durable bug-fix contracts. Test-first with cubeplex's test taxonomy. Use judgment for one-off migrations/config/docs; always verify. |
+| `/debug-cubeplex` | Any bug or test failure — **before** proposing fixes. Reproduce first, then route to the right cubeplex diagnostic. |
+| `/pr-codex-review-loop` | After pushing a PR — the full review loop, including replying to every codex / human review comment. |
 
 **Implementation domains:**
 
 | Skill | Trigger |
 |---|---|
-| `sqlmodel-expert` | SQLModel + Alembic migrations, query optimization. |
-| `frontend-design` / `huashu-design` | UI components / pages with high design quality. |
-| `shadcn` | Adding shadcn/ui components. |
+| `cubepi` | Building/extending/debugging agents on the CubePi framework — Agent API, providers, tools, middleware, checkpointing, MCP, HITL. |
+| `cubepi-trace` | Debugging a cubepi/cubebox agent run — span tree, tool I/O, token/cache numbers, "why did the agent do that?". |
 | `web-design-guidelines` | UI accessibility / design review pass. |
 | `playwright-cli` | Writing or debugging Playwright tests. |
-| `karpathy-guidelines` | LLM coding pitfalls (context, evals, complexity). |
 
 **Escape hatch:** `/codex:rescue` — stuck; want a second opinion or alternate
 implementation pass.
@@ -208,20 +180,6 @@ Worktrees need both copied in before first test run. Details:
 
 ---
 
-## Worktrees in Brief
-
-Create from main repo root with a date prefix:
-
-```bash
-./scripts/new-worktree feat/YYYY-MM-DD-<name>
-```
-
-Inside a worktree, **first command**: `cat .worktree.env` (allocated ports +
-DBs), then `./scripts/worktree-env doctor`. Full reference (subcommands,
-rebase migration drift, agent caveats): [docs/worktrees.md](docs/worktrees.md).
-
----
-
 ## Auth & Scoping Mental Model
 
 `Organization → Workspace → Membership → User`. All business routes are
@@ -245,8 +203,6 @@ Full details, role tables, operator CLI, system endpoints:
 - **shadcn/ui**: run `npx shadcn-ui@latest` from `packages/web/`.
 - **SSE compress**: Next.js rewrite buffers SSE if compress is on. Keep
   `compress: false`.
-- **Worktree ports**: `8000` / `3000` are wrong inside worktrees — port
-  collisions silently test the wrong code.
 - **Worktree test DB**: plain `uv run pytest` is safe — conftest auto-routes
   to the per-slot `cubeplex_test_<slug>` DB. S3 tests need rustfs on `:9000`.
   See [docs/worktrees.md](docs/worktrees.md) → "Running tests in a worktree".
@@ -276,5 +232,9 @@ traceback is already in the log; grep it instead of re-running the suite.
   `notes/YYYY-MM-DD-<slug>.md` (investigations, decisions, post-mortems).
   A spec/plan is a frozen snapshot; rebase the content, don't rewrite history.
 - Only add a code comment when the *why* is non-obvious; never multi-paragraph.
+- **Surgical changes.** Every changed line traces to the request. Match the
+  file's existing style; don't refactor, reformat, or "improve" unrelated code.
+  Remove only the imports/vars your change orphaned — flag other dead code,
+  don't delete it.
 - No backwards-compat shims unless explicitly asked — the project hasn't
   shipped publicly; cut over cleanly.
