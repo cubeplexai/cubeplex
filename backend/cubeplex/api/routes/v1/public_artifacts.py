@@ -1,4 +1,4 @@
-"""Public (unauthenticated) artifact download via one-time token."""
+"""Public (unauthenticated) artifact download via short-lived token."""
 
 import mimetypes
 from typing import Annotated
@@ -21,17 +21,18 @@ async def public_download(
     filename: str,
     rh: Annotated[RedisHandle, Depends(redis_dep)],
 ) -> Response:
-    """Serve an artifact file using a one-time download token.
+    """Serve an artifact file using a short-lived download token.
 
-    Microsoft Office Online Viewer calls this URL exactly once to fetch the
-    file. The token is atomically deleted on first use (GETDEL).
+    Microsoft Office Online Viewer may fetch this URL more than once (its
+    probe and conversion nodes pull independently), so the token stays valid
+    for its full Redis TTL instead of being consumed on first use.
     """
     key = f"{rh.key_prefix}:otk:{token}"
-    raw: bytes | str | None = await rh.client.getdel(key)
+    raw: bytes | str | None = await rh.client.get(key)
     if raw is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Token not found or already used",
+            detail="Token not found or expired",
         )
 
     payload = orjson.loads(raw if isinstance(raw, bytes) else raw.encode())
