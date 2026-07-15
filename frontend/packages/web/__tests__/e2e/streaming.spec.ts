@@ -17,7 +17,7 @@ test('loading animation appears while streaming', async ({ page }) => {
   test.setTimeout(150_000)
   await registerAndLand(page)
 
-  const input = page.getByPlaceholder('Describe a task…')
+  const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill('Write a haiku about coding.')
   await input.press('Enter')
 
@@ -38,7 +38,7 @@ test('input stays editable while streaming (so the user can steer)', async ({ pa
   test.setTimeout(150_000)
   await registerAndLand(page)
 
-  const input = page.getByPlaceholder('Describe a task…')
+  const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill('Write a short poem.')
   await input.press('Enter')
 
@@ -47,10 +47,10 @@ test('input stays editable while streaming (so the user can steer)', async ({ pa
   // While the run streams, the composer must remain enabled — steering needs
   // the user to type mid-run. (Previously the box was locked during streaming.)
   await expect(page.getByTestId('loading-indicator')).toBeVisible({ timeout: 10_000 })
-  await expect(page.getByPlaceholder('Describe a task…')).toBeEnabled()
+  await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeEnabled()
 
   // Same cold-sandbox headroom as the test above (fresh user → ~80s provisioning).
   await expect(page.getByTestId('loading-indicator')).toBeHidden({ timeout: 120_000 })
 
-  await expect(page.getByPlaceholder('Describe a task…')).toBeEnabled()
+  await expect(page.getByPlaceholder('Tell CubePlex what you want to get done…')).toBeEnabled()
 })

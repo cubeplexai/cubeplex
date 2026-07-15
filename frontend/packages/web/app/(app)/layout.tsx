@@ -12,6 +12,7 @@ import { useAuthRedirect } from '@/hooks/useAuthRedirect'
 import { useMobileMenu } from '@/hooks/useMobileMenu'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { VerificationBanner } from '@/components/layout/VerificationBanner'
+import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 
 /** Detect routes that mount AppShell — those render their own h-11 header
@@ -77,7 +78,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             >
               <Menu className="size-4" />
             </button>
-            <span className="ml-2 text-sm font-semibold tracking-tight">cubeplex</span>
+            <CubePlexLogo
+              className="ml-2 gap-1.5"
+              markClassName="size-4"
+              wordmarkClassName="text-sm"
+            />
           </div>
         )}
         {/* Reserve remaining vertical space for the child page so the 44px

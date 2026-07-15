@@ -28,6 +28,10 @@
    dark variant. */
 @custom-variant dark (&:where(.dark, .dark *, .operator-dark, .operator-dark *));
 
+:root {
+  --brand-mark-primary: #1268e8;
+}
+
 /* Token layer — "Vercel Mono" direction.
    Source of truth: this file (spec docs/dev/specs/2026-06-10-ui-redesign-design.md §1).
    Light mode is the default @theme; .dark overrides below. */

@@ -23,10 +23,11 @@ const jetBrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'cubeplex',
-  description: 'AI Agent System',
+  title: 'CubePlex',
+  description:
+    'CubePlex is a self-hosted agent workspace for enterprise teams to delegate document, data, and cross-system automation while keeping permissions and execution boundaries under team control.',
   icons: {
-    icon: '/icon.svg',
+    icon: [{ url: '/icon.png', type: 'image/png', sizes: '64x64' }],
   },
 }
 

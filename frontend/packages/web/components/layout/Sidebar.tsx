@@ -27,9 +27,9 @@ import { TopicNode } from '@/components/sidebar/TopicNode'
 import { WorkspaceSelector } from '@/components/sidebar/WorkspaceSelector'
 import { CreateGroupChatDialog } from '@/components/dialogs/CreateGroupChatDialog'
 import { AvatarStack } from '@/components/ui/avatar-stack'
+import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { VscMcp } from 'react-icons/vsc'
 import {
-  Box,
   CalendarClock,
   Layers,
   type LucideIcon,
@@ -480,24 +480,20 @@ export function Sidebar({ onCollapse, onExpand, collapsed }: SidebarProps): Reac
         collapsed ? 'w-12' : 'w-56',
       )}
     >
-      {/* Brand — shows logo + "cubeplex" + collapse button when expanded;
+      {/* Brand — shows logo + wordmark + collapse button when expanded;
           logo only (centered) when collapsed. */}
       <div
         className={cn('border-b border-border', collapsed ? 'px-2 pt-3 pb-2.5' : 'px-3 pt-4 pb-3')}
       >
         <div className={cn('flex items-center mb-3', collapsed ? 'justify-center' : 'px-0.5')}>
           <div className={cn('flex items-center gap-2 min-w-0', !collapsed && 'flex-1')}>
-            <div className="w-6 h-6 rounded bg-primary flex items-center justify-center shrink-0">
-              <Box className="size-3.5 text-primary-foreground" strokeWidth={2.5} />
-            </div>
-            <span
-              className={cn(
-                'text-sm font-semibold tracking-tight whitespace-nowrap overflow-hidden transition-all duration-200',
+            <CubePlexLogo
+              markClassName="size-6"
+              wordmarkClassName={cn(
+                'text-sm whitespace-nowrap overflow-hidden transition-all duration-200',
                 collapsed ? 'max-w-0 opacity-0' : 'max-w-full opacity-100',
               )}
-            >
-              cubeplex
-            </span>
+            />
           </div>
           {/* Collapse button — desktop only (onCollapse provided). In the
               mobile drawer there's no collapse handler and the Sheet renders

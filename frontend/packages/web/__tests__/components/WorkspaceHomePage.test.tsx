@@ -146,4 +146,16 @@ describe('WorkspaceHomePage', () => {
     // Conversation creation is cached — second call (on submit) does NOT re-create.
     expect(storeMocks.createConversation).toHaveBeenCalledTimes(1)
   })
+
+  it('loads an office task template into the composer', async () => {
+    await act(async () => {
+      renderWithIntl(<WorkspaceHomePage params={Promise.resolve({ wsId: 'ws-1' })} />)
+      await Promise.resolve()
+    })
+
+    const input = await screen.findByTestId('chat-input')
+    fireEvent.click(screen.getByRole('button', { name: /Create a document or deck/ }))
+
+    expect(input).toHaveValue(en.home.promptCards.document.prompt)
+  })
 })

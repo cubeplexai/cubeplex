@@ -12,6 +12,7 @@ import {
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
 import { WidgetView } from '@/components/chat/widget/WidgetView'
 import { ToolCallGroup } from '@/components/chat/ToolCallGroup'
+import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 import { proseClasses } from '@/lib/utils'
 
 // ---------------------------------------------------------------------------
@@ -340,7 +341,11 @@ export default function SharePage({ params }: { params: Promise<{ shrId: string 
       <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-sm">
         <div className="max-w-3xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
           {/* Logo */}
-          <span className="font-semibold text-foreground tracking-tight select-none">cubeplex</span>
+          <CubePlexLogo
+            className="select-none"
+            markClassName="size-5"
+            wordmarkClassName="text-sm"
+          />
 
           {/* Title */}
           <h1 className="flex-1 text-center text-sm font-medium text-foreground truncate px-2">
