@@ -542,6 +542,7 @@ def create_app(
         model_presets,
         onboarding,
         public_artifacts,
+        public_attachments,
         shares,
         system,
         trigger_ingest,
@@ -582,6 +583,7 @@ def create_app(
     app.include_router(artifacts_router, prefix="/api/v1")
     app.include_router(ws_artifacts_router, prefix="/api/v1")
     app.include_router(public_artifacts.router, prefix="/api/v1")
+    app.include_router(public_attachments.router, prefix="/api/v1")
     app.include_router(avatars_routes.router, prefix="/api/v1")
     app.include_router(shares.router, prefix="/api/v1")
     app.include_router(sso_routes.router, prefix="/api/v1")

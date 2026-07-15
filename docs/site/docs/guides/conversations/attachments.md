@@ -53,7 +53,11 @@ For images, the agent can also "see" the image directly through vision-capable m
 Sent attachments appear above the message bubble:
 
 - **Images** display as thumbnails. Click a thumbnail to open a full-size lightbox.
-- **Documents and other files** display as compact chips showing the filename and size. Click to download or preview.
+- **Documents and other files** display as compact chips showing the filename and size. Click a chip to open a preview in the side panel:
+  - PDF, Markdown, plain text, code, JSON, and CSV files render directly.
+  - Word, Excel, and PowerPoint files (`.docx` / `.xlsx` / `.pptx`) render through Microsoft's Office Online viewer. This requires the deployment to have a public URL configured (`api.public_url`); the viewer fetches the document through a short-lived tokenized link.
+  - Audio and video files open with playback controls.
+  - File types that can't be previewed (archives, unknown formats) show a download button instead.
 
 ## Size and quota limits
 

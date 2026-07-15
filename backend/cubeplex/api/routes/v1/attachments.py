@@ -1,19 +1,26 @@
 """Conversation attachments API."""
 
+import secrets
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+import orjson
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cubeplex.api.exceptions import AttachmentAlreadyAttachedError
 from cubeplex.auth.context import RequestContext
 from cubeplex.auth.dependencies import require_member
+from cubeplex.cache import RedisHandle, redis_dep
+from cubeplex.config import config
 from cubeplex.db import get_session
 from cubeplex.objectstore import get_objectstore_client
 from cubeplex.repositories import AttachmentRepository, ConversationRepository
 from cubeplex.services.attachments import AttachmentService
+
+OFFICE_EXTENSIONS = frozenset({".docx", ".xlsx", ".pptx"})
+OTK_TTL_SECONDS = 300
 
 router = APIRouter(
     prefix="/ws/{workspace_id}/conversations/{conversation_id}/attachments",
@@ -240,3 +247,52 @@ async def delete_attachment(
         attachment_id=attachment_id,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{attachment_id}/preview-token")
+async def create_preview_token(
+    workspace_id: str,
+    conversation_id: str,
+    attachment_id: str,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    rh: Annotated[RedisHandle, Depends(redis_dep)],
+) -> dict[str, str]:
+    """Issue a one-time public download token for Office Online Viewer."""
+    await _require_conversation(session, ctx, conversation_id)
+    repo = AttachmentRepository(
+        session,
+        org_id=ctx.org_id,
+        workspace_id=ctx.workspace_id,
+    )
+    row = await repo.get_with_fork_fallback(
+        conversation_id=conversation_id,
+        attachment_id=attachment_id,
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Attachment {attachment_id} not found",
+        )
+
+    filename = row.filename
+    ext = filename[filename.rfind(".") :].lower() if "." in filename else ""
+    if ext not in OFFICE_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Office preview not supported for extension '{ext}'",
+        )
+
+    nonce = secrets.token_hex(32)
+    payload = orjson.dumps({"object_key": row.object_key, "filename": filename})
+    key = f"{rh.key_prefix}:otk:att:{nonce}"
+    await rh.client.set(key, payload, ex=OTK_TTL_SECONDS)
+
+    public_url = config.get("api.public_url", "")
+    base = str(public_url).rstrip("/") if public_url else str(request.base_url).rstrip("/")
+    download_url = f"{base}/api/v1/public/attachments/dl/{nonce}/{quote(filename, safe='')}"
+    viewer_url = (
+        f"https://view.officeapps.live.com/op/embed.aspx?src={quote(download_url, safe='')}"
+    )
+    return {"download_url": download_url, "viewer_url": viewer_url}
