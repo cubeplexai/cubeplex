@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import { Download, RefreshCw } from 'lucide-react'
 import type { AttachmentPanelInfo } from '@cubeplex/core'
 import { createApiClient, requestAttachmentPreviewToken, usePanelStore } from '@cubeplex/core'
-import { useTranslations } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MarkdownWithCitations } from '@/components/shared/MarkdownWithCitations'
@@ -250,6 +250,8 @@ function OfficeAttachmentPreview({
   conversationId: string
 }): React.ReactElement {
   const t = useTranslations('panel.attachment')
+  const locale = useLocale()
+  const msLocale = locale === 'zh' ? 'zh-CN' : 'en-US'
   const [viewerUrl, setViewerUrl] = useState<string | null>(null)
   const [state, setState] = useState<ViewerState>('loading')
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -265,11 +267,11 @@ function OfficeAttachmentPreview({
       const client = createApiClient('')
       if (info.workspaceId) client.setWorkspaceId(info.workspaceId)
       const res = await requestAttachmentPreviewToken(client, conversationId, info.attachmentId)
-      setViewerUrl(res.viewer_url)
+      setViewerUrl(`${res.viewer_url}&ui=${msLocale}`)
     } catch {
       setState('error')
     }
-  }, [conversationId, info.attachmentId, info.workspaceId])
+  }, [conversationId, info.attachmentId, info.workspaceId, msLocale])
 
   useEffect(() => {
     // StrictMode double-invokes effects; key-guard so one open mints one

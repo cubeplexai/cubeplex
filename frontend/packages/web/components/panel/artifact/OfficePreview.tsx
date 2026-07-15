@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
 import type { Artifact } from '@cubeplex/core'
 import { createApiClient, requestPreviewToken } from '@cubeplex/core'
-import { useTranslations } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
 import { getArtifactIcon } from './artifactIcons'
 import { buildDownloadUrl } from './previewUtils'
 import { PreviewLoading } from './PreviewLoading'
@@ -22,6 +22,8 @@ const REDIRECT_DETECT_MS = 1_500
 
 export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewProps) {
   const t = useTranslations('panel.office')
+  const locale = useLocale()
+  const msLocale = locale === 'zh' ? 'zh-CN' : 'en-US'
   const [viewerUrl, setViewerUrl] = useState<string | null>(null)
   const [state, setState] = useState<ViewerState>('loading')
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -42,11 +44,11 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
         artifact.id,
         version ?? artifact.version,
       )
-      setViewerUrl(res.viewer_url)
+      setViewerUrl(`${res.viewer_url}&ui=${msLocale}`)
     } catch {
       setState('error')
     }
-  }, [artifact.conversation_id, artifact.id, artifact.version, version, workspaceId])
+  }, [artifact.conversation_id, artifact.id, artifact.version, version, workspaceId, msLocale])
 
   useEffect(() => {
     // StrictMode double-invokes effects; key-guard so one open mints one

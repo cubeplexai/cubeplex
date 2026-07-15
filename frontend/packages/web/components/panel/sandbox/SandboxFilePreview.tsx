@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { Download, FileText } from 'lucide-react'
+import { useLocale } from 'next-intl'
 import { csrfHeaders } from '@/lib/csrf'
 import { useSandboxFileContent } from '@/hooks/useSandboxFileContent'
 import type { SandboxFileEntry } from '@/hooks/useSandboxFiles'
@@ -359,6 +360,8 @@ function OfficeFilePreview({
   workspaceId: string
   conversationId?: string | null
 }) {
+  const locale = useLocale()
+  const msLocale = locale === 'zh' ? 'zh-CN' : 'en-US'
   const [viewerUrl, setViewerUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [timedOut, setTimedOut] = useState(false)
@@ -384,7 +387,7 @@ function OfficeFilePreview({
         })
         if (!res.ok) throw new Error(`${res.status}`)
         const data = (await res.json()) as { viewer_url: string }
-        if (!cancelled) setViewerUrl(data.viewer_url)
+        if (!cancelled) setViewerUrl(`${data.viewer_url}&ui=${msLocale}`)
       } catch (e) {
         if (!cancelled) setError((e as Error).message)
       }
@@ -393,7 +396,7 @@ function OfficeFilePreview({
     return () => {
       cancelled = true
     }
-  }, [workspaceId, conversationId, entry.path, retrySeq])
+  }, [workspaceId, conversationId, entry.path, retrySeq, msLocale])
 
   useEffect(() => {
     if (!viewerUrl) return
