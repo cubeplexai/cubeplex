@@ -9,8 +9,10 @@ import { buildPreviewUrl } from '@/components/panel/artifact/previewUtils'
 import { useWorkspaceContext } from '@/hooks/useWorkspaceContext'
 import { cn } from '@/lib/utils'
 
-interface ImageGenerationCardProps {
-  prompt: string
+interface ImageArtifactCardProps {
+  /** Displayed below the image as a caption. */
+  caption: string
+  /** Null while the artifact is still being generated/saved. */
   artifact: Artifact | null
 }
 
@@ -25,7 +27,7 @@ function Shimmer() {
   )
 }
 
-function ImageGenerationCardImpl({ prompt, artifact }: ImageGenerationCardProps) {
+function ImageArtifactCardImpl({ caption, artifact }: ImageArtifactCardProps) {
   const t = useTranslations('chatExtras')
   const { workspaceId } = useWorkspaceContext()
   const openPreview = usePanelStore((s) => s.openArtifact)
@@ -47,20 +49,24 @@ function ImageGenerationCardImpl({ prompt, artifact }: ImageGenerationCardProps)
   return (
     <div
       className={cn(
-        'my-2 w-72 overflow-hidden rounded-xl border border-border bg-card',
+        'my-2 w-full overflow-hidden rounded border border-border bg-card',
         artifact && 'cursor-pointer transition-colors hover:border-primary/30',
       )}
       onClick={handleClick}
     >
-      <div className="relative aspect-[4/3] bg-muted/30">
-        {showShimmer && <Shimmer />}
+      <div className="relative bg-muted/30">
+        {showShimmer && !previewUrl && (
+          <div className="aspect-[4/3]">
+            <Shimmer />
+          </div>
+        )}
         {previewUrl && (
           /* eslint-disable-next-line @next/next/no-img-element */
           <img
             src={previewUrl}
-            alt={prompt}
+            alt={caption}
             className={cn(
-              'size-full object-cover transition-opacity duration-300',
+              'w-full h-auto transition-opacity duration-300',
               imgLoaded ? 'opacity-100' : 'opacity-0',
             )}
             onLoad={() => setImgLoaded(true)}
@@ -74,13 +80,13 @@ function ImageGenerationCardImpl({ prompt, artifact }: ImageGenerationCardProps)
           </div>
         )}
       </div>
-      {prompt && (
+      {caption && (
         <div className="border-t border-border px-3 py-2">
-          <p className="line-clamp-2 text-xs text-muted-foreground">{prompt}</p>
+          <p className="line-clamp-2 text-xs text-muted-foreground">{caption}</p>
         </div>
       )}
     </div>
   )
 }
 
-export const ImageGenerationCard = memo(ImageGenerationCardImpl)
+export const ImageArtifactCard = memo(ImageArtifactCardImpl)
