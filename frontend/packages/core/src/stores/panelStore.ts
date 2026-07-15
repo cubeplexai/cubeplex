@@ -33,6 +33,8 @@ export interface AttachmentPanelInfo {
   downloadUrl: string
   mimeType: string
   sizeBytes: number
+  workspaceId?: string
+  conversationId?: string
 }
 
 export type PanelView =

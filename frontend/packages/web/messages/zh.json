@@ -1440,7 +1440,9 @@
       "loading": "加载中…",
       "loadFailed": "加载失败：{message}",
       "tooLarge": "文件过大无法内联预览（{size} MB），请下载查看。",
-      "empty": "空"
+      "empty": "空",
+      "previewFailed": "预览不可用",
+      "retry": "重试"
     },
     "fileRead": {
       "untitled": "（无标题）",

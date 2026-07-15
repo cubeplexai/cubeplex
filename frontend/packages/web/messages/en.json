@@ -1440,7 +1440,9 @@
       "loading": "Loading…",
       "loadFailed": "Failed to load: {message}",
       "tooLarge": "File is too large for inline preview ({size} MB). Please download to view.",
-      "empty": "Empty"
+      "empty": "Empty",
+      "previewFailed": "Preview unavailable",
+      "retry": "Retry"
     },
     "fileRead": {
       "untitled": "(untitled)",

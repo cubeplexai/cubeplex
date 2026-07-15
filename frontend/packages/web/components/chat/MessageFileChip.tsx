@@ -10,10 +10,24 @@ export interface MessageFileChipProps {
   mimeType: string
   sizeBytes: number
   downloadUrl: string
+  workspaceId?: string
+  conversationId?: string
   onOpenImage?: (downloadUrl: string, filename: string) => void
 }
 
-const PANEL_FAMILIES = new Set(['pdf', 'markdown', 'text', 'code', 'json', 'csv', 'video', 'audio'])
+const PANEL_FAMILIES = new Set([
+  'pdf',
+  'markdown',
+  'text',
+  'code',
+  'json',
+  'csv',
+  'video',
+  'audio',
+  'word',
+  'excel',
+  'ppt',
+])
 
 export function MessageFileChip({
   attachmentId,
@@ -21,6 +35,8 @@ export function MessageFileChip({
   mimeType,
   sizeBytes,
   downloadUrl,
+  workspaceId,
+  conversationId,
   onOpenImage,
 }: MessageFileChipProps): React.ReactElement {
   const openAttachment = usePanelStore((s) => s.openAttachment)
@@ -34,10 +50,18 @@ export function MessageFileChip({
     }
     if (PANEL_FAMILIES.has(visual.family)) {
       e.preventDefault()
-      openAttachment({ attachmentId, filename, downloadUrl, mimeType, sizeBytes })
+      openAttachment({
+        attachmentId,
+        filename,
+        downloadUrl,
+        mimeType,
+        sizeBytes,
+        workspaceId,
+        conversationId,
+      })
       return
     }
-    // word/excel/ppt/archive/unknown → let the <a> default download behavior run
+    // archive/unknown → let the <a> default download behavior run
   }
 
   return (

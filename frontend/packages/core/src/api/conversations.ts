@@ -131,3 +131,14 @@ export async function requestPreviewToken(
   if (!res.ok) throw await toApiError(res)
   return res.json() as Promise<PreviewTokenResponse>
 }
+
+export async function requestAttachmentPreviewToken(
+  client: ApiClient,
+  conversationId: string,
+  attachmentId: string,
+): Promise<PreviewTokenResponse> {
+  const url = `/api/v1/conversations/${conversationId}/attachments/${attachmentId}/preview-token`
+  const res = await client.post(url, {})
+  if (!res.ok) throw await toApiError(res)
+  return res.json() as Promise<PreviewTokenResponse>
+}

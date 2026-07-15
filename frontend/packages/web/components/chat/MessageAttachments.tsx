@@ -29,6 +29,7 @@ export function MessageAttachments({
 }: Props): React.ReactElement | null {
   const { workspaceId } = useWorkspaceContext()
   const [openSrc, setOpenSrc] = useState<{ src: string; alt: string } | null>(null)
+  const [failedThumbs, setFailedThumbs] = useState<ReadonlySet<string>>(new Set())
 
   const resolved = useMemo(() => {
     const client = createApiClient('')
@@ -44,10 +45,12 @@ export function MessageAttachments({
     }
     return attachments.map((a) => ({
       ...a,
-      thumbnail_url: a.thumbnail_url ? fix(a.thumbnail_url) : null,
-      // /attachments/{id} is the metadata endpoint; bytes live under /content.
       // Historical messages reloaded from cubepi only carry file_id, so we
-      // build the URL ourselves when download_url isn't pre-filled.
+      // build thumbnail/download URLs ourselves when not pre-filled.
+      thumbnail_url: fix(
+        a.thumbnail_url ?? (a.kind === 'image' ? `./attachments/${a.file_id}/thumbnail` : null),
+      ),
+      // /attachments/{id} is the metadata endpoint; bytes live under /content.
       download_url: fix(a.download_url ?? `./attachments/${a.file_id}/content`),
     }))
   }, [attachments, conversationId, workspaceId])
@@ -60,7 +63,7 @@ export function MessageAttachments({
       data-testid="message-attachments"
     >
       {resolved.map((a) => {
-        if (a.kind === 'image' && a.thumbnail_url) {
+        if (a.kind === 'image' && a.thumbnail_url && !failedThumbs.has(a.file_id)) {
           return (
             <button
               key={a.file_id}
@@ -73,6 +76,7 @@ export function MessageAttachments({
                 src={a.thumbnail_url}
                 alt={a.filename}
                 className="size-24 object-cover transition group-hover:scale-105"
+                onError={() => setFailedThumbs((prev) => new Set(prev).add(a.file_id))}
               />
               <span className="absolute bottom-0 left-0 right-0 truncate bg-background/80 px-1 py-0.5 text-[10px]">
                 {a.filename}
@@ -88,6 +92,8 @@ export function MessageAttachments({
             mimeType={a.mime_type ?? ''}
             sizeBytes={a.size_bytes}
             downloadUrl={a.download_url}
+            workspaceId={workspaceId ?? undefined}
+            conversationId={conversationId}
             onOpenImage={(src, alt) => setOpenSrc({ src, alt })}
           />
         )
