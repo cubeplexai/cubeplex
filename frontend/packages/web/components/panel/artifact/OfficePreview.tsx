@@ -27,6 +27,7 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const loadCountRef = useRef(0)
+  const fetchedKeyRef = useRef<string | null>(null)
 
   const fetchToken = useCallback(async () => {
     setState('loading')
@@ -48,9 +49,13 @@ export function OfficePreview({ artifact, version, workspaceId }: OfficePreviewP
   }, [artifact.conversation_id, artifact.id, artifact.version, version, workspaceId])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    // StrictMode double-invokes effects; key-guard so one open mints one
+    // token (each mint triggers a Microsoft fetch of the document).
+    const key = `${artifact.conversation_id}:${artifact.id}:${version ?? artifact.version}`
+    if (fetchedKeyRef.current === key) return
+    fetchedKeyRef.current = key
     void fetchToken()
-  }, [fetchToken])
+  }, [artifact.conversation_id, artifact.id, artifact.version, version, fetchToken])
 
   useEffect(() => {
     if (!viewerUrl) return
