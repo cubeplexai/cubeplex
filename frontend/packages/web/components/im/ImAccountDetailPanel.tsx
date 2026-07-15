@@ -108,7 +108,7 @@ export function ImAccountDetailPanel({
     }
   }, [client, account.workspace_id, account.id, settingsScoped])
 
-  const botName = account.bot_app_name || 'cubeplex'
+  const botName = account.bot_app_name || 'CubePlex'
   // Shared routing needs a channel-wide scope. The Teams connector only emits
   // per-sender scopes, so shared would silently produce one group conversation
   // per sender — disable it there.

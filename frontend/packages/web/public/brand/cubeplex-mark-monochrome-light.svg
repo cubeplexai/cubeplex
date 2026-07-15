@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">CubePlex light monochrome mark</title>
+  <g fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"
+     stroke-linejoin="round">
+    <path d="M32 7 55 20 32 33 9 20 32 7Z"/>
+    <path d="m10 32 22 12.5L54 32M10 43.5 32 56l22-12.5"/>
+  </g>
+</svg>

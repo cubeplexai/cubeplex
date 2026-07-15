@@ -47,7 +47,7 @@ test.describe('conversation search', () => {
     // run-completion hook enqueues an embedding job, which the worker
     // drains.
     const KEYWORD = 'docling'
-    const input = page.getByPlaceholder('Describe a task…')
+    const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
     await input.fill(`tell me about ${KEYWORD} for table extraction`)
     await input.press('Enter')
     await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//, { timeout: 10_000 })

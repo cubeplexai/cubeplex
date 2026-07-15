@@ -2,6 +2,7 @@ import { useTranslations } from 'next-intl'
 import { AuthLanguageSwitcher } from '@/components/auth/AuthLanguageSwitcher'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { CubePlexLogo } from '@/components/brand/CubePlexLogo'
 
 export function AuthShell({ children }: { children: React.ReactNode }) {
   const t = useTranslations('auth')
@@ -15,14 +16,8 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
         <div className="absolute inset-y-0 right-0 w-[52%] bg-gradient-to-r from-transparent via-background/70 to-background" />
       </div>
 
-      <div
-        data-testid="auth-brand-logo"
-        className="absolute left-5 top-5 z-20 flex items-center gap-2 md:left-8 md:top-7"
-      >
-        <span className="grid size-7 place-items-center rounded-md bg-primary text-[13px] font-semibold text-primary-foreground shadow-[0_12px_40px_rgba(0,112,243,0.24)]">
-          c
-        </span>
-        <span className="text-sm font-semibold tracking-normal text-foreground">cubeplex</span>
+      <div data-testid="auth-brand-logo" className="absolute left-5 top-5 z-20 md:left-8 md:top-7">
+        <CubePlexLogo markClassName="size-7" wordmarkClassName="text-sm" />
       </div>
       <AuthLanguageSwitcher />
 

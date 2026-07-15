@@ -12,7 +12,7 @@ async function registerAndLand(page: Page): Promise<void> {
 }
 
 async function startRun(page: Page, prompt: string): Promise<void> {
-  const input = page.getByPlaceholder('Describe a task…')
+  const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill(prompt)
   await input.press('Enter')
   await expect(page).toHaveURL(/\/w\/[^/]+\/conversations\//)
@@ -34,7 +34,7 @@ test('steer shows a pending chip, then commits into the transcript at a stable p
   await startRun(page, STREAMY_PROMPT)
 
   // Type a steer while the run is streaming.
-  const input = page.getByPlaceholder('Describe a task…')
+  const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill('Actually, also say hello at the end.')
   await input.press('Enter')
 
@@ -71,7 +71,7 @@ test('cancelling a pending steer removes the chip before it is injected', async 
   await registerAndLand(page)
   await startRun(page, STREAMY_PROMPT)
 
-  const input = page.getByPlaceholder('Describe a task…')
+  const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
   await input.fill('Never mind this instruction.')
   await input.press('Enter')
 

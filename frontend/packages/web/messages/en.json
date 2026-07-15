@@ -4,7 +4,7 @@
     "signInTitle": "Welcome back",
     "signInSubtitle": "Open your workspace and continue the runs already in motion.",
     "signUp": "Create account",
-    "signUpTitle": "Create your cubeplex account",
+    "signUpTitle": "Create your CubePlex account",
     "email": "Email",
     "password": "Password",
     "signingIn": "Signing in…",
@@ -57,7 +57,7 @@
     "verifyEmailNow": "Verify email now",
     "surfaceEyebrow": "Agent workspace",
     "surfaceTitle": "Run agents with memory, tools, and approvals in one place.",
-    "surfaceSubtitle": "Cubeplex keeps long-running agent work inside the same workspace as your models, connectors, artifacts, and team controls.",
+    "surfaceSubtitle": "CubePlex keeps long-running agent work inside the same workspace as your models, connectors, artifacts, and team controls.",
     "surfacePanelTitle": "Built for controlled autonomy",
     "surfacePanelDescription": "Sign in to inspect active runs, review tool access, and resume work with full workspace context.",
     "surfaceFeatureMemoryTitle": "Memory",
@@ -192,7 +192,7 @@
     "new": "New workspace"
   },
   "input": {
-    "placeholder": "Describe a task…",
+    "placeholder": "Tell CubePlex what you want to get done…",
     "hint": "Enter to send / Shift+Enter for newline",
     "pendingHitlLock": "Answer the pending question above first."
   },
@@ -369,22 +369,22 @@
     "allDone": "{count} tasks completed"
   },
   "home": {
-    "subtitle": "AI Agent System",
+    "subtitle": "Agents do the work. Teams stay in control.",
     "promptCards": {
-      "analyze": {
-        "title": "Analyze a data file",
-        "description": "Upload CSV/Excel — clean, summarize, visualize.",
-        "prompt": "Analyze this dataset and summarize the key trends, anomalies, and a few visualizations I should share with the team.\n\n[attach your CSV or Excel file]"
+      "document": {
+        "title": "Create a document or deck",
+        "description": "Turn source material into a Word document or presentation.",
+        "prompt": "Create a polished [Word document / presentation] from the topic and source material below. First organize the structure for the intended audience, then produce an editable file.\n\nOutput format:\nAudience:\nTopic and source material:"
       },
-      "research": {
-        "title": "Research a topic",
-        "description": "Multi-source search with citations.",
-        "prompt": "Research the topic below across multiple credible sources, cross-check key facts, and produce a concise report with inline citations.\n\nTopic: "
+      "analyze": {
+        "title": "Analyze a spreadsheet",
+        "description": "Clean Excel or CSV data, find patterns, and create charts.",
+        "prompt": "Analyze the attached spreadsheet. Clean the data, identify key trends and anomalies, and create clear charts with a concise summary the team can act on.\n\n[Attach an Excel or CSV file]"
       },
       "automate": {
-        "title": "Automate a workflow",
-        "description": "Write a script, schedule, or webhook.",
-        "prompt": "Help me automate the following workflow. Walk through the design, write the code/script, and suggest how to schedule or trigger it.\n\nWorkflow: "
+        "title": "Automate recurring work",
+        "description": "Connect systems and run repeatable work with approvals.",
+        "prompt": "Help me automate the recurring workflow below. First confirm which systems and data you need to access, what actions are allowed, and which steps require my approval. Then propose the workflow and proceed within those boundaries.\n\nWorkflow:"
       }
     }
   },
@@ -873,7 +873,7 @@
       },
       "attributeMapping": {
         "section": "Attribute mapping",
-        "help": "How fields from your IdP map to cubeplex accounts.",
+        "help": "How fields from your IdP map to CubePlex accounts.",
         "idKey": "External ID",
         "emailKey": "Email",
         "nameKey": "Display name",
@@ -2128,7 +2128,7 @@
     "sharedBy": "Shared by {name}",
     "notFound": "Share not found",
     "notFoundBody": "This share link may have been revoked or does not exist.",
-    "poweredBy": "Powered by cubeplex"
+    "poweredBy": "Powered by CubePlex"
   },
   "profile": {
     "title": "Profile",
@@ -2229,8 +2229,8 @@
     },
     "empty": {
       "workspace": {
-        "headline": "Connect your team's IM to cubeplex",
-        "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right cubeplex user by email.",
+        "headline": "Connect your team's IM to CubePlex",
+        "description": "Bot replies in your chat, runs agents on @mentions, auto-routes to the right CubePlex user by email.",
         "cta": "Connect a {platform} bot",
         "comingNote": "",
         "guideLink": "Setup guide"
@@ -2440,16 +2440,16 @@
         "infoAria": "More info",
         "routing": {
           "body": "Only affects group chats — DMs are always one-on-one. In a group, should the bot keep each person's chat separate, or treat the whole group as one shared conversation?",
-          "isolated": "Each member talks to the bot privately. In the cubeplex web UI, you only see your own thread; nobody else in the channel can see what you asked.",
-          "shared": "The whole channel shares one cubeplex conversation. Everyone in the group can see what others ask the bot and build on each other's questions."
+          "isolated": "Each member talks to the bot privately. In the CubePlex web UI, you only see your own thread; nobody else in the channel can see what you asked.",
+          "shared": "The whole channel shares one CubePlex conversation. Everyone in the group can see what others ask the bot and build on each other's questions."
         },
         "sandbox": {
           "body": "Only matters for shared (group) conversations — choose whose sandbox the bot uses to run code, edit files, and keep state. In DMs the bot always uses the DM user's own sandbox.",
           "dedicated": "This group conversation gets a brand-new sandbox of its own, isolated from any other work.",
-          "creator": "Reuses the personal sandbox of the cubeplex user who set up this IM bot (not the IM channel's creator). Useful when you want this group chat to share files and state with that user's other cubeplex work."
+          "creator": "Reuses the personal sandbox of the CubePlex user who set up this IM bot (not the IM channel's creator). Useful when you want this group chat to share files and state with that user's other CubePlex work."
         },
         "topic": {
-          "body": "A topic is a cubeplex container that groups multiple conversations together — think of it as a folder in the chat sidebar. This setting decides what happens when you /new with the bot in IM.",
+          "body": "A topic is a CubePlex container that groups multiple conversations together — think of it as a folder in the chat sidebar. This setting decides what happens when you /new with the bot in IM.",
           "topic": "Every /new opens a new conversation, but they all stay folded under one topic in the sidebar.",
           "flat": "Each /new becomes its own standalone item in the chat history, listed flat."
         }
@@ -2459,26 +2459,26 @@
         "group": {
           "label": "In group chats",
           "routing": {
-            "isolated": "Each IM user talks to the bot privately — in cubeplex, each member sees only their own exchanges with the bot, not other members'.",
+            "isolated": "Each IM user talks to the bot privately — in CubePlex, each member sees only their own exchanges with the bot, not other members'.",
             "shared": "Everyone in the channel shares one conversation — anyone in the group can see what others ask the bot and build on it."
           },
           "topic": {
-            "isolatedTopic": "In cubeplex, each IM user's conversations are folded under their own topic folder — visible only to that user.",
-            "sharedTopic": "In cubeplex, the channel's conversations are folded under one shared topic folder — visible to everyone in the group.",
-            "flat": "In cubeplex's chat history, conversations appear flat — no topic folder."
+            "isolatedTopic": "In CubePlex, each IM user's conversations are folded under their own topic folder — visible only to that user.",
+            "sharedTopic": "In CubePlex, the channel's conversations are folded under one shared topic folder — visible to everyone in the group.",
+            "flat": "In CubePlex's chat history, conversations appear flat — no topic folder."
           },
           "sandbox": {
-            "isolated": "The bot runs code and edits files in each IM user's own cubeplex sandbox — sandboxes are isolated between users.",
+            "isolated": "The bot runs code and edits files in each IM user's own CubePlex sandbox — sandboxes are isolated between users.",
             "dedicated": "The bot runs code and edits files in a dedicated sandbox owned by this group conversation, isolated from any other work.",
-            "creator": "The bot runs code and edits files in the bot owner's personal sandbox, shared with that user's other cubeplex work."
+            "creator": "The bot runs code and edits files in the bot owner's personal sandbox, shared with that user's other CubePlex work."
           }
         },
         "dm": {
           "label": "In DMs (one-on-one)",
           "base": "The bot talks to each IM user privately and runs code in that user's own personal sandbox.",
           "topic": {
-            "topic": "In cubeplex, each user's DM conversations are folded under their own topic folder named “{botName}” — visible only to that user.",
-            "flat": "In cubeplex's chat history, DM conversations appear flat — no topic folder."
+            "topic": "In CubePlex, each user's DM conversations are folded under their own topic folder named “{botName}” — visible only to that user.",
+            "flat": "In CubePlex's chat history, DM conversations appear flat — no topic folder."
           }
         }
       },
@@ -2501,12 +2501,12 @@
     "link": {
       "title": "Link IM Account",
       "verifying": "Verifying your identity link...",
-      "success": "Your {platform} account has been linked to cubeplex successfully.",
+      "success": "Your {platform} account has been linked to CubePlex successfully.",
       "invalidToken": "This link is invalid or has expired. Please run /link again in your IM.",
       "emailMismatch": "Please log in with the email specified in the /link command.",
       "notMember": "You are not a member of this workspace. Ask the workspace admin to add you.",
       "error": "Linking failed. Please try again.",
-      "goToApp": "Go to cubeplex"
+      "goToApp": "Go to CubePlex"
     }
   },
   "wsSandboxes": {

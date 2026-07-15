@@ -37,7 +37,7 @@ describe('Login page surface', () => {
 
     expect(screen.getByText(/agent workspace/i)).toBeInTheDocument()
     expect(screen.getByText(/memory, tools, and approvals/i)).toBeInTheDocument()
-    expect(screen.getByTestId('auth-brand-logo')).toHaveTextContent('cubeplex')
+    expect(screen.getByTestId('auth-brand-logo')).toHaveTextContent('CubePlex')
     expect(screen.getByTestId('auth-ambient-background')).toBeInTheDocument()
     expect(screen.getByTestId('cubeplex-runtime-visual')).toBeInTheDocument()
     expect(screen.getByTestId('cubeplex-runtime-visual')).toHaveAttribute(
