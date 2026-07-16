@@ -11,7 +11,7 @@ Before the first deployment, configure these repository secrets under
 | `CF_API_TOKEN` | Cloudflare API token with Account → Cloudflare Pages → Edit permission |
 | `CF_ACCOUNT_ID` | Cloudflare account that owns the Pages project |
 
-Create a Cloudflare Pages project named `cubeplex` in Direct Upload mode before
+Create a Cloudflare Pages project named `cubeplex-docs` in Direct Upload mode before
 the first deployment. The workflow publishes `docs/site/build/` to that
 project. Attach `docs.cubeplex.ai` as the custom domain in the Pages project
 settings after the first successful deployment.

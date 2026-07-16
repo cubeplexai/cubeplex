@@ -4,7 +4,7 @@
 
 Build the Docusaurus documentation site in GitHub Actions for pull requests and
 main-branch pushes, then publish the verified main-branch build to the
-Cloudflare Pages project `cubeplex`.
+Cloudflare Pages project `cubeplex-docs`.
 
 ## Context
 
@@ -57,8 +57,8 @@ main pushes deploy to the production branch. It downloads the exact artifact
 produced by that build and uses
 `cloudflare/wrangler-action@v3` with:
 
-- `projectName: cubeplex`;
-- `pages deploy docs/site/build --project-name=cubeplex --branch=<target>`;
+- `projectName: cubeplex-docs`;
+- `pages deploy docs/site/build --project-name=cubeplex-docs --branch=<target>`;
 - `CF_API_TOKEN` and `CF_ACCOUNT_ID` repository secrets;
 - the GitHub token for deployment metadata.
 
@@ -83,6 +83,6 @@ documents the local check plus the fact that main pushes deploy automatically.
   backend services.
 - A successful main push produces a non-empty `docs/site/build/` artifact.
 - A successful main push invokes Cloudflare Pages deployment using the
-  `cubeplex` project and the artifact from that same commit.
+  `cubeplex-docs` project and the artifact from that same commit.
 - The setup and local commands are documented, and the workflow does not expose
   secret values.
