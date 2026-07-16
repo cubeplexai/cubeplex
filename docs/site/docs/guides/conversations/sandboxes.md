@@ -23,8 +23,8 @@ Every active sandbox you own gets one row, regardless of whether its container i
 - **Status** — a badge showing the sandbox's runtime state (see below).
 - **Scope label** — which conversation or topic the sandbox belongs to:
   - **Your workspace sandbox** — your personal sandbox, used by 1:1 conversations that aren't part of a topic.
-  - **Group chat: {title}** — a standalone group conversation (not in a topic).
-  - **Topic: {title}** — a sandbox belonging to a [topic](./topics.md).
+  - **Group chat: `{title}`** — a standalone group conversation (not in a topic).
+  - **Topic: `{title}`** — a sandbox belonging to a [topic](./topics.md).
   - **(deleted)** — the conversation or topic that owned this sandbox has been deleted. The sandbox row remains so you can clean it up.
 - **Last active** — when the agent last ran code in it.
 - **Restart** and **Delete** — the two actions (see below).
