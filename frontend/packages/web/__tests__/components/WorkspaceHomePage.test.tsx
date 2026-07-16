@@ -14,6 +14,7 @@ const storeMocks = vi.hoisted(() => ({
   cancelSteer: vi.fn(),
   upload: vi.fn(),
   clear: vi.fn(),
+  markSkipHydrate: vi.fn(),
   hydrate: vi.fn(),
   attachedIds: vi.fn(),
   setWorkspaceId: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('@cubeplex/core', () => {
   const attachmentState = {
     upload: storeMocks.upload,
     clear: storeMocks.clear,
+    markSkipHydrate: storeMocks.markSkipHydrate,
     hydrate: storeMocks.hydrate,
     attachedIds: storeMocks.attachedIds,
     staging: {},
