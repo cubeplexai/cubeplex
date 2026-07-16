@@ -38,6 +38,13 @@ jobs:
         working-directory: docs/site
         run: pnpm check
 
+      - name: List Cloudflare Pages projects
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages project list
+
       - name: Deploy docs preview to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
