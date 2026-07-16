@@ -15,6 +15,21 @@ from cubeplex.im.types import RenderState
 AI_CARD_TEMPLATE_ID = "382e4302-551d-4880-bf29-a30acfab2e71.schema"
 _CONTENT_KEY = "msgContent"
 
+
+def _combined_content(card_state: Any) -> str:
+    """Return the full text for the single DingTalk card content field.
+
+    After HITL resolution, post_hitl_content is appended below a divider
+    so the card shows the complete conversation in chronological order.
+    """
+    pre = card_state.streaming_content or ""
+    post = card_state.post_hitl_content or ""
+    if not post:
+        return pre
+    sep = "\n\n---\n\n" if pre else ""
+    return pre + sep + post
+
+
 _FLOW_INPUTING = "2"
 _FLOW_FINISHED = "3"
 _FLOW_FAILED = "5"
@@ -89,7 +104,7 @@ class DingtalkOpDispatcher:
 
         await self._ensure_inputing()
 
-        full_content = s.card_state.streaming_content
+        full_content = _combined_content(s.card_state)
         self._stream_seq += 1
         guid = f"{s.card_id}-{self._stream_seq}"
         try:
@@ -131,7 +146,7 @@ class DingtalkOpDispatcher:
 
     async def dispatch_finalize(self, state: Any) -> bool:
         s = self._state
-        full_content = s.card_state.streaming_content or ""
+        full_content = _combined_content(s.card_state)
 
         if s.card_state.error:
             error_suffix = f"\n\n⚠️ {s.card_state.error}"

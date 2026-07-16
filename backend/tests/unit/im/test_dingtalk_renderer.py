@@ -92,3 +92,43 @@ class TestDispatchFinalize:
         finish_kwargs = connector.update_card_actions.call_args.kwargs
         assert finish_kwargs["card_data"]["flowStatus"] == "3"
         assert finish_kwargs["card_update_options"] == {"updateCardDataByKey": True}
+
+    @pytest.mark.anyio()
+    async def test_finalize_includes_post_hitl_content(
+        self, state: RenderState, connector: AsyncMock
+    ) -> None:
+        d = DingtalkOpDispatcher(
+            connector=connector,
+            state=state,
+            open_conversation_id="cid_123",
+        )
+        state.card_id = "track_001"
+        state.card_state.streaming_content = "Pre-HITL answer"
+        state.card_state.hitl_resolved = True
+        state.card_state.post_hitl_content = "Post-HITL answer"
+        ok = await d.dispatch_finalize(state)
+        assert ok is True
+        call_kwargs = connector.streaming_update_card.call_args.kwargs
+        content = call_kwargs["content"]
+        assert "Pre-HITL answer" in content
+        assert "Post-HITL answer" in content
+
+    @pytest.mark.anyio()
+    async def test_stream_includes_post_hitl_content(
+        self, state: RenderState, connector: AsyncMock
+    ) -> None:
+        d = DingtalkOpDispatcher(
+            connector=connector,
+            state=state,
+            open_conversation_id="cid_123",
+        )
+        state.card_id = "track_001"
+        state.card_state.streaming_content = "Pre-HITL answer"
+        state.card_state.hitl_resolved = True
+        state.card_state.post_hitl_content = "Post-HITL answer"
+        ok = await d.dispatch_stream(state, "Post-HITL answer")
+        assert ok is True
+        call_kwargs = connector.streaming_update_card.call_args.kwargs
+        content = call_kwargs["content"]
+        assert "Pre-HITL answer" in content
+        assert "Post-HITL answer" in content

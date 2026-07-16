@@ -155,6 +155,54 @@ async def _download_url(
     return b"".join(chunks)
 
 
+async def _download_dingtalk(client: Any, ref: InboundAttachmentRef) -> bytes:
+    """Download a DingTalk inbound media file.
+
+    ``client`` is the account secrets dict (contains ``app_key`` and
+    ``app_secret``).  Handle encoding from DingtalkConnector._extract_richtext:
+    - ``url:<url>``   — direct pre-signed OSS download, no auth required
+    - ``code:<code>`` — exchange via /v1.0/robot/messageFiles/download first
+    """
+    handle = ref.handle
+    if handle.startswith("url:"):
+        return await _download_url(handle[4:])
+
+    if not handle.startswith("code:"):
+        raise DownloadError(f"dingtalk: unrecognized handle format: {handle[:40]!r}")
+
+    download_code = handle[5:]
+    secrets: dict[str, Any] = client or {}
+    app_key = str(secrets.get("app_key") or "")
+    app_secret = str(secrets.get("app_secret") or "")
+    if not app_key or not app_secret:
+        raise DownloadError("dingtalk download: missing app_key / app_secret in secrets")
+
+    async with httpx.AsyncClient(timeout=_DOWNLOAD_TIMEOUT) as http:
+        token_resp = await http.post(
+            "https://api.dingtalk.com/v1.0/oauth2/accessToken",
+            json={"appKey": app_key, "appSecret": app_secret},
+        )
+        access_token: str = token_resp.json().get("accessToken", "")
+        if not access_token:
+            raise DownloadError("dingtalk download: token refresh returned empty token")
+
+        dl_resp = await http.post(
+            "https://api.dingtalk.com/v1.0/robot/messageFiles/download",
+            json={"downloadCode": download_code, "robotCode": app_key},
+            headers={
+                "x-acs-dingtalk-access-token": access_token,
+                "Content-Type": "application/json",
+            },
+        )
+        dl_data = dl_resp.json()
+        download_url: str = dl_data.get("downloadUrl", "")
+        if not download_url:
+            raise DownloadError(f"dingtalk download: no downloadUrl in response: {dl_data}")
+
+    # Pre-signed OSS URL — do NOT send Content-Type (breaks OSS signature check)
+    return await _download_url(download_url)
+
+
 async def download_for(
     platform: str, client: Any, ref: InboundAttachmentRef, *, message_id: str | None
 ) -> bytes:
@@ -174,6 +222,8 @@ async def download_for(
     if platform == "discord":
         # Discord CDN URLs are pre-signed; no auth header.
         return await _download_url(ref.handle)
+    if platform == "dingtalk":
+        return await _download_dingtalk(client, ref)
     raise DownloadError(f"unsupported platform for inbound download: {platform}")
 
 
@@ -185,6 +235,8 @@ def _client_for_download(
         return client_for((account.id, account.credential_id), secrets)
     if account.platform == "slack":
         return str(secrets.get("bot_token") or "")
+    if account.platform == "dingtalk":
+        return secrets  # _download_dingtalk uses app_key + app_secret to refresh a token
     return None  # discord: CDN download, no client
 
 

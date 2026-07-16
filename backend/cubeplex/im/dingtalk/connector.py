@@ -13,6 +13,7 @@ from cubeplex.im.outbound import _FloodSignal
 from cubeplex.im.types import (
     DM_SCOPE_KEY,
     BindingMode,
+    InboundAttachmentRef,
     InboundEvent,
     make_channel_scope,
     make_participant_scope,
@@ -61,19 +62,95 @@ class DingtalkConnector:
     # Inbound
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _extract_richtext(
+        raw: dict[str, Any],
+    ) -> tuple[str, list[InboundAttachmentRef]]:
+        """Extract text and attachment refs from a DingTalk richText message.
+
+        Content lives in raw["content"] (JSON string or dict with a
+        "richText" list), or in the older raw["richText"]["richTextList"].
+
+        Attachment handle encoding:
+        - ``code:<downloadCode>`` — exchange via /v1.0/robot/messageFiles/download
+        - ``url:<pictureUrl>``   — direct pre-signed OSS URL
+        When an item has both, ``downloadCode`` is preferred (longer-lived).
+        """
+        content_raw = raw.get("content")
+        if isinstance(content_raw, str):
+            try:
+                content: dict[str, Any] = json.loads(content_raw)
+            except (json.JSONDecodeError, ValueError):
+                content = {}
+        elif isinstance(content_raw, dict):
+            content = content_raw
+        else:
+            content = {}
+
+        rich_list: list[dict[str, Any]] = (
+            content.get("richText") or (raw.get("richText") or {}).get("richTextList") or []
+        )
+
+        text_parts: list[str] = []
+        attachments: list[InboundAttachmentRef] = []
+
+        for item in rich_list:
+            item_type: str = item.get("type") or ""
+            is_skill = item_type == "skill" or bool(item.get("skillData"))
+
+            if "text" in item and not is_skill:
+                text_parts.append(item["text"])
+
+            code: str = item.get("downloadCode") or ""
+            pic_url: str = item.get("pictureUrl") or ""
+
+            if code:
+                if item_type in ("", "picture"):
+                    attachments.append(
+                        InboundAttachmentRef(
+                            kind="image",
+                            filename="image.jpg",
+                            mime=None,
+                            handle=f"code:{code}",
+                        )
+                    )
+                elif item_type in ("video", "audio", "file"):
+                    attachments.append(
+                        InboundAttachmentRef(
+                            kind=item_type,
+                            filename=str(item.get("fileName") or f"media.{item_type}"),
+                            mime=None,
+                            handle=f"code:{code}",
+                        )
+                    )
+            elif pic_url:
+                attachments.append(
+                    InboundAttachmentRef(
+                        kind="image",
+                        filename="image.jpg",
+                        mime=None,
+                        handle=f"url:{pic_url}",
+                    )
+                )
+
+        return "".join(text_parts).strip(), attachments
+
     def parse_inbound(
         self, raw: dict[str, Any], *, binding_mode: BindingMode = "isolated"
     ) -> InboundEvent | None:
         """Normalize a DingTalk Stream callback dict into an InboundEvent.
 
-        Returns None for non-text messages.
+        Handles text and richText messages; all other types are ignored.
         """
         msgtype = raw.get("msgtype", "")
-        if msgtype != "text":
+        attachments: list[InboundAttachmentRef] = []
+        if msgtype == "text":
+            text_obj = raw.get("text") or {}
+            text: str = text_obj.get("content", "").strip()
+        elif msgtype == "richText":
+            text, attachments = self._extract_richtext(raw)
+        else:
             return None
-
-        text_obj = raw.get("text") or {}
-        text: str = text_obj.get("content", "").strip()
         msg_id: str = raw.get("msgId", "")
         conversation_id: str = raw.get("conversationId", "")
         conversation_type: str = raw.get("conversationType", "")
@@ -117,6 +194,7 @@ class DingtalkConnector:
             sender_ref=sender_staff_id,
             sender_open_id=sender_staff_id,
             text=text,
+            attachments=attachments,
             channel_name=channel_name,
         )
 
