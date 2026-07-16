@@ -106,6 +106,8 @@ class CardState:
     """citation_id → (url, title). Renderer rewrites 【citation_id-chunk_index】 markers via this map."""
     pending_input: PendingInput | None = None
     finalized: bool = False
+    hitl_resolved: bool = False
+    post_hitl_content: str = ""
     error: str | None = None
     elapsed_ms: int = 0
     next_seq: int = 0

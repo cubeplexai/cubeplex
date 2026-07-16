@@ -81,11 +81,12 @@ class FeishuOpDispatcher:
             optimize_markdown_style as _optimize,
         )
 
+        element_id = "post_hitl_content" if state.card_state.hitl_resolved else "streaming_content"
         sanitized = _optimize(text, citation_index=state.card_state.citation_index)
         try:
             await cardkit.stream_text(
                 card_id=state.card_id,
-                element_id="streaming_content",
+                element_id=element_id,
                 content=sanitized,
                 sequence=seq,
             )
@@ -138,8 +139,13 @@ class FeishuOpDispatcher:
         if state.card_id is None or state.card_unavailable:
             if state.card_state.error:
                 await self.emergency_text(f"⚠️ {state.card_state.error}")
-            elif state.card_state.streaming_content:
-                await self.emergency_text(state.card_state.streaming_content[:4000])
+            else:
+                content = state.card_state.streaming_content
+                if state.card_state.post_hitl_content:
+                    sep = "\n\n---\n\n" if content else ""
+                    content = content + sep + state.card_state.post_hitl_content
+                if content:
+                    await self.emergency_text(content[:4000])
             return False
 
         from cubeplex.im.feishu.card_renderer import render
@@ -177,8 +183,13 @@ class FeishuOpDispatcher:
             )
             if state.card_state.error:
                 await self.emergency_text(f"⚠️ {state.card_state.error}")
-            elif state.card_state.streaming_content:
-                await self.emergency_text(state.card_state.streaming_content[:4000])
+            else:
+                content = state.card_state.streaming_content
+                if state.card_state.post_hitl_content:
+                    sep = "\n\n---\n\n" if content else ""
+                    content = content + sep + state.card_state.post_hitl_content
+                if content:
+                    await self.emergency_text(content[:4000])
         return delivered
 
     async def emergency_text(self, text: str) -> None:

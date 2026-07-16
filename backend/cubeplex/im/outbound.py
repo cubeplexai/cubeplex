@@ -70,7 +70,10 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
 
     if etype == "text_delta":
         delta = str(data.get("content", ""))
-        state.card_state.streaming_content += delta
+        if state.card_state.hitl_resolved:
+            state.card_state.post_hitl_content += delta
+        else:
+            state.card_state.streaming_content += delta
         if state.card_id is None:
             state.last_stream_monotonic = now
             return OutboundOp(kind="card_create")
@@ -79,14 +82,22 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         if now - state.last_stream_monotonic < state.stream_interval:
             return None
         state.last_stream_monotonic = now
-        if not state.card_state.streaming_content:
-            return None
         # Feishu's streaming_mode markdown element expects the FULL cumulative
         # text on every PUT — the platform diffs it against the previous push
         # and renders the typewriter increment client-side. Sending only the
         # delta would REPLACE the rendered content with just the delta (the
         # user would see the card cycle through tail fragments). See
         # https://open.feishu.cn/document/cardkit-v1/streaming-updates-openapi-overview
+        if state.card_state.hitl_resolved:
+            if not state.card_state.post_hitl_content:
+                return None
+            return OutboundOp(
+                kind="stream_text",
+                element_id="post_hitl_content",
+                text=state.card_state.post_hitl_content,
+            )
+        if not state.card_state.streaming_content:
+            return None
         return OutboundOp(
             kind="stream_text",
             element_id="streaming_content",
@@ -351,8 +362,17 @@ def fold_event(event: dict[str, Any], state: RenderState, *, now: float) -> Outb
         elif etype == "sandbox_confirm_resolved":
             resolved = str(data.get("decision") or "")
         else:
-            resolved = "answered"
+            # data["answers"] is {answer_key: machine_value} — look up the
+            # human-readable label so the receipt shows what the user chose.
+            answers = data.get("answers") or {}
+            chosen_value = next(iter(answers.values()), "") if isinstance(answers, dict) else ""
+            label = next(
+                (lbl for lbl, val, _ in pending.choices if val == chosen_value),
+                chosen_value or "answered",
+            )
+            resolved = label
         pending.resolved_choice = resolved
+        state.card_state.hitl_resolved = True
         state.last_patch_monotonic = now
         return OutboundOp(kind="patch_card") if state.card_id else OutboundOp(kind="card_create")
 

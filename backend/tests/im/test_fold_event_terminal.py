@@ -274,7 +274,10 @@ def test_ask_user_resolved_flips_receipt_when_question_id_matches() -> None:
     )
     pending = state.card_state.pending_input
     assert pending is not None
-    assert pending.resolved_choice == "answered"
+    # Options are bare strings so label == value; resolved_choice carries
+    # the human-readable label (not the hardcoded "answered" sentinel).
+    assert pending.resolved_choice == "yes"
+    assert state.card_state.hitl_resolved is True
     assert op is not None and op.kind == "patch_card"
 
 

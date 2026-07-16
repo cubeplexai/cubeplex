@@ -149,6 +149,10 @@ def test_pending_input_renders_buttons_with_payload() -> None:
 def test_pending_input_button_text_is_label_value_carries_schema_key() -> None:
     """The button TEXT must be the human label; the button VALUE.choice must
     carry the schema value. Otherwise users pick between machine tokens.
+
+    Buttons are direct children of the interactive_container (not wrapped in
+    column_set columns) so each gets the full card width and long labels
+    are never truncated.
     """
     state = _empty_state()
     state.pending_input = PendingInput(
@@ -161,8 +165,9 @@ def test_pending_input_button_text_is_label_value_carries_schema_key() -> None:
     )
     card = render(state)
     container = next(e for e in card["body"]["elements"] if e.get("element_id") == "pending_input")
-    column_set = next(el for el in container["elements"] if el.get("tag") == "column_set")
-    buttons = [col["elements"][0] for col in column_set["columns"]]
+    # Buttons are direct children, not wrapped in column_set columns.
+    buttons = [el for el in container["elements"] if el.get("tag") == "button"]
+    assert len(buttons) == 2
     # Button TEXT carries the human-readable Chinese labels.
     button_texts = [btn["text"]["content"] for btn in buttons]
     assert button_texts == ["批准", "拒绝"]

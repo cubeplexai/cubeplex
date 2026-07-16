@@ -369,47 +369,44 @@ def _render_pending_input(pending: PendingInput) -> dict[str, Any]:
                 {"tag": "div", "text": {"tag": "lark_md", "content": receipt}},
             ],
         }
-    columns: list[dict[str, Any]] = []
-    for label, value, btn_type in pending.choices:
-        # The button TEXT carries the human-readable label so the user picks
-        # by what the option means. The button VALUE carries the machine
-        # value (what cubepi expects in the answer dict). If we used the
-        # value for both, prompts where label/value diverge (e.g.
-        # "Yes" / "yes") would render opaque tokens like "yes" / "no".
-        value_payload: dict[str, Any] = {
-            "action": pending.kind,
-            "run_id": pending.run_id,
-            "choice": value,
-        }
-        if pending.question_id:
-            value_payload["question_id"] = pending.question_id
-        if pending.answer_key:
-            value_payload["answer_key"] = pending.answer_key
-        columns.append(
-            {
-                "tag": "column",
-                "elements": [
-                    {
-                        "tag": "button",
-                        "text": {"tag": "plain_text", "content": label},
-                        "type": btn_type,
-                        # CardKit 2.0 schema: the callback payload lives INSIDE
-                        # the callback behavior, not as a top-level ``value``
-                        # sibling. With value at the wrong slot Feishu sends
-                        # back an empty ``action.value`` on click, and
-                        # ``parse_action_payload`` rejects the button click as
-                        # malformed, so the user cannot resume the paused run.
-                        # https://github.com/larksuite/node-sdk/blob/main/docs/channel.md
-                        "behaviors": [{"type": "callback", "value": value_payload}],
-                    }
-                ],
-            }
-        )
     body_elements: list[dict[str, Any]] = [
         {"tag": "div", "text": {"tag": "lark_md", "content": pending.question}},
     ]
-    if columns:
-        body_elements.append({"tag": "column_set", "columns": columns})
+    if pending.choices:
+        for label, value, btn_type in pending.choices:
+            # The button TEXT carries the human-readable label so the user picks
+            # by what the option means. The button VALUE carries the machine
+            # value (what cubepi expects in the answer dict). If we used the
+            # value for both, prompts where label/value diverge (e.g.
+            # "Yes" / "yes") would render opaque tokens like "yes" / "no".
+            value_payload: dict[str, Any] = {
+                "action": pending.kind,
+                "run_id": pending.run_id,
+                "choice": value,
+            }
+            if pending.question_id:
+                value_payload["question_id"] = pending.question_id
+            if pending.answer_key:
+                value_payload["answer_key"] = pending.answer_key
+            # Buttons are direct children of the interactive_container so each
+            # gets the full card width. Using column_set (one column per button)
+            # caused equal-width splitting: with 4+ options every button was
+            # squished to ~25% width and most label text was truncated.
+            body_elements.append(
+                {
+                    "tag": "button",
+                    "text": {"tag": "plain_text", "content": label},
+                    "type": btn_type,
+                    # CardKit 2.0 schema: the callback payload lives INSIDE
+                    # the callback behavior, not as a top-level ``value``
+                    # sibling. With value at the wrong slot Feishu sends
+                    # back an empty ``action.value`` on click, and
+                    # ``parse_action_payload`` rejects the button click as
+                    # malformed, so the user cannot resume the paused run.
+                    # https://github.com/larksuite/node-sdk/blob/main/docs/channel.md
+                    "behaviors": [{"type": "callback", "value": value_payload}],
+                }
+            )
     else:
         body_elements.append({"tag": "div", "text": {"tag": "plain_text", "content": "(等待响应)"}})
     return {
@@ -440,6 +437,19 @@ def render(state: CardState) -> dict[str, Any]:
         elements.append(_artifacts_panel(state))
     if state.pending_input is not None:
         elements.append(_render_pending_input(state.pending_input))
+    if state.hitl_resolved:
+        # Rendered even when empty so CardKit has the element before the first
+        # stream_text targeting it arrives after HITL resolution.
+        elements.append(
+            {
+                "tag": "markdown",
+                "element_id": "post_hitl_content",
+                "content": optimize_markdown_style(
+                    state.post_hitl_content,
+                    citation_index=state.citation_index,
+                ),
+            }
+        )
     return {
         "schema": "2.0",
         "config": {
