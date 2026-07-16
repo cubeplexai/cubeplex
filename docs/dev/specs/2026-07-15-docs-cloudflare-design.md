@@ -58,7 +58,8 @@ produced by that build and uses
 `cloudflare/wrangler-action@v3` with:
 
 - `projectName: cubeplex-docs`;
-- `pages deploy docs/site/build --project-name=cubeplex-docs --branch=<target>`;
+- manual preview: `pages deploy docs/site/build --project-name=cubeplex-docs --branch=<target>`;
+- main production: `pages deploy docs/site/build --project-name=cubeplex-docs`;
 - `CF_API_TOKEN` and `CF_ACCOUNT_ID` repository secrets;
 - the GitHub token for deployment metadata.
 
