@@ -16,11 +16,18 @@ export interface UploadingFile {
 
 interface AttachmentStoreState {
   staging: Record<string, UploadingFile[]>
+  // Convs whose next hydrate() call should be skipped. Set by clear() callers
+  // (home-page submit) that navigate immediately without awaiting send(), so
+  // the server's mark_attached_bulk hasn't run yet when the conversation page
+  // mounts and fires hydrate() — without this guard the files reappear in the
+  // input bar even though they were just submitted.
+  skipHydrate: Record<string, true>
 
   upload(client: ApiClient, convId: string, files: File[]): Promise<void>
   cancel(convId: string, tempId: string): Promise<void>
   remove(client: ApiClient, convId: string, tempId: string): Promise<void>
   clear(convId: string): void
+  markSkipHydrate(convId: string): void
   attachedIds(convId: string): string[]
   hydrate(client: ApiClient, convId: string): Promise<void>
 }
@@ -31,6 +38,7 @@ const abortControllers: Record<string, AbortController> = {}
 
 export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
   staging: {},
+  skipHydrate: {},
 
   async upload(client, convId, files) {
     const next: UploadingFile[] = files.map((f) => ({
@@ -139,6 +147,10 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
     })
   },
 
+  markSkipHydrate(convId) {
+    set((s) => ({ skipHydrate: { ...s.skipHydrate, [convId]: true } }))
+  },
+
   attachedIds(convId) {
     return (get().staging[convId] || [])
       .filter((u) => u.status === 'done' && u.serverFile)
@@ -146,6 +158,17 @@ export const useAttachmentStore = create<AttachmentStoreState>((set, get) => ({
   },
 
   async hydrate(client, convId) {
+    // Skip once if the caller set the flag (home-page submit navigates before
+    // send() completes, so mark_attached_bulk may not have run yet on the
+    // server — we'd re-surface files that were just submitted).
+    if (get().skipHydrate[convId]) {
+      set((s) => {
+        const next = { ...s.skipHydrate }
+        delete next[convId]
+        return { skipHydrate: next }
+      })
+      return
+    }
     let list: Awaited<ReturnType<typeof listAttachments>>
     try {
       list = await listAttachments(client, convId, 'pending')

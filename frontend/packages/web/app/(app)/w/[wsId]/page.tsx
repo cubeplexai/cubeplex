@@ -82,6 +82,7 @@ export default function WorkspaceHomePage({
       }
 
       useAttachmentStore.getState().clear(convId)
+      useAttachmentStore.getState().markSkipHydrate(convId)
       // Mirror InputBar.handleSubmit: the composer's preset + thinking choice
       // is a per-message field, so the home page's first-send path must read
       // and forward it too. Without this, the first message after opening a
