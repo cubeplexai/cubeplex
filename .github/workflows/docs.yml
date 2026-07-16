@@ -73,10 +73,20 @@ jobs:
           name: docs-site-build
           path: docs/site/build/
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy docs preview to Cloudflare Pages
+        if: github.event_name == 'workflow_dispatch'
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy docs/site/build --project-name=cubeplex-docs --branch=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pages_branch || 'main' }}
+          command: pages deploy docs/site/build --project-name=cubeplex-docs --branch=${{ github.event.inputs.pages_branch }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy docs production to Cloudflare Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages deploy docs/site/build --project-name=cubeplex-docs
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
