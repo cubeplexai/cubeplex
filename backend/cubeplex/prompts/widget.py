@@ -90,6 +90,19 @@ NOT need this — the cascade re-evaluates automatically.
 
 #### A. Single chart (Chart.js)
 
+**Chart.js height rule (mandatory).** With `responsive:true` and
+`maintainAspectRatio:false`, Chart.js reads the canvas's CSS height —
+NOT the HTML `height` attribute. Without an explicit CSS height pinned with
+`!important`, Chart.js reads its parent container's `clientHeight` (which
+includes the canvas itself), computes a slightly larger value, resizes the
+canvas, which makes the container taller, and so on — an unbounded
+height-growth loop that freezes the browser. Always set height in CSS:
+
+- **One chart:** `canvas{width:100%!important;height:300px!important;}`
+- **Multiple charts with different heights:** use per-id rules or inline styles,
+  e.g. `<canvas id="yr" style="width:100%;height:180px;display:block;">`.
+  Never use the HTML `height` attribute as a substitute.
+
 ```html
 <style>
   .card{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:16px;}
