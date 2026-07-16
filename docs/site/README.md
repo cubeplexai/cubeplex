@@ -36,6 +36,6 @@ pnpm serve
 
 The `Docs` GitHub Actions workflow runs `pnpm check` for docs pull requests.
 When a change lands on `main`, it uploads the verified `build/` directory to
-the `cubeplex` Cloudflare Pages project. The required repository secrets and
+the `cubeplex-docs` Cloudflare Pages project. The required repository secrets and
 one-time Pages setup are documented in
 `../../.github/workflows/SECRETS.md`.

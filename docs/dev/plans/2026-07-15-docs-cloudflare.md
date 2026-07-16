@@ -1,7 +1,7 @@
 # Docs CI and Cloudflare Pages Deployment
 
 **Goal:** Verify the Docusaurus site in GitHub Actions and publish main-branch
-builds to the existing Cloudflare Pages project `cubeplex`.
+builds to the Cloudflare Pages project `cubeplex-docs`.
 
 **Architecture:** A dedicated workflow builds the static site once, uploads the
 `docs/site/build/` directory on main, and a dependent deployment job downloads
@@ -20,7 +20,7 @@ Pages Direct Upload.
 - `build-and-check` produces an artifact named `docs-site-build` containing
   `docs/site/build/` on main.
 - `deploy-cloudflare` consumes `docs-site-build` and deploys it to Pages
-  project `cubeplex` for `push` events targeting `main` or a manually selected
+  project `cubeplex-docs` for `push` events targeting `main` or a manually selected
   preview branch.
 - Required secrets are `CF_API_TOKEN` and `CF_ACCOUNT_ID`.
 

@@ -78,5 +78,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: pages deploy docs/site/build --project-name=cubeplex --branch=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pages_branch || 'main' }}
+          command: pages deploy docs/site/build --project-name=cubeplex-docs --branch=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pages_branch || 'main' }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
