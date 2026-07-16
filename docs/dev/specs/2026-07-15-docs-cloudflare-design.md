@@ -59,7 +59,7 @@ produced by that build and uses
 
 - `projectName: cubeplex-docs`;
 - manual preview: `pages deploy docs/site/build --project-name=cubeplex-docs --branch=<target>`;
-- main production: `pages deploy docs/site/build --project-name=cubeplex-docs`;
+- main production: `pages deploy docs/site/build --project-name=cubeplex-docs --branch=main`;
 - `CF_API_TOKEN` and `CF_ACCOUNT_ID` repository secrets;
 - the GitHub token for deployment metadata.
 
