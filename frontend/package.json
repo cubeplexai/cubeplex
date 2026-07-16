@@ -1,6 +1,6 @@
 {
   "name": "cubeplex-frontend",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.23.0",
   "scripts": {
