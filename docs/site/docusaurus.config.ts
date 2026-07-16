@@ -25,6 +25,7 @@ const config: Config = {
 
   url: 'https://docs.cubeplex.ai',
   baseUrl: '/',
+  trailingSlash: false,
   organizationName: 'cubeplexai',
   projectName: 'cubeplex',
 

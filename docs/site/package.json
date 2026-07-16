@@ -11,8 +11,11 @@
     "clear": "docusaurus clear",
     "serve": "docusaurus serve",
     "write-translations": "docusaurus write-translations",
+    "postbuild": "node scripts/normalize-url-format.mjs build",
     "typecheck": "tsc",
-    "check": "pnpm build && pnpm typecheck",
+    "check:urls": "node scripts/check-url-format.mjs build",
+    "test:worker": "node scripts/test-worker.mjs",
+    "check": "pnpm build && pnpm typecheck && pnpm check:urls && pnpm test:worker",
     "test": "vitest run",
     "test:watch": "vitest"
   },
