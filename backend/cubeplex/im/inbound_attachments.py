@@ -311,6 +311,10 @@ def make_resolver(
                             exc,
                         )
                     notes.append(f"[附件 {ref.filename} 已忽略]")
+            # The inbound IM message IS the sending message, so the rows must
+            # leave 'pending' immediately — a pending row gets re-staged into
+            # the web composer on hydrate and is orphan-reaper bait.
+            await repo.mark_attached_bulk(conversation_id=item.conversation_id, attachment_ids=ids)
         return ids, notes
 
     return resolve

@@ -159,6 +159,11 @@ async def test_feishu_inbound_file_materializes_attachment_and_starts_run(
 
     Bug guarded: if the Feishu non-text drop re-tightens (or the worker stops
     resolving), inbound files silently vanish and start_run gets attachments=None.
+
+    Also guarded: the row must land status='attached' — the inbound IM message
+    IS the sending message. A row left 'pending' gets re-staged into the web
+    composer on hydrate (and re-sent with the next web message), and is
+    eligible for orphan-reaper deletion.
     """
     maker, account = _seeded
 
@@ -190,6 +195,8 @@ async def test_feishu_inbound_file_materializes_attachment_and_starts_run(
     assert rows[0].id == attachment_ids[0]
     assert rows[0].filename == "report.pdf"
     assert rows[0].size_bytes == len(_PDF_BYTES)
+    assert rows[0].status == "attached"
+    assert rows[0].attached_at is not None
 
 
 async def test_reclaim_reuses_persisted_ids_without_duplicate_upload(
