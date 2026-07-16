@@ -1,0 +1,47 @@
+name: Docs Pages Preview Test
+
+on:
+  push:
+    branches:
+      - feat/2026-07-15-docs-cloudflare
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: docs-preview-test
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build and deploy docs preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.10.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: docs/site/pnpm-lock.yaml
+
+      - name: Install docs dependencies
+        working-directory: docs/site
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and type-check docs
+        working-directory: docs/site
+        run: pnpm check
+
+      - name: Deploy docs preview to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          command: pages deploy docs/site/build --project-name=cubeplex --branch=preview
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
