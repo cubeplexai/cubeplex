@@ -23,8 +23,13 @@ The local server watches the site files and reloads after changes.
 pnpm check
 ```
 
-This runs the production Docusaurus build and the TypeScript check. The static
-output is written to `build/`.
+This runs the production Docusaurus build, the TypeScript check, the generated
+URL audit, and the Cloudflare Worker normalization test. The static output is
+written to `build/`.
+
+The site uses slashless URLs for every non-root page. Cloudflare Pages
+redirects legacy URLs such as `/docs/getting-started/quick-start/` to
+`/docs/getting-started/quick-start`; the root URL `/` remains unchanged.
 
 To serve an already-built site locally:
 
