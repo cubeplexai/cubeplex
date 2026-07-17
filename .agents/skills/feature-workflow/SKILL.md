@@ -1,23 +1,29 @@
 ---
 name: feature-workflow
-description: Use at the START of any non-trivial cubeplex feature or change — before writing code — to run the repo's front-of-workflow discipline: isolate in a worktree, clarify intent, write a spec/plan under docs/dev, then execute the plan. Covers worktree provisioning (./scripts/new-worktree), reading .worktree.env for allocated ports/DBs, brainstorming requirements, and one-concern-per-PR planning. Triggers on phrases like "做个新功能", "开个 worktree", "先写 spec/plan", "怎么开始这个 feature", "plan before code", "brainstorm 一下需求".
+description: Use at the START of a large, unclear, or multi-subsystem cubeplex feature — before writing code — to isolate work, resolve the design, and write a spec/plan under docs/dev. Clearly specified, small, single-concern tasks skip spec, plan, clarification, and review and execute directly. Covers worktree provisioning (./scripts/new-worktree), reading .worktree.env for allocated ports/DBs, brainstorming requirements, and one-concern-per-PR planning. Triggers on phrases like "做个新功能", "开个 worktree", "先写 spec/plan", "怎么开始这个 feature", "plan before code", "brainstorm 一下需求".
 ---
 
 # Feature Workflow (cubeplex)
 
-The front half of cubeplex's non-negotiable workflow: **worktree → clarify →
-spec/plan → execute**. This replaces the generic brainstorm/plan/execute
-skills with the repo's actual commands and paths. Read
+The front half of cubeplex's workflow for changes that need design work:
+**worktree → clarify → spec/plan → execute**. This replaces the generic
+brainstorm/plan/execute skills with the repo's actual commands and paths. Read
 [docs/worktrees.md](../../../docs/worktrees.md) and AGENTS.md → "Workflow
 Discipline" for the authoritative rules; this skill is the operating loop.
 
-## When to use
+## Choose the workflow
 
-- Any feature or non-trivial change (new route, subsystem, schema, UI flow).
-- Skip for a one-line fix or a typo — but if it touches a business invariant,
-  a migration, or user-facing behavior, it's not trivial.
+Use the full workflow when the task is a large feature, spans independent
+subsystems, has unresolved requirements, or requires a meaningful design
+decision. Use it when the user explicitly requests a spec, plan, brainstorming,
+or review.
 
-## 1. Worktree before spec/code
+Directly execute a clearly specified, small, single-concern task. Do not create
+a spec or plan, ask for requirement clarification, or wait for design review
+just because the change is user-facing or touches documentation, a route, or UI.
+Inspect the affected files, make the surgical change, and verify it.
+
+## 1. Worktree before spec/code for the full workflow
 
 Always from the **main repo root** (not inside another worktree):
 
@@ -141,14 +147,13 @@ there's nothing to catch. Any push with code or tests keeps the hooks: the
 pre-push hook *is* the `make check-ci` gate, so don't run check-ci by hand.
 (Skipping here also matches `new-worktree`, which pushes with `--no-verify`.)
 
-## 5. Execute the plan
+## 5. Execute
 
-Work the plan's units of work top to bottom on the feature branch — stay on the
-branch, never auto-switch to main or start a merge mid-execution (rule 8). Drive
-each unit through the `/cubeplex-tdd` red→green→commit loop, verifying and
-committing as you go. **No review gate between steps or units** — the per-step
-verifications plus the pre-push hook are the checkpoints; don't stop for a manual
-review after every step.
+For the full workflow, work the plan's units of work top to bottom. For a direct
+task, make the scoped change immediately. In both cases, stay on the feature
+branch, never auto-switch to main or start a merge mid-execution (rule 8), and
+verify before claiming completion. **No review gate between steps or units** —
+the per-step verifications plus the pre-push hook are the checkpoints.
 
 - **Simplest thing that works.** Write the minimum code for the requirement —
   no speculative abstractions, config, or flexibility nobody asked for, no
