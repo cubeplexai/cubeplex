@@ -1,4 +1,4 @@
-# cubeplex SWE-bench harness
+# CubePlex SWE-bench harness
 
 Drives cubeplex over its public HTTP API to produce
 [SWE-bench Verified](https://www.swebench.com/) predictions in the
