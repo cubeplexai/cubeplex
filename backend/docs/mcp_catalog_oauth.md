@@ -198,6 +198,18 @@ read / refresh / persist cycle for OAuth-scoped connectors. Behavior:
   connector, and surfaces a reauthorization-required signal to the UI;
   the user gets a "Reconnect" prompt at the next interaction with the
   connector.
+- **Early revocation (401 with a valid-looking grant).** Providers may
+  invalidate an access token before the `expires_in` they reported
+  (Cloudflare did, 2026-07-17). When the MCP server answers 401 even
+  though `oauth_expires_at` is still in the future, both discovery and
+  runtime tool calls force one refresh
+  (`get_access_token_for_grant(force_refresh=True)`) and retry the
+  request once. Concurrent forced refreshes collapse to a single
+  rotation via the redis lock plus an `expires_at` snapshot check. If
+  the refresh fails — or the server rejects even the fresh token — the
+  grant flips to `expired` and the UI shows Reconnect; discovery
+  records `last_error` starting with `oauth_reauthorization_required:`
+  for the refresh-failure case.
 
 ## Catalog seeder
 
@@ -313,6 +325,13 @@ would change without committing.
   the AS response. The UI surfaces a "Reauthorize" affordance —
   clicking re-enters the OAuth start route and overwrites the
   credential.
+- **`last_error` starts with `oauth_reauthorization_required:`**: the
+  MCP server rejected the access token with 401 before its recorded
+  expiry, and the automatic forced refresh also failed (see "Token
+  refresh" → early revocation). The grant is already `expired`; the
+  user must reconnect. A plain 401 in `last_error` without that prefix
+  means the failure predates the retry, or auth isn't OAuth — check
+  the grant row.
 - **Tools missing after distributing a connector**: discovery runs once
   on distribute and again after each successful OAuth grant. Re-trigger
   via `POST /api/v1/admin/mcp/installs/{connector_id}/refresh-discovery`;

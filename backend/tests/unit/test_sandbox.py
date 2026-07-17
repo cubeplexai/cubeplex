@@ -220,6 +220,9 @@ async def test_execute_tool_no_exit_code_suffix_on_success() -> None:
 async def test_write_file_uploads_to_sandbox() -> None:
     sandbox = _make_sandbox()
     sandbox.upload = AsyncMock()
+    check_result = MagicMock()
+    check_result.output = "MISSING"
+    sandbox.execute = AsyncMock(return_value=check_result)
 
     tool = _make_write_file_tool(sandbox)
     args = _WriteFileArgs(file_path="/work/hello.txt", content="Hello!")
