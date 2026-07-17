@@ -149,11 +149,13 @@ test.describe('MCP catalog flow', () => {
     await page.goto(`/w/${wsId}/mcp`)
 
     // Wait for the panel to load — the template should appear.
-    await expect(page.getByTestId(`ws-catalog-row-${templateId}`)).toBeVisible({ timeout: 15_000 })
+    const row = page.getByTestId(`ws-catalog-row-${templateId}`)
+    await expect(row).toBeVisible({ timeout: 15_000 })
+    await row.click()
 
-    // The toggle should be checked (enabled=true after distribute).
+    // The detail action should offer Disable (enabled=true after distribute).
     const toggle = page.getByTestId(`ws-catalog-toggle-${templateId}`)
-    await expect(toggle).toBeChecked({ timeout: 10_000 })
+    await expect(toggle).toContainText(/Disable|禁用/, { timeout: 10_000 })
 
     // 5. Admin disables the template in the org via API.
     await disableTemplate(cookies, csrf, templateId)
@@ -202,7 +204,10 @@ test.describe('MCP catalog flow', () => {
     })
 
     // Switch to "全部"/"All" — row reappears, showing disabled state.
-    await page.getByRole('button', { name: /全部|All/ }).click()
+    await page
+      .getByRole('group', { name: /按状态筛选|Filter by status/ })
+      .getByRole('button', { name: /^(全部|All)$/ })
+      .click()
     await expect(page.getByTestId(`ws-catalog-row-${templateId}`)).toBeVisible({
       timeout: 5_000,
     })
