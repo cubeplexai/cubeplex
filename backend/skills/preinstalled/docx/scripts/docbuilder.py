@@ -14,7 +14,7 @@ and margins. Pick one per document. *Building-block* methods (cover, heading,
 body, bullets, table, figure, quote, toc, …) emit correctly-styled content so
 the result is consistent and passes the checker.
 
-Fonts assumed present in the sandbox image (see misc/sandbox-image): Latin —
+Fonts assumed present in the sandbox image (see deploy/images/sandbox): Latin —
 Liberation Serif/Sans (Times/Arial-metric), Inter, Sorts Mill Goudy; CJK — Noto
 Sans/Serif CJK SC, LXGW WenKai.
 """
