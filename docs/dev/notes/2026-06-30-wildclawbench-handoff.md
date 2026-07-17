@@ -27,9 +27,9 @@ extracts ≥ reference-harness capability.
   log still in in-repo `tmp/`.
 - **Batch 4 (4 focused pure-text tasks, GLM-5.2, claude-sonnet judge): OVERALL 0.375**
   - `conflicting_handling` (Search) = **1.0** ✅ — agent got the statute-of-limitations answer right in 255s.
-  - `excel_with_search` (Search) = **0.5** — partial (Excel parse ok, web part partial).
+  - `excel_with_search` (Search) = **0.5** — model near-miss (graded fairly): target airport correct (Jack McNamara Field, CEC), final integer 1782 vs GT 1783 (off-by-1 in enplanement calc).
   - `calendar_scheduling` (Productivity) = **0.0** — agent's scheduler had attendee conflicts (12/16 sub-checks passed, but `hard_constraint_pass`=0 gates to 0). Model miss, graded correctly.
-  - `constraint_search` (Search) = **0.0** — model miss.
+  - `constraint_search` (Search) = **0.0** — **GT/judge error, NOT a model miss**: agent correctly found vivo X100 Ultra satisfies all 7 conditions (verified vs official specs); the task GT wrongly assumes "no phone fully matches" so any judge scores 0. Flawed GT (re-running won't fix); agent was right (real ~1.0).
   - All 4 scored end-to-end, no harness issues; failures are model capability.
 - **fuzzy_search rerun = 1.0** (was 0 — gpt-5.5 judge empty-response bug, §7.7b).
   Re-ran with claude-sonnet judge + the reasoning-shim: judge reason
