@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bootstrap N benchmark workspaces for a sharded full run.
 
-Writes shard-0.env … shard-{N-1}.env into --out-dir, each a fresh cubebox
+Writes shard-0.env … shard-{N-1}.env into --out-dir, each a fresh cubeplex
 user/workspace whose SandboxPolicy is set to the build image + allow-egress
 + proxy. Idempotent-ish: skips a shard whose env file already exists and
 still authenticates.
@@ -30,7 +30,7 @@ def _still_valid(env_path: Path, base_url: str) -> bool:
         if "=" in line and not line.strip().startswith("#"):
             k, _, v = line.partition("=")
             env[k.strip()] = v.strip()
-    token = env.get("CUBEBOX_TOKEN")
+    token = env.get("CUBEPLEX_TOKEN")
     if not token:
         return False
     try:
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--shards", type=int, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument("--image",
-                    default="hub.sensedeal.vip/library/cubebox-sandbox:24.04-20260623-build")
+                    default="hub.sensedeal.vip/library/cubeplex-sandbox:24.04-20260623-build")
     ap.add_argument("--egress-proxy", default="http://192.168.1.215:7892")
     args = ap.parse_args(argv)
 

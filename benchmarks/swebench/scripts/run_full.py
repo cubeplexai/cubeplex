@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchestrate a full SWE-bench Verified run sharded across N cubebox workspaces.
+"""Orchestrate a full SWE-bench Verified run sharded across N cubeplex workspaces.
 
 Each shard is a separate workspace (= its own sandbox PVC / pod), running a
 slice of the 500 instances serially via `swebench-run`. Shards run in
@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[full] ERROR missing {env_file}", file=sys.stderr)
             return 2
         shard_env = {**os.environ, **_load_env_file(env_file)}
-        shard_env["CUBEBOX_BENCH_EGRESS_PROXY"] = args.egress_proxy
+        shard_env["CUBEPLEX_BENCH_EGRESS_PROXY"] = args.egress_proxy
         run_name = f"{args.run_name}/shard-{s}"
         log_path = Path(args.out_root) / args.run_name / f"shard-{s}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)

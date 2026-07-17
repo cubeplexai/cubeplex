@@ -1,4 +1,4 @@
-"""Command-line entry: drive N SWE-bench Verified instances through cubebox."""
+"""Command-line entry: drive N SWE-bench Verified instances through cubeplex."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 
-from swebench_harness.client import CubeboxClient, CubeboxConfig
+from swebench_harness.client import CubePlexClient, CubePlexConfig
 from swebench_harness.dataset import load_verified_instances
 from swebench_harness.runner import append_prediction, run_instance
 
@@ -30,7 +30,7 @@ def _env_or_die(name: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="swebench-run",
-        description="Drive cubebox over its HTTP API to produce SWE-bench Verified predictions.",
+        description="Drive cubeplex over its HTTP API to produce SWE-bench Verified predictions.",
     )
     parser.add_argument(
         "--instances",
@@ -48,12 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--model-key",
         default=None,
-        help="cubebox model_key to use (e.g. 'claude-sonnet-4-6'). Omit to use the workspace default.",
+        help="cubeplex model_key to use (e.g. 'claude-sonnet-4-6'). Omit to use the workspace default.",
     )
     parser.add_argument(
         "--thinking",
         default="off",
-        help="cubebox `thinking` parameter on each message (default: off).",
+        help="cubeplex `thinking` parameter on each message (default: off).",
     )
     parser.add_argument(
         "--out-root",
@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         "--model-name",
         default=None,
         help="Name to record in predictions.jsonl `model_name_or_path`. "
-        "Default: 'cubebox-<model_key>-<utc>'.",
+        "Default: 'cubeplex-<model_key>-<utc>'.",
     )
     parser.add_argument(
         "--cleanup-conversation",
@@ -79,10 +79,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--egress-proxy",
-        default=os.environ.get("CUBEBOX_BENCH_EGRESS_PROXY"),
+        default=os.environ.get("CUBEPLEX_BENCH_EGRESS_PROXY"),
         help="HTTP(S) proxy URL (e.g. http://192.168.1.215:7892) the agent should "
         "tell git/pip to use. Workaround for sandboxes whose direct outbound to "
-        "GitHub is unstable. Defaults to $CUBEBOX_BENCH_EGRESS_PROXY.",
+        "GitHub is unstable. Defaults to $CUBEPLEX_BENCH_EGRESS_PROXY.",
     )
     parser.add_argument(
         "--skip-done",
@@ -111,14 +111,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.instances and args.limit is None:
         parser.error("Pass --instances or --limit.")
 
-    cfg = CubeboxConfig(
-        base_url=_env_or_die("CUBEBOX_BASE_URL"),
-        token=_env_or_die("CUBEBOX_TOKEN"),
-        workspace_id=_env_or_die("CUBEBOX_WS"),
+    cfg = CubePlexConfig(
+        base_url=_env_or_die("CUBEPLEX_BASE_URL"),
+        token=_env_or_die("CUBEPLEX_TOKEN"),
+        workspace_id=_env_or_die("CUBEPLEX_WS"),
     )
-    client = CubeboxClient(cfg)
+    client = CubePlexClient(cfg)
     me = client.whoami()
-    print(f"[bench] cubebox: base={cfg.base_url} user={me.get('email','?')} ws={cfg.workspace_id}", flush=True)
+    print(f"[bench] cubeplex: base={cfg.base_url} user={me.get('email','?')} ws={cfg.workspace_id}", flush=True)
 
     run_name = args.run_name or f"{_utc_stamp()}-mini"
     out_dir = Path(args.out_root) / run_name
@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     predictions_path = out_dir / "predictions.jsonl"
     summary_path = out_dir / "summary.json"
 
-    model_name = args.model_name or f"cubebox-{args.model_key or 'default'}-{_utc_stamp()}"
+    model_name = args.model_name or f"cubeplex-{args.model_key or 'default'}-{_utc_stamp()}"
     (out_dir / "meta.json").write_text(
         json.dumps(
             {
@@ -136,9 +136,9 @@ def main(argv: list[str] | None = None) -> int:
                 "thinking": args.thinking,
                 "instances_arg": args.instances,
                 "limit": args.limit,
-                "cubebox_base_url": cfg.base_url,
-                "cubebox_user": me.get("email"),
-                "cubebox_workspace": cfg.workspace_id,
+                "cubeplex_base_url": cfg.base_url,
+                "cubeplex_user": me.get("email"),
+                "cubeplex_workspace": cfg.workspace_id,
             },
             indent=2,
         ),

@@ -1,6 +1,6 @@
-# cubebox SWE-bench harness
+# cubeplex SWE-bench harness
 
-Drives cubebox over its public HTTP API to produce
+Drives cubeplex over its public HTTP API to produce
 [SWE-bench Verified](https://www.swebench.com/) predictions in the
 official `predictions.jsonl` format.
 
@@ -33,18 +33,18 @@ swebench-run --limit 5 --model-key flash
 ```
 
 If you already have an API key + workspace (e.g. you minted one in the
-cubebox settings UI), skip bootstrap and just `export CUBEBOX_TOKEN=…`
+cubeplex settings UI), skip bootstrap and just `export CUBEPLEX_TOKEN=…`
 yourself. But the SandboxPolicy must allow outbound HTTPS — see the
 spec's "Phase 1 prerequisites" section.
 
 Artifacts land under `runs/<YYYYMMDDTHHMMSSZ>-mini/`:
 
 ```
-meta.json              ← config + cubebox identity for this run
+meta.json              ← config + cubeplex identity for this run
 predictions.jsonl      ← SWE-bench scorer input: {instance_id, model_name_or_path, model_patch}
 summary.json           ← per-task timings, token usage, error counts
 tasks/<instance_id>/
-  prompt.txt           ← exact user message sent to cubebox
+  prompt.txt           ← exact user message sent to cubeplex
   sse.jsonl            ← raw SSE stream, one event per line
   patch.diff           ← extracted from the sandbox (empty if agent failed)
   summary.json         ← task-level metadata
@@ -74,5 +74,5 @@ Plan to wire this into the CLI in Phase 2.
   leaderboard convention.
 - It does NOT parallelise. Phase 1 runs serially; concurrency comes in
   Phase 2 when we have a baseline.
-- It does NOT install/manage cubebox. Bring your own running instance
+- It does NOT install/manage cubeplex. Bring your own running instance
   + API key.

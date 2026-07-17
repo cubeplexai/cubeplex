@@ -1,16 +1,16 @@
 """Phase-0 validation: parser parity + transcript-converter fidelity.
 
 These run WITHOUT the WildClawBench docker images — they only need the cloned
-WildClawBench source repo and a recorded cubebox SSE trace. Run:
+WildClawBench source repo and a recorded cubeplex SSE trace. Run:
 
     WCB_REPO=~/benchmarks/wildclawbench/repo \
-    CUBEBOX_SSE=<path/to/a/sse.jsonl> \
+    CUBEPLEX_SSE=<path/to/a/sse.jsonl> \
     python benchmarks/wildclawbench/tests/test_phase0.py
 
 Asserts:
   1. our parse_task_md matches WildClawBench's own parser field-for-field on all
      60 tasks (so a task we parse == what their grader/runner sees).
-  2. our cubebox-SSE → OpenClaw-JSONL converter produces a transcript that their
+  2. our cubeplex-SSE → OpenClaw-JSONL converter produces a transcript that their
      load_transcript + extract_usage_from_jsonl read correctly, and the summed
      per-turn usage equals the SSE `done` event's session totals.
 """
@@ -54,9 +54,9 @@ def test_parser_parity(repo: Path) -> None:
 
 
 def test_transcript_fidelity(repo: Path) -> None:
-    sse = os.environ.get("CUBEBOX_SSE")
+    sse = os.environ.get("CUBEPLEX_SSE")
     if not sse or not Path(sse).exists():
-        print("[skip] transcript fidelity: set CUBEBOX_SSE to a non-empty sse.jsonl")
+        print("[skip] transcript fidelity: set CUBEPLEX_SSE to a non-empty sse.jsonl")
         return
     sys.path.insert(0, str(repo / "src"))
     from wcb_harness.transcript import sse_to_openclaw_records, write_openclaw_jsonl

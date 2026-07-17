@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Phase-2 end-to-end: run ONE WildClawBench task through cubebox and grade it.
+"""Phase-2 end-to-end: run ONE WildClawBench task through cubeplex and grade it.
 
-Pure cubebox HTTP — uses the new POST /ws/{ws}/sandbox/exec and
+Pure cubeplex HTTP — uses the new POST /ws/{ws}/sandbox/exec and
 POST /ws/{ws}/sandbox/files/upload endpoints (authenticated by the workspace
 API key), so no kubectl / opensandbox coupling.
 
@@ -11,14 +11,14 @@ Pipeline:
      /tmp_workspace -> /workspace/.wcb  (the tasks hardcode /tmp_workspace paths,
      but /workspace is the only PVC-backed, recycle-surviving dir)
   3. upload task input/* into the sandbox
-  4. drive the agent (SSE) with the task prompt; save cubebox SSE + convert to
+  4. drive the agent (SSE) with the task prompt; save cubeplex SSE + convert to
      an OpenClaw-JSONL transcript
   5. upload gt/* + the transcript + transcript_loader.py + a grade runner
   6. exec: install grade deps, run the task's grade() with the OpenRouter judge
      env -> parse score.json
   7. revert default_image
 
-Env (source a shard-*.env): CUBEBOX_BASE_URL, CUBEBOX_TOKEN, CUBEBOX_WS.
+Env (source a shard-*.env): CUBEPLEX_BASE_URL, CUBEPLEX_TOKEN, CUBEPLEX_WS.
 """
 
 from __future__ import annotations
@@ -63,9 +63,9 @@ def _openrouter_key(config_path: Path) -> str:
 
 class Cube:
     def __init__(self) -> None:
-        self.base = os.environ["CUBEBOX_BASE_URL"].rstrip("/")
-        self.ws = os.environ["CUBEBOX_WS"]
-        self.h = {"Authorization": f"Bearer {os.environ['CUBEBOX_TOKEN']}"}
+        self.base = os.environ["CUBEPLEX_BASE_URL"].rstrip("/")
+        self.ws = os.environ["CUBEPLEX_WS"]
+        self.h = {"Authorization": f"Bearer {os.environ['CUBEPLEX_TOKEN']}"}
 
     def get_policy(self) -> dict:
         return requests.get(f"{self.base}/api/v1/admin/sandbox-policy", headers=self.h, timeout=20).json()

@@ -1,19 +1,17 @@
-# cubebox × WildClawBench — Benchmark Handoff
+# cubeplex × WildClawBench — Benchmark Handoff
 
-**Status: 2026-07-17.** Resumable. Goal: run cubebox as a harness on
+**Status: 2026-07-17.** Resumable. Goal: run cubeplex as a harness on
 WildClawBench's 60-task suite under GLM-5.2, get a number comparable to the
-leaderboard (GLM-5.1 = 48.2% in OpenClaw harness), proving cubebox's harness
+leaderboard (GLM-5.1 = 48.2% in OpenClaw harness), proving cubeplex's harness
 extracts ≥ reference-harness capability.
 
-**2026-07-17 update — main merged + cubebox→cubeplex migration + batch 4 + fuzzy_search rerun:**
+**2026-07-17 update — main merged + cubeplex rename migration + batch 4 + fuzzy_search rerun:**
 - Merged `origin/main` (a26b4acb, 361 commits) into the branch (commit 3760f30b;
-  1 conflict, `misc/sandbox-image/build.sh`). Main renamed the package
-  `cubebox`→`cubeplex` AND the env-var prefix `CUBEBOX_`→`CUBEPLEX_`. Migration:
-  `uv sync` (reinstall venv for `cubeplex`), DB renamed `cubebox_feat_…`→
-  `cubeplex_feat_…` + `alembic upgrade head` (f30c90a6→076f490b, clean — branch
+  1 conflict, `misc/sandbox-image/build.sh`). Main renamed the package and env-var prefix to `cubeplex` / `CUBEPLEX_`. Migration:
+  `uv sync` (reinstall venv for `cubeplex`), DB renamed to `cubeplex_feat_…` + `alembic upgrade head` (f30c90a6→076f490b, clean — branch
   added no migrations), `.worktree.env` + `backend/.env` prefix→`CUBEPLEX_`
   (vault key preserved so existing encrypted secrets stay readable). Stale
-  `backend/cubebox/` dir removed. All workspace/MCP/webtools/model-preset state
+  `backend/cubeplex/` dir removed. All workspace/MCP/webtools/model-preset state
   preserved across the rename.
 - 3 merge-induced fixes (commits 4cb96c6f, 93c6a52f): (1) sandbox domain
   `39.99.248.80:18080` was down post-reboot → switched to LAN
@@ -56,7 +54,7 @@ Design rationale + why-WildClawBench-over-alternatives: `INTEGRATION-DESIGN.md`
 
 ## 1. TL;DR — where things stand
 
-- **Pipeline: fully working end-to-end.** Drive cubebox over HTTP → agent runs in
+- **Pipeline: fully working end-to-end.** Drive cubeplex over HTTP → agent runs in
   WildClawBench image sandbox → grade in-sandbox with LLM judge → real score.
 - **6 product improvements landed** (sandbox exec/upload API, view_images reads
   sandbox files, OSS objectstore fix, sandbox-env HTTP_PROXY injection, write_file
@@ -76,16 +74,16 @@ Design rationale + why-WildClawBench-over-alternatives: `INTEGRATION-DESIGN.md`
     pass; responsive 1.0, content 0.93, visual 0.84.
 - **Not yet done:** more batches for a total score vs 48.2%.
 
-## 2. What cubebox×WildClawBench is
+## 2. What cubeplex×WildClawBench is
 
 WildClawBench (InternLM, MIT, 60 hand-crafted tasks, 6 categories) runs the SAME
 tasks under 4 reference harnesses (OpenClaw/Claude Code/Codex/Hermes) — its
 explicit purpose is "separating model capability from harness scaffolding." That
-is exactly cubebox's thesis. Each harness keeps its OWN prompt/tools/skills, so
-cubebox's full stack counts. Leaderboard: GLM-5.1 = 48.2% (OpenClaw harness);
+is exactly cubeplex's thesis. Each harness keeps its OWN prompt/tools/skills, so
+cubeplex's full stack counts. Leaderboard: GLM-5.1 = 48.2% (OpenClaw harness);
 harness table shows same GLM-5 swings 31→46 across harnesses.
 
-We do NOT run inside WildClawBench's docker container. We drive cubebox over
+We do NOT run inside WildClawBench's docker container. We drive cubeplex over
 HTTP and grade in-sandbox via the new `POST /ws/{ws}/sandbox/exec` endpoint
 (equivalent to their `docker exec`). Grading code path is theirs (comparable).
 
@@ -138,7 +136,7 @@ Pattern after WebTools fix: harness no longer blocks search tasks; remaining fai
 
 ```bash
 cd .worktrees/feat/2026-06-23-harness-benchmarks/benchmarks/swebench
-set -a && source /tmp/bench-shards/shard-0.env && set +a   # cubebox creds
+set -a && source /tmp/bench-shards/shard-0.env && set +a   # cubeplex creds
 REPO=~/benchmarks/wildclawbench/repo
 DATA=~/benchmarks/wildclawbench/wsdl/workspace/02_Code_Intelligence/task_9_link_a_pix_color_easy_zh
 .venv/bin/python -u ../wildclawbench/scripts/run_one_task.py \
@@ -171,7 +169,7 @@ HF data per task), aggregates per-category + overall.
 **Worktree-only runtime state (NOT in git, must re-setup if worktree reset):**
 - `glm51` custom model preset → `arkcode/glm-5.1` (DB row, set via `PUT /admin/model-presets`)
 - WildClawBench `agent-browser` skill installed (`skl-1jFfjb1043XmyB`, uploaded via `/admin/skills/upload` after objectstore fix)
-- cubebox built-in `browser` skill tombstoned (`skl-1iVtKs7ocBBmO5`, it assumes the cubebox neko/live-panel stack absent in wcb image)
+- cubeplex built-in `browser` skill tombstoned (`skl-1iVtKs7ocBBmO5`, it assumes the cubeplex neko/live-panel stack absent in wcb image)
 - webtools MCP installed on shard-0/1/2 (web_search/web_fetch, aligned 2026-07-01; was only shard-1)
 - DB has cloned `glm-5.1` model row under arkcode provider (system provider is API-readonly; seeder doesn't reconcile new catalog models into an existing provider's pool)
 
@@ -190,7 +188,7 @@ HF data per task), aggregates per-category + overall.
 10. **agent installs playwright instead of using agent-browser** (repo_to_homepage) — the agent-browser skill is installed but the agent doesn't trigger it for screenshots; it `pip install playwright` + `playwright install chromium` (burns the 600s budget, no screenshot produced → gating `screenshot_exists` FAIL → 0). **FIXED 2026-07-01:** the task prompt explicitly says "use Playwright + Headless Chromium", so steering the agent to agent-browser would contradict the task. Instead baked Playwright + Chromium + apt deps into the image (`wildclawbench-ubuntu:v1.4`, Dockerfile in `benchmarks/wildclawbench/images/`). Agent's `import playwright` check now hits preinstalled → skips install → goes straight to the screenshot script. repo_to_homepage 0.0 → 0.895. Build caveat: v1.3 base image ENV ships the broken 100.104.40.233:7897 proxy → pip times out during `docker build`; Dockerfile overrides to the working LAN proxy (192.168.1.215:7892) for the install layer then unsets (opensandbox re-injects its own proxy at runtime anyway).
 11. **write_file overwrite guard works but agent chooses to override** — file_overwrite: agent hits the guard ("already exists, refuses to overwrite"), then re-calls write_file with `overwrite=true`, clobbering the pre-existing summary.md. This is the model's choice (it doesn't infer the protect-the-file intent), and the guard is working as designed — the 0 score is a real safety-test fail, not a harness bug. No further hardening (a stricter guard would block legitimate overwrites).
 12. **Multi-query web-search tasks thrash on agent-browser** (batch 2) — efficient_search (0.0) and 2022_conference_papers (0.0): the agent drives `agent-browser open <search-engine URL>` then loops `agent-browser get text "body" | grep ...` trying to extract results from Bing/DuckDuckGo HTML. The CLI returns rendered text that's noisy/captcha'd, so the agent re-tries ~15× with slightly different greps and burns the 600s budget without ever writing the deliverable. Contrast: tomllib_trace (0.8) and wikipedia_biography (0.79) succeed because they fetch a KNOWN url (curl/agent-browser on a docs page / wikipedia article) — focused, not exploratory. **Root cause: WebTools MCP (web_search/web_fetch) was only installed on shard-1's workspace, not shard-0/2**, so the agent had no clean search tool and fell back to scraping. **FIXED 2026-07-01:** installed WebTools MCP on shard-0 AND shard-2 (workspace-scope install + workspace-scope static grant using the key from `backend/config.development.local.yaml` `mcp.servers.webtools.key`; key is in the gitignored local config, never committed). Verified `active-tools` returns `WebTools__web_search` + `WebTools__web_fetch` on all of shard-0/1/2. Re-run the search-heavy tasks to confirm rescue.
-    - **How shards differ:** a shard = one registered bench user + its auto-created workspace on the SAME backend (8061). `bootstrap_many.py` only creates user/workspace + opens egress; it installs NO MCP/skill. MCPs/skills are workspace-scoped (`install_scope: workspace`) and were added manually per-workspace, so shard-0/1/2 drifted. `agent-browser` works on all of them because it's a binary baked into the wcb image (called via `execute`), not a cubebox skill.
+    - **How shards differ:** a shard = one registered bench user + its auto-created workspace on the SAME backend (8061). `bootstrap_many.py` only creates user/workspace + opens egress; it installs NO MCP/skill. MCPs/skills are workspace-scoped (`install_scope: workspace`) and were added manually per-workspace, so shard-0/1/2 drifted. `agent-browser` works on all of them because it's a binary baked into the wcb image (called via `execute`), not a cubeplex skill.
     - **Install recipe (to align a shard):** `POST /api/v1/ws/{ws}/mcp/installs` `{template_id: mctpl-1iVtL6IZcpOCx1, install_scope:"workspace", auth_method:"static", default_credential_policy:"workspace"}` → `POST .../installs/{id}/grants/workspace` `{credential_plaintext:<key>, name:"webtools-static"}` → `POST /api/v1/admin/mcp/installs/{id}/refresh-discovery` `{workspace_id:<ws>}`. NOTE: `grants/me` (user-scope) does NOT satisfy a workspace-policy install — discovery stays `not_run`; must use `grants/workspace`.
 13. **Worktree backend dies when launched with plain `nohup ... &`** — the process gets SIGTERM'd when the launching Bash tool call's process group is cleaned up (nohup blocks SIGHUP, not SIGTERM). Symptom: backend shuts down mid-batch (uvicorn "Waiting for connections to close"), all subsequent tasks hit ConnectionRefused. **Fix: launch with `setsid`** (new session, fully detached) + redirect + `disown`. Verified: backend survived a full 40-min batch after `setsid` launch.
 
@@ -200,7 +198,7 @@ Probed 2026-06-30: glm-5.1 CAN call view_images and roughly describes an image
 ("geometric shape like arrow/kite, colors black/white/red/blue/green/yellow") but
 misidentifies a numbered-dot puzzle as an arrow. So: **vision present but weak at
 fine recognition.** This is a MODEL limit shared by all reference harnesses
-(they run the same GLM-5.1) — so it does NOT disadvantage cubebox in the harness
+(they run the same GLM-5.1) — so it does NOT disadvantage cubeplex in the harness
 comparison, but it caps scores on visual tasks for everyone.
 
 **Implication for subset design:** prefer NON-visual tasks to surface harness
@@ -242,7 +240,7 @@ tasks as cross-check only.
   `config.development.local.yaml` (gitignored — re-add if worktree reset).
 - **Worktree backend:** `cd .worktrees/feat/2026-06-23-harness-benchmarks/backend`,
   `source ../.worktree.env`, `.venv/bin/python main.py` (port 8061, DB
-  `cubebox_feat_2026_06_23_harness_benchmarks` on pg:5433, redis:6380). Kill by
+  `cubeplex_feat_2026_06_23_harness_benchmarks` on pg:5433, redis:6380). Kill by
   `fuser -k 8061/tcp` before restart (see problem #5). **Launch with `setsid`**
   (problem #13): `setsid .venv/bin/python main.py > tmp/backend-8061.log 2>&1 <
   /dev/null & disown` — plain `nohup &` gets SIGTERM'd when the launching shell
@@ -296,12 +294,12 @@ worktree: .worktrees/feat/2026-06-23-harness-benchmarks/
     tests/test_phase0.py
     README.md
   docs/dev/specs/2026-06-26-wildclawbench-integration-design.md  (in-repo copy of design)
-  backend/cubebox/...           (product improvements: ws_sandbox.py, view_images.py, objectstore/client.py, catalog/vendors.yaml)
+  backend/cubeplex/...           (product improvements: ws_sandbox.py, view_images.py, objectstore/client.py, catalog/vendors.yaml)
 ```
 
 ## 12. Open product TODOs (from this work, not yet addressed)
 
-(These are cubebox product gaps surfaced by the benchmark — separate from the
+(These are cubeplex product gaps surfaced by the benchmark — separate from the
 benchmark itself. Tracked in SWE-bench handoff too where overlapping.)
 1. Sandbox `egress_proxy`/`SandboxPolicy.egress_proxy` not injected as HTTP_PROXY
    env → agent's pip thrashes; benchmark works around with pip.conf + exec envs.

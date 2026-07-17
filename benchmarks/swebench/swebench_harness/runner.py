@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from swebench_harness.client import CubeboxAPIError, CubeboxClient
+from swebench_harness.client import CubePlexAPIError, CubePlexClient
 from swebench_harness.dataset import SWEBenchInstance
 from swebench_harness.prompt import render_prompt
 
@@ -67,7 +67,7 @@ class TaskResult:
 
 
 def run_instance(
-    client: CubeboxClient,
+    client: CubePlexClient,
     instance: SWEBenchInstance,
     *,
     out_dir: Path,
@@ -140,7 +140,7 @@ def run_instance(
                             usage[k] = usage.get(k, 0) + int(data[k])
                 elif etype == "model_failover":
                     # The LLM-side rate-limit/quota signal lives HERE, not in an
-                    # `error` event: cubebox emits model_failover as each model
+                    # `error` event: cubeplex emits model_failover as each model
                     # in the preset chain is tried. When the LAST one fails
                     # (next_ref is null) with a 429, the run is dead — surface
                     # that as the error so --stop-on-rate-limit can catch it,
@@ -170,7 +170,7 @@ def run_instance(
                 patch_bytes = client.download_file(
                     path=patch_path, conversation_id=conversation_id
                 )
-            except CubeboxAPIError as e:
+            except CubePlexAPIError as e:
                 # 404 (no file) and 500 (no sandbox/internal) both mean "no
                 # patch", not a fatal harness error — record and move on,
                 # preserving any earlier (e.g. rate-limit) error.
@@ -203,7 +203,7 @@ def run_instance(
     if cleanup_conversation and conversation_id is not None:
         try:
             client.delete_conversation(conversation_id)
-        except CubeboxAPIError:
+        except CubePlexAPIError:
             pass  # best-effort cleanup
 
     return result

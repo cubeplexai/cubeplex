@@ -1,4 +1,4 @@
-# Harness Benchmarks: Evaluating cubebox (not cubepi, not the model)
+# Harness Benchmarks: Evaluating cubeplex (not cubepi, not the model)
 
 **Status**: Design
 **Date**: 2026-06-23
@@ -6,14 +6,14 @@
 
 ## Summary
 
-Run public agent benchmarks against **cubebox's HTTP API** (not cubepi
+Run public agent benchmarks against **cubeplex's HTTP API** (not cubepi
 directly, not the model in isolation), so the resulting score reflects
-the cubebox harness — middleware, tool design, planning loop, sandbox
+the cubeplex harness — middleware, tool design, planning loop, sandbox
 integration, memory, context management — under a fixed model. The
 marketing claim we want to be able to make is:
 
 > "On the same Claude (or DeepSeek, or whichever) model that
-> OpenHands / SWE-agent / Cursor used, cubebox scores **X%** on
+> OpenHands / SWE-agent / Cursor used, cubeplex scores **X%** on
 > SWE-bench Verified, **Y points above** the published harness baseline."
 
 The benchmark grid is intentionally small and pointed at workloads where
@@ -23,7 +23,7 @@ the harness (not the model) drives most of the score variance:
   standard, biggest spread between harnesses (~20+ point range on the
   same model).
 - **τ-bench** — multi-turn customer-service simulator with strict
-  policies. Maps directly to cubebox's streaming conversational
+  policies. Maps directly to cubeplex's streaming conversational
   positioning. Less crowded leaderboard so a SOTA same-model result is
   achievable.
 
@@ -31,16 +31,16 @@ Benchmarks that primarily test the **model** (GPQA, MMLU-Pro, BFCL,
 HumanEval, LiveCodeBench) are explicitly excluded — winning them says
 "good model choice," not "good harness."
 
-The cubebox public API has already been verified end-to-end on
+The cubeplex public API has already been verified end-to-end on
 2026-06-23 (see [Hello-world API drive verification](#hello-world-verification)
 in this doc and the `feat/2026-06-23-api-key` branch): a single Bearer
 token authenticates an external harness to create conversations, stream
-SSE, observe tool calls, and download sandbox files. **No cubebox or
+SSE, observe tool calls, and download sandbox files. **No cubeplex or
 cubepi code changes are required to run the first round of benchmarks.**
 
 ## Goals
 
-- A repeatable benchmark harness that drives **public cubebox HTTP API**
+- A repeatable benchmark harness that drives **public cubeplex HTTP API**
   and produces SWE-bench Verified + τ-bench scores, plus per-task
   artifacts (patch, traces, token counts) sufficient for adversarial
   defense of the result.
@@ -62,7 +62,7 @@ cubepi code changes are required to run the first round of benchmarks.**
 - Beating OpenAI / Anthropic in absolute terms. The goal is *harness
   attribution* — same model, our scaffolding does more with it.
 - Real-time / streaming benchmarks (latency-sensitive workloads). Out of
-  scope for round 1; revisit if cubebox starts marketing low-latency.
+  scope for round 1; revisit if cubeplex starts marketing low-latency.
 
 ## Why these benchmarks (and not others)
 
@@ -150,8 +150,8 @@ Notes for the harness implementer:
 
 ```python
 # One-time, harness startup
-token = os.environ["CUBEBOX_TOKEN"]       # sk-… from settings/profile
-ws    = os.environ["CUBEBOX_WS"]          # workspace id
+token = os.environ["CUBEPLEX_TOKEN"]       # sk-… from settings/profile
+ws    = os.environ["CUBEPLEX_WS"]          # workspace id
 H     = {"Authorization": f"Bearer {token}"}
 
 # Per task
@@ -211,7 +211,7 @@ SWE-bench harness applies + scores.
 
 ### Per-task user message (the "task prompt")
 
-The cubebox API doesn't accept a per-run system prompt (`SendMessageRequest`
+The cubeplex API doesn't accept a per-run system prompt (`SendMessageRequest`
 in `conversations.py` has no field for it). The task instructions live
 inside `content` — functionally equivalent for our purposes, and
 explicit about the bench-vs-product separation.
@@ -280,11 +280,11 @@ user-simulator + scoring. The simulator is an LLM playing a user with
 a goal; the agent must obey the policy doc while satisfying the
 simulated user.
 
-Mapping to cubebox:
+Mapping to cubeplex:
 
-- One conversation per τ-bench task. The agent under test = cubebox.
-- The simulated user lives **inside the harness**, not inside cubebox.
-- After every cubebox assistant turn (detected by SSE `done`), the
+- One conversation per τ-bench task. The agent under test = cubeplex.
+- The simulated user lives **inside the harness**, not inside cubeplex.
+- After every cubeplex assistant turn (detected by SSE `done`), the
   harness sends the next simulated-user message until the task ends or
   hits a turn cap.
 - Policy doc + tool catalog go into the first user message (same
@@ -293,11 +293,11 @@ Mapping to cubebox:
 Tools τ-bench expects (mostly "lookup customer", "modify order",
 "refund") map to ordinary `execute` shell calls against a stubbed
 Python service running in the sandbox — harness ships the stub as a
-preamble step. No new cubebox tool needed.
+preamble step. No new cubeplex tool needed.
 
 ## Concurrency model
 
-cubebox enforces **one active run per conversation** (`run_manager.py:842-860`,
+cubeplex enforces **one active run per conversation** (`run_manager.py:842-860`,
 CAS on insert). So parallelism is achieved by N **separate conversations**,
 not by N runs on one conversation.
 
@@ -308,7 +308,7 @@ Recommended fleet sizing:
 | 1 (serial) | 35–125 h (1.5–5 days) | Easiest to debug |
 | 5 | 7–25 h | Sweet spot; cheap enough to retry stragglers |
 | 10 | 4–13 h | Watch sandbox host load; monitor LLM rate limits |
-| 20+ | Marginal gains | Likely throttled by LLM gateway, not cubebox |
+| 20+ | Marginal gains | Likely throttled by LLM gateway, not cubeplex |
 
 Per-task isolation (different `/workspace/swebench/runs/<id>/`
 directories) means a single user/workspace is sufficient. No need to
@@ -320,7 +320,7 @@ Per run (one execution of a benchmark suite end-to-end):
 
 ```
 benchmarks/runs/{YYYY-MM-DDThhmm}-{suite}-{commit}/
-  meta.json                # cubebox commit, model, model preset,
+  meta.json                # cubeplex commit, model, model preset,
                            # thinking, temp, max_tokens, fleet size,
                            # start/end timestamps
   tasks/{instance_id}/
@@ -343,7 +343,7 @@ machine-readable for trend plots.
 Every published number ships with this disclosure block:
 
 ```
-SWE-bench Verified, cubebox harness
+SWE-bench Verified, cubeplex harness
 - Model:               anthropic/claude-sonnet-4-6 (released YYYY-MM-DD)
 - Provider:            <bedrock|anthropic|gateway>
 - Temperature:         <value> (default 1.0)
@@ -351,7 +351,7 @@ SWE-bench Verified, cubebox harness
 - Thinking:            off | {effort, summary}
 - Parallel:            <N> conversations
 - Retries:             <N> per task on transient errors, otherwise none
-- cubebox commit:      <sha>
+- cubeplex commit:      <sha>
 - Date:                YYYY-MM-DD
 - Score:               XX.X%  (N/500 resolved)
 - Cost:                $XX.XX
@@ -361,18 +361,18 @@ Comparison-ready table (filled in over Phase 2/3):
 
 | Harness | Model | Score | Notes |
 |---|---|---|---|
-| **cubebox** | claude-sonnet-4-6 | **TBD** | this work |
+| **cubeplex** | claude-sonnet-4-6 | **TBD** | this work |
 | OpenHands | claude-sonnet-4-6 | <from leaderboard> | |
 | SWE-agent | claude-sonnet-4-6 | <from leaderboard> | |
 | Cursor agent mode | claude-sonnet-4-6 | <if disclosed> | |
 
 The headline we want to be able to claim, once Phase 3 has run:
 
-> Same Claude Sonnet 4.6, cubebox scores XX% on SWE-bench Verified — Y
+> Same Claude Sonnet 4.6, cubeplex scores XX% on SWE-bench Verified — Y
 > points above OpenHands, Z points above SWE-agent.
 
 If we lose, we say so internally and figure out why (Phase 3 is harness
-optimization). We do not publish until cubebox is at least
+optimization). We do not publish until cubeplex is at least
 "competitive within noise" with the top non-Anthropic baseline.
 
 ## Phased plan
@@ -417,7 +417,7 @@ Possible levers, in rough order of expected impact:
   full-rewrite) is consistently worth points.
 - **Sub-agent**: spawn a sub-conversation for "read this 30-file
   module" so context doesn't pollute the main loop. cubepi supports
-  this; cubebox just needs to expose it.
+  this; cubeplex just needs to expose it.
 - **Memory**: write learnings to org-scoped memory (`memory.py`) and
   let later tasks read them.
 
@@ -440,7 +440,7 @@ Each lever is one PR + one re-run of Phase 2 + a one-line entry in
 ## Phase 1 prerequisites — what needs to be true before the harness can score anything
 
 These are gating items discovered during the 2026-06-23 smoke test on
-`psf__requests-1142` with the `flash` preset. The harness drove cubebox
+`psf__requests-1142` with the `flash` preset. The harness drove cubeplex
 end-to-end (19 tool calls, 19 tool results, real SSE) — but the agent
 never reached a patch because of the items below.
 
@@ -496,14 +496,14 @@ workspaces point their SandboxPolicy at the build variant.
 
 ### P4. Cold image pull blows the opensandbox pod-ready timeout
 
-**This is a production-relevant cubebox finding, not just a benchmark
-nuisance.** cubebox does NOT pre-pull the sandbox image or run a warm
+**This is a production-relevant cubeplex finding, not just a benchmark
+nuisance.** cubeplex does NOT pre-pull the sandbox image or run a warm
 pool — `SandboxManager.get_or_create` (`manager.py:610`) calls
 `opensandbox.Sandbox.create(policy.default_image, ...)` on demand and
 the image is pulled by containerd when the pod first starts on a node.
 The opensandbox server enforces its own pod-ready deadline; a cold pull
 of a multi-GB image (our build image is 4.88 GB) overruns it and the
-create returns `HTTP 504 KUBERNETES::POD_READY_TIMEOUT`. cubebox's own
+create returns `HTTP 504 KUBERNETES::POD_READY_TIMEOUT`. cubeplex's own
 `sandbox.ready_timeout` (config.yaml = 300s) does not help — the
 timeout is server-side on the opensandbox cluster.
 
@@ -514,30 +514,30 @@ sandbox-creating requests every ~20s until one succeeds (image now
 cached on that node), then run the real tasks. First warm of a 4.88 GB
 image to a fresh node took several minutes.
 
-opensandbox ships a `Pool` CRD with a warm buffer, and cubebox does
+opensandbox ships a `Pool` CRD with a warm buffer, and cubeplex does
 NOT instantiate it (no `kind: Pool` in the charts). Remediation,
 in increasing order of investment:
 - **Ops**: `crictl pull` the new image on sandbox nodes before
   flipping the SandboxPolicy to it.
 - **Deploy**: a pre-pull DaemonSet, or enable the opensandbox Pool
   CRD warm buffer.
-- **Product**: a cubebox-side image-warm step / sandbox warm pool so
+- **Product**: a cubeplex-side image-warm step / sandbox warm pool so
   the first user after an image bump doesn't eat a 504.
 
 ## Product-internal optimizations to review (post-run)
 
-Findings that point at improvements **inside cubebox**, not just the
+Findings that point at improvements **inside cubeplex**, not just the
 benchmark harness. Each was worked around at the periphery (in
 `benchmarks/swebench/` or via ops) so the run could proceed; the
 product-side fix is deferred to a review after the full 500 completes,
 to avoid touching the system prompt / image / sandbox path while a
-20-hour run is in flight. These benefit ALL cubebox sandbox users, not
+20-hour run is in flight. These benefit ALL cubeplex sandbox users, not
 just benchmarking.
 
 1. **`SandboxPolicy.egress_proxy` is not injected into the sandbox env.**
    It's stored and honored nowhere the agent's shell sees it, so the
    agent must `git config --global http.proxy …` by hand (our prompt
-   does this). Cubebox should export it as `HTTP_PROXY` / `HTTPS_PROXY`
+   does this). CubePlex should export it as `HTTP_PROXY` / `HTTPS_PROXY`
    (+ lowercase) in the sandbox so git/pip/curl pick it up transparently.
    Peripheral workaround: prompt sets git proxy. (Task: egress-proxy env.)
 
@@ -549,7 +549,7 @@ just benchmarking.
    shadows the venv — so `import <project>` finds the base image's
    version. The django__django-10554 trace showed the agent burning ~40%
    of its tool calls fighting this (43× `unset PYTHONPATH PIP_PREFIX`,
-   6× "No module named 'django'"). Options: (a) one line in the cubebox
+   6× "No module named 'django'"). Options: (a) one line in the cubeplex
    system prompt ("before creating a venv, `unset PYTHONPATH
    PIP_PREFIX`"); (b) image uses a pip.conf `prefix` that a venv
    naturally overrides instead of the `PIP_PREFIX` env; (c) sandbox shell
@@ -561,7 +561,7 @@ just benchmarking.
 3. **No agent thrash / max-run-duration guard.** django__django-10554
    ran 53 min / 198 tool calls / 91k output tokens / 0-byte patch — the
    model thrashed without converging and nothing stopped it (the idle
-   watchdog only fires on a SILENT stream). Cubebox/cubepi could offer a
+   watchdog only fires on a SILENT stream). CubePlex/cubepi could offer a
    configurable max run duration and/or a repetition detector (same
    command looping, same error recurring). Peripheral workaround: the
    harness enforces a 35-min per-task wall-clock cap. (Task: thrash
@@ -588,7 +588,7 @@ just benchmarking.
    not OK for a published number. Need to pin to direct `anthropic` /
    `bedrock` for the headline run; internal gateway is fine for Phase
    1.
-3. **Real-LLM tagging in cubebox tests** — out of scope for this spec
+3. **Real-LLM tagging in cubeplex tests** — out of scope for this spec
    but adjacent: `@pytest.mark.real_llm` already exists per
    CLAUDE.md. The benchmark harness should NOT live in
    `backend/tests/` — it's its own top-level subproject, since it has
@@ -597,7 +597,7 @@ just benchmarking.
    top-level subproject, separate repo, or `backend/scripts/benchmarks/`.
    Recommendation: top-level `benchmarks/` (new directory at repo
    root), so it can have its own `pyproject.toml`, its own
-   `uv.lock`, and not pull in cubebox's full dev deps. Pinned cubebox
+   `uv.lock`, and not pull in cubeplex's full dev deps. Pinned cubeplex
    commit becomes a sibling git submodule or just `pip install -e
    ../backend` for local dev.
 
@@ -629,9 +629,9 @@ otherwise ships a browser. The reason: tasks come from real GitHub
 issues with publicly-known fixes; a browsing agent can look up the
 answer instead of solving it.
 
-So the agent's tool set for SWE-bench is fully covered by cubebox today:
+So the agent's tool set for SWE-bench is fully covered by cubeplex today:
 
-| Tool | Purpose | cubebox |
+| Tool | Purpose | cubeplex |
 |---|---|---|
 | Shell exec | `git clone`, `pytest`, `pip install`, `grep -rn`, anything else | ✅ `execute` |
 | Write file | new files (test scaffolds, patch staging) | ✅ `write_file` |
@@ -647,7 +647,7 @@ competitors; if it loses, that's an optimization PR.
 **Explicitly NOT allowed for SWE-bench**: web search, web fetch,
 browser, calling the GitHub API to inspect issue history or commit
 backports. Phase 1 harness should disable / not expose these by
-default. If cubebox ever installs an MCP web tool into a benchmark
+default. If cubeplex ever installs an MCP web tool into a benchmark
 workspace, the benchmark CI run must scrub it.
 
 ## Reference: competitor harness trajectories
@@ -711,7 +711,7 @@ fetches.
 ## First real result — mini-10 (2026-06-23)
 
 A 10-instance cross-repo sample (one per repo, plus the 3 compiled-extension
-repos) run through cubebox over HTTP with the **`max` tier (arkagent /
+repos) run through cubeplex over HTTP with the **`max` tier (arkagent /
 glm-5.2)** via the Volcengine agent plan, then scored with the official
 SWE-bench Docker harness (`--namespace none`→ later `swebench` via a local
 registry mirror).
@@ -740,7 +740,7 @@ registry mirror).
   but `requests`' `test_requests.py` makes live HTTP calls (httpbin.org)
   that hang in the eval container's network until the 1800s timeout.
 - This 70–78% sits squarely in the glm-5.2 / Claude-4 leaderboard tier
-  (~74–79%), i.e. **cubebox's scaffolding extracts the model's full
+  (~74–79%), i.e. **cubeplex's scaffolding extracts the model's full
   capability rather than bottlenecking it** — exactly the thesis this
   whole exercise set out to test.
 
@@ -792,7 +792,7 @@ Notes:
   it over-represents whatever each shard reached first. The remaining 407
   include sympy (~75, often hard), sphinx, matplotlib, pylint, pytest,
   xarray — so the final 500 number will likely settle somewhat below
-  82.8%. But 82.8% with django at 87% is a strong signal that the cubebox
+  82.8%. But 82.8% with django at 87% is a strong signal that the cubeplex
   harness extracts — and on this slice slightly exceeds — glm-5.2's
   leaderboard tier (~74-79%).
 
@@ -809,7 +809,7 @@ contention.
 - Hello-world verification trace: this branch, `.test.env`-driven port
   8012; conversation `conv-1iUvRMfa5CuRE6` ran the 4-step toy task
   successfully end-to-end.
-- Cubebox API surface audit: see commit log on `feat/2026-06-23-api-key`
+- CubePlex API surface audit: see commit log on `feat/2026-06-23-api-key`
   (PR #270) and the API key e2e tests for the Bearer-auth contract.
 - SWE-bench Verified: <https://www.swebench.com/>
 - SWE-bench experiments repo (submission artifacts):

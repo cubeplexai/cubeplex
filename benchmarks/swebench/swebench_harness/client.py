@@ -1,4 +1,4 @@
-"""Cubebox HTTP client + SSE parser.
+"""CubePlex HTTP client + SSE parser.
 
 Single Bearer token authenticates every call (see `feat/2026-06-23-api-key`,
 PR #270). The SSE format is documented in the harness-benchmarks design
@@ -18,7 +18,7 @@ import requests
 
 
 @dataclass(slots=True)
-class CubeboxConfig:
+class CubePlexConfig:
     base_url: str
     token: str
     workspace_id: str
@@ -28,8 +28,8 @@ class CubeboxConfig:
         return {"Authorization": f"Bearer {self.token}"}
 
 
-class CubeboxAPIError(RuntimeError):
-    """Raised when cubebox returns a non-2xx response."""
+class CubePlexAPIError(RuntimeError):
+    """Raised when cubeplex returns a non-2xx response."""
 
     def __init__(self, status: int, body: str, *, method: str, url: str) -> None:
         super().__init__(f"{method} {url} -> {status}: {body[:300]}")
@@ -37,8 +37,8 @@ class CubeboxAPIError(RuntimeError):
         self.body = body
 
 
-class CubeboxClient:
-    def __init__(self, cfg: CubeboxConfig, *, request_timeout: float = 60.0) -> None:
+class CubePlexClient:
+    def __init__(self, cfg: CubePlexConfig, *, request_timeout: float = 60.0) -> None:
         self.cfg = cfg
         self.session = requests.Session()
         self.session.headers.update(cfg.auth_headers)
@@ -110,7 +110,7 @@ class CubeboxClient:
             if r.status_code >= 400:
                 # Drain body so we can surface a useful error.
                 body_text = r.text
-                raise CubeboxAPIError(r.status_code, body_text, method="POST", url=url)
+                raise CubePlexAPIError(r.status_code, body_text, method="POST", url=url)
             for line in r.iter_lines(decode_unicode=True):
                 if not line:
                     continue
@@ -135,7 +135,7 @@ class CubeboxClient:
     ) -> bytes:
         """Pull a file from the sandbox by absolute path.
 
-        Returns the raw bytes. Raises `CubeboxAPIError(status=404)` if the
+        Returns the raw bytes. Raises `CubePlexAPIError(status=404)` if the
         file does not exist (typical "agent never wrote patch.diff" case).
         """
         url = (
@@ -167,4 +167,4 @@ class CubeboxClient:
     @staticmethod
     def _raise_for_status(r: requests.Response, *, method: str, url: str) -> None:
         if r.status_code >= 400:
-            raise CubeboxAPIError(r.status_code, r.text, method=method, url=url)
+            raise CubePlexAPIError(r.status_code, r.text, method=method, url=url)

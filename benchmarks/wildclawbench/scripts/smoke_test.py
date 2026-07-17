@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Phase-1 smoke test: can cubebox spin up & drive a sandbox on the WildClawBench image?
+"""Phase-1 smoke test: can cubeplex spin up & drive a sandbox on the WildClawBench image?
 
 Verifies the core integration assumption: opensandbox injects execd into an
-ARBITRARY image (here wildclawbench-ubuntu), so cubebox can drive an agent whose
+ARBITRARY image (here wildclawbench-ubuntu), so cubeplex can drive an agent whose
 sandbox == the WildClawBench tool environment.
 
 Steps (uses a workspace API key, which is org-admin in single_tenant):
@@ -12,7 +12,7 @@ Steps (uses a workspace API key, which is org-admin in single_tenant):
      agent's `execute` tool, stream SSE, collect the tool_result(s)
   4. revert default_image to the saved value (always, even on error)
 
-Env (source a shard-*.env first): CUBEBOX_BASE_URL, CUBEBOX_TOKEN, CUBEBOX_WS.
+Env (source a shard-*.env first): CUBEPLEX_BASE_URL, CUBEPLEX_TOKEN, CUBEPLEX_WS.
 Usage: smoke_test.py <wcb-image-ref> [--model-key lite]
 """
 
@@ -42,9 +42,9 @@ def main() -> int:
     ap.add_argument("--model-key", default="lite", help="cheap tier for the smoke (default lite)")
     args = ap.parse_args()
 
-    base = os.environ["CUBEBOX_BASE_URL"].rstrip("/")
-    token = os.environ["CUBEBOX_TOKEN"]
-    ws = os.environ["CUBEBOX_WS"]
+    base = os.environ["CUBEPLEX_BASE_URL"].rstrip("/")
+    token = os.environ["CUBEPLEX_TOKEN"]
+    ws = os.environ["CUBEPLEX_WS"]
 
     # 1. current policy
     pol = json.loads(_req("GET", base, "/api/v1/admin/sandbox-policy", token).read())

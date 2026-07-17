@@ -1,6 +1,6 @@
 """SWE-bench task prompt template.
 
-The cubebox API does not accept a per-run system prompt (`SendMessageRequest`
+The cubeplex API does not accept a per-run system prompt (`SendMessageRequest`
 in conversations.py has no field for it), so task instructions live inside
 the user message `content`. This is fine and is what the spec calls for.
 
@@ -116,7 +116,7 @@ count of `patch.diff`. Stop after that — do not run further commands.
 
 _PROXY_BLOCK_TEMPLATE = """\
    Configure git + pip to route through the egress HTTPS proxy
-   (cubebox's SandboxPolicy.egress_proxy is not auto-injected into the
+   (cubeplex's SandboxPolicy.egress_proxy is not auto-injected into the
    sandbox env yet; this prompt sets it explicitly). Idempotent:
      git config --global http.proxy  {egress_proxy}
      git config --global https.proxy {egress_proxy}

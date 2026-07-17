@@ -1,4 +1,4 @@
-"""Convert cubebox's SSE event stream into WildClawBench's OpenClaw JSONL transcript.
+"""Convert cubeplex's SSE event stream into WildClawBench's OpenClaw JSONL transcript.
 
 WildClawBench grades by running each task's `grade(transcript, workspace_path)`
 against a transcript loaded from an OpenClaw-format `.jsonl` file. Their usage
@@ -20,7 +20,7 @@ Target schema (one JSON object per line), derived from
   tool result:
     {"type": "toolResult", "toolResult": {"content":"<str>", "tool_call_id":"<str>"}}
 
-cubebox SSE events consumed (see runner.py / SWE-bench sse.jsonl):
+cubeplex SSE events consumed (see runner.py / SWE-bench sse.jsonl):
   text_delta   data.content (stream of partial assistant text)
   tool_call    data.{tool_call_id,name,arguments}
   tool_result  data.{tool_call_id,name,content,is_error}
@@ -48,7 +48,7 @@ def _convert_usage(d: dict[str, Any]) -> dict[str, Any]:
         # totalTokens = non-cache billable tokens; cache counts are tracked
         # separately by extract_usage_from_jsonl, so don't double-count them here.
         "totalTokens": inp + out,
-        "cost": {"total": 0.0},  # cubebox SSE carries no price; fill post-hoc if needed
+        "cost": {"total": 0.0},  # cubeplex SSE carries no price; fill post-hoc if needed
     }
 
 
@@ -63,7 +63,7 @@ def sse_to_openclaw_records(
     *,
     prompt: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Convert an ordered iterable of cubebox SSE event dicts to OpenClaw records.
+    """Convert an ordered iterable of cubeplex SSE event dicts to OpenClaw records.
 
     If `prompt` is given, a leading user message is emitted (the SSE stream does
     not echo the user's prompt back).
@@ -139,7 +139,7 @@ def write_openclaw_jsonl(records: list[dict[str, Any]], path: str) -> None:
 
 
 def convert_sse_file(sse_path: str, out_path: str, *, prompt: str | None = None) -> int:
-    """Read a cubebox sse.jsonl, write an OpenClaw transcript .jsonl. Returns line count."""
+    """Read a cubeplex sse.jsonl, write an OpenClaw transcript .jsonl. Returns line count."""
     events: list[dict[str, Any]] = []
     with open(sse_path, encoding="utf-8") as f:
         for line in f:
@@ -158,8 +158,8 @@ def convert_sse_file(sse_path: str, out_path: str, *, prompt: str | None = None)
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="cubebox SSE → OpenClaw JSONL transcript")
-    ap.add_argument("sse", help="path to cubebox sse.jsonl")
+    ap = argparse.ArgumentParser(description="cubeplex SSE → OpenClaw JSONL transcript")
+    ap.add_argument("sse", help="path to cubeplex sse.jsonl")
     ap.add_argument("out", help="output OpenClaw transcript .jsonl path")
     ap.add_argument("--prompt", default=None, help="optional leading user prompt")
     args = ap.parse_args()

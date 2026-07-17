@@ -1,7 +1,7 @@
 [project]
-name = "cubebox-swebench-harness"
+name = "cubeplex-swebench-harness"
 version = "0.1.0"
-description = "Drive cubebox over its HTTP API to produce SWE-bench Verified predictions."
+description = "Drive cubeplex over its HTTP API to produce SWE-bench Verified predictions."
 requires-python = ">=3.11"
 dependencies = [
     "datasets>=2.20.0",
