@@ -113,7 +113,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
@@ -279,7 +279,7 @@ jobs:
           # Ephemeral runner — skip post-run `uv cache prune --ci`
           # which occasionally hangs on a concurrent lock and fails the job.
           prune-cache: false
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
