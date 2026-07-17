@@ -1,4 +1,4 @@
-# cubeplex × WildClawBench harness
+# CubePlex × WildClawBench harness
 
 Drive cubeplex over its HTTP API on [WildClawBench](https://github.com/internlm/WildClawBench)'s
 fixed 60-task suite, to get a number comparable to its reference harnesses
