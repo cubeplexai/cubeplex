@@ -67,7 +67,14 @@ const config: Config = {
       { name: 'keywords', content: 'CubePlex, AI agent, AI workspace, agent platform, chat AI, MCP tools, AI automation' },
     ],
     navbar: {
-      title: 'CubePlex',
+      logo: {
+        alt: 'CubePlex',
+        src: 'img/cubeplex-lockup-on-light.svg',
+        srcDark: 'img/cubeplex-lockup-on-dark.svg',
+        href: 'https://cubeplex.ai',
+        width: 140,
+        height: 32,
+      },
       items: [
         { type: 'docSidebar', sidebarId: 'docs', label: 'Docs', position: 'left' },
         { type: 'localeDropdown', position: 'right' },
