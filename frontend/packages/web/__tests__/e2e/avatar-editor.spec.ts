@@ -57,7 +57,9 @@ test.describe('avatar editor', () => {
     await page.getByRole('button', { name: 'Change profile picture' }).click()
     await page.getByRole('button', { name: 'Shuffle' }).click()
 
-    const galleryButtons = page.locator('section button').filter({ has: page.locator('img') })
+    const galleryButtons = page
+      .locator('button:not([aria-label])')
+      .filter({ has: page.locator('img') })
     await expect(galleryButtons.first()).toBeVisible({ timeout: 5_000 })
 
     await galleryButtons.first().click()

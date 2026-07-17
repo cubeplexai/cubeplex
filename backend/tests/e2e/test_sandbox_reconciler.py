@@ -75,8 +75,8 @@ async def _mk(
 ) -> UserSandbox:
     row = UserSandbox(
         user_id=scope["user_id"],
-        scope_type="user",
-        scope_id=scope["user_id"],
+        scope_type="conversation",
+        scope_id=f"conv-{secrets.token_hex(6)}",
         sandbox_id=f"sbx_{secrets.token_hex(6)}",
         image="img:latest",
         status=status,

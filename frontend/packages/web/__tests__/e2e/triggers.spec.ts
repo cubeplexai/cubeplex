@@ -140,12 +140,9 @@ test.describe('Triggers', () => {
     await expect(page).toHaveURL(/\/triggers$/, { timeout: 10_000 })
 
     // The deleted trigger should not appear in the list
-    const emptyState = page.getByTestId('triggers-empty')
-    const noLink = page.getByTestId(`trigger-link-${triggerId}`)
-    // Either empty state shows, or the link is gone
-    const isEmpty = await emptyState.isVisible().catch(() => false)
-    const linkVisible = await noLink.isVisible().catch(() => false)
-    expect(isEmpty || !linkVisible).toBe(true)
+    await expect(page.getByTestId(`trigger-row-${triggerId}`)).toHaveCount(0, {
+      timeout: 10_000,
+    })
 
     // Verify the detail route returns 404 by navigating there
     await page.goto(`/w/${wsId}/triggers/${triggerId}`)
