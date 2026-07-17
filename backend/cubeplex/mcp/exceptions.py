@@ -1,5 +1,26 @@
 """MCP OAuth domain exceptions."""
 
+import httpx
+
+
+def is_unauthorized_error(exc: BaseException) -> bool:
+    """True when ``exc`` is (or wraps) an httpx 401 response error.
+
+    The MCP SDK opens sessions inside asyncio TaskGroups, so an auth
+    rejection reaches callers as one or more ``ExceptionGroup`` layers
+    around the underlying ``httpx.HTTPStatusError``. Every leaf is
+    inspected — connection-cleanup noise can precede the real cause.
+    """
+    stack: list[BaseException] = [exc]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, BaseExceptionGroup):
+            stack.extend(current.exceptions)
+            continue
+        if isinstance(current, httpx.HTTPStatusError) and current.response.status_code == 401:
+            return True
+    return False
+
 
 class OAuthError(Exception):
     """Base class for MCP OAuth-related failures."""

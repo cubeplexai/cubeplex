@@ -75,6 +75,24 @@ class OAuthTokenManager:
         self._refresh_buffer = refresh_buffer_seconds
         self._lock_ttl = lock_ttl_seconds
 
+    def with_credential_repo(self, credential_repo: CredentialRepository) -> OAuthTokenManager:
+        """Clone bound to a different (fresh-session) credential repo.
+
+        The runtime tool-call retry runs long after the request session
+        that built this manager has closed; the clone shares the http
+        client, redis, encryption backend, and metadata cache but reads
+        and writes vault rows through the new session's repo.
+        """
+        return OAuthTokenManager(
+            http_client=self._http,
+            redis=self._redis,
+            encryption_backend=self._backend,
+            credential_repo=credential_repo,
+            metadata=self._metadata,
+            refresh_buffer_seconds=self._refresh_buffer,
+            lock_ttl_seconds=self._lock_ttl,
+        )
+
     async def get_access_token_for_grant(
         self,
         *,
@@ -82,6 +100,7 @@ class OAuthTokenManager:
         grant_repo: MCPCredentialGrantRepository,
         server_url: str,
         oauth_client_config: dict[str, Any],
+        force_refresh: bool = False,
     ) -> str:
         """Return a valid access token for a four-layer OAuth grant.
 
@@ -93,6 +112,12 @@ class OAuthTokenManager:
           (required to perform a refresh; absent → terminal failure).
         * ``grant.expires_at`` is the cached access-token expiry. Refresh
           fires when this is within ``refresh_buffer_seconds`` of now.
+        * ``force_refresh=True`` refreshes regardless of ``expires_at`` —
+          for callers that saw the server reject the cached token (401)
+          before its recorded expiry. ``grant.expires_at`` doubles as the
+          caller's snapshot: if the re-read row inside the lock carries a
+          different expiry, another worker already rotated and the current
+          token is returned without a second rotation.
         * ``oauth_client_config`` carries ``client_id`` (and optionally
           ``client_secret_credential_id``) on the install row.
 
@@ -109,7 +134,7 @@ class OAuthTokenManager:
                 f"grant {grant.id} has no refresh_credential_id; cannot refresh"
             )
 
-        if not self._needs_refresh(grant.expires_at):
+        if not force_refresh and not self._needs_refresh(grant.expires_at):
             return await self._read_credential(grant.credential_id)
 
         # Lock on the access-token credential id — the row we'll rotate.
@@ -120,6 +145,7 @@ class OAuthTokenManager:
                 grant_repo=grant_repo,
                 server_url=server_url,
                 oauth_client_config=oauth_client_config,
+                force=force_refresh,
             ),
             re_read=lambda: self._read_grant_after_lock(
                 grant=grant,
@@ -150,6 +176,7 @@ class OAuthTokenManager:
         grant_repo: MCPCredentialGrantRepository,
         server_url: str,
         oauth_client_config: dict[str, Any],
+        force: bool = False,
     ) -> str:
         """Perform the refresh inside the lock; persist credentials + grant."""
         # Re-read inside the lock so we don't double-refresh if another worker
@@ -161,7 +188,13 @@ class OAuthTokenManager:
             raise OAuthInvalidServerState(
                 f"grant {fresh.id} has no refresh_credential_id; cannot refresh"
             )
-        if not self._needs_refresh(fresh.expires_at):
+        if force:
+            # Forced path (caller saw a 401): the caller's grant.expires_at is
+            # its snapshot. A different value on the re-read row means another
+            # worker rotated since — reuse its token instead of rotating twice.
+            if grant.expires_at is not None and fresh.expires_at != grant.expires_at:
+                return await self._read_credential(fresh.credential_id)
+        elif not self._needs_refresh(fresh.expires_at):
             return await self._read_credential(fresh.credential_id)
 
         refresh_token = await self._read_credential(fresh.refresh_credential_id)
