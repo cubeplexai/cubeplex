@@ -70,6 +70,10 @@ chart creates. Override `storageClass.basePath` for a different node path,
 or set `storageClass.create: false` and point each StatefulSet at an
 existing class.
 
+Two more optional in-namespace services can be turned on: the egress
+secret-injection webhook (§4.10) and a docling-serve document parser
+(§4.11, Deployment + models PVC). Both are off by default.
+
 ---
 
 ## 3. Build and push images
@@ -452,6 +456,47 @@ Notes:
   chart can read it via `Files.Get`);
   `deploy/kubernetes/egress-bundle/addon/inject.py` is a symlink to it.
 
+### 4.11 Docling document parsing (optional)
+
+The backend's `DoclingParser` converts uploaded PDF / office documents to
+markdown by calling a [docling-serve](https://github.com/docling-project/docling-serve)
+instance. Turn it on to deploy that service in-cluster; the chart then
+auto-points the backend at it (config key `parsers.docling_serve.base_url`).
+Leave it off to skip docling parsing, or point the backend at an external
+docling-serve via `backend.configOverrides`.
+
+```yaml
+docling:
+  enabled: true
+  # Default is the CPU image. For GPU, use docling-serve-cu130 and add GPU
+  # resources / a nodeSelector under docling.resources.
+  # image: ghcr.io/docling-project/docling-serve-cpu:v1.16.1
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 15Gi      # model cache; ~10 GB downloaded on first start
+  # Mainland-China HuggingFace mirror for the model download (optional):
+  # env:
+  #   HF_ENDPOINT: https://hf-mirror.com
+  #   HF_TOKEN: hf_xxx        # only for gated/private repos
+```
+
+The model set is downloaded once by an initContainer into a ReadWriteOnce
+PVC and reused across restarts (single replica, `Recreate` strategy). First
+start therefore blocks on the download — watch
+`kubectl logs -c model-download deploy/<release>-docling`. The model list is
+kept in sync with `deploy/docling-serve/docker-compose.yml`.
+
+To use an external docling-serve instead of deploying one, keep
+`docling.enabled: false` and set the URL directly:
+
+```yaml
+backend:
+  configOverrides:
+    parsers:
+      docling_serve:
+        base_url: "http://docling.example.internal:5001"
+```
+
 ---
 
 ## 5. Install
@@ -667,6 +712,14 @@ rustfs:
   auth: { accessKey, secretKey }
   defaultBucket: "cubeplex"
   persistence: { storageClass, size }
+  resources: { ... }
+
+docling:                            # optional, see §4.11
+  enabled: false
+  image: "ghcr.io/docling-project/docling-serve-cpu:v1.16.1"
+  service: { port: 5001 }
+  persistence: { storageClass, size }
+  env: { }                          # e.g. HF_ENDPOINT, HF_TOKEN
   resources: { ... }
 
 opensandbox:

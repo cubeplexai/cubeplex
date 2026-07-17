@@ -1,0 +1,139 @@
+{{- if .Values.docling.enabled -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-docling-models
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docling
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: {{ .Values.docling.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.docling.persistence.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cubeplex.docling.host" . }}
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docling
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.docling.service.port }}
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: {{ include "cubeplex.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: docling
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cubeplex.docling.host" . }}
+  labels:
+    {{- include "cubeplex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: docling
+spec:
+  replicas: {{ .Values.docling.replicaCount }}
+  # Single writer to the RWO models PVC — never run two pods at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "cubeplex.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: docling
+  template:
+    metadata:
+      labels:
+        {{- include "cubeplex.labels" . | nindent 8 }}
+        app.kubernetes.io/component: docling
+    spec:
+      initContainers:
+        # Predownload the model set into the shared PVC before serving. Kept
+        # in sync with deploy/docling-serve/docker-compose.yml.
+        - name: model-download
+          image: {{ .Values.docling.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.docling.env }}
+          env:
+            {{- range $k, $v := . }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- end }}
+          command:
+            - sh
+            - -lc
+            - |
+              set -eu
+              ready_flag=/models/.docling-models-ready
+              if [ -f "$ready_flag" ]; then
+                echo "Docling models already downloaded"
+                exit 0
+              fi
+              docling-tools models download --output-dir /models \
+                layout tableformer code_formula picture_classifier rapidocr easyocr \
+                smolvlm granitedocling
+              touch "$ready_flag"
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      containers:
+        - name: docling-serve
+          image: {{ .Values.docling.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - docling-serve
+            - run
+            - --host
+            - "0.0.0.0"
+            - --port
+            - {{ .Values.docling.service.port | quote }}
+            - --workers
+            - "1"
+          env:
+            - name: DOCLING_SERVE_ENABLE_UI
+              value: "true"
+            - name: DOCLING_SERVE_ARTIFACTS_PATH
+              value: /models
+            - name: DOCLING_SERVE_ENABLE_REMOTE_SERVICES
+              value: "true"
+            - name: DOCLING_SERVE_ALLOW_CUSTOM_VLM_CONFIG
+              value: "true"
+            - name: DOCLING_SERVE_ALLOWED_VLM_ENGINES
+              value: '["api","api_openai","api_ollama","api_lmstudio"]'
+            {{- range $k, $v := .Values.docling.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.docling.service.port }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.docling.resources | nindent 12 }}
+          volumeMounts:
+            - name: models
+              mountPath: /models
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-docling-models
+{{- end }}
