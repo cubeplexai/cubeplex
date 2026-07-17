@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: pnpm/action-setup@v4
@@ -171,7 +171,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -269,7 +269,7 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -374,7 +374,7 @@ jobs:
     timeout-minutes: 5
     needs: [gate, backend-check]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.gate.outputs.sha }}
       - uses: astral-sh/setup-uv@v6
@@ -403,11 +403,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: cubeplex
           ref: ${{ needs.gate.outputs.sha }}
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: cubeplex/cubeplex-ee
           path: cubeplex-ee
