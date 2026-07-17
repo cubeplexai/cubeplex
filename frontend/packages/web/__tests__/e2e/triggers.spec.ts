@@ -1,27 +1,15 @@
 import { test, expect, type Page } from '@playwright/test'
 import { createHmac } from 'node:crypto'
+import { registerAndLand } from './_helpers/auth'
 
-const PASSWORD = 'correcthorsebatterystaple'
 const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8033'
-
-function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
 
 function sign(secret: string, ts: string, body: string): string {
   return createHmac('sha256', secret).update(`${ts}.`).update(body).digest('hex')
 }
 
 async function registerAndGetWsId(page: Page): Promise<string> {
-  const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 15_000 })
-  const match = page.url().match(/\/w\/([^/?#]+)/)
-  if (!match) throw new Error(`Could not parse workspace id from URL: ${page.url()}`)
-  return match[1]
+  return (await registerAndLand(page)).wsId
 }
 
 async function postIngest(
@@ -73,13 +61,12 @@ test.describe('Triggers', () => {
     // run_as_user defaults to the first member (the registered user) — just submit
     await page.getByTestId('create-trigger-submit').click()
 
-    // Should redirect to detail page
-    await expect(page).toHaveURL(/\/triggers\/[^/]+$/, { timeout: 15_000 })
-    const triggerIdMatch = page.url().match(/\/triggers\/([^/?#]+)/)
-    if (!triggerIdMatch) throw new Error(`Could not parse triggerId from URL: ${page.url()}`)
-    const triggerId = triggerIdMatch[1]
+    // The list/detail layout opens the new trigger inline without changing the URL.
+    await expect(page.getByRole('heading', { name: triggerName })).toBeVisible({
+      timeout: 15_000,
+    })
 
-    // Step 3: Copy ingest URL and verify clipboard
+    // Step 3: Copy ingest URL, verify clipboard, and recover the new trigger ID.
     // Grant clipboard permissions so the test can read clipboard
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.getByTestId('copy-ingest-url').click()
@@ -88,7 +75,10 @@ test.describe('Triggers', () => {
     await page.waitForTimeout(500)
 
     const clipboardText = await page.evaluate(() => navigator.clipboard.readText())
-    expect(clipboardText).toMatch(new RegExp(`/api/v1/ws/${wsId}/triggers/${triggerId}/ingest`))
+    const triggerIdMatch = clipboardText.match(/\/triggers\/([^/?#]+)\/ingest/)
+    if (!triggerIdMatch) throw new Error(`Could not parse triggerId from URL: ${clipboardText}`)
+    const triggerId = triggerIdMatch[1]
+    expect(clipboardText).toContain(`/api/v1/ws/${wsId}/triggers/${triggerId}/ingest`)
 
     // Step 4: Fire a test webhook from the test runner (not via the browser)
     const eventBody = JSON.stringify({ event: { action: 'opened' } })
@@ -100,6 +90,7 @@ test.describe('Triggers', () => {
     let foundEvent = false
     for (let attempt = 0; attempt < 10; attempt++) {
       await page.reload()
+      await page.getByTestId(`trigger-row-${triggerId}`).click()
       await page.waitForTimeout(1_000)
 
       const counterEl = page.getByTestId('counter-total')
@@ -149,12 +140,9 @@ test.describe('Triggers', () => {
     await expect(page).toHaveURL(/\/triggers$/, { timeout: 10_000 })
 
     // The deleted trigger should not appear in the list
-    const emptyState = page.getByTestId('triggers-empty')
-    const noLink = page.getByTestId(`trigger-link-${triggerId}`)
-    // Either empty state shows, or the link is gone
-    const isEmpty = await emptyState.isVisible().catch(() => false)
-    const linkVisible = await noLink.isVisible().catch(() => false)
-    expect(isEmpty || !linkVisible).toBe(true)
+    await expect(page.getByTestId(`trigger-row-${triggerId}`)).toHaveCount(0, {
+      timeout: 10_000,
+    })
 
     // Verify the detail route returns 404 by navigating there
     await page.goto(`/w/${wsId}/triggers/${triggerId}`)

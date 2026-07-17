@@ -1,15 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function registerAndLand(page: Page): Promise<void> {
-  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-}
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 async function startRun(page: Page, prompt: string): Promise<void> {
   const input = page.getByPlaceholder('Tell CubePlex what you want to get done…')
@@ -29,6 +19,7 @@ const STREAMY_PROMPT =
 test('steer shows a pending chip, then commits into the transcript at a stable position', async ({
   page,
 }) => {
+  skipWithoutRealLlm()
   test.setTimeout(240_000)
   await registerAndLand(page)
   await startRun(page, STREAMY_PROMPT)
@@ -67,6 +58,7 @@ test('steer shows a pending chip, then commits into the transcript at a stable p
 })
 
 test('cancelling a pending steer removes the chip before it is injected', async ({ page }) => {
+  skipWithoutRealLlm()
   test.setTimeout(240_000)
   await registerAndLand(page)
   await startRun(page, STREAMY_PROMPT)

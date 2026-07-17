@@ -1,17 +1,7 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function registerAndLand(page: Page): Promise<void> {
-  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-}
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test.describe('M7 attachments happy path', () => {
   // This test exercises the full attachment upload + send cycle including LLM response.
@@ -19,6 +9,7 @@ test.describe('M7 attachments happy path', () => {
   test.setTimeout(180_000)
 
   test('upload image, send, see attachment in history', async ({ page }) => {
+    skipWithoutRealLlm()
     await registerAndLand(page)
 
     // The workspace home InputBar has no conversationId — the attach button is disabled.
@@ -127,6 +118,7 @@ test.describe('M7 attachments — home page eager-create flow', () => {
   })
 
   test('uploads on the home page and sends with attachment above the bubble', async ({ page }) => {
+    skipWithoutRealLlm()
     await registerAndLand(page)
 
     // Write a tiny valid PNG inline (re-use the same trick as the existing test).

@@ -133,6 +133,10 @@ async def _seeded_engine_and_account() -> AsyncIterator[
                     {"id": _ACCOUNT_ID},
                 )
                 await session.execute(
+                    text("DELETE FROM im_connector_accounts WHERE id = :id"),
+                    {"id": _ACCOUNT_ID},
+                )
+                await session.execute(
                     text("DELETE FROM conversations WHERE workspace_id = :id"),
                     {"id": _WS_ID},
                 )

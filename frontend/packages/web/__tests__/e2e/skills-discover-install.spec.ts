@@ -10,20 +10,10 @@
  */
 
 import { test, expect } from '@playwright/test'
-
-const PASSWORD = 'correcthorsebatterystaple'
+import { registerAndLand } from './_helpers/auth'
 
 async function registerAndGetWsId(page: import('@playwright/test').Page): Promise<string> {
-  const email = `skills-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 15_000 })
-  const url = page.url()
-  const wsId = url.match(/\/w\/([^/?#]+)/)?.[1]
-  if (!wsId) throw new Error(`Could not extract wsId from URL: ${url}`)
-  return wsId
+  return (await registerAndLand(page)).wsId
 }
 
 test('skills page loads with the deep-research skill in the local list', async ({ page }) => {

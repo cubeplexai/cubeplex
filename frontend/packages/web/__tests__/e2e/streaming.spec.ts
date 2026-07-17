@@ -1,17 +1,8 @@
-import { test, expect, type Page } from '@playwright/test'
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function registerAndLand(page: Page): Promise<void> {
-  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-}
+import { test, expect } from '@playwright/test'
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test('loading animation appears while streaming', async ({ page }) => {
+  skipWithoutRealLlm()
   // Cold sandbox provisioning for a fresh user can take ~80s in CI; raise the
   // per-test cap above the default 90s so the run can finish before timeout.
   test.setTimeout(150_000)
@@ -34,6 +25,7 @@ test('loading animation appears while streaming', async ({ page }) => {
 })
 
 test('input stays editable while streaming (so the user can steer)', async ({ page }) => {
+  skipWithoutRealLlm()
   // Same cold-sandbox headroom as above (fresh user → ~80s provisioning).
   test.setTimeout(150_000)
   await registerAndLand(page)

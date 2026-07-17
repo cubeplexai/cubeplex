@@ -1,18 +1,8 @@
 import { test, expect } from '@playwright/test'
-
-function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
-
-const PASSWORD = 'correcthorsebatterystaple'
+import { registerAndLand } from './_helpers/auth'
 
 test('workspace switching isolates conversation lists', async ({ page }) => {
-  const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
+  await registerAndLand(page)
   const firstWsUrl = page.url()
   const firstWsId = firstWsUrl.split('/w/')[1]
 

@@ -9,23 +9,9 @@
  * IdP roundtrip is deferred to the backend integration tests (Task 15).
  */
 import { test, expect, type Page, type Route } from '@playwright/test'
+import { registerAndLand } from './_helpers/auth'
 
 const ORG_SLUG = 'acme'
-
-function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function register(page: Page): Promise<void> {
-  const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 15_000 })
-}
 
 async function mockAdminOrg(page: Page): Promise<void> {
   await page.route('**/api/v1/admin/org', async (route: Route) => {
@@ -74,7 +60,7 @@ test.describe('Admin SSO Authentication page', () => {
   })
 
   test('empty state shows "Configure SSO" and reveals the OIDC form', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
     await mockNoSso(page)
     await page.goto('/admin/authentication')
 
@@ -87,7 +73,7 @@ test.describe('Admin SSO Authentication page', () => {
   })
 
   test('Discover button fills OIDC endpoints from the discovery response', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
     await mockNoSso(page)
     await page.route('**/api/v1/admin/sso/discover-oidc', async (route: Route) => {
       await route.fulfill({
@@ -120,7 +106,7 @@ test.describe('Admin SSO Authentication page', () => {
   })
 
   test('save creates connection and transitions to testing-state panel', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
 
     // First GET returns null; once we POST create, subsequent GET would return
     // the connection — but the page state updates from the POST response.
@@ -158,7 +144,7 @@ test.describe('Admin SSO Authentication page', () => {
   })
 
   test('activate flow prompts for confirmation and updates status', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
 
     await page.route('**/api/v1/admin/sso', async (route: Route) => {
       if (route.request().method() === 'GET') {
@@ -193,7 +179,7 @@ test.describe('Admin SSO Authentication page', () => {
   })
 
   test('identities list renders rows and unlink confirms before deleting', async ({ page }) => {
-    await register(page)
+    await registerAndLand(page)
 
     await page.route('**/api/v1/admin/sso', async (route: Route) => {
       if (route.request().method() === 'GET') {
