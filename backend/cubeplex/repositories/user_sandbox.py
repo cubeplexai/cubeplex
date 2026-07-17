@@ -22,6 +22,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         self,
         *,
         user_id: str,
+        scope_type: str,
+        scope_id: str,
         sandbox_id: str,
         image: str,
         volumes_config: dict[str, Any] | None = None,
@@ -36,6 +38,8 @@ class UserSandboxRepository(ScopedRepository[UserSandbox]):
         """
         fields: dict[str, Any] = {
             "user_id": user_id,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
             "sandbox_id": sandbox_id,
             "image": image,
             "volumes_config": volumes_config,

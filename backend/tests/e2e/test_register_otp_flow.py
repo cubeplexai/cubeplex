@@ -6,6 +6,7 @@ import httpx
 import pytest
 from redis.asyncio import Redis
 
+from tests.e2e.conftest import _auth_cookie_name
 from tests.e2e.helpers import csrf_cookie_name
 
 pytestmark = pytest.mark.e2e
@@ -68,7 +69,7 @@ async def test_register_otp_flow(
     body = resp.json()
     assert body["verification_required"] is True
     # Register does NOT set auth cookie
-    assert unauthenticated_memory_client.cookies.get("cubeplex_auth_1") is None
+    assert unauthenticated_memory_client.cookies.get(_auth_cookie_name()) is None
 
     # Read OTP from Redis
     code = await _read_otp(redis_client, email)
@@ -81,7 +82,7 @@ async def test_register_otp_flow(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"ok": True}
-    assert unauthenticated_memory_client.cookies.get("cubeplex_auth_1") is not None
+    assert unauthenticated_memory_client.cookies.get(_auth_cookie_name()) is not None
 
     # GET /me should show is_verified + needs_onboarding
     me = await unauthenticated_memory_client.get("/api/v1/auth/me")

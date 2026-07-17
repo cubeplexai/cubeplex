@@ -50,6 +50,8 @@ async def test_status_running_when_row_exists(
         repo = UserSandboxRepository(s, org_id=org_id, workspace_id=ws_id)
         await repo.create(
             user_id=user_id,
+            scope_type="user",
+            scope_id=user_id,
             sandbox_id=f"sbx-test-{user_id[-6:]}",
             image="python:3.12",
         )

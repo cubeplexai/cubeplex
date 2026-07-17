@@ -53,7 +53,6 @@ async function seedTemplate(cookies: string, csrf: string, name: string): Promis
       server_url: 'https://mcp-test-sink.internal/mcp',
       transport: 'streamable_http',
       auth_method: 'none',
-      supported_auth_methods: ['none'],
       default_credential_policy: 'none',
     }),
   })

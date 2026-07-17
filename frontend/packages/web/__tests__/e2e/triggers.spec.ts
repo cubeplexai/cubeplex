@@ -90,6 +90,7 @@ test.describe('Triggers', () => {
     let foundEvent = false
     for (let attempt = 0; attempt < 10; attempt++) {
       await page.reload()
+      await page.getByTestId(`trigger-row-${triggerId}`).click()
       await page.waitForTimeout(1_000)
 
       const counterEl = page.getByTestId('counter-total')
