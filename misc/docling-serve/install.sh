@@ -37,6 +37,10 @@ Mainland China mirror fallback (third-party sync, verify before production use):
   export DOCLING_REGISTRY=swr.cn-north-4.myhuaweicloud.com/ddn-k8s/ghcr.io/docling-project
   docker compose pull
 
+Mainland China HuggingFace mirror for model downloads (docling-models job):
+  export HF_ENDPOINT=https://hf-mirror.com
+  # gated/private repos also need: export HF_TOKEN=hf_xxx
+
 Start services:
   docker compose up -d --profile gpu
   or
