@@ -242,7 +242,7 @@ jobs:
     name: Frontend E2E (playwright)
     needs: gate
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       ENV_FOR_DYNACONF: test
       CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
@@ -360,15 +360,17 @@ jobs:
         if: always()
         run: make backend-cleanup-sandboxes
 
-      - name: Upload backend log on failure
-        if: failure()
+      - name: Upload backend logs on failure
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: backend-log
-          path: /tmp/backend.log
+          path: |
+            /tmp/backend.log
+            /tmp/backend-console.log
 
       - name: Upload playwright traces on failure
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-traces
