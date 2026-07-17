@@ -135,16 +135,21 @@ jobs:
         run: make frontend-check-ci
 
   backend-e2e:
-    name: Backend E2E (pytest)
+    name: Backend E2E (pytest, shard ${{ matrix.shard }})
     needs: gate
     runs-on: ubuntu-latest
-    # pytest e2e has been observed at ~19-20 min on slow runners, so the
-    # previous 20-min cap was right at the wire and killed the job mid-run.
-    # 30 min gives margin without masking a real regression (a healthy run is
-    # well under 20 min on a normal runner).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    # The complete suite contains more than 850 tests and took over 30 minutes
+    # in a single process. Stable node-id sharding keeps full coverage while
+    # giving every shard enough time to finish and report all failures.
     timeout-minutes: 30
     env:
       ENV_FOR_DYNACONF: test
+      CUBEPLEX_E2E_SHARD_INDEX: ${{ matrix.shard }}
+      CUBEPLEX_E2E_SHARD_TOTAL: 4
       CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
       CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
       CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
