@@ -1,17 +1,7 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import path from 'node:path'
 import fs from 'node:fs'
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function registerAndLand(page: Page): Promise<void> {
-  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-}
+import { registerAndLand } from './_helpers/auth'
 
 test.describe('M7 attachments happy path', () => {
   // This test exercises the full attachment upload + send cycle including LLM response.

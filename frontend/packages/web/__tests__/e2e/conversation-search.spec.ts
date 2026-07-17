@@ -1,18 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
-
-const PASSWORD = 'correcthorsebatterystaple'
+import { registerAndLand as registerWorkspace } from './_helpers/auth'
 
 async function registerAndLand(page: Page): Promise<string> {
-  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-  const url = page.url()
-  const m = url.match(/\/w\/([^/?#]+)/)
-  if (!m) throw new Error(`no workspace id in url: ${url}`)
-  return m[1]
+  return (await registerWorkspace(page)).wsId
 }
 
 // Probe the search API directly. Returns the fused_count so callers can

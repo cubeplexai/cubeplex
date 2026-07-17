@@ -1,10 +1,7 @@
 import { expect, type Page } from '@playwright/test'
+import { PASSWORD, registerAndLand, uniqueEmail } from '../_helpers/auth'
 
-export const PASSWORD = 'correcthorsebatterystaple'
-
-export function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
+export { PASSWORD, uniqueEmail }
 
 /**
  * Register a fresh account (auto-admin under M3 single-user-org bootstrap)
@@ -12,11 +9,7 @@ export function uniqueEmail(): string {
  */
 export async function registerAsAdmin(page: Page): Promise<string> {
   const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
+  await registerAndLand(page, email)
   return email
 }
 

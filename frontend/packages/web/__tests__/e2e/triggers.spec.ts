@@ -1,27 +1,15 @@
 import { test, expect, type Page } from '@playwright/test'
 import { createHmac } from 'node:crypto'
+import { registerAndLand } from './_helpers/auth'
 
-const PASSWORD = 'correcthorsebatterystaple'
 const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8033'
-
-function uniqueEmail(): string {
-  return `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
 
 function sign(secret: string, ts: string, body: string): string {
   return createHmac('sha256', secret).update(`${ts}.`).update(body).digest('hex')
 }
 
 async function registerAndGetWsId(page: Page): Promise<string> {
-  const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 15_000 })
-  const match = page.url().match(/\/w\/([^/?#]+)/)
-  if (!match) throw new Error(`Could not parse workspace id from URL: ${page.url()}`)
-  return match[1]
+  return (await registerAndLand(page)).wsId
 }
 
 async function postIngest(
