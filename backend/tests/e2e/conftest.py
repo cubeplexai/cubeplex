@@ -48,6 +48,7 @@ from cubeplex.sandbox.manager import SandboxManager
 from cubeplex.skills.sandbox_paths import SKILLS_ROOT
 from cubeplex.skills.sync_tar import SKILLS_DELTA_TGZ_PATH
 from tests.e2e.helpers import csrf_cookie_name
+from tests.e2e.sharding import shard_for_node_id
 
 
 def _auth_cookie_name() -> str:
@@ -156,6 +157,35 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if str(item.path).startswith(e2e_dir):
             item.add_marker(pytest.mark.e2e)
+
+    shard_index_raw = os.getenv("CUBEPLEX_E2E_SHARD_INDEX")
+    shard_total_raw = os.getenv("CUBEPLEX_E2E_SHARD_TOTAL")
+    if shard_index_raw is None and shard_total_raw is None:
+        return
+    if shard_index_raw is None or shard_total_raw is None:
+        raise pytest.UsageError(
+            "CUBEPLEX_E2E_SHARD_INDEX and CUBEPLEX_E2E_SHARD_TOTAL must be set together"
+        )
+
+    try:
+        shard_index = int(shard_index_raw)
+        shard_total = int(shard_total_raw)
+    except ValueError as exc:
+        raise pytest.UsageError("E2E shard index and total must be integers") from exc
+    if shard_total < 1 or not 0 <= shard_index < shard_total:
+        raise pytest.UsageError(
+            f"E2E shard index must be in [0, {shard_total}); received {shard_index}"
+        )
+
+    selected: list[pytest.Item] = []
+    deselected: list[pytest.Item] = []
+    for item in items:
+        target = (
+            selected if shard_for_node_id(item.nodeid, shard_total) == shard_index else deselected
+        )
+        target.append(item)
+    items[:] = selected
+    config.hook.pytest_deselected(items=deselected)
 
 
 @pytest_asyncio.fixture(autouse=True)
