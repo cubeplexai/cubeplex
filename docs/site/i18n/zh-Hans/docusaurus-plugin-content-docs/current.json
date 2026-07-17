@@ -1,0 +1,42 @@
+{
+  "sidebar.docs.category.Getting Started": {
+    "message": "开始使用",
+    "description": "Label for the Getting Started sidebar category"
+  },
+  "sidebar.docs.category.Guides": {
+    "message": "指南",
+    "description": "Label for the Guides sidebar category"
+  },
+  "sidebar.docs.category.Conversations": {
+    "message": "对话",
+    "description": "Label for the Conversations sidebar category"
+  },
+  "sidebar.docs.category.Skills": {
+    "message": "技能",
+    "description": "Label for the Skills sidebar category"
+  },
+  "sidebar.docs.category.Memory": {
+    "message": "记忆",
+    "description": "Label for the Memory sidebar category"
+  },
+  "sidebar.docs.category.MCP Tools": {
+    "message": "MCP 工具",
+    "description": "Label for the MCP Tools sidebar category"
+  },
+  "sidebar.docs.category.Automation": {
+    "message": "自动化",
+    "description": "Label for the Automation sidebar category"
+  },
+  "sidebar.docs.category.IM Connectors": {
+    "message": "IM 连接器",
+    "description": "Label for the IM Connectors sidebar category"
+  },
+  "sidebar.docs.category.Account": {
+    "message": "账户",
+    "description": "Label for the Account sidebar category"
+  },
+  "sidebar.docs.category.Administration": {
+    "message": "管理",
+    "description": "Label for the Administration sidebar category"
+  }
+}
