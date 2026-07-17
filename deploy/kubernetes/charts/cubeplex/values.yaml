@@ -154,6 +154,37 @@ rustfs:
       cpu: "1"
       memory: "1Gi"
 
+# ── Docling document-conversion service (optional) ──────────────────────
+# The backend's DoclingParser (config key parsers.docling_serve.base_url)
+# calls this to convert PDF/office files to markdown. When enabled, the
+# backend ConfigMap is auto-pointed at the in-cluster Service; leave it off
+# to disable docling parsing or to point at an external endpoint via
+# backend.configOverrides.parsers.docling_serve.base_url.
+docling:
+  enabled: false
+  # CPU image. For GPU, swap to docling-serve-cu130 and add GPU resources /
+  # nodeSelector under docling.resources.
+  image: ghcr.io/docling-project/docling-serve-cpu:v1.16.1
+  replicaCount: 1
+  service:
+    port: 5001
+  # Models are downloaded once by an initContainer into this PVC and reused
+  # across restarts (single replica; the PVC is ReadWriteOnce).
+  persistence:
+    storageClass: cubeplex-work-hostpath
+    size: 15Gi
+  # Extra env applied to both the model-download initContainer and the serve
+  # container. Set HF_ENDPOINT: https://hf-mirror.com (and HF_TOKEN) for
+  # mainland-China HuggingFace mirrors.
+  env: {}
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "2Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
 # ── Egress secret-injection (MITM webhook + backend mTLS exchange) ───────
 # Default off. Turning on:
 #   - deploys the mutating admission webhook in this (cubeplex) namespace
