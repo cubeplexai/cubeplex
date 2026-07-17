@@ -1,6 +1,9 @@
 name: CI
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
   issue_comment:
     types: [created]
@@ -11,8 +14,10 @@ concurrency:
 
 jobs:
   gate:
-    name: Gate (/ci comment or workflow_dispatch)
+    name: Gate (automatic, /ci, or workflow_dispatch)
     if: |
+      github.event_name == 'pull_request' ||
+      github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'issue_comment' &&
        github.event.issue.pull_request != null &&
@@ -32,6 +37,8 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
             SHA=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.issue.number }} -q .head.sha)
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            SHA="${{ github.event.pull_request.head.sha }}"
           else
             SHA="${{ github.sha }}"
           fi
@@ -46,6 +53,7 @@ jobs:
             -f content=rocket
       - name: Create in-progress check run
         id: check
+        if: github.event_name == 'issue_comment'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -424,7 +432,10 @@ jobs:
 
   report:
     name: Finalize CI check run
-    if: always() && needs.gate.result == 'success'
+    if: |
+      always() &&
+      needs.gate.result == 'success' &&
+      github.event_name == 'issue_comment'
     needs: [gate, backend-check, frontend-check, backend-e2e, frontend-e2e, test-ee-compat]
     runs-on: ubuntu-latest
     permissions:
