@@ -21,7 +21,7 @@ const classicOptions: ClassicOptions = {
 const config: Config = {
   title: 'CubePlex',
   tagline: 'Your AI agent workspace — chat, automate, extend',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/cubeplex-favicon.svg',
 
   url: 'https://docs.cubeplex.ai',
   baseUrl: '/',

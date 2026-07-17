@@ -16,11 +16,6 @@ export default {
       return Response.redirect(url.toString(), 301);
     }
 
-    if (url.pathname === '/docs' || url.pathname === '/zh-Hans/docs') {
-      url.pathname = `${url.pathname}.html`;
-      return env.ASSETS.fetch(new Request(url, request));
-    }
-
     if (url.pathname.length > 1 && url.pathname.endsWith('/')) {
       url.pathname = url.pathname.slice(0, -1);
       return Response.redirect(url.toString(), 301);
