@@ -1,9 +1,44 @@
 # cubebox × WildClawBench — Benchmark Handoff
 
-**Status: 2026-07-01.** Resumable. Goal: run cubebox as a harness on
+**Status: 2026-07-17.** Resumable. Goal: run cubebox as a harness on
 WildClawBench's 60-task suite under GLM-5.2, get a number comparable to the
 leaderboard (GLM-5.1 = 48.2% in OpenClaw harness), proving cubebox's harness
 extracts ≥ reference-harness capability.
+
+**2026-07-17 update — main merged + cubebox→cubeplex migration + batch 4 + fuzzy_search rerun:**
+- Merged `origin/main` (a26b4acb, 361 commits) into the branch (commit 3760f30b;
+  1 conflict, `misc/sandbox-image/build.sh`). Main renamed the package
+  `cubebox`→`cubeplex` AND the env-var prefix `CUBEBOX_`→`CUBEPLEX_`. Migration:
+  `uv sync` (reinstall venv for `cubeplex`), DB renamed `cubebox_feat_…`→
+  `cubeplex_feat_…` + `alembic upgrade head` (f30c90a6→076f490b, clean — branch
+  added no migrations), `.worktree.env` + `backend/.env` prefix→`CUBEPLEX_`
+  (vault key preserved so existing encrypted secrets stay readable). Stale
+  `backend/cubebox/` dir removed. All workspace/MCP/webtools/model-preset state
+  preserved across the rename.
+- 3 merge-induced fixes (commits 4cb96c6f, 93c6a52f): (1) sandbox domain
+  `39.99.248.80:18080` was down post-reboot → switched to LAN
+  `192.168.1.207:32378` (reachable); (2) `/sandbox/exec` + `/sandbox/files/upload`
+  now unwrap `attachment.sandbox` (main's `get_or_create` returns a
+  `SandboxAttachment`, not a `Sandbox` — branch's endpoints called `.execute()`
+  on the attachment → AttributeError → 503); (3) runner's message body
+  `thinking`→`reasoning:{mode:off}` (main renamed the field, `extra=forbid` → 422).
+- **State hygiene (per user):** shard creds + logs moved out of `/tmp` (tmpfs,
+  lost on reboot) to `benchmarks/wildclawbench/.state/` (gitignored). Backend
+  log still in in-repo `tmp/`.
+- **Batch 4 (4 focused pure-text tasks, GLM-5.2, claude-sonnet judge): OVERALL 0.375**
+  - `conflicting_handling` (Search) = **1.0** ✅ — agent got the statute-of-limitations answer right in 255s.
+  - `excel_with_search` (Search) = **0.5** — partial (Excel parse ok, web part partial).
+  - `calendar_scheduling` (Productivity) = **0.0** — agent's scheduler had attendee conflicts (12/16 sub-checks passed, but `hard_constraint_pass`=0 gates to 0). Model miss, graded correctly.
+  - `constraint_search` (Search) = **0.0** — model miss.
+  - All 4 scored end-to-end, no harness issues; failures are model capability.
+- **fuzzy_search rerun = 1.0** (was 0 — gpt-5.5 judge empty-response bug, §7.7b).
+  Re-ran with claude-sonnet judge + the reasoning-shim: judge reason
+  "Visual-RFT: Visual Reinforcement Fine-Tuning, 与标准答案完全一致". Model had
+  answered correctly all along; the 0 was a judge measurement error.
+- **Formal 12-task (batch 1+2+3, fuzzy_search now 1.0) = 0.507 — past 48.2% ✅.**
+  Formal 16-task (12 + batch 4) = 0.474 (batch 4's harder remaining tasks drag it
+  just below). Remaining 41 tasks are mostly multimodal/exploratory/heavy — the
+  easy focused wins were in batches 1-3.
 
 This doc is the single source of truth for the work — read it first if resuming.
 Design rationale + why-WildClawBench-over-alternatives: `INTEGRATION-DESIGN.md`
