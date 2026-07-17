@@ -1,15 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
-
-const PASSWORD = 'correcthorsebatterystaple'
-
-async function registerAndLand(page: Page): Promise<void> {
-  const email = `u-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 10_000 })
-}
+import { test, expect } from '@playwright/test'
+import { registerAndLand } from './_helpers/auth'
 
 test('loading animation appears while streaming', async ({ page }) => {
   // Cold sandbox provisioning for a fresh user can take ~80s in CI; raise the

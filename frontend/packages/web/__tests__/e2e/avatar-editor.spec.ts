@@ -1,23 +1,14 @@
 import { test, expect } from '@playwright/test'
-
-function uniqueEmail(): string {
-  return `avatar-editor-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
-
-const PASSWORD = 'correcthorsebatterystaple'
+import { PASSWORD, registerAndLand, uniqueEmail } from './_helpers/auth'
 
 test.describe('avatar editor', () => {
   let email: string
 
   test.beforeAll(async ({ browser }) => {
-    email = uniqueEmail()
+    email = uniqueEmail('avatar-editor')
     const ctx = await browser.newContext()
     const page = await ctx.newPage()
-    await page.goto('/register')
-    await page.getByLabel('Email').fill(email)
-    await page.getByLabel('Password').fill(PASSWORD)
-    await page.getByRole('button', { name: /create account/i }).click()
-    await expect(page).toHaveURL(/\/w\//, { timeout: 10_000 })
+    await registerAndLand(page, email)
     await ctx.close()
   })
 

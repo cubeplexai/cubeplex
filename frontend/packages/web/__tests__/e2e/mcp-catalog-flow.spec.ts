@@ -13,13 +13,9 @@
  */
 
 import { test, expect, type Page } from '@playwright/test'
+import { registerAndLand } from './_helpers/auth'
 
-const PASSWORD = 'correcthorsebatterystaple'
 const BACKEND_URL = process.env.CUBEPLEX_API_URL ?? 'http://localhost:8091'
-
-function uniqueEmail(): string {
-  return `u-mcp-${Date.now()}-${Math.random().toString(16).slice(2, 6)}@example.com`
-}
 
 interface RegisterResult {
   wsId: string
@@ -28,16 +24,7 @@ interface RegisterResult {
 }
 
 async function registerAndExtractSession(page: Page): Promise<RegisterResult> {
-  const email = uniqueEmail()
-  await page.goto('/register')
-  await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(PASSWORD)
-  await page.getByRole('button', { name: /create account/i }).click()
-  await expect(page).toHaveURL(/\/w\/[^/]+$/, { timeout: 15_000 })
-
-  const url = page.url()
-  const wsId = url.match(/\/w\/([^/?#]+)/)?.[1]
-  if (!wsId) throw new Error(`Could not extract wsId from URL: ${url}`)
+  const { wsId } = await registerAndLand(page)
 
   // Extract cookies from the browser context so we can make authenticated
   // direct API calls for setup/teardown without opening new pages.
