@@ -18,7 +18,7 @@ from typing import Annotated, Any, cast
 from urllib.parse import quote
 
 import orjson
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
@@ -383,6 +383,102 @@ async def download_sandbox_file(
         media_type=mime or "application/octet-stream",
         headers={"Content-Disposition": content_disposition(filename)},
     )
+
+
+# ── Programmatic exec + upload (for automation / benchmark harnesses) ──
+#
+# The agent's `execute` tool already runs commands and writes files in the
+# sandbox, but only the LLM can drive it. External automation (benchmark
+# harnesses, CI, ops scripts) needs to put files and run commands out-of-band,
+# authenticated by the user's own API key. These two endpoints expose exactly
+# the backend capabilities the agent uses, and refresh the sandbox TTL so a
+# sequence of out-of-band calls isn't reaped between steps. No new privilege:
+# the caller can already run anything in their own sandbox via the agent.
+
+
+class SandboxExecRequest(BaseModel):
+    command: str
+    timeout: int | None = None
+    envs: dict[str, str] | None = None
+
+
+class SandboxExecResponse(BaseModel):
+    output: str
+    exit_code: int | None
+
+
+@router.post("/exec", response_model=SandboxExecResponse)
+async def exec_in_sandbox(
+    body: SandboxExecRequest,
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    conversation_id: str | None = Query(default=None),
+) -> SandboxExecResponse:
+    """Run a shell command in the workspace sandbox; return combined output + exit code."""
+    manager = get_sandbox_manager()
+    scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
+        session, ctx, conversation_id
+    )
+    try:
+        attachment = await manager.get_or_create(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=owner_user_id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        sandbox = attachment.sandbox
+        result = await sandbox.execute(body.command, timeout=body.timeout, envs=body.envs)
+        await manager.touch(
+            sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
+        )
+    except SandboxError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox unavailable",
+        ) from exc
+    return SandboxExecResponse(output=result.output, exit_code=result.exit_code)
+
+
+@router.post("/files/upload")
+async def upload_sandbox_file(
+    ctx: Annotated[RequestContext, Depends(require_member)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    file: Annotated[UploadFile, File(...)],
+    path: str = Query(...),
+    conversation_id: str | None = Query(default=None),
+) -> dict[str, object]:
+    """Upload a file to an absolute path under /workspace in the sandbox."""
+    normalized = posixpath.normpath(path)
+    if not (normalized == "/workspace" or normalized.startswith("/workspace/")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="path outside workspace",
+        )
+    manager = get_sandbox_manager()
+    scope_type, scope_id, owner_user_id = await _resolve_sandbox_scope(
+        session, ctx, conversation_id
+    )
+    content = await file.read()
+    try:
+        attachment = await manager.get_or_create(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            user_id=owner_user_id,
+            org_id=ctx.org_id,
+            workspace_id=ctx.workspace_id,
+        )
+        sandbox = attachment.sandbox
+        await sandbox.upload([(normalized, content)])
+        await manager.touch(
+            sandbox.id, org_id=ctx.org_id, workspace_id=ctx.workspace_id, force=True
+        )
+    except SandboxError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="sandbox unavailable",
+        ) from exc
+    return {"ok": True, "path": normalized, "bytes": len(content)}
 
 
 # ── Office preview token ───────────────────────────────────────────

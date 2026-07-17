@@ -2443,6 +2443,7 @@ class RunManager:
                     workspace_id=ctx.workspace_id,
                     objectstore=get_objectstore_client(),
                     capabilities=LLMCapabilities(_caps_cfg),
+                    sandbox=sandbox,
                 )
             )
         except Exception as _exc:
