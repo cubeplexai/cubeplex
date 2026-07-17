@@ -19,7 +19,7 @@ override the marked values per environment.
 
 1. Deploy `coturn.yaml` (with your reachable IP + creds).
 2. Build the image with matching TURN build args (`build-on-node.sh`, or
-   `misc/sandbox-image/build.sh` if your docker reaches the registry).
+   `deploy/images/sandbox/build.sh` if your docker reaches the registry).
 3. Point the backend at the tag (`CUBEPLEX_SANDBOX__IMAGE`) and apply
    `prepull-daemonset.yaml` with the same tag; wait for rollout.
 4. For each pre-existing org that should have the browser, run
