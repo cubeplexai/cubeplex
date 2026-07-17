@@ -75,8 +75,10 @@ async def _seeded_artifact() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
             await session.execute(
                 text(
                     "INSERT INTO conversations (id, org_id, workspace_id, creator_user_id,"
-                    " title, created_at, updated_at)"
-                    " VALUES (:id, :org, :ws, :uid, 'share-test', NOW(), NOW())"
+                    " title, has_messages, is_group_chat, reasoning, attributes,"
+                    " created_at, updated_at)"
+                    " VALUES (:id, :org, :ws, :uid, 'share-test', true, false,"
+                    " '{}'::jsonb, '{}'::jsonb, NOW(), NOW())"
                     " ON CONFLICT (id) DO NOTHING"
                 ),
                 {"id": _CONV_ID, "org": _ORG_ID, "ws": _WS_ID, "uid": _USER_ID},

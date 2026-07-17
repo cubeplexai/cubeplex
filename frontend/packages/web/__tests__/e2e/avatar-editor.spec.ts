@@ -22,6 +22,7 @@ test.describe('avatar editor', () => {
     await page.goto('/settings/profile')
     await page.waitForSelector('text=Profile')
 
+    await page.getByRole('button', { name: 'Change profile picture' }).click()
     const fileInput = page.locator('input[type="file"]')
     await fileInput.setInputFiles({
       name: 'test-avatar.png',
@@ -50,6 +51,7 @@ test.describe('avatar editor', () => {
     await page.goto('/settings/profile')
     await page.waitForSelector('text=Profile')
 
+    await page.getByRole('button', { name: 'Change profile picture' }).click()
     await page.getByRole('button', { name: 'Shuffle' }).click()
 
     const galleryButtons = page.locator('section button').filter({ has: page.locator('img') })

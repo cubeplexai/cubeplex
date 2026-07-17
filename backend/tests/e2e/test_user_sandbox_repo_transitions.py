@@ -6,7 +6,7 @@ Verifies:
 - Lease (``in_use_until``) and freshness re-checks happen inside the WHERE
   clause so a touch landing between selection and claim makes the claim a
   no-op.
-- ``get_active_by_scope`` ignores transient/paused rows.
+- ``get_active_by_scope`` returns the one live sandbox entity in any runtime state.
 - ``get_resumable_by_scope`` returns ``running`` or ``paused`` but never
   ``pausing``/``resuming`` (unless the only candidate row IS transient).
 - ``mark_paused``/``mark_resuming``/``mark_running`` reject illegal prior
@@ -87,6 +87,7 @@ async def _mk(
     repo: UserSandboxRepository,
     scope: dict[str, str],
     *,
+    scope_id: str | None = None,
     status: str = "running",
     idle_secs: int = 10,
     ttl_seconds: int = 1,
@@ -106,7 +107,7 @@ async def _mk(
         paused_at=paused_at,
         paused_ttl_seconds=paused_ttl_seconds,
         scope_type="user",
-        scope_id=scope["user_id"],
+        scope_id=scope_id or scope["user_id"],
     )
     return await repo.add(row)
 
@@ -141,7 +142,7 @@ async def test_claim_pausing_single_winner(db_session: AsyncSession, scope: dict
     row = await _mk(repo, scope, status="running", idle_secs=10, ttl_seconds=1)
 
     assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is True
-    assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is False
+    assert await repo.claim_pausing(row.id, idle_ttl_seconds=3600) is False
 
 
 async def test_claim_pausing_skips_leased_row(
@@ -168,21 +169,42 @@ async def test_claim_pausing_skips_fresh_row(
     # idle_secs=0 vs ttl=3600 → not stale.
     row = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
 
-    assert await repo.claim_pausing(row.id, idle_ttl_seconds=1) is False
+    assert await repo.claim_pausing(row.id, idle_ttl_seconds=3600) is False
 
     await db_session.refresh(row)
     assert row.status == "running"
 
 
-async def test_get_active_by_scope_ignores_pausing_and_paused(
+async def test_get_active_by_scope_returns_live_rows_in_any_runtime_state(
     db_session: AsyncSession, scope: dict[str, str]
 ) -> None:
-    """(e) get_active_by_scope only returns ``running`` rows."""
+    """(e) Every non-deleted sandbox entity is active regardless of runtime state."""
     repo = _mk_repo(db_session, scope)
-    await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
-    await _mk(repo, scope, status="paused", idle_secs=0, ttl_seconds=3600)
+    pausing_scope = f"usr_{secrets.token_hex(8)}"
+    paused_scope = f"usr_{secrets.token_hex(8)}"
+    await _mk(
+        repo,
+        scope,
+        scope_id=pausing_scope,
+        status="pausing",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
+    await _mk(
+        repo,
+        scope,
+        scope_id=paused_scope,
+        status="paused",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
 
-    assert await repo.get_active_by_scope(scope_type="user", scope_id=scope["user_id"]) is None
+    pausing = await repo.get_active_by_scope(scope_type="user", scope_id=pausing_scope)
+    paused = await repo.get_active_by_scope(scope_type="user", scope_id=paused_scope)
+    assert pausing is not None
+    assert pausing.status == "pausing"
+    assert paused is not None
+    assert paused.status == "paused"
 
     running = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
     found = await repo.get_active_by_scope(scope_type="user", scope_id=scope["user_id"])
@@ -198,13 +220,10 @@ async def test_get_resumable_by_scope_returns_most_recent_non_terminal(
     row instead of treating it as absent and creating a duplicate sandbox.
     """
     repo = _mk_repo(db_session, scope)
-    await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
-    await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
     paused = await _mk(
         repo, scope, status="paused", idle_secs=0, ttl_seconds=3600, paused_at=datetime.now(UTC)
     )
 
-    # Most recent row wins regardless of which non-terminal status it carries.
     found = await repo.get_resumable_by_scope(scope_type="user", scope_id=scope["user_id"])
     assert found is not None
     assert found.id == paused.id
@@ -236,6 +255,7 @@ async def test_claim_terminated_from_paused_atomic(
     fresh_paused = await _mk(
         repo,
         scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
         status="paused",
         idle_secs=0,
         ttl_seconds=3600,
@@ -247,7 +267,14 @@ async def test_claim_terminated_from_paused_atomic(
 
     # (c) A row in transient ``resuming`` is not claimed even if past TTL —
     # the resume path owns the row.
-    resuming_row = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
+    resuming_row = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="resuming",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
     # Stamp paused_at directly so the time predicate would otherwise fire.
     resuming_row.paused_at = datetime.now(UTC) - timedelta(seconds=600)
     await db_session.commit()
@@ -265,10 +292,30 @@ async def test_mark_failed_from_transient_atomic(
     repo = _mk_repo(db_session, scope)
 
     pausing = await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
-    resuming = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
-    running = await _mk(repo, scope, status="running", idle_secs=0, ttl_seconds=3600)
+    resuming = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="resuming",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
+    running = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="running",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
     paused = await _mk(
-        repo, scope, status="paused", idle_secs=0, ttl_seconds=3600, paused_at=datetime.now(UTC)
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="paused",
+        idle_secs=0,
+        ttl_seconds=3600,
+        paused_at=datetime.now(UTC),
     )
 
     # Legal: pausing/resuming -> failed
@@ -319,19 +366,15 @@ async def test_mark_paused_accepts_pausing_or_resuming_prior_state(
     await db_session.refresh(row)
     assert row.status == "running"
 
-    # Move row out of the active state before creating another active sandbox
-    # under the same (org, workspace, user) — uq_user_sandbox_active is a
-    # partial unique index on status IN ('provisioning','running'), so two
-    # concurrent running rows under the same scope are not allowed.
-    row.status = "terminated"
-    await db_session.commit()
-
     # Legal: pausing → paused
-    await repo.claim_pausing(
-        (await _mk(repo, scope, status="running", idle_secs=10, ttl_seconds=1)).id,
-        idle_ttl_seconds=1,
+    pausing_row = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="pausing",
+        idle_secs=0,
+        ttl_seconds=3600,
     )
-    pausing_row = await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
     assert await repo.mark_paused(pausing_row.id) is True
     await db_session.refresh(pausing_row)
     assert pausing_row.status == "paused"
@@ -339,7 +382,14 @@ async def test_mark_paused_accepts_pausing_or_resuming_prior_state(
 
     # Legal (codex P2): resuming → paused (reconciler reverts when provider
     # still reports Paused after a mid-flight resume abort).
-    resuming_row = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
+    resuming_row = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="resuming",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
     assert await repo.mark_paused(resuming_row.id) is True
     await db_session.refresh(resuming_row)
     assert resuming_row.status == "paused"
@@ -355,7 +405,13 @@ async def test_mark_resuming_rejects_non_paused_prior_state(
     assert await repo.mark_resuming(running_row.id) is False
 
     paused_row = await _mk(
-        repo, scope, status="paused", idle_secs=0, ttl_seconds=3600, paused_at=datetime.now(UTC)
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="paused",
+        idle_secs=0,
+        ttl_seconds=3600,
+        paused_at=datetime.now(UTC),
     )
     assert await repo.mark_resuming(paused_row.id) is True
     await db_session.refresh(paused_row)
@@ -375,19 +431,27 @@ async def test_mark_running_rejects_terminal_and_paused_states(
     assert await repo.mark_running(paused_row.id) is False
 
     # From pausing → ok (pause failed → revert)
-    pausing_row = await _mk(repo, scope, status="pausing", idle_secs=0, ttl_seconds=3600)
+    pausing_row = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="pausing",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
     assert await repo.mark_running(pausing_row.id) is True
     await db_session.refresh(pausing_row)
     assert pausing_row.status == "running"
 
-    # Move pausing_row (now running) out of the active set so the next
-    # mark_running below doesn't violate uq_user_sandbox_active (partial unique
-    # index on status IN ('provisioning','running') per (org, workspace, user)).
-    pausing_row.status = "terminated"
-    await db_session.commit()
-
     # From resuming → ok (resume completed)
-    resuming_row = await _mk(repo, scope, status="resuming", idle_secs=0, ttl_seconds=3600)
+    resuming_row = await _mk(
+        repo,
+        scope,
+        scope_id=f"usr_{secrets.token_hex(8)}",
+        status="resuming",
+        idle_secs=0,
+        ttl_seconds=3600,
+    )
     now = datetime.now(UTC)
     assert await repo.mark_running(resuming_row.id, last_resumed_at=now) is True
     await db_session.refresh(resuming_row)

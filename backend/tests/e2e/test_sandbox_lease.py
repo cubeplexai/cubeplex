@@ -81,6 +81,8 @@ async def _seed_idle_running(
     )
     row = UserSandbox(
         user_id=scope["user_id"],
+        scope_type="user",
+        scope_id=scope["user_id"],
         sandbox_id=f"sbx_{secrets.token_hex(6)}",
         image="img:latest",
         status="running",

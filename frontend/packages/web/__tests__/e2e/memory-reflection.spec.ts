@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { registerAndLand } from './_helpers/auth'
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test('preference message triggers reflection and surfaces memory chip', async ({ page }) => {
+  skipWithoutRealLlm()
   // Headroom: cold sandbox (~80s on first run) + main agent reply + detached
   // reflection LLM call (~5–15s after main run completes).
   test.setTimeout(180_000)

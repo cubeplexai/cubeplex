@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { registerAndLand } from './_helpers/auth'
+import { registerAndLand, skipWithoutRealLlm } from './_helpers/auth'
 
 test('loading animation appears while streaming', async ({ page }) => {
+  skipWithoutRealLlm()
   // Cold sandbox provisioning for a fresh user can take ~80s in CI; raise the
   // per-test cap above the default 90s so the run can finish before timeout.
   test.setTimeout(150_000)
@@ -24,6 +25,7 @@ test('loading animation appears while streaming', async ({ page }) => {
 })
 
 test('input stays editable while streaming (so the user can steer)', async ({ page }) => {
+  skipWithoutRealLlm()
   // Same cold-sandbox headroom as above (fresh user → ~80s provisioning).
   test.setTimeout(150_000)
   await registerAndLand(page)

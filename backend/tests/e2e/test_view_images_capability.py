@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-pytestmark = pytest.mark.asyncio
+pytestmark = [pytest.mark.asyncio, pytest.mark.real_llm]
 
 
 @pytest_asyncio.fixture(autouse=True)

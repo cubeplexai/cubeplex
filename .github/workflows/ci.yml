@@ -150,12 +150,12 @@ jobs:
       ENV_FOR_DYNACONF: test
       CUBEPLEX_E2E_SHARD_INDEX: ${{ matrix.shard }}
       CUBEPLEX_E2E_SHARD_TOTAL: 4
-      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
-      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
-      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
-      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
-      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
-      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL || 'http://127.0.0.1:9' }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY || 'ci-placeholder' }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID || 'ci-placeholder' }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN || '127.0.0.1:9' }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE || 'ci-placeholder' }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY || 'ci-placeholder' }}
       # Optional: gates the conversation-search E2E test. The test skips
       # cleanly when this secret isn't set in the repo, so PRs from forks
       # without the secret stay green; the real-network path runs in main.
@@ -250,12 +250,13 @@ jobs:
     timeout-minutes: 30
     env:
       ENV_FOR_DYNACONF: test
-      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL }}
-      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY }}
-      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID }}
-      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN }}
-      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE }}
-      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY }}
+      CUBEPLEX_E2E_LLM_BASE_URL: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL || 'http://127.0.0.1:9' }}
+      CUBEPLEX_E2E_LLM_API_KEY: ${{ secrets.CUBEPLEX_E2E_LLM_API_KEY || 'ci-placeholder' }}
+      CUBEPLEX_E2E_LLM_MODEL_ID: ${{ secrets.CUBEPLEX_E2E_LLM_MODEL_ID || 'ci-placeholder' }}
+      CUBEPLEX_E2E_REAL_LLM: ${{ secrets.CUBEPLEX_E2E_LLM_BASE_URL != '' && secrets.CUBEPLEX_E2E_LLM_API_KEY != '' && secrets.CUBEPLEX_E2E_LLM_MODEL_ID != '' }}
+      CUBEPLEX_SANDBOX__DOMAIN: ${{ secrets.CUBEPLEX_SANDBOX__DOMAIN || '127.0.0.1:9' }}
+      CUBEPLEX_SANDBOX__IMAGE: ${{ secrets.CUBEPLEX_SANDBOX__IMAGE || 'ci-placeholder' }}
+      CUBEPLEX_SANDBOX__API_KEY: ${{ secrets.CUBEPLEX_SANDBOX__API_KEY || 'ci-placeholder' }}
       # Test-only Fernet key for CI startup and vault E2E. Production must set its own key.
       CUBEPLEX_AUTH__VAULT_KEY: 1EwVRAtWccVJhdXX_2iepp7OlPfadfHpWNwVFpRzLBI=
       # Frontend proxies to local backend:8001 (matches config.test.yaml)
